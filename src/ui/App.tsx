@@ -1,12 +1,10 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
-import { StatusBar } from './StatusBar.js';
-import type { Agent, TokenUsage, ThinkingLevel } from '../agent.js';
-import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId } from '../profiles.js';
-
-const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
+import type { AgentClient } from '../client.js';
+import type { TokenUsage, ThinkingLevel } from '../agent.js';
+import type { DisplayMessage, ServerState } from '../protocol.js';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -22,15 +20,20 @@ export interface ToolExecution {
 }
 
 interface AppProps {
-  agent: Agent;
-  thinking?: string | undefined;
-  model?: string | undefined;
-  workspacePath?: string | undefined;
+  client: AgentClient;
 }
 
-export function App({ agent, thinking: initialThinking, model, workspacePath: wp }: AppProps): React.JSX.Element {
+function toUIMessage(dm: DisplayMessage): Message {
+  return {
+    role: dm.role,
+    content: dm.content,
+    timestamp: new Date(dm.timestamp),
+    elapsed: dm.elapsed,
+  };
+}
+
+export function App({ client }: AppProps): React.JSX.Element {
   const { exit } = useApp();
-  const workspacePath = wp ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -38,26 +41,127 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
   const [activeTools, setActiveTools] = useState<ToolExecution[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-  const [currentThinking, setCurrentThinking] = useState(initialThinking ?? 'high');
+  const [currentThinking, setCurrentThinking] = useState<ThinkingLevel>('high');
   const [inputValue, setInputValue] = useState('');
-  const [currentProfile, setCurrentProfile] = useState('default');
-  const [currentSessionId, setCurrentSessionId] = useState(generateSessionId());
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
+  const [model, setModel] = useState('');
   const ctrlCPending = useRef(false);
-  const messageQueue = useRef<string[]>([]);
-  const abortController = useRef<AbortController | null>(null);
-  const processingQueue = useRef(false);
 
-  useInput((_input, key) => {
-    // Esc — cancel current generation or clear input
-    if (key.escape) {
-      if (isLoading && abortController.current) {
-        abortController.current.abort();
-        abortController.current = null;
-        messageQueue.current = [];
-        setIsLoading(false);
+  // Wire up client events
+  useEffect(() => {
+    const onConnected = (state: ServerState) => {
+      setConnectionStatus('connected');
+      setMessages(state.messages.map(toUIMessage));
+      setUsage(state.usage);
+      setCurrentThinking(state.thinking);
+      setModel(state.model);
+      setIsLoading(state.isLoading);
+      setError(null);
+    };
+
+    const onDisconnected = () => {
+      setConnectionStatus('reconnecting');
+      setIsLoading(false);
+      setStreaming('');
+      setActiveTools([]);
+    };
+
+    const onReconnecting = (_attempt: number) => {
+      setConnectionStatus('reconnecting');
+    };
+
+    const onMessage = (dm: DisplayMessage) => {
+      setMessages((prev) => [...prev, toUIMessage(dm)]);
+      // Clear streaming when assistant message arrives
+      if (dm.role === 'assistant') {
         setStreaming('');
         setActiveTools([]);
-        addSystemMessage('Cancelled.');
+      }
+    };
+
+    const onSystem = (content: string) => {
+      setMessages((prev) => [...prev, {
+        role: 'system' as const,
+        content,
+        timestamp: new Date(),
+      }]);
+    };
+
+    const onText = (content: string) => {
+      setIsThinking(false);
+      setStreaming(content);
+    };
+
+    const onThinking = (_content: string) => {
+      setIsThinking(true);
+    };
+
+    const onToolStart = (name: string, input: string, summary: string) => {
+      setActiveTools((prev) => [...prev, { name, input, summary }]);
+    };
+
+    const onToolEnd = () => {
+      setActiveTools([]);
+      setStreaming('');
+    };
+
+    const onUsage = (u: TokenUsage) => {
+      setUsage(u);
+    };
+
+    const onLoading = (loading: boolean) => {
+      setIsLoading(loading);
+      if (!loading) {
+        setStreaming('');
+        setActiveTools([]);
+        setIsThinking(false);
+      }
+    };
+
+    const onError = (message: string) => {
+      setError(message);
+    };
+
+    const onState = (partial: { thinking?: ThinkingLevel; profile?: string }) => {
+      if (partial.thinking) setCurrentThinking(partial.thinking);
+    };
+
+    client.on('connected', onConnected);
+    client.on('disconnected', onDisconnected);
+    client.on('reconnecting', onReconnecting);
+    client.on('message', onMessage);
+    client.on('system', onSystem);
+    client.on('text', onText);
+    client.on('thinking', onThinking);
+    client.on('tool_start', onToolStart);
+    client.on('tool_end', onToolEnd);
+    client.on('usage', onUsage);
+    client.on('loading', onLoading);
+    client.on('error', onError);
+    client.on('state', onState);
+
+    return () => {
+      client.removeListener('connected', onConnected);
+      client.removeListener('disconnected', onDisconnected);
+      client.removeListener('reconnecting', onReconnecting);
+      client.removeListener('message', onMessage);
+      client.removeListener('system', onSystem);
+      client.removeListener('text', onText);
+      client.removeListener('thinking', onThinking);
+      client.removeListener('tool_start', onToolStart);
+      client.removeListener('tool_end', onToolEnd);
+      client.removeListener('usage', onUsage);
+      client.removeListener('loading', onLoading);
+      client.removeListener('error', onError);
+      client.removeListener('state', onState);
+    };
+  }, [client]);
+
+  useInput((_input, key) => {
+    // Esc — cancel
+    if (key.escape) {
+      if (isLoading) {
+        client.cancel();
         return;
       }
       if (inputValue.length > 0) {
@@ -68,25 +172,17 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
     }
 
     if (key.ctrl && _input === 'c') {
-      // Double-tap Ctrl+C to exit — always, regardless of state
+      // Double-tap Ctrl+C to exit
       if (ctrlCPending.current) {
+        client.disconnect();
         exit();
         process.exit(0);
       }
-      // First Ctrl+C: cancel generation, or clear input, or warn
-      if (isLoading && abortController.current) {
-        abortController.current.abort();
-        abortController.current = null;
-        messageQueue.current = [];
-        setIsLoading(false);
-        setStreaming('');
-        setActiveTools([]);
-        addSystemMessage('Cancelled. Press Ctrl+C again to exit.');
+      // First Ctrl+C: cancel or clear
+      if (isLoading) {
+        client.cancel();
       } else if (inputValue.length > 0) {
         setInputValue('');
-        addSystemMessage('Press Ctrl+C again to exit.');
-      } else {
-        addSystemMessage('Press Ctrl+C again to exit.');
       }
       ctrlCPending.current = true;
       setTimeout(() => {
@@ -97,256 +193,32 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
     ctrlCPending.current = false;
   });
 
-  const addSystemMessage = useCallback((content: string) => {
-    setMessages((prev) => [...prev, { role: 'system', content, timestamp: new Date() }]);
-  }, []);
-
-  const handleCommand = useCallback((trimmed: string): boolean => {
-    if (trimmed === '/reset') {
-      agent.reset();
-      setUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-      addSystemMessage('Conversation reset.');
-      return true;
-    }
-
-    // /reasoning on|off — toggle reasoning
-    if (trimmed === '/reasoning') {
-      const isOn = currentThinking !== 'off';
-      addSystemMessage(`Reasoning: ${isOn ? 'on' : 'off'}\nUsage: /reasoning on | /reasoning off`);
-      return true;
-    }
-
-    if (trimmed === '/reasoning on') {
-      if (currentThinking === 'off') {
-        agent.thinkingLevel = 'medium';
-        setCurrentThinking('medium');
-      }
-      addSystemMessage('Reasoning: on');
-      return true;
-    }
-
-    if (trimmed === '/reasoning off') {
-      agent.thinkingLevel = 'off';
-      setCurrentThinking('off');
-      addSystemMessage('Reasoning: off');
-      return true;
-    }
-
-    // /effort <level> — set thinking effort
-    if (trimmed === '/effort') {
-      const effortLevels = VALID_THINKING_LEVELS.filter((l) => l !== 'off');
-      addSystemMessage(`Effort: ${currentThinking === 'off' ? '(reasoning off)' : currentThinking}\nLevels: ${effortLevels.join(', ')}\nUsage: /effort <level>`);
-      return true;
-    }
-
-    if (trimmed.startsWith('/effort ')) {
-      const level = trimmed.split(' ')[1] as ThinkingLevel;
-      const effortLevels: ThinkingLevel[] = ['low', 'medium', 'high', 'max'];
-      if (effortLevels.includes(level)) {
-        agent.thinkingLevel = level;
-        setCurrentThinking(level);
-        addSystemMessage(`Effort: ${level}`);
-      } else {
-        addSystemMessage(`Invalid effort. Options: ${effortLevels.join(', ')}`);
-      }
-      return true;
-    }
-
-    // Profile commands
-    if (trimmed === '/profiles' || trimmed === '/profile list') {
-      const profiles = listProfiles(workspacePath);
-      if (profiles.length === 0) {
-        addSystemMessage(`No profiles yet. Current: ${currentProfile}\nCreate one: /profile create <name>`);
-      } else {
-        const list = profiles.map((p) => `  ${p.name === currentProfile ? '>' : ' '} ${p.name}`).join('\n');
-        addSystemMessage(`Profiles:\n${list}`);
-      }
-      return true;
-    }
-
-    if (trimmed.startsWith('/profile create ')) {
-      const name = trimmed.slice('/profile create '.length).trim();
-      if (!name || name.includes('/') || name.includes('..')) {
-        addSystemMessage('Invalid profile name.');
-        return true;
-      }
-      getProfilePath(workspacePath, name);
-      addSystemMessage(`Profile "${name}" created. Switch to it: /profile ${name}`);
-      return true;
-    }
-
-    if (trimmed.startsWith('/profile ') && !trimmed.startsWith('/profile list') && !trimmed.startsWith('/profile create')) {
-      const name = trimmed.slice('/profile '.length).trim();
-      const profileDir = getProfilePath(workspacePath, name);
-      agent.reset();
-      agent.reloadWorkspace(profileDir);
-      setCurrentProfile(name);
-      setCurrentSessionId(generateSessionId());
-      setUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-      addSystemMessage(`Switched to profile: ${name}`);
-      return true;
-    }
-
-    // Session commands
-    if (trimmed === '/save') {
-      saveSession(workspacePath, currentProfile, currentSessionId, agent.getMessages());
-      addSystemMessage(`Session saved: ${currentSessionId}`);
-      return true;
-    }
-
-    if (trimmed === '/sessions') {
-      const sessions = listSessions(workspacePath, currentProfile);
-      if (sessions.length === 0) {
-        addSystemMessage('No saved sessions. Use /save to save current session.');
-      } else {
-        const list = sessions.map((s) =>
-          `  ${s.id === currentSessionId ? '>' : ' '} ${s.id} (${s.messageCount} msgs, ${s.lastActiveAt.slice(0, 10)})`
-        ).join('\n');
-        addSystemMessage(`Sessions (${currentProfile}):\n${list}`);
-      }
-      return true;
-    }
-
-    if (trimmed.startsWith('/load ')) {
-      const sessionId = trimmed.slice('/load '.length).trim();
-      const data = loadSession(workspacePath, currentProfile, sessionId);
-      if (!data) {
-        addSystemMessage(`Session not found: ${sessionId}`);
-        return true;
-      }
-      agent.setMessages(data.messages as Parameters<typeof agent.setMessages>[0]);
-      setCurrentSessionId(sessionId);
-      setUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-      addSystemMessage(`Loaded session: ${sessionId} (${data.messages.length} messages)`);
-      return true;
-    }
-
-    if (trimmed === '/refresh' || trimmed === '/refesh') {
-      // Clear screen and force re-render
-      process.stdout.write('\x1B[2J\x1B[H');
-      addSystemMessage('Refreshed.');
-      return true;
-    }
-
-    if (trimmed === '/help') {
-      addSystemMessage(
-        'Commands:\n' +
-        '  /refresh            Refresh screen\n' +
-        '  /reset              Clear conversation\n' +
-        '  /reasoning on|off   Toggle reasoning\n' +
-        '  /effort <level>     Set effort (low/medium/high/max)\n' +
-        '  /profiles           List profiles\n' +
-        '  /profile <name>     Switch profile\n' +
-        '  /profile create <n> Create new profile\n' +
-        '  /save               Save current session\n' +
-        '  /sessions           List saved sessions\n' +
-        '  /load <id>          Load a saved session\n' +
-        '  Esc                 Cancel generation / clear input\n' +
-        '  Ctrl+C              Cancel / clear input (x2 to exit)'
-      );
-      return true;
-    }
-
-    // Catch unknown commands
-    if (trimmed.startsWith('/')) {
-      addSystemMessage(`Unknown command: ${trimmed}\nType /help for available commands.`);
-      return true;
-    }
-
-    return false;
-  }, [agent, currentThinking, currentProfile, currentSessionId, workspacePath, addSystemMessage]);
-
-  const processMessage = useCallback(async (trimmed: string) => {
-    setMessages((prev) => [...prev, { role: 'user', content: trimmed, timestamp: new Date() }]);
-    setIsLoading(true);
-    setIsThinking(false);
-    setError(null);
-    setStreaming('');
-    setActiveTools([]);
-
-    const controller = new AbortController();
-    abortController.current = controller;
-    const startTime = Date.now();
-
-    try {
-      const response = await agent.chat(trimmed, {
-        onText: (text) => {
-          if (controller.signal.aborted) return;
-          setIsThinking(false);
-          setStreaming(text);
-        },
-        onThinking: () => {
-          if (controller.signal.aborted) return;
-          setIsThinking(true);
-        },
-        onToolStart: (name, toolInput, summary) => {
-          if (controller.signal.aborted) return;
-          setActiveTools((prev) => [...prev, { name, input: toolInput, summary }]);
-        },
-        onToolEnd: () => {
-          if (controller.signal.aborted) return;
-          setActiveTools([]);
-          setStreaming('');
-        },
-        onUsage: (u) => {
-          setUsage(u);
-        },
-      });
-
-      if (!controller.signal.aborted) {
-        const elapsed = (Date.now() - startTime) / 1000;
-        setStreaming('');
-        setMessages((prev) => [
-          ...prev,
-          { role: 'assistant', content: response, timestamp: new Date(), elapsed },
-        ]);
-      }
-    } catch (err: unknown) {
-      if (!controller.signal.aborted) {
-        const e = err as { status?: number; message?: string };
-        let errorMsg = e.message ?? 'Unknown error';
-        if (e.status === 401) errorMsg = 'Authentication failed. Check ANTHROPIC_API_KEY.';
-        if (e.status === 429) errorMsg = 'Rate limited. Wait a moment.';
-        setError(errorMsg);
-      }
-    } finally {
-      abortController.current = null;
-      setIsLoading(false);
-      setActiveTools([]);
-    }
-  }, [agent]);
-
-  const processQueue = useCallback(async () => {
-    if (processingQueue.current) return;
-    processingQueue.current = true;
-
-    while (messageQueue.current.length > 0) {
-      const next = messageQueue.current.shift();
-      if (next) await processMessage(next);
-    }
-
-    processingQueue.current = false;
-  }, [processMessage]);
-
-  const handleSubmit = useCallback(async (input: string) => {
+  const handleSubmit = useCallback((input: string) => {
     const trimmed = input.trim();
     if (!trimmed) return;
 
-    if (handleCommand(trimmed)) return;
-
-    if (isLoading) {
-      // Queue the message — show it in chat immediately
-      messageQueue.current.push(trimmed);
-      setMessages((prev) => [...prev, { role: 'user', content: `[queued] ${trimmed}`, timestamp: new Date() }]);
+    // /refresh is client-side only
+    if (trimmed === '/refresh' || trimmed === '/refesh') {
+      process.stdout.write('\x1B[2J\x1B[H');
       return;
     }
 
-    messageQueue.current.push(trimmed);
-    await processQueue();
-  }, [handleCommand, isLoading, processQueue]);
+    // Everything else goes to the server
+    client.sendMessage(trimmed);
+  }, [client]);
 
   return (
     <Box flexDirection="column" width="100%">
+      {connectionStatus === 'reconnecting' && (
+        <Box marginLeft={1}>
+          <Text color="yellow">Reconnecting to server...</Text>
+        </Box>
+      )}
+      {connectionStatus === 'connecting' && (
+        <Box marginLeft={1}>
+          <Text color="gray">Connecting...</Text>
+        </Box>
+      )}
       <ChatView
         messages={messages}
         streaming={streaming}
@@ -359,12 +231,13 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
           <Text color="red">Error: {error}</Text>
         </Box>
       )}
-      <StatusBar thinking={currentThinking} usage={usage} model={model} />
       <InputBar
         value={inputValue}
         onChange={setInputValue}
         onSubmit={handleSubmit}
         isLoading={isLoading}
+        thinking={currentThinking}
+        usage={usage}
       />
     </Box>
   );

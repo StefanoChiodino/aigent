@@ -1,9 +1,9 @@
 import { Text } from 'ink';
-import { marked } from 'marked';
+import { Marked } from 'marked';
 import { markedTerminal } from 'marked-terminal';
 
 // Configure marked with terminal renderer once
-const terminalMarked = new marked.Marked();
+const terminalMarked = new Marked();
 terminalMarked.use(
   markedTerminal({
     // No heading prefix characters

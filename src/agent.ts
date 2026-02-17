@@ -3,8 +3,6 @@ import { createProvider, detectProvider, type Provider, type ProviderMessage, ty
 import { getToolDefinitions, executeTool, summarizeToolCall } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
-import { isRestartPending, gracefulRestart } from './restart.js';
-
 const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container. You have access to:
 - A shell (exec tool) to run any command
 - File read/write/edit to inspect and modify files
@@ -18,20 +16,23 @@ Be direct. Be helpful. Execute commands to verify things rather than guessing.
 You are a self-authoring agent. Your source code is mounted at /app/ from the host filesystem.
 Any changes you make to files in /app/ persist on the host and are visible to your user.
 
-Architecture:
-  /app/src/index.tsx    — Entry point, TUI/REPL launcher
+Architecture (backend/frontend split):
+  /app/src/server.ts    — Agent backend server (Unix socket, manages agent lifecycle)
+  /app/src/client.ts    — Client connector (TUI connects to server)
   /app/src/agent.ts     — Agent class, conversation loop, streaming
+  /app/src/protocol.ts  — Shared types for client-server communication
   /app/src/auth.ts      — API key / OAT token handling
   /app/src/provider.ts  — Multi-provider abstraction (Anthropic + OpenAI)
   /app/src/tools.ts     — Tool definitions and execution
   /app/src/workspace.ts — Workspace file loading
+  /app/src/supervisor.ts — Process manager (server + TUI as separate processes)
+  /app/src/index.tsx    — TUI entry point
   /app/src/repl.ts      — Fallback readline REPL
   /app/src/ui/          — ink (React) TUI components
 
-A supervisor process watches for source file changes. When you edit your own code,
-it sends SIGUSR1 and waits for you to finish your current turn before restarting.
-You will NOT be killed mid-conversation. Your conversation resets on restart,
-but workspace memory persists.
+The supervisor watches for source file changes and restarts only the backend server.
+The TUI frontend survives server restarts — it reconnects automatically and restores
+conversation state. Your conversation is auto-saved and reloaded on server restart.
 
 When modifying your own code:
 1. Read the relevant file(s) first to understand context
@@ -39,7 +40,7 @@ When modifying your own code:
 3. Run \`exec: npx tsc --noEmit\` to verify your changes compile
 4. Use \`exec: git diff\` to review what you changed
 5. Commit with \`exec: git add -A && git commit -m "..."\`
-6. After commit, you'll get a graceful restart — finish your response first
+6. The server will restart automatically — the TUI reconnects seamlessly
 
 You CAN and SHOULD improve yourself when you find limitations.
 
@@ -118,11 +119,6 @@ export class Agent {
   async chat(userMessage: string, callbacks?: ChatCallbacks): Promise<string> {
     this.messages.push({ role: 'user', content: userMessage });
 
-    // If a restart was requested before this turn even started, exit now
-    if (isRestartPending()) {
-      gracefulRestart();
-    }
-
     let iterations = 0;
     const maxIterations = 25;
 
@@ -184,11 +180,6 @@ export class Agent {
       callbacks?.onToolEnd?.();
       this.messages.push({ role: 'tool_result', results });
 
-      // Check for pending restart between tool iterations
-      // Let the current tool batch finish, but don't start another LLM call
-      if (isRestartPending()) {
-        return '[restarting with updated code — conversation will reset]';
-      }
     }
 
     return '[agent hit maximum tool-use iterations]';

@@ -1,0 +1,453 @@
+/**
+ * Agent backend server.
+ *
+ * Runs the agent, processes commands, streams events to connected TUI clients
+ * over a Unix socket using newline-delimited JSON.
+ *
+ * On restart (code change), auto-saves conversation state and reloads it,
+ * so the TUI can reconnect seamlessly.
+ */
+
+import { createServer, type Server, type Socket } from 'node:net';
+import { existsSync, unlinkSync } from 'node:fs';
+import { Agent, type ThinkingLevel, type TokenUsage } from './agent.js';
+import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
+import type { ProviderMessage } from './provider.js';
+import type { ClientCommand, ServerEvent, DisplayMessage, ServerState } from './protocol.js';
+import { SOCKET_PATH } from './protocol.js';
+
+const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
+
+// --- State ---
+
+let agent: Agent;
+let messages: DisplayMessage[] = [];
+let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+let currentThinking: ThinkingLevel;
+let currentProfile = 'default';
+let currentSessionId = generateSessionId();
+let model: string;
+let workspacePath: string;
+let isLoading = false;
+let abortController: AbortController | null = null;
+const clients = new Set<Socket>();
+
+// --- Helpers ---
+
+function send(socket: Socket, event: ServerEvent): void {
+  try {
+    socket.write(JSON.stringify(event) + '\n');
+  } catch {
+    // Client disconnected, will be cleaned up
+  }
+}
+
+function broadcast(event: ServerEvent): void {
+  for (const client of clients) {
+    send(client, event);
+  }
+}
+
+function addSystemMessage(content: string): void {
+  const msg: DisplayMessage = { role: 'system', content, timestamp: new Date().toISOString() };
+  messages.push(msg);
+  broadcast({ type: 'system', content });
+}
+
+function getState(): ServerState {
+  return {
+    messages,
+    usage,
+    thinking: currentThinking,
+    profile: currentProfile,
+    sessionId: currentSessionId,
+    model,
+    isLoading,
+  };
+}
+
+function doAutoSave(): void {
+  try {
+    autoSaveSession(workspacePath, agent.getMessages(), messages);
+  } catch {
+    // Non-critical
+  }
+}
+
+// --- Command handling ---
+
+function handleCommand(cmd: string): boolean {
+  const trimmed = cmd.trim();
+
+  if (trimmed === '/reset') {
+    agent.reset();
+    messages = [];
+    usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    clearAutoSave(workspacePath);
+    addSystemMessage('Conversation reset.');
+    broadcast({ type: 'usage', usage });
+    return true;
+  }
+
+  if (trimmed === '/reasoning') {
+    const isOn = currentThinking !== 'off';
+    addSystemMessage(`Reasoning: ${isOn ? 'on' : 'off'}\nUsage: /reasoning on | /reasoning off`);
+    return true;
+  }
+
+  if (trimmed === '/reasoning on') {
+    if (currentThinking === 'off') {
+      agent.thinkingLevel = 'medium';
+      currentThinking = 'medium';
+    }
+    addSystemMessage('Reasoning: on');
+    broadcast({ type: 'state', thinking: currentThinking });
+    return true;
+  }
+
+  if (trimmed === '/reasoning off') {
+    agent.thinkingLevel = 'off';
+    currentThinking = 'off';
+    addSystemMessage('Reasoning: off');
+    broadcast({ type: 'state', thinking: currentThinking });
+    return true;
+  }
+
+  if (trimmed === '/effort') {
+    const effortLevels = VALID_THINKING_LEVELS.filter((l) => l !== 'off');
+    addSystemMessage(`Effort: ${currentThinking === 'off' ? '(reasoning off)' : currentThinking}\nLevels: ${effortLevels.join(', ')}\nUsage: /effort <level>`);
+    return true;
+  }
+
+  if (trimmed.startsWith('/effort ')) {
+    const level = trimmed.split(' ')[1] as ThinkingLevel;
+    const effortLevels: ThinkingLevel[] = ['low', 'medium', 'high', 'max'];
+    if (effortLevels.includes(level)) {
+      agent.thinkingLevel = level;
+      currentThinking = level;
+      addSystemMessage(`Effort: ${level}`);
+      broadcast({ type: 'state', thinking: currentThinking });
+    } else {
+      addSystemMessage(`Invalid effort. Options: ${effortLevels.join(', ')}`);
+    }
+    return true;
+  }
+
+  if (trimmed === '/profiles' || trimmed === '/profile list') {
+    const profiles = listProfiles(workspacePath);
+    if (profiles.length === 0) {
+      addSystemMessage(`No profiles yet. Current: ${currentProfile}\nCreate one: /profile create <name>`);
+    } else {
+      const list = profiles.map((p) => `  ${p.name === currentProfile ? '>' : ' '} ${p.name}`).join('\n');
+      addSystemMessage(`Profiles:\n${list}`);
+    }
+    return true;
+  }
+
+  if (trimmed.startsWith('/profile create ')) {
+    const name = trimmed.slice('/profile create '.length).trim();
+    if (!name || name.includes('/') || name.includes('..')) {
+      addSystemMessage('Invalid profile name.');
+      return true;
+    }
+    getProfilePath(workspacePath, name);
+    addSystemMessage(`Profile "${name}" created. Switch to it: /profile ${name}`);
+    return true;
+  }
+
+  if (trimmed.startsWith('/profile ') && !trimmed.startsWith('/profile list') && !trimmed.startsWith('/profile create')) {
+    const name = trimmed.slice('/profile '.length).trim();
+    const profileDir = getProfilePath(workspacePath, name);
+    agent.reset();
+    agent.reloadWorkspace(profileDir);
+    currentProfile = name;
+    currentSessionId = generateSessionId();
+    messages = [];
+    usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    addSystemMessage(`Switched to profile: ${name}`);
+    broadcast({ type: 'state', profile: currentProfile, sessionId: currentSessionId });
+    broadcast({ type: 'usage', usage });
+    return true;
+  }
+
+  if (trimmed === '/save') {
+    saveSession(workspacePath, currentProfile, currentSessionId, agent.getMessages());
+    addSystemMessage(`Session saved: ${currentSessionId}`);
+    return true;
+  }
+
+  if (trimmed === '/sessions') {
+    const sessions = listSessions(workspacePath, currentProfile);
+    if (sessions.length === 0) {
+      addSystemMessage('No saved sessions. Use /save to save current session.');
+    } else {
+      const list = sessions.map((s) =>
+        `  ${s.id === currentSessionId ? '>' : ' '} ${s.id} (${s.messageCount} msgs, ${s.lastActiveAt.slice(0, 10)})`
+      ).join('\n');
+      addSystemMessage(`Sessions (${currentProfile}):\n${list}`);
+    }
+    return true;
+  }
+
+  if (trimmed.startsWith('/load ')) {
+    const sessionId = trimmed.slice('/load '.length).trim();
+    const data = loadSession(workspacePath, currentProfile, sessionId);
+    if (!data) {
+      addSystemMessage(`Session not found: ${sessionId}`);
+      return true;
+    }
+    agent.setMessages(data.messages as ProviderMessage[]);
+    currentSessionId = sessionId;
+    usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    addSystemMessage(`Loaded session: ${sessionId} (${data.messages.length} messages)`);
+    broadcast({ type: 'state', sessionId: currentSessionId });
+    broadcast({ type: 'usage', usage });
+    return true;
+  }
+
+  if (trimmed === '/help') {
+    addSystemMessage(
+      'Commands:\n' +
+      '  /reset              Clear conversation\n' +
+      '  /reasoning on|off   Toggle reasoning\n' +
+      '  /effort <level>     Set effort (low/medium/high/max)\n' +
+      '  /profiles           List profiles\n' +
+      '  /profile <name>     Switch profile\n' +
+      '  /profile create <n> Create new profile\n' +
+      '  /save               Save current session\n' +
+      '  /sessions           List saved sessions\n' +
+      '  /load <id>          Load a saved session\n' +
+      '  Esc                 Cancel generation / clear input\n' +
+      '  Ctrl+C              Cancel / clear input (x2 to exit)'
+    );
+    return true;
+  }
+
+  if (trimmed.startsWith('/')) {
+    addSystemMessage(`Unknown command: ${trimmed}\nType /help for available commands.`);
+    return true;
+  }
+
+  return false;
+}
+
+// --- Message processing ---
+
+const messageQueue: string[] = [];
+let processingQueue = false;
+
+async function processMessage(content: string): Promise<void> {
+  const userMsg: DisplayMessage = { role: 'user', content, timestamp: new Date().toISOString() };
+  messages.push(userMsg);
+  broadcast({ type: 'message', message: userMsg });
+
+  isLoading = true;
+  broadcast({ type: 'loading', isLoading: true });
+
+  const controller = new AbortController();
+  abortController = controller;
+  const startTime = Date.now();
+
+  try {
+    const response = await agent.chat(content, {
+      onText: (text) => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'text', content: text });
+      },
+      onThinking: (text) => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'thinking', content: text });
+      },
+      onToolStart: (name, toolInput, summary) => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'tool_start', name, input: toolInput, summary });
+      },
+      onToolEnd: () => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'tool_end' });
+      },
+      onUsage: (u) => {
+        usage = u;
+        broadcast({ type: 'usage', usage });
+      },
+      onCompact: (summary) => {
+        addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
+      },
+    });
+
+    if (!controller.signal.aborted) {
+      const elapsed = (Date.now() - startTime) / 1000;
+      // Clear streaming text
+      broadcast({ type: 'text', content: '' });
+      const assistantMsg: DisplayMessage = {
+        role: 'assistant',
+        content: response,
+        timestamp: new Date().toISOString(),
+        elapsed,
+      };
+      messages.push(assistantMsg);
+      broadcast({ type: 'message', message: assistantMsg });
+      doAutoSave();
+    }
+  } catch (err: unknown) {
+    if (!controller.signal.aborted) {
+      const e = err as { status?: number; message?: string };
+      let errorMsg = e.message ?? 'Unknown error';
+      if (e.status === 401) errorMsg = 'Authentication failed. Check ANTHROPIC_API_KEY.';
+      if (e.status === 429) errorMsg = 'Rate limited. Wait a moment.';
+      broadcast({ type: 'error', message: errorMsg });
+    }
+  } finally {
+    abortController = null;
+    isLoading = false;
+    broadcast({ type: 'loading', isLoading: false });
+  }
+}
+
+async function processQueue(): Promise<void> {
+  if (processingQueue) return;
+  processingQueue = true;
+
+  while (messageQueue.length > 0) {
+    const next = messageQueue.shift();
+    if (next) await processMessage(next);
+  }
+
+  processingQueue = false;
+}
+
+function handleCancel(): void {
+  if (isLoading && abortController) {
+    abortController.abort();
+    abortController = null;
+    messageQueue.length = 0;
+    isLoading = false;
+    broadcast({ type: 'text', content: '' });
+    broadcast({ type: 'loading', isLoading: false });
+    addSystemMessage('Cancelled.');
+  }
+}
+
+// --- Client connection handling ---
+
+function handleClient(socket: Socket): void {
+  clients.add(socket);
+  let buffer = '';
+
+  // Send current state
+  send(socket, { type: 'connected', state: getState() });
+
+  socket.on('data', (data) => {
+    buffer += data.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const cmd = JSON.parse(line) as ClientCommand;
+        switch (cmd.type) {
+          case 'message': {
+            const trimmed = cmd.content.trim();
+            if (!trimmed) break;
+            if (handleCommand(trimmed)) break;
+            if (isLoading) {
+              messageQueue.push(trimmed);
+              const queuedMsg: DisplayMessage = {
+                role: 'user',
+                content: `[queued] ${trimmed}`,
+                timestamp: new Date().toISOString(),
+              };
+              messages.push(queuedMsg);
+              broadcast({ type: 'message', message: queuedMsg });
+            } else {
+              messageQueue.push(trimmed);
+              void processQueue();
+            }
+            break;
+          }
+          case 'cancel':
+            handleCancel();
+            break;
+          case 'command':
+            handleCommand(cmd.cmd);
+            break;
+          case 'ping':
+            send(socket, { type: 'pong' });
+            break;
+        }
+      } catch {
+        // Malformed JSON, ignore
+      }
+    }
+  });
+
+  socket.on('close', () => {
+    clients.delete(socket);
+  });
+
+  socket.on('error', () => {
+    clients.delete(socket);
+  });
+}
+
+// --- Server startup ---
+
+function startServer(): Server {
+  // Clean up stale socket
+  if (existsSync(SOCKET_PATH)) {
+    try { unlinkSync(SOCKET_PATH); } catch { /* ignore */ }
+  }
+
+  const server = createServer(handleClient);
+  server.listen(SOCKET_PATH, () => {
+    // Server ready
+  });
+
+  return server;
+}
+
+function restoreSession(): void {
+  const saved = autoLoadSession(workspacePath);
+  if (saved) {
+    agent.setMessages(saved.agentMessages as ProviderMessage[]);
+    messages = saved.uiMessages as DisplayMessage[];
+    // Recalculate usage from agent
+    usage = agent.totalUsage;
+    console.error(`[server] Restored session (${messages.length} messages)`);
+  }
+}
+
+// --- Main ---
+
+model = process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
+currentThinking = (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
+workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
+
+try {
+  agent = new Agent({ model, thinking: currentThinking, workspacePath });
+} catch (err: unknown) {
+  const error = err as { message?: string };
+  console.error(`Fatal: ${error.message ?? 'Failed to initialize agent'}`);
+  process.exit(1);
+}
+
+restoreSession();
+const server = startServer();
+console.error(`[server] Listening on ${SOCKET_PATH}`);
+
+// Graceful shutdown
+function shutdown(): void {
+  doAutoSave();
+  server.close();
+  if (existsSync(SOCKET_PATH)) {
+    try { unlinkSync(SOCKET_PATH); } catch { /* ignore */ }
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+// Keep alive
+setInterval(() => {}, 60_000);

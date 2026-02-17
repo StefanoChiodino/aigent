@@ -1,31 +1,16 @@
-import { config } from 'dotenv';
-import { resolve } from 'node:path';
-import { Agent } from './agent.js';
-import { installRestartHandler } from './restart.js';
+/**
+ * Entry point — starts the TUI client.
+ *
+ * The agent server runs as a separate process (managed by the supervisor).
+ * This process is purely the frontend: it connects to the server over
+ * a Unix socket, renders the TUI, and forwards user input.
+ *
+ * The TUI survives server restarts — it reconnects automatically.
+ */
 
-// Install graceful restart handler (listens for SIGUSR1 from supervisor)
-installRestartHandler();
+import { AgentClient } from './client.js';
 
-// Load .env files silently
-const _origLog = console.log;
-console.log = () => {};
-config({ path: resolve(process.cwd(), '.env') });
-config({ path: resolve('/app', '.env') });
-console.log = _origLog;
-
-import type { ThinkingLevel } from './agent.js';
-
-const model = process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
-const thinking = (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
-
-let agent: Agent;
-try {
-  agent = new Agent({ model, thinking });
-} catch (err: unknown) {
-  const error = err as { message?: string };
-  console.error(`Fatal: ${error.message ?? 'Failed to initialize agent'}`);
-  process.exit(1);
-}
+const client = new AgentClient();
 
 // Detect if we can run the full TUI or need fallback
 const canUseTUI = Boolean(
@@ -34,13 +19,12 @@ const canUseTUI = Boolean(
 );
 
 if (canUseTUI) {
-  // Dynamic import to avoid loading ink/react when not needed
   const { render } = await import('ink');
   const { App } = await import('./ui/App.js');
-  const workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
-  render(<App agent={agent} thinking={thinking} model={model} workspacePath={workspacePath} />);
+  render(<App client={client} />);
+  client.connect();
 } else {
-  // Fallback: simple readline REPL for non-TTY environments
+  // Fallback: simple readline REPL
   const { startRepl } = await import('./repl.js');
-  startRepl(agent, model);
+  startRepl(client);
 }
