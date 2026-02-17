@@ -85,19 +85,45 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
       return true;
     }
 
-    if (trimmed === '/thinking' || trimmed === '/reasoning') {
-      addSystemMessage(`Reasoning: ${currentThinking}\nLevels: ${VALID_THINKING_LEVELS.join(', ')}\nUsage: /thinking <level>`);
+    // /reasoning on|off — toggle reasoning
+    if (trimmed === '/reasoning') {
+      const isOn = currentThinking !== 'off';
+      addSystemMessage(`Reasoning: ${isOn ? 'on' : 'off'}\nUsage: /reasoning on | /reasoning off`);
       return true;
     }
 
-    if (trimmed.startsWith('/thinking ') || trimmed.startsWith('/reasoning ')) {
+    if (trimmed === '/reasoning on') {
+      if (currentThinking === 'off') {
+        agent.thinkingLevel = 'medium';
+        setCurrentThinking('medium');
+      }
+      addSystemMessage('Reasoning: on');
+      return true;
+    }
+
+    if (trimmed === '/reasoning off') {
+      agent.thinkingLevel = 'off';
+      setCurrentThinking('off');
+      addSystemMessage('Reasoning: off');
+      return true;
+    }
+
+    // /effort <level> — set thinking effort
+    if (trimmed === '/effort') {
+      const effortLevels = VALID_THINKING_LEVELS.filter((l) => l !== 'off');
+      addSystemMessage(`Effort: ${currentThinking === 'off' ? '(reasoning off)' : currentThinking}\nLevels: ${effortLevels.join(', ')}\nUsage: /effort <level>`);
+      return true;
+    }
+
+    if (trimmed.startsWith('/effort ')) {
       const level = trimmed.split(' ')[1] as ThinkingLevel;
-      if (VALID_THINKING_LEVELS.includes(level)) {
+      const effortLevels: ThinkingLevel[] = ['low', 'medium', 'high', 'max'];
+      if (effortLevels.includes(level)) {
         agent.thinkingLevel = level;
         setCurrentThinking(level);
-        addSystemMessage(`Reasoning set to: ${level}`);
+        addSystemMessage(`Effort: ${level}`);
       } else {
-        addSystemMessage(`Invalid level. Options: ${VALID_THINKING_LEVELS.join(', ')}`);
+        addSystemMessage(`Invalid effort. Options: ${effortLevels.join(', ')}`);
       }
       return true;
     }
@@ -175,8 +201,8 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
       addSystemMessage(
         'Commands:\n' +
         '  /reset              Clear conversation\n' +
-        '  /thinking <level>   Set reasoning (off/low/medium/high/max)\n' +
-        '  /reasoning <level>  Same as /thinking\n' +
+        '  /reasoning on|off   Toggle reasoning\n' +
+        '  /effort <level>     Set effort (low/medium/high/max)\n' +
         '  /profiles           List profiles\n' +
         '  /profile <name>     Switch profile\n' +
         '  /profile create <n> Create new profile\n' +
