@@ -56,10 +56,9 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
           />
         </Box>
         <Box flexShrink={0} marginLeft={1}>
-          {effortLabel ? (
-            <Text color="gray">t:<Text color="white">{effortLabel}</Text></Text>
-          ) : (
-            <Text color="gray">t:<Text color="white">off</Text></Text>
+          <Text color="gray">reasoning:<Text color="white">{effortLabel ? 'on' : 'off'}</Text></Text>
+          {effortLabel && (
+            <Text color="gray"> effort:<Text color="white">{effortLabel}</Text></Text>
           )}
           {contextUsed > 0 && (
             <Text color="gray">

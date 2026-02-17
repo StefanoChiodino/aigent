@@ -223,9 +223,17 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
       return true;
     }
 
+    if (trimmed === '/refresh' || trimmed === '/refesh') {
+      // Clear screen and force re-render
+      process.stdout.write('\x1B[2J\x1B[H');
+      addSystemMessage('Refreshed.');
+      return true;
+    }
+
     if (trimmed === '/help') {
       addSystemMessage(
         'Commands:\n' +
+        '  /refresh            Refresh screen\n' +
         '  /reset              Clear conversation\n' +
         '  /reasoning on|off   Toggle reasoning\n' +
         '  /effort <level>     Set effort (low/medium/high/max)\n' +
