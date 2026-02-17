@@ -6,6 +6,7 @@ interface TextInputProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit?: (value: string) => void;
+  onTab?: (currentValue: string) => string | null;
   placeholder?: string | undefined;
   focus?: boolean | undefined;
   showCursor?: boolean | undefined;
@@ -36,6 +37,7 @@ export function TextInput({
   value,
   onChange,
   onSubmit,
+  onTab,
   placeholder = '',
   focus = true,
   showCursor = true,
@@ -53,7 +55,19 @@ export function TextInput({
     if (!focus) return;
 
     // Ignore certain keys we don't handle
-    if (key.upArrow || key.downArrow || key.tab || (key.shift && key.tab)) return;
+    if (key.upArrow || key.downArrow || (key.shift && key.tab)) return;
+
+    // Tab — autocomplete
+    if (key.tab) {
+      if (onTab) {
+        const completed = onTab(value);
+        if (completed !== null) {
+          onChange(completed);
+          setCursorOffset(completed.length);
+        }
+      }
+      return;
+    }
 
     // Ctrl+C — let parent handle
     if (key.ctrl && input === 'c') return;

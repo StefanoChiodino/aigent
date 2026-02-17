@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
+import { renderMarkdown } from './Markdown.js';
 import type { Message, ToolExecution } from './App.js';
 
 interface ChatViewProps {
@@ -31,16 +32,18 @@ function MessageBubble({ message }: { message: Message }): React.JSX.Element {
     );
   }
 
-  // Assistant
+  // Assistant — render with markdown
   return (
     <Box flexDirection="column" marginY={0} marginLeft={1}>
-      <Text>
+      <Box>
         <Text color="magenta" bold>agent</Text>
         <Text color="gray"> {'>'} </Text>
-        <Text>{message.content}</Text>
-      </Text>
+      </Box>
+      <Box marginLeft={2}>
+        <Text>{renderMarkdown(message.content)}</Text>
+      </Box>
       {message.elapsed !== undefined && (
-        <Text color="gray" dimColor>      ({message.elapsed.toFixed(1)}s)</Text>
+        <Text color="gray" dimColor>  ({message.elapsed.toFixed(1)}s)</Text>
       )}
     </Box>
   );
@@ -64,15 +67,17 @@ export function ChatView({ messages, streaming, isLoading, isThinking, activeToo
         </Box>
       )}
 
-      {/* Streaming text */}
+      {/* Streaming text — render raw during streaming, markdown applied on completion */}
       {streaming && (
-        <Box marginLeft={1}>
-          <Text>
+        <Box flexDirection="column" marginLeft={1}>
+          <Box>
             <Text color="magenta" bold>agent</Text>
             <Text color="gray"> {'>'} </Text>
+          </Box>
+          <Box marginLeft={2}>
             <Text>{streaming}</Text>
             <Text color="gray">_</Text>
-          </Text>
+          </Box>
         </Box>
       )}
 
