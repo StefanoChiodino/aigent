@@ -2,6 +2,7 @@
 
 # Run aigent with Claude (default)
 dev:
+	docker compose build aigent
 	docker compose run --rm -it aigent
 
 # Run aigent with a local model (Ollama, GPU if available)

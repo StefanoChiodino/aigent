@@ -19,10 +19,8 @@ RUN npm ci
 # Install tsx globally so it's always available (not affected by volume mounts)
 RUN npm install -g tsx
 
-# Copy source and build (for non-watch fallback)
+# Copy tsconfig (needed by tsx at runtime)
 COPY tsconfig.json ./
-COPY src/ ./src/
-RUN npx tsc
 
 # Default working directory for the agent's workspace
 RUN mkdir -p /workspace
