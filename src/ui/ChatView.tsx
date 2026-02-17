@@ -10,6 +10,7 @@ interface ChatViewProps {
   isLoading: boolean;
   isThinking: boolean;
   activeTools: ToolExecution[];
+  toolOutput: string;
 }
 
 function ThinkingBlock({ text }: { text: string }): React.JSX.Element {
@@ -79,7 +80,7 @@ function MessageBubble({ message, cols }: { message: Message; cols: number }): R
   return <AssistantMessage content={message.content} elapsed={message.elapsed} />;
 }
 
-export function ChatView({ messages, streaming, thinkingText, isLoading, isThinking, activeTools }: ChatViewProps): React.JSX.Element {
+export function ChatView({ messages, streaming, thinkingText, isLoading, isThinking, activeTools, toolOutput }: ChatViewProps): React.JSX.Element {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
 
@@ -101,6 +102,15 @@ export function ChatView({ messages, streaming, thinkingText, isLoading, isThink
             <Text key={`tool-${i}-${tool.name}`} color="gray" dimColor>
               {tool.summary}
             </Text>
+          ))}
+        </Box>
+      )}
+
+      {/* Streaming tool output (e.g. exec) */}
+      {toolOutput && activeTools.length > 0 && (
+        <Box flexDirection="column" marginLeft={4}>
+          {toolOutput.split('\n').slice(-8).map((line, i) => (
+            <Text key={`tout-${i}`} color="gray" dimColor>{line}</Text>
           ))}
         </Box>
       )}

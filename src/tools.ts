@@ -1,4 +1,4 @@
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
@@ -417,32 +417,64 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
 
 // --- Tool Execution ---
 
-export function executeTool(name: string, input: ToolInput, isOAuth: boolean): string {
+/**
+ * Execute a tool and return the result.
+ * For exec, output is streamed via onOutput callback if provided.
+ */
+export async function executeTool(
+  name: string,
+  input: ToolInput,
+  isOAuth: boolean,
+  onOutput?: (chunk: string) => void,
+): Promise<string> {
   // Map Claude Code names back to internal names if needed
   const internalName = isOAuth ? fromClaudeCodeName(name) : name;
 
   switch (internalName) {
     case 'exec': {
       const { command, cwd, timeout = 30_000 } = input as ExecInput;
-      try {
-        const output = execSync(command, {
-          encoding: 'utf-8',
-          timeout,
-          maxBuffer: 1024 * 1024 * 5, // 5MB
+      return new Promise<string>((res) => {
+        let stdout = '';
+        let stderr = '';
+
+        const proc = spawn('sh', ['-c', command], {
           stdio: ['pipe', 'pipe', 'pipe'],
+          env: process.env,
           ...(cwd ? { cwd: resolve(cwd) } : {}),
         });
-        return output || '(no output)';
-      } catch (err: unknown) {
-        const execErr = err as { stdout?: string; stderr?: string; status?: number; message?: string };
-        const stdout = execErr.stdout ?? '';
-        const stderr = execErr.stderr ?? '';
-        const code = execErr.status ?? 1;
-        if (!stdout && !stderr) {
-          return `Exit code: ${code}\n${execErr.message ?? 'unknown error'}`.trim();
-        }
-        return `Exit code: ${code}\n${stdout}\n${stderr}`.trim();
-      }
+
+        const timer = setTimeout(() => {
+          proc.kill('SIGTERM');
+          setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 2000);
+        }, timeout);
+
+        proc.stdout?.on('data', (data: Buffer) => {
+          const chunk = data.toString();
+          stdout += chunk;
+          onOutput?.(chunk);
+        });
+
+        proc.stderr?.on('data', (data: Buffer) => {
+          const chunk = data.toString();
+          stderr += chunk;
+          onOutput?.(chunk);
+        });
+
+        proc.on('close', (code) => {
+          clearTimeout(timer);
+          if (code === 0) {
+            res(stdout || '(no output)');
+          } else {
+            const output = `Exit code: ${code ?? 1}\n${stdout}\n${stderr}`.trim();
+            res(output || `Exit code: ${code ?? 1}`);
+          }
+        });
+
+        proc.on('error', (err) => {
+          clearTimeout(timer);
+          res(`Error: ${err.message}`);
+        });
+      });
     }
 
     case 'read_file': {

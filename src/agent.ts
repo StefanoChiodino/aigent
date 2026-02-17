@@ -2,6 +2,7 @@ import { createProvider, detectProvider, type Provider, type ProviderMessage, ty
 import { getToolDefinitions, executeTool, summarizeToolCall, fromClaudeCodeName } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
+import type { MCPManager } from './mcp.js';
 
 const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container. You have access to:
 - A shell (exec tool) to run any command, with optional cwd
@@ -11,6 +12,7 @@ const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker containe
 - fetch for HTTP requests (with text_only mode for web pages)
 - patch for applying multiple edits to a file at once
 - spawn_agent to delegate tasks to a sub-agent
+- MCP tools from connected servers (if configured via mcp.json)
 - Internet access via curl, wget, etc.
 
 Be direct. Be helpful. Execute commands to verify things rather than guessing.
@@ -67,19 +69,18 @@ export interface AgentOptions {
   maxTokens?: number;
   workspacePath?: string;
   thinking?: ThinkingLevel;
+  mcpManager?: MCPManager;
 }
 
-export interface TokenUsage {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
+// Re-export TokenUsage from protocol (single source of truth)
+export type { TokenUsage } from './protocol.js';
+import type { TokenUsage } from './protocol.js';
 
 export interface ChatCallbacks {
   onText?: (fullText: string) => void;
   onThinking?: (fullText: string) => void;
   onToolStart?: (name: string, input: string, summary: string) => void;
+  onToolOutput?: (content: string) => void;
   onToolEnd?: () => void;
   onUsage?: (usage: TokenUsage) => void;
   onCompact?: (summary: string) => void;
@@ -96,6 +97,7 @@ export class Agent {
   private thinking: ThinkingLevel;
   private workspacePath: string;
   private _totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  private mcpManager: MCPManager | null;
   readonly providerType: string;
 
   constructor(options: AgentOptions = {}) {
@@ -106,14 +108,26 @@ export class Agent {
     this.model = options.model ?? process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
     this.maxTokens = options.maxTokens ?? 16384;
     this.thinking = options.thinking ?? (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
+    this.mcpManager = options.mcpManager ?? null;
 
-    // Get tool definitions
+    // Get built-in tool definitions
     const rawTools = getToolDefinitions(this.isOAuth);
     this.toolDefs = rawTools.map((t) => ({
       name: t.name,
       description: t.description ?? '',
       input_schema: t.input_schema as Record<string, unknown>,
     }));
+
+    // Merge MCP tools
+    if (this.mcpManager) {
+      for (const t of this.mcpManager.getTools()) {
+        this.toolDefs.push({
+          name: t.name,
+          description: t.description ?? '',
+          input_schema: t.input_schema as Record<string, unknown>,
+        });
+      }
+    }
 
     // Load workspace context
     this.workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
@@ -122,6 +136,8 @@ export class Agent {
   }
 
   async chat(userMessage: string | UserContent, callbacks?: ChatCallbacks): Promise<string> {
+    this.reloadSystemPrompt();
+
     const content: UserContent = typeof userMessage === 'string' ? userMessage : userMessage;
     this.messages.push({ role: 'user', content });
 
@@ -169,8 +185,10 @@ export class Agent {
         let result: string;
         if (toolName === 'spawn_agent') {
           result = await this.executeSpawnAgent(tc.input as Record<string, unknown>);
+        } else if (this.mcpManager?.isMCPTool(toolName)) {
+          result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
         } else {
-          result = executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
+          result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput);
         }
 
         const maxLen = 50_000;
@@ -275,7 +293,7 @@ export class Agent {
         // Execute sub-agent tools (no spawn_agent)
         const results: { id: string; content: string }[] = [];
         for (const tc of response.toolCalls) {
-          const result = executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
+          const result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
           const truncated = result.length > 50_000
             ? result.slice(0, 50_000) + '\n\n... [truncated]'
             : result;
@@ -327,6 +345,11 @@ export class Agent {
 
   getMessages(): ProviderMessage[] { return [...this.messages]; }
   setMessages(messages: ProviderMessage[]): void { this.messages = [...messages]; }
+
+  reloadSystemPrompt(): void {
+    const workspaceContext = loadWorkspaceContext(this.workspacePath);
+    this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
+  }
 
   reloadWorkspace(workspacePath: string): void {
     const workspaceContext = loadWorkspaceContext(workspacePath);

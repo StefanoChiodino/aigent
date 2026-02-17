@@ -15,6 +15,7 @@ export interface AgentClientEvents {
   text: (content: string) => void;
   thinking: (content: string) => void;
   tool_start: (name: string, input: string, summary: string) => void;
+  tool_output: (content: string) => void;
   tool_end: () => void;
   message: (message: ServerState['messages'][number]) => void;
   system: (content: string) => void;
@@ -119,6 +120,9 @@ export class AgentClient extends EventEmitter {
         break;
       case 'tool_start':
         this.emit('tool_start', event.name, event.input, event.summary);
+        break;
+      case 'tool_output':
+        this.emit('tool_output', event.content);
         break;
       case 'tool_end':
         this.emit('tool_end');

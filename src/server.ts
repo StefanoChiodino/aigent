@@ -9,13 +9,15 @@
  */
 
 import { createServer, type Server, type Socket } from 'node:net';
-import { existsSync, unlinkSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { Agent, type ThinkingLevel, type TokenUsage } from './agent.js';
+import { existsSync, unlinkSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { resolve, join } from 'node:path';
+import { Agent, type ThinkingLevel } from './agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
 import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType } from './provider.js';
-import type { ClientCommand, ServerEvent, DisplayMessage, ServerState } from './protocol.js';
+import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
+import { computeCost } from './pricing.js';
+import { loadMCP, type MCPManager } from './mcp.js';
 
 const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
 
@@ -331,8 +333,9 @@ function handleCommand(cmd: string): boolean {
           onText: (text) => { if (!controller.signal.aborted) broadcast({ type: 'text', content: text }); },
           onThinking: (text) => { if (!controller.signal.aborted) broadcast({ type: 'thinking', content: text }); },
           onToolStart: (name, toolInput, summary) => { if (!controller.signal.aborted) broadcast({ type: 'tool_start', name, input: toolInput, summary }); },
+          onToolOutput: (content) => { if (!controller.signal.aborted) broadcast({ type: 'tool_output', content }); },
           onToolEnd: () => { if (!controller.signal.aborted) broadcast({ type: 'tool_end' }); },
-          onUsage: (u) => { usage = u; broadcast({ type: 'usage', usage }); },
+          onUsage: (u) => { usage = { ...u, cost: computeCost(model, u) }; broadcast({ type: 'usage', usage }); },
           onCompact: (summary) => { addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`); },
         });
 
@@ -420,12 +423,16 @@ async function processMessage(content: string): Promise<void> {
         if (controller.signal.aborted) return;
         broadcast({ type: 'tool_start', name, input: toolInput, summary });
       },
+      onToolOutput: (content) => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'tool_output', content });
+      },
       onToolEnd: () => {
         if (controller.signal.aborted) return;
         broadcast({ type: 'tool_end' });
       },
       onUsage: (u) => {
-        usage = u;
+        usage = { ...u, cost: computeCost(model, u) };
         broadcast({ type: 'usage', usage });
       },
       onCompact: (summary) => {
@@ -582,8 +589,32 @@ model = process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
 currentThinking = (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
 workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
 
+let mcpManager: MCPManager | null = null;
+
+// Initialize MCP and agent
+async function initAgent(): Promise<void> {
+  // Start MCP servers (non-blocking — failures are logged, not fatal)
+  try {
+    mcpManager = await loadMCP(workspacePath);
+    const { servers, tools } = mcpManager.stats;
+    if (servers > 0) {
+      console.error(`[server] MCP: ${servers} server(s), ${tools} tool(s)`);
+    }
+  } catch (err: unknown) {
+    const e = err as { message?: string };
+    console.error(`[server] MCP init failed (non-fatal): ${e.message}`);
+  }
+
+  agent = new Agent({
+    model,
+    thinking: currentThinking,
+    workspacePath,
+    ...(mcpManager ? { mcpManager } : {}),
+  });
+}
+
 try {
-  agent = new Agent({ model, thinking: currentThinking, workspacePath });
+  await initAgent();
 } catch (err: unknown) {
   const error = err as { message?: string };
   console.error(`Fatal: ${error.message ?? 'Failed to initialize agent'}`);
@@ -594,9 +625,46 @@ restoreSession();
 const server = startServer();
 console.error(`[server] Listening on ${SOCKET_PATH}`);
 
+// --- End-of-session summary ---
+
+function writeEndOfSessionSummary(): void {
+  try {
+    if (messages.length < 4) return;
+
+    const userMessages = messages.filter((m) => m.role === 'user');
+    const assistantMessages = messages.filter((m) => m.role === 'assistant');
+
+    if (userMessages.length === 0) return;
+
+    const firstUserContent = String(userMessages[0]!.content).slice(0, 100);
+    const lastUserContent = String(userMessages[userMessages.length - 1]!.content).slice(0, 100);
+
+    const now = new Date();
+    const time = now.toTimeString().slice(0, 8);
+    const dateStr = now.toISOString().slice(0, 10);
+
+    const summary =
+      `- Messages: ${messages.length} total (${userMessages.length} user, ${assistantMessages.length} assistant)\n` +
+      `- First user message: ${firstUserContent}\n` +
+      `- Last user message: ${lastUserContent}\n`;
+
+    const memoryDir = join(workspacePath, 'memory');
+    if (!existsSync(memoryDir)) {
+      mkdirSync(memoryDir, { recursive: true });
+    }
+
+    const filePath = join(memoryDir, `${dateStr}.md`);
+    appendFileSync(filePath, `\n## Session End (${time})\n\n${summary}\n`);
+  } catch {
+    // Non-critical — don't prevent shutdown
+  }
+}
+
 // Graceful shutdown
 function shutdown(): void {
+  writeEndOfSessionSummary();
   doAutoSave();
+  if (mcpManager) mcpManager.shutdown();
   server.close();
   if (existsSync(SOCKET_PATH)) {
     try { unlinkSync(SOCKET_PATH); } catch { /* ignore */ }

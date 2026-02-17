@@ -3,8 +3,8 @@ import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
 import type { AgentClient } from '../client.js';
-import type { TokenUsage, ThinkingLevel } from '../agent.js';
-import type { DisplayMessage, ServerState } from '../protocol.js';
+import type { ThinkingLevel } from '../agent.js';
+import type { DisplayMessage, ServerState, TokenUsage } from '../protocol.js';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -40,6 +40,7 @@ export function App({ client }: AppProps): React.JSX.Element {
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [activeTools, setActiveTools] = useState<ToolExecution[]>([]);
+  const [toolOutput, setToolOutput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const [currentThinking, setCurrentThinking] = useState<ThinkingLevel>('high');
@@ -104,11 +105,17 @@ export function App({ client }: AppProps): React.JSX.Element {
     };
 
     const onToolStart = (name: string, input: string, summary: string) => {
+      setToolOutput(''); // Clear output for new tool
       setActiveTools((prev) => [...prev, { name, input, summary }]);
+    };
+
+    const onToolOutput = (content: string) => {
+      setToolOutput((prev) => prev + content);
     };
 
     const onToolEnd = () => {
       setActiveTools([]);
+      setToolOutput('');
       setStreaming('');
     };
 
@@ -142,6 +149,7 @@ export function App({ client }: AppProps): React.JSX.Element {
     client.on('text', onText);
     client.on('thinking', onThinking);
     client.on('tool_start', onToolStart);
+    client.on('tool_output', onToolOutput);
     client.on('tool_end', onToolEnd);
     client.on('usage', onUsage);
     client.on('loading', onLoading);
@@ -157,6 +165,7 @@ export function App({ client }: AppProps): React.JSX.Element {
       client.removeListener('text', onText);
       client.removeListener('thinking', onThinking);
       client.removeListener('tool_start', onToolStart);
+      client.removeListener('tool_output', onToolOutput);
       client.removeListener('tool_end', onToolEnd);
       client.removeListener('usage', onUsage);
       client.removeListener('loading', onLoading);
@@ -239,6 +248,7 @@ export function App({ client }: AppProps): React.JSX.Element {
         isLoading={isLoading}
         isThinking={isThinking}
         activeTools={activeTools}
+        toolOutput={toolOutput}
       />
       {error && (
         <Box marginLeft={1}>

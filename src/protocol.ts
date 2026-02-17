@@ -3,7 +3,15 @@
  * Newline-delimited JSON (NDJSON).
  */
 
-import type { TokenUsage, ThinkingLevel } from './agent.js';
+import type { ThinkingLevel } from './agent.js';
+
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost?: number; // Estimated cost in USD
+}
 
 // --- Client → Server ---
 
@@ -37,6 +45,7 @@ export type ServerEvent =
   | { type: 'text'; content: string }
   | { type: 'thinking'; content: string }
   | { type: 'tool_start'; name: string; input: string; summary: string }
+  | { type: 'tool_output'; content: string }
   | { type: 'tool_end' }
   | { type: 'message'; message: DisplayMessage }
   | { type: 'system'; content: string }

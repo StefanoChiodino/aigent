@@ -213,7 +213,7 @@ export function autoLoadSession(
     // Only restore if saved within the last hour
     const savedAt = new Date(data.savedAt).getTime();
     const age = Date.now() - savedAt;
-    if (age > 60 * 60 * 1000) return null;
+    if (age > 24 * 60 * 60 * 1000) return null;
     return { agentMessages: data.agentMessages, uiMessages: data.uiMessages };
   } catch {
     return null;

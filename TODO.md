@@ -10,3 +10,4 @@
 - [x] Context compaction when conversation gets too long
 - [x] Docker experience not up to date — thinking indicator now shows "reasoning..." vs "waiting..."
 - [x] Makefile for all common commands (start, build, restart, etc.)
+subagents? or parallel chats?
