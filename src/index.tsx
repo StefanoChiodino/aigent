@@ -16,7 +16,7 @@ console.log = _origLog;
 import type { ThinkingLevel } from './agent.js';
 
 const model = process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
-const thinking = (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'medium';
+const thinking = (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
 
 let agent: Agent;
 try {

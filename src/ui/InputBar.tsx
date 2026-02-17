@@ -9,7 +9,7 @@ function formatTokens(n: number): string {
 }
 
 function getContextWindow(_model: string): number {
-  return 200_000; // all current Claude models
+  return 200_000;
 }
 
 function contextBar(used: number, total: number, width: number): string {
@@ -44,33 +44,9 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
     ? ({ low: 'L', medium: 'M', high: 'H', max: 'X' } as Record<string, string>)[thinking] ?? thinking
     : null;
 
-  // Build compact status string for the right side
-  const statusParts: React.JSX.Element[] = [];
-
-  if (effortLabel) {
-    statusParts.push(
-      <Text key="r" color="gray">r:<Text color="white">{effortLabel}</Text></Text>
-    );
-  } else {
-    statusParts.push(
-      <Text key="r" color="gray">r:<Text color="white">off</Text></Text>
-    );
-  }
-
-  if (contextUsed > 0) {
-    statusParts.push(
-      <Text key="ctx" color="gray">
-        {' '}
-        <Text color={pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green'}>{contextBar(contextUsed, contextWindow, 8)}</Text>
-        {' '}<Text color="white">{formatTokens(contextUsed)}</Text>
-        <Text color="gray">/{formatTokens(contextWindow)}</Text>
-      </Text>
-    );
-  }
-
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor={isLoading ? 'gray' : 'cyan'} paddingX={1}>
-      <Box justifyContent="space-between">
+    <Box borderStyle="single" borderColor={isLoading ? 'gray' : 'cyan'} paddingX={1}>
+      <Box justifyContent="space-between" width="100%">
         <Box flexGrow={1}>
           <Text color={isLoading ? 'gray' : 'cyan'} bold>{'> '}</Text>
           {isLoading ? (
@@ -85,7 +61,20 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
           )}
         </Box>
         <Box flexShrink={0} marginLeft={1}>
-          {statusParts}
+          {effortLabel ? (
+            <Text color="gray">t:<Text color="white">{effortLabel}</Text></Text>
+          ) : (
+            <Text color="gray">t:<Text color="white">off</Text></Text>
+          )}
+          {contextUsed > 0 && (
+            <Text color="gray">
+              {' '}
+              <Text color={pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green'}>{contextBar(contextUsed, contextWindow, 8)}</Text>
+              {' '}<Text color="white">{formatTokens(contextUsed)}</Text>
+              <Text color="gray">/{formatTokens(contextWindow)}</Text>
+            </Text>
+          )}
+          <Text color="gray"> /help</Text>
         </Box>
       </Box>
     </Box>

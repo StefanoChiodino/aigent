@@ -2,7 +2,6 @@ import { useState, useCallback, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
-import { StatusBar } from './StatusBar.js';
 import type { Agent, TokenUsage, ThinkingLevel } from '../agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId } from '../profiles.js';
 
@@ -38,7 +37,7 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
   const [activeTools, setActiveTools] = useState<ToolExecution[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
-  const [currentThinking, setCurrentThinking] = useState(initialThinking ?? 'medium');
+  const [currentThinking, setCurrentThinking] = useState(initialThinking ?? 'high');
   const [inputValue, setInputValue] = useState('');
   const [currentProfile, setCurrentProfile] = useState('default');
   const [currentSessionId, setCurrentSessionId] = useState(generateSessionId());
@@ -273,7 +272,6 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
 
   return (
     <Box flexDirection="column" width="100%">
-      <StatusBar thinking={currentThinking} usage={usage} model={model} />
       <ChatView
         messages={messages}
         streaming={streaming}
@@ -291,6 +289,9 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
         onChange={setInputValue}
         onSubmit={handleSubmit}
         isLoading={isLoading}
+        thinking={currentThinking}
+        usage={usage}
+        model={model}
       />
     </Box>
   );
