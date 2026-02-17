@@ -164,9 +164,20 @@ export class Agent {
 
       // Accumulate streaming text for real-time display
       let currentText = '';
+      let thinkingText = '';
       stream.on('text', (text) => {
         currentText += text;
         callbacks?.onText?.(currentText);
+      });
+
+      // Track thinking blocks
+      stream.on('inputJSON' as 'text', () => { /* noop, just for type safety */ });
+      (stream as unknown as { on(event: string, cb: (data: unknown) => void): void }).on('contentBlock', (block: unknown) => {
+        const b = block as { type: string; thinking?: string };
+        if (b.type === 'thinking' && b.thinking) {
+          thinkingText += b.thinking;
+          callbacks?.onThinking?.(thinkingText);
+        }
       });
 
       const response = await stream.finalMessage();

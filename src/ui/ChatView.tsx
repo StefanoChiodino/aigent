@@ -6,6 +6,7 @@ interface ChatViewProps {
   messages: Message[];
   streaming: string;
   isLoading: boolean;
+  isThinking: boolean;
   activeTools: ToolExecution[];
 }
 
@@ -45,7 +46,7 @@ function MessageBubble({ message }: { message: Message }): React.JSX.Element {
   );
 }
 
-export function ChatView({ messages, streaming, isLoading, activeTools }: ChatViewProps): React.JSX.Element {
+export function ChatView({ messages, streaming, isLoading, isThinking, activeTools }: ChatViewProps): React.JSX.Element {
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
       {messages.map((msg, i) => (
@@ -81,7 +82,7 @@ export function ChatView({ messages, streaming, isLoading, activeTools }: ChatVi
           <Text color="magenta">
             <Spinner type="dots" />
           </Text>
-          <Text color="gray"> thinking...</Text>
+          <Text color="gray">{isThinking ? ' reasoning...' : ' waiting...'}</Text>
         </Box>
       )}
     </Box>

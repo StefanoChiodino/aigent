@@ -34,6 +34,7 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const [activeTools, setActiveTools] = useState<ToolExecution[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
@@ -198,6 +199,7 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
 
     setMessages((prev) => [...prev, { role: 'user', content: trimmed, timestamp: new Date() }]);
     setIsLoading(true);
+    setIsThinking(false);
     setError(null);
     setStreaming('');
     setActiveTools([]);
@@ -207,7 +209,11 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
     try {
       const response = await agent.chat(trimmed, {
         onText: (text) => {
+          setIsThinking(false);
           setStreaming(text);
+        },
+        onThinking: () => {
+          setIsThinking(true);
         },
         onToolStart: (name, toolInput, summary) => {
           setActiveTools((prev) => [...prev, { name, input: toolInput, summary }]);
@@ -246,6 +252,7 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
         messages={messages}
         streaming={streaming}
         isLoading={isLoading}
+        isThinking={isThinking}
         activeTools={activeTools}
       />
       {error && (
