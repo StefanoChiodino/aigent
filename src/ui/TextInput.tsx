@@ -30,6 +30,9 @@ interface TextInputProps {
  *   Ctrl+H       — delete character before cursor (same as backspace)
  *   Ctrl+D       — delete character under cursor
  *
+ * Multi-line:
+ *   Ctrl+J       — insert newline
+ *
  * Other:
  *   Ctrl+L       — clear (handled at app level)
  */
@@ -71,6 +74,14 @@ export function TextInput({
 
     // Ctrl+C — let parent handle
     if (key.ctrl && input === 'c') return;
+
+    // Ctrl+J — insert newline
+    if (key.ctrl && input === 'j') {
+      const newValue = value.slice(0, cursorOffset) + '\n' + value.slice(cursorOffset);
+      onChange(newValue);
+      setCursorOffset(cursorOffset + 1);
+      return;
+    }
 
     // Enter — submit
     if (key.return) {
@@ -213,7 +224,9 @@ export function TextInput({
     rendered = renderedPlaceholder;
   } else if (showCursor && focus) {
     for (let i = 0; i < value.length; i++) {
-      rendered += i === cursorOffset ? chalk.inverse(value[i]) : value[i];
+      const ch = value[i]!;
+      // Show cursor on newline as highlighted space before the break
+      rendered += i === cursorOffset ? (ch === '\n' ? chalk.inverse(' ') + '\n' : chalk.inverse(ch)) : ch;
     }
     if (cursorOffset === value.length) {
       rendered += chalk.inverse(' ');

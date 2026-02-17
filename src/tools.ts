@@ -162,7 +162,39 @@ const grepTool: ToolDef = {
   },
 };
 
-const internalTools = [execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool];
+const spawnAgentTool: ToolDef = {
+  name: 'spawn_agent',
+  description:
+    'Spawn a sub-agent to work on a task independently. The sub-agent gets its own conversation ' +
+    'with full tool access (exec, read, write, edit, grep, list_files) and runs until the task is ' +
+    'complete or it hits the iteration limit. Use this for: complex tasks you want to delegate, ' +
+    'parallel research, reviewing code while you work on something else, or any task that benefits ' +
+    'from a fresh context. The sub-agent shares your workspace and filesystem.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      task: {
+        type: 'string',
+        description: 'Clear description of what the sub-agent should do. Be specific.',
+      },
+      context: {
+        type: 'string',
+        description: 'Optional context to provide (e.g. relevant file paths, decisions made, constraints)',
+      },
+      model: {
+        type: 'string',
+        description: 'Model to use (default: same as parent). Use a smaller model for simple tasks.',
+      },
+      max_iterations: {
+        type: 'number',
+        description: 'Maximum tool-use iterations (default: 15, max: 25)',
+      },
+    },
+    required: ['task'],
+  },
+};
+
+const internalTools = [execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool, spawnAgentTool];
 
 /**
  * Get tool definitions, optionally mapped to Claude Code names for OAT auth.
@@ -186,8 +218,9 @@ interface WriteFileInput { path: string; content: string }
 interface EditFileInput { path: string; old_text: string; new_text: string }
 interface ListFilesInput { path?: string }
 interface GrepInput { pattern: string; path?: string; include?: string }
+interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | SpawnAgentInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -214,6 +247,11 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
     case 'grep': {
       const { pattern, path: p } = input as GrepInput;
       return `grep "${pattern}" ${p ?? '.'}`;
+    }
+    case 'spawn_agent': {
+      const { task } = input as SpawnAgentInput;
+      const short = task.length > 60 ? task.slice(0, 60) + '...' : task;
+      return `spawn: ${short}`;
     }
     default:
       return name;

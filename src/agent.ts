@@ -1,5 +1,5 @@
 import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderToolDef, type AnthropicProvider } from './provider.js';
-import { getToolDefinitions, executeTool, summarizeToolCall } from './tools.js';
+import { getToolDefinitions, executeTool, summarizeToolCall, fromClaudeCodeName } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
 
@@ -126,16 +126,7 @@ export class Agent {
     while (iterations < maxIterations) {
       iterations++;
 
-      const response = await this.provider.sendMessage(
-        this.systemPromptText,
-        this.messages,
-        this.toolDefs,
-        { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking },
-        {
-          onText: callbacks?.onText,
-          onThinking: callbacks?.onThinking,
-        },
-      );
+      const response = await this.sendWithRetry(callbacks);
 
       // Track usage
       this._totalUsage.input += response.usage.input;
@@ -166,10 +157,17 @@ export class Agent {
       for (const tc of response.toolCalls) {
         const inputStr = JSON.stringify(tc.input);
         const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '\u2026' : inputStr;
+        const toolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
         const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
         callbacks?.onToolStart?.(tc.name, truncatedInput, summary);
 
-        const result = executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
+        let result: string;
+        if (toolName === 'spawn_agent') {
+          result = await this.executeSpawnAgent(tc.input as Record<string, unknown>);
+        } else {
+          result = executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
+        }
+
         const maxLen = 50_000;
         const truncated = result.length > maxLen
           ? result.slice(0, maxLen) + `\n\n... [truncated, ${result.length} bytes total]`
@@ -183,6 +181,82 @@ export class Agent {
     }
 
     return '[agent hit maximum tool-use iterations]';
+  }
+
+  private async executeSpawnAgent(input: Record<string, unknown>): Promise<string> {
+    const task = String(input['task'] ?? '');
+    const context = input['context'] ? String(input['context']) : '';
+    const requestedModel = input['model'] ? String(input['model']) : this.model;
+    const maxIter = Math.min(Number(input['max_iterations'] ?? 15), 25);
+
+    if (!task) return 'Error: task is required';
+
+    const systemPrompt = [
+      'You are a sub-agent spawned to complete a specific task.',
+      'Work independently and return a clear, complete result.',
+      'You have access to exec, file read/write/edit, grep, and list_files.',
+      'Do NOT spawn further sub-agents.',
+      '',
+      `Task: ${task}`,
+      context ? `\nContext: ${context}` : '',
+    ].join('\n');
+
+    // Create a sub-agent with its own conversation but same provider/tools
+    // Exclude spawn_agent from sub-agent tools to prevent recursion
+    const subProvider = createProvider(detectProvider());
+    const subToolDefs = this.toolDefs.filter((t) => t.name !== 'spawn_agent');
+
+    const subMessages: ProviderMessage[] = [
+      { role: 'user', content: task + (context ? `\n\nContext: ${context}` : '') },
+    ];
+
+    let iterations = 0;
+    let finalText = '';
+
+    try {
+      while (iterations < maxIter) {
+        iterations++;
+
+        const response = await subProvider.sendMessage(
+          systemPrompt,
+          subMessages,
+          subToolDefs,
+          { model: requestedModel, maxTokens: this.maxTokens, thinking: this.thinking },
+        );
+
+        subMessages.push({
+          role: 'assistant',
+          content: response.text,
+          toolCalls: response.toolCalls.length > 0 ? response.toolCalls : undefined,
+        });
+
+        if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
+          finalText = response.text;
+          break;
+        }
+
+        // Execute sub-agent tools (no spawn_agent)
+        const results: { id: string; content: string }[] = [];
+        for (const tc of response.toolCalls) {
+          const result = executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
+          const truncated = result.length > 50_000
+            ? result.slice(0, 50_000) + '\n\n... [truncated]'
+            : result;
+          results.push({ id: tc.id, content: truncated });
+        }
+
+        subMessages.push({ role: 'tool_result', results });
+      }
+
+      if (!finalText) {
+        finalText = '[sub-agent hit iteration limit without final response]';
+      }
+
+      return `[Sub-agent completed in ${iterations} iterations]\n\n${finalText}`;
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      return `[Sub-agent error: ${e.message ?? 'unknown error'}]`;
+    }
   }
 
   private async compact(callbacks?: ChatCallbacks): Promise<void> {
