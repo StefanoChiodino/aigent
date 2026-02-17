@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Box, Text } from 'ink';
-import TextInput from 'ink-text-input';
+import { TextInput } from './TextInput.js';
 
 interface InputBarProps {
   onSubmit: (value: string) => void;
@@ -20,13 +20,13 @@ export function InputBar({ onSubmit, isLoading }: InputBarProps): React.JSX.Elem
     <Box borderStyle="single" borderColor={isLoading ? 'gray' : 'cyan'} paddingX={1}>
       <Text color={isLoading ? 'gray' : 'cyan'} bold>{'> '}</Text>
       {isLoading ? (
-        <Text color="gray" dimColor>waiting for response…</Text>
+        <Text color="gray" dimColor>waiting for response...</Text>
       ) : (
         <TextInput
           value={value}
           onChange={setValue}
           onSubmit={handleSubmit}
-          placeholder="Type a message…"
+          placeholder="Type a message..."
         />
       )}
     </Box>
