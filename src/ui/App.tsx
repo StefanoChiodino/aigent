@@ -23,9 +23,10 @@ export interface ToolExecution {
 interface AppProps {
   agent: Agent;
   thinking?: string | undefined;
+  model?: string | undefined;
 }
 
-export function App({ agent, thinking: initialThinking }: AppProps): React.JSX.Element {
+export function App({ agent, thinking: initialThinking, model }: AppProps): React.JSX.Element {
   const { exit } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
@@ -160,7 +161,7 @@ export function App({ agent, thinking: initialThinking }: AppProps): React.JSX.E
 
   return (
     <Box flexDirection="column" width="100%">
-      <StatusBar thinking={currentThinking} usage={usage} />
+      <StatusBar thinking={currentThinking} usage={usage} model={model} />
       <ChatView
         messages={messages}
         streaming={streaming}

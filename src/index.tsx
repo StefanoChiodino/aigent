@@ -33,7 +33,7 @@ if (canUseTUI) {
   // Dynamic import to avoid loading ink/react when not needed
   const { render } = await import('ink');
   const { App } = await import('./ui/App.js');
-  render(<App agent={agent} thinking={thinking} />);
+  render(<App agent={agent} thinking={thinking} model={model} />);
 } else {
   // Fallback: simple readline REPL for non-TTY environments
   const { startRepl } = await import('./repl.js');
