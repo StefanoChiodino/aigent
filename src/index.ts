@@ -13,7 +13,7 @@ function prompt(query: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const model = process.env['AIGENT_MODEL'] ?? 'claude-sonnet-4-20250514';
+  const model = process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
   console.log(`🌸 aigent v0 — model: ${model}`);
   console.log('Type your message. Ctrl+C to exit.\n');
 

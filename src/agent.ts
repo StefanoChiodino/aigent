@@ -25,7 +25,7 @@ export class Agent {
 
   constructor(options: AgentOptions = {}) {
     this.client = new Anthropic();
-    this.model = options.model ?? 'claude-sonnet-4-20250514';
+    this.model = options.model ?? 'claude-opus-4-6-20250514';
     this.maxTokens = options.maxTokens ?? 8192;
   }
 
