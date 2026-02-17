@@ -44,7 +44,6 @@ export function App({ client }: AppProps): React.JSX.Element {
   const [currentThinking, setCurrentThinking] = useState<ThinkingLevel>('high');
   const [inputValue, setInputValue] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
-  const [model, setModel] = useState('');
   const ctrlCPending = useRef(false);
 
   // Wire up client events
@@ -54,7 +53,6 @@ export function App({ client }: AppProps): React.JSX.Element {
       setMessages(state.messages.map(toUIMessage));
       setUsage(state.usage);
       setCurrentThinking(state.thinking);
-      setModel(state.model);
       setIsLoading(state.isLoading);
       setError(null);
     };
