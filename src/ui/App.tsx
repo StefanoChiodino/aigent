@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
+import { StatusBar } from './StatusBar.js';
 import type { Agent, TokenUsage, ThinkingLevel } from '../agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId } from '../profiles.js';
 
@@ -67,7 +68,12 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
     }
 
     if (key.ctrl && _input === 'c') {
-      // If generating, cancel first
+      // Double-tap Ctrl+C to exit — always, regardless of state
+      if (ctrlCPending.current) {
+        exit();
+        process.exit(0);
+      }
+      // First Ctrl+C: cancel generation, or clear input, or warn
       if (isLoading && abortController.current) {
         abortController.current.abort();
         abortController.current = null;
@@ -75,22 +81,14 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
         setIsLoading(false);
         setStreaming('');
         setActiveTools([]);
-        addSystemMessage('Cancelled.');
-        return;
-      }
-      // Clear input if there's text
-      if (inputValue.length > 0) {
+        addSystemMessage('Cancelled. Press Ctrl+C again to exit.');
+      } else if (inputValue.length > 0) {
         setInputValue('');
-        ctrlCPending.current = false;
-        return;
-      }
-      // Double-tap to exit
-      if (ctrlCPending.current) {
-        exit();
-        process.exit(0);
+        addSystemMessage('Press Ctrl+C again to exit.');
+      } else {
+        addSystemMessage('Press Ctrl+C again to exit.');
       }
       ctrlCPending.current = true;
-      addSystemMessage('Press Ctrl+C again to exit.');
       setTimeout(() => {
         ctrlCPending.current = false;
       }, 2000);
@@ -244,8 +242,14 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
         '  /sessions           List saved sessions\n' +
         '  /load <id>          Load a saved session\n' +
         '  Esc                 Cancel generation / clear input\n' +
-        '  Ctrl+C              Clear input / exit'
+        '  Ctrl+C              Cancel / clear input (x2 to exit)'
       );
+      return true;
+    }
+
+    // Catch unknown commands
+    if (trimmed.startsWith('/')) {
+      addSystemMessage(`Unknown command: ${trimmed}\nType /help for available commands.`);
       return true;
     }
 
@@ -355,14 +359,12 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
           <Text color="red">Error: {error}</Text>
         </Box>
       )}
+      <StatusBar thinking={currentThinking} usage={usage} model={model} />
       <InputBar
         value={inputValue}
         onChange={setInputValue}
         onSubmit={handleSubmit}
         isLoading={isLoading}
-        thinking={currentThinking}
-        usage={usage}
-        model={model}
       />
     </Box>
   );

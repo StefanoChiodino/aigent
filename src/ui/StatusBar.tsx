@@ -10,8 +10,7 @@ function formatTokens(n: number): string {
 
 // Context window sizes by model family
 const CONTEXT_WINDOWS: Record<string, number> = {
-  'opus-4-6': 200_000,
-  'opus-4.6': 200_000,
+  'opus': 200_000,
   'sonnet': 200_000,
   'haiku': 200_000,
 };
@@ -47,7 +46,7 @@ export function StatusBar({ thinking, usage, model }: StatusBarProps): React.JSX
     : null;
 
   return (
-    <Box borderStyle="single" borderColor="gray" paddingX={1} justifyContent="space-between">
+    <Box paddingX={2} justifyContent="space-between">
       <Text>
         <Text color="gray">reasoning:<Text color="white">{effortLabel ? 'on' : 'off'}</Text></Text>
         {effortLabel && (
@@ -55,7 +54,7 @@ export function StatusBar({ thinking, usage, model }: StatusBarProps): React.JSX
         )}
         {contextUsed > 0 && (
           <Text color="gray">
-            {' | '}
+            {' │ '}
             <Text color={pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green'}>{contextBar(contextUsed, contextWindow, 12)}</Text>
             {' '}
             <Text color="white">{formatTokens(contextUsed)}</Text>
