@@ -3,6 +3,7 @@ import { createProvider, detectProvider, type Provider, type ProviderMessage, ty
 import { getToolDefinitions, executeTool, summarizeToolCall } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
+import { isRestartPending, gracefulRestart } from './restart.js';
 
 const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container. You have access to:
 - A shell (exec tool) to run any command
@@ -27,8 +28,10 @@ Architecture:
   /app/src/repl.ts      — Fallback readline REPL
   /app/src/ui/          — ink (React) TUI components
 
-The container runs tsx --watch, so saving any source file auto-restarts the process.
-Your conversation will reset on restart, but workspace memory persists.
+A supervisor process watches for source file changes. When you edit your own code,
+it sends SIGUSR1 and waits for you to finish your current turn before restarting.
+You will NOT be killed mid-conversation. Your conversation resets on restart,
+but workspace memory persists.
 
 When modifying your own code:
 1. Read the relevant file(s) first to understand context
@@ -36,6 +39,7 @@ When modifying your own code:
 3. Run \`exec: npx tsc --noEmit\` to verify your changes compile
 4. Use \`exec: git diff\` to review what you changed
 5. Commit with \`exec: git add -A && git commit -m "..."\`
+6. After commit, you'll get a graceful restart — finish your response first
 
 You CAN and SHOULD improve yourself when you find limitations.
 
@@ -114,6 +118,11 @@ export class Agent {
   async chat(userMessage: string, callbacks?: ChatCallbacks): Promise<string> {
     this.messages.push({ role: 'user', content: userMessage });
 
+    // If a restart was requested before this turn even started, exit now
+    if (isRestartPending()) {
+      gracefulRestart();
+    }
+
     let iterations = 0;
     const maxIterations = 25;
 
@@ -174,6 +183,12 @@ export class Agent {
 
       callbacks?.onToolEnd?.();
       this.messages.push({ role: 'tool_result', results });
+
+      // Check for pending restart between tool iterations
+      // Let the current tool batch finish, but don't start another LLM call
+      if (isRestartPending()) {
+        return '[restarting with updated code — conversation will reset]';
+      }
     }
 
     return '[agent hit maximum tool-use iterations]';

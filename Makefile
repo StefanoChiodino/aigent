@@ -1,10 +1,15 @@
-.PHONY: dev rebuild clean
+.PHONY: dev local rebuild clean
 
-# Run aigent (builds if needed, interactive, watch mode)
+# Run aigent with Claude (default)
 dev:
-	docker compose run --rm --build aigent
+	docker compose run --rm aigent
 
-# Full rebuild from scratch (no cache)
+# Run aigent with a local model (Ollama, GPU if available)
+# Override model: AIGENT_LOCAL_MODEL=mistral make local
+local:
+	docker compose run --rm local
+
+# Full rebuild from scratch
 rebuild:
 	docker compose build --no-cache
 

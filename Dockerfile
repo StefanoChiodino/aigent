@@ -9,7 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     jq \
     ca-certificates \
+    procps \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Ollama for local model inference
+RUN curl -fsSL https://ollama.com/install.sh | sh
 
 # Copy package files and install deps
 COPY package.json package-lock.json ./
@@ -27,5 +31,7 @@ RUN npx tsc
 RUN mkdir -p /workspace
 WORKDIR /workspace
 
-# Watch mode by default — edits to mounted /app/src/ auto-restart
-ENTRYPOINT ["tsx", "--watch", "--tsconfig", "/app/tsconfig.json", "/app/src/index.tsx"]
+# Entrypoint handles Ollama startup (if local provider) + agent
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
