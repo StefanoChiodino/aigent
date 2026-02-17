@@ -1,11 +1,13 @@
+import React from 'react';
 import { Box, Text } from 'ink';
 
 interface StatusBarProps {
   model: string;
   messageCount: number;
+  thinking?: string | undefined;
 }
 
-export function StatusBar({ model, messageCount }: StatusBarProps): React.JSX.Element {
+export function StatusBar({ model, messageCount, thinking }: StatusBarProps): React.JSX.Element {
   return (
     <Box
       borderStyle="single"
@@ -17,6 +19,9 @@ export function StatusBar({ model, messageCount }: StatusBarProps): React.JSX.El
         <Text color="magenta" bold>🌸 aigent</Text>
         <Text color="gray"> — </Text>
         <Text color="cyan">{model}</Text>
+        {thinking && thinking !== 'off' && (
+          <Text color="gray"> — thinking: <Text color="yellow">{thinking}</Text></Text>
+        )}
       </Text>
       <Text color="gray">
         msgs: {messageCount} | /help | Ctrl+C to exit

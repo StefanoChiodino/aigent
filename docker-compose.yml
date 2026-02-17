@@ -6,6 +6,7 @@ services:
     environment:
       - ANTHROPIC_API_KEY
       - AIGENT_MODEL
+      - AIGENT_THINKING
       - AIGENT_WORKSPACE=/workspace
     volumes:
       - .:/app                       # repo mapped in — edits trigger auto-restart

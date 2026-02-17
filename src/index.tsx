@@ -9,11 +9,14 @@ config({ path: resolve(process.cwd(), '.env') });
 config({ path: resolve('/app', '.env') });
 console.log = _origLog;
 
+import type { ThinkingLevel } from './agent.js';
+
 const model = process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
+const thinking = (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'medium';
 
 let agent: Agent;
 try {
-  agent = new Agent({ model });
+  agent = new Agent({ model, thinking });
 } catch (err: unknown) {
   const error = err as { message?: string };
   console.error(`Fatal: ${error.message ?? 'Failed to initialize agent'}`);
@@ -30,7 +33,7 @@ if (canUseTUI) {
   // Dynamic import to avoid loading ink/react when not needed
   const { render } = await import('ink');
   const { App } = await import('./ui/App.js');
-  render(<App agent={agent} model={model} />);
+  render(<App agent={agent} model={model} thinking={thinking} />);
 } else {
   // Fallback: simple readline REPL for non-TTY environments
   const { startRepl } = await import('./repl.js');

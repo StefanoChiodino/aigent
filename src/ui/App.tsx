@@ -20,9 +20,10 @@ export interface ToolExecution {
 interface AppProps {
   agent: Agent;
   model: string;
+  thinking?: string;
 }
 
-export function App({ agent, model }: AppProps): React.JSX.Element {
+export function App({ agent, model, thinking }: AppProps): React.JSX.Element {
   const { exit } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
@@ -115,7 +116,7 @@ export function App({ agent, model }: AppProps): React.JSX.Element {
 
   return (
     <Box flexDirection="column" width="100%">
-      <StatusBar model={model} messageCount={agent.conversationLength} />
+      <StatusBar model={model} messageCount={agent.conversationLength} thinking={thinking} />
       <ChatView
         messages={messages}
         streaming={streaming}

@@ -4,33 +4,66 @@ import { createClient, buildSystemPrompt } from './auth.js';
 import { getToolDefinitions, executeTool } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 
-const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a sandboxed environment. You have access to:
+const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container. You have access to:
 - A shell (exec tool) to run any command
 - File read/write/edit to inspect and modify files
 - grep and list_files for searching and navigating
 - Internet access via curl, wget, etc.
 
-You can install packages, write code, and modify your own source code.
-Your source code is at /app/src/ and your workspace is at /workspace/.
-
 Be direct. Be helpful. Execute commands to verify things rather than guessing.
 
-## Memory
+## Your Own Source Code
 
-You have persistent memory via workspace files. At minimum:
-- Update memory/YYYY-MM-DD.md with notable events during each session
-- Update MEMORY.md when you learn something worth keeping long-term
-- Read SOUL.md and USER.md to know who you are and who you're helping`;
+You are a self-authoring agent. Your source code is mounted at /app/ from the host filesystem.
+Any changes you make to files in /app/ persist on the host and are visible to your user.
+
+Architecture:
+  /app/src/index.tsx    — Entry point, TUI/REPL launcher
+  /app/src/agent.ts     — Agent class, conversation loop, streaming
+  /app/src/auth.ts      — API key / OAT token handling
+  /app/src/tools.ts     — Tool definitions and execution
+  /app/src/workspace.ts — Workspace file loading
+  /app/src/repl.ts      — Fallback readline REPL
+  /app/src/ui/          — ink (React) TUI components
+    App.tsx, ChatView.tsx, InputBar.tsx, StatusBar.tsx
+
+The container runs tsx --watch, so saving any source file auto-restarts the process.
+Your conversation will reset on restart, but workspace memory persists.
+
+When modifying your own code:
+1. Read the relevant file(s) first to understand context
+2. Use edit_file for surgical changes, write_file for new files
+3. Run \`exec: npx tsc --noEmit\` to verify your changes compile
+4. Use \`exec: git diff\` to review what you changed
+5. Commit with \`exec: git add -A && git commit -m "..."\`
+
+You CAN and SHOULD improve yourself when you find limitations.
+
+## Workspace & Memory
+
+Your workspace is at /workspace/. It contains persistent files that survive restarts:
+- AGENTS.md — your operating instructions
+- SOUL.md — your personality and values
+- USER.md — info about your user
+- MEMORY.md — long-term curated memory
+- TOOLS.md — tool notes and gotchas
+- memory/YYYY-MM-DD.md — daily session logs
+
+Update these files as you learn. If it's worth remembering, write it down.`;
+
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 
 export interface AgentOptions {
   model?: string;
   maxTokens?: number;
   apiKey?: string;
   workspacePath?: string;
+  thinking?: ThinkingLevel;
 }
 
 export interface ChatCallbacks {
   onText?: (fullText: string) => void;
+  onThinking?: (fullText: string) => void;
   onToolStart?: (name: string, input: string) => void;
   onToolEnd?: () => void;
 }
@@ -49,6 +82,7 @@ export class Agent {
   private isOAuth: boolean;
   private tools: Anthropic.Tool[];
   private systemPromptText: string;
+  private thinking: ThinkingLevel;
 
   constructor(options: AgentOptions = {}) {
     const apiKey = options.apiKey ?? process.env['ANTHROPIC_API_KEY'] ?? '';
@@ -64,6 +98,7 @@ export class Agent {
     this.model = options.model ?? process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
     this.maxTokens = options.maxTokens ?? 16384;
     this.tools = getToolDefinitions(isOAuth);
+    this.thinking = options.thinking ?? (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'medium';
 
     // Load workspace context into system prompt
     const workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
@@ -98,14 +133,23 @@ export class Agent {
 
       const systemPrompt = buildSystemPrompt(this.systemPromptText, this.isOAuth);
 
-      // Use streaming API
-      const stream = this.client.messages.stream({
+      // Build request params
+      const params: Record<string, unknown> = {
         model: this.model,
         max_tokens: this.maxTokens,
         system: systemPrompt,
         tools: this.tools,
         messages: this.messages,
-      });
+      };
+
+      // Add extended thinking for supported models
+      if (this.thinking !== 'off' && this.supportsAdaptiveThinking()) {
+        params['thinking'] = { type: 'adaptive' };
+        params['output_config'] = { effort: this.thinking };
+      }
+
+      // Use streaming API
+      const stream = this.client.messages.stream(params as Parameters<typeof this.client.messages.stream>[0]);
 
       // Accumulate streaming text for real-time display
       let currentText = '';
@@ -165,6 +209,11 @@ export class Agent {
     }
 
     return '[agent hit maximum tool-use iterations]';
+  }
+
+  /** Check if the current model supports adaptive thinking */
+  private supportsAdaptiveThinking(): boolean {
+    return this.model.includes('opus-4-6') || this.model.includes('opus-4.6');
   }
 
   /** Reset conversation history */
