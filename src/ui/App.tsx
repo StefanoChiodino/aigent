@@ -36,6 +36,7 @@ export function App({ client }: AppProps): React.JSX.Element {
   const { exit } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
+  const [thinkingText, setThinkingText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [activeTools, setActiveTools] = useState<ToolExecution[]>([]);
@@ -76,9 +77,10 @@ export function App({ client }: AppProps): React.JSX.Element {
 
     const onMessage = (dm: DisplayMessage) => {
       setMessages((prev) => [...prev, toUIMessage(dm)]);
-      // Clear streaming when assistant message arrives
+      // Clear streaming/thinking when assistant message arrives
       if (dm.role === 'assistant') {
         setStreaming('');
+        setThinkingText('');
         setActiveTools([]);
       }
     };
@@ -96,8 +98,9 @@ export function App({ client }: AppProps): React.JSX.Element {
       setStreaming(content);
     };
 
-    const onThinking = (_content: string) => {
+    const onThinking = (content: string) => {
       setIsThinking(true);
+      setThinkingText(content);
     };
 
     const onToolStart = (name: string, input: string, summary: string) => {
@@ -117,6 +120,7 @@ export function App({ client }: AppProps): React.JSX.Element {
       setIsLoading(loading);
       if (!loading) {
         setStreaming('');
+        setThinkingText('');
         setActiveTools([]);
         setIsThinking(false);
       }
@@ -231,6 +235,7 @@ export function App({ client }: AppProps): React.JSX.Element {
       <ChatView
         messages={messages}
         streaming={streaming}
+        thinkingText={thinkingText}
         isLoading={isLoading}
         isThinking={isThinking}
         activeTools={activeTools}
