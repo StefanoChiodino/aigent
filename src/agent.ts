@@ -1,8 +1,8 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderToolDef, type AnthropicProvider } from './provider.js';
 import { getToolDefinitions, executeTool, summarizeToolCall } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
+
 const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container. You have access to:
 - A shell (exec tool) to run any command
 - File read/write/edit to inspect and modify files
@@ -25,7 +25,7 @@ Architecture (backend/frontend split):
   /app/src/provider.ts  — Multi-provider abstraction (Anthropic + OpenAI)
   /app/src/tools.ts     — Tool definitions and execution
   /app/src/workspace.ts — Workspace file loading
-  /app/src/supervisor.ts — Process manager (server + TUI as separate processes)
+  /app/src/supervisor.tsx — Process manager (server + TUI)
   /app/src/index.tsx    — TUI entry point
   /app/src/repl.ts      — Fallback readline REPL
   /app/src/ui/          — ink (React) TUI components
@@ -153,7 +153,7 @@ export class Agent {
       // No tool calls — return text
       if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
         // Auto-compact check
-        const contextUsed = response.usage.input + response.usage.output;
+        const contextUsed = this._totalUsage.input + this._totalUsage.output;
         if (contextUsed > this.getContextWindow() * 0.7 && this.messages.length > 12) {
           await this.compact(callbacks);
         }
@@ -164,7 +164,7 @@ export class Agent {
       const results: { id: string; content: string }[] = [];
       for (const tc of response.toolCalls) {
         const inputStr = JSON.stringify(tc.input);
-        const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '…' : inputStr;
+        const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '\u2026' : inputStr;
         const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
         callbacks?.onToolStart?.(tc.name, truncatedInput, summary);
 
@@ -179,46 +179,22 @@ export class Agent {
 
       callbacks?.onToolEnd?.();
       this.messages.push({ role: 'tool_result', results });
-
     }
 
     return '[agent hit maximum tool-use iterations]';
   }
 
   private async compact(callbacks?: ChatCallbacks): Promise<void> {
-    // Only works with Anthropic provider for now (needs raw client for summary call)
-    if (this.providerType !== 'anthropic') return;
+    const { messages: compacted, summary } = await compactConversation(
+      this.provider,
+      this.model,
+      this.messages,
+    );
 
-    const { createClient } = await import('./auth.js');
-    const apiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
-    const { client } = createClient(apiKey);
-
-    // Convert to Anthropic message format for compaction
-    const anthropicMsgs: Anthropic.MessageParam[] = [];
-    for (const msg of this.messages) {
-      if (msg.role === 'user') {
-        anthropicMsgs.push({ role: 'user', content: msg.content });
-      } else if (msg.role === 'assistant') {
-        anthropicMsgs.push({ role: 'assistant', content: [{ type: 'text', text: msg.content }] as Anthropic.ContentBlock[] });
-      }
+    if (summary) {
+      this.messages = compacted;
+      callbacks?.onCompact?.(summary);
     }
-
-    const { messages: compacted, summary } = await compactConversation(client, this.model, anthropicMsgs);
-
-    // Convert back
-    this.messages = [];
-    for (const msg of compacted) {
-      if (msg.role === 'user') {
-        this.messages.push({ role: 'user', content: typeof msg.content === 'string' ? msg.content : '(context)' });
-      } else if (msg.role === 'assistant') {
-        const text = Array.isArray(msg.content)
-          ? (msg.content as Array<{ type: string; text?: string }>).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n')
-          : String(msg.content);
-        this.messages.push({ role: 'assistant', content: text });
-      }
-    }
-
-    if (summary) callbacks?.onCompact?.(summary);
   }
 
   private getContextWindow(): number {

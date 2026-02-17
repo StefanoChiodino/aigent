@@ -1,7 +1,17 @@
 import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type Anthropic from '@anthropic-ai/sdk';
+
+/** Tool definition — provider-agnostic. */
+export interface ToolDef {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
 
 /**
  * Claude Code canonical tool names.
@@ -33,7 +43,7 @@ export function fromClaudeCodeName(name: string): string {
 
 // --- Tool Definitions ---
 
-const execTool: Anthropic.Tool = {
+const execTool: ToolDef = {
   name: 'exec',
   description:
     'Execute a shell command and return stdout/stderr. Use for running programs, installing packages, git operations, network requests, etc.',
@@ -53,7 +63,7 @@ const execTool: Anthropic.Tool = {
   },
 };
 
-const readFileTool: Anthropic.Tool = {
+const readFileTool: ToolDef = {
   name: 'read_file',
   description: 'Read the contents of a file at the given path.',
   input_schema: {
@@ -68,7 +78,7 @@ const readFileTool: Anthropic.Tool = {
   },
 };
 
-const writeFileTool: Anthropic.Tool = {
+const writeFileTool: ToolDef = {
   name: 'write_file',
   description:
     'Write content to a file. Creates parent directories if needed. Overwrites existing files.',
@@ -88,7 +98,7 @@ const writeFileTool: Anthropic.Tool = {
   },
 };
 
-const editFileTool: Anthropic.Tool = {
+const editFileTool: ToolDef = {
   name: 'edit_file',
   description:
     'Edit a file by replacing exact text. The old_text must match exactly (including whitespace). Use for precise, surgical edits.',
@@ -112,7 +122,7 @@ const editFileTool: Anthropic.Tool = {
   },
 };
 
-const listFilesTool: Anthropic.Tool = {
+const listFilesTool: ToolDef = {
   name: 'list_files',
   description:
     'List files and directories at a given path. Returns names with trailing / for directories.',
@@ -128,7 +138,7 @@ const listFilesTool: Anthropic.Tool = {
   },
 };
 
-const grepTool: Anthropic.Tool = {
+const grepTool: ToolDef = {
   name: 'grep',
   description:
     'Search for a pattern in files. Uses grep -rn under the hood. Returns matching lines with file paths and line numbers.',
@@ -157,7 +167,7 @@ const internalTools = [execTool, readFileTool, writeFileTool, editFileTool, list
 /**
  * Get tool definitions, optionally mapped to Claude Code names for OAT auth.
  */
-export function getToolDefinitions(useClaudeCodeNames: boolean): Anthropic.Tool[] {
+export function getToolDefinitions(useClaudeCodeNames: boolean): ToolDef[] {
   if (!useClaudeCodeNames) {
     return internalTools;
   }

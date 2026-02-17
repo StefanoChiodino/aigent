@@ -1,5 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
-import type { TextBlock } from '@anthropic-ai/sdk/resources/messages/messages.js';
+import type { Provider, ProviderMessage } from './provider.js';
 
 const COMPACT_PROMPT = `Summarize the conversation so far into a concise but thorough summary. Include:
 - The user's goals and what they asked for
@@ -17,15 +16,17 @@ Write as a compact reference document, not a narrative.`;
  *
  * Strategy:
  * 1. Keep the last `keepRecent` message pairs (user + assistant)
- * 2. Summarize everything before that into a single "context" message
- * 3. Return the compacted message array
+ * 2. Send the older messages to the provider with a summarization prompt
+ * 3. Replace old messages with a summary exchange + recent messages
+ *
+ * Works with any provider — no Anthropic-specific types.
  */
 export async function compactConversation(
-  client: Anthropic,
+  provider: Provider,
   model: string,
-  messages: Anthropic.MessageParam[],
+  messages: ProviderMessage[],
   keepRecent: number = 6,
-): Promise<{ messages: Anthropic.MessageParam[]; summary: string }> {
+): Promise<{ messages: ProviderMessage[]; summary: string }> {
   // Don't compact if conversation is short
   if (messages.length <= keepRecent * 2) {
     return { messages, summary: '' };
@@ -36,36 +37,39 @@ export async function compactConversation(
   const oldMessages = messages.slice(0, splitPoint);
   const recentMessages = messages.slice(splitPoint);
 
-  // Build a summary request
-  const summaryMessages: Anthropic.MessageParam[] = [
-    ...oldMessages,
-    {
-      role: 'user',
-      content: COMPACT_PROMPT,
-    },
-  ];
+  // Build summary request: old messages + summarization prompt
+  const summaryMessages: ProviderMessage[] = [];
 
-  // Ensure the first message is from the user (API requirement)
-  if (summaryMessages.length > 0 && summaryMessages[0]?.role !== 'user') {
-    summaryMessages.unshift({
-      role: 'user',
-      content: '(conversation start)',
-    });
+  // Ensure first message is from user
+  if (oldMessages.length > 0 && oldMessages[0]!.role !== 'user') {
+    summaryMessages.push({ role: 'user', content: '(conversation start)' });
   }
 
-  const response = await client.messages.create({
-    model,
-    max_tokens: 4096,
-    messages: summaryMessages,
-  });
+  // Add old messages (skip tool_result messages — they don't make sense without context)
+  for (const msg of oldMessages) {
+    if (msg.role === 'user') {
+      summaryMessages.push({ role: 'user', content: msg.content });
+    } else if (msg.role === 'assistant') {
+      summaryMessages.push({ role: 'assistant', content: msg.content });
+    }
+    // Skip tool_result — the provider wouldn't know what tool_use they belong to
+  }
 
-  const summary = response.content
-    .filter((block): block is TextBlock => block.type === 'text')
-    .map((b) => b.text)
-    .join('\n');
+  // Add the summarization request
+  summaryMessages.push({ role: 'user', content: COMPACT_PROMPT });
+
+  // Send to provider (no tools, no thinking — just a summary)
+  const response = await provider.sendMessage(
+    'You are a helpful assistant that summarizes conversations accurately.',
+    summaryMessages,
+    [], // no tools
+    { model, maxTokens: 4096, thinking: 'off' },
+  );
+
+  const summary = response.text;
 
   // Build compacted messages: summary as first exchange + recent messages
-  const compacted: Anthropic.MessageParam[] = [
+  const compacted: ProviderMessage[] = [
     {
       role: 'user',
       content: `[Context from earlier in this conversation — this is a summary, not a new message]\n\n${summary}`,
