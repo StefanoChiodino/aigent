@@ -45,10 +45,16 @@ export function App({ client }: AppProps): React.JSX.Element {
   const [inputValue, setInputValue] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
   const ctrlCPending = useRef(false);
+  const hasEverConnected = useRef(false);
 
   // Wire up client events
   useEffect(() => {
     const onConnected = (state: ServerState) => {
+      // Clear screen on first connection to wipe startup artifacts
+      if (!hasEverConnected.current) {
+        hasEverConnected.current = true;
+        process.stdout.write('\x1B[2J\x1B[H');
+      }
       setConnectionStatus('connected');
       setMessages(state.messages.map(toUIMessage));
       setUsage(state.usage);
@@ -205,16 +211,14 @@ export function App({ client }: AppProps): React.JSX.Element {
     client.sendMessage(trimmed);
   }, [client]);
 
+  // Only show reconnection banner after we've been connected at least once
+  const showReconnecting = connectionStatus === 'reconnecting' && hasEverConnected.current;
+
   return (
     <Box flexDirection="column" width="100%">
-      {connectionStatus === 'reconnecting' && (
+      {showReconnecting && (
         <Box marginLeft={1}>
           <Text color="yellow">Reconnecting to server...</Text>
-        </Box>
-      )}
-      {connectionStatus === 'connecting' && (
-        <Box marginLeft={1}>
-          <Text color="gray">Connecting...</Text>
         </Box>
       )}
       <ChatView

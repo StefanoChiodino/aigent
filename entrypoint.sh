@@ -1,11 +1,22 @@
 #!/bin/sh
 set -e
 
-# Ensure node_modules are installed (anonymous volume may start empty)
-if [ ! -d "/app/node_modules/@anthropic-ai" ]; then
+cd /app
+
+# Ensure node_modules match package.json
+# The anonymous volume may have stale deps from a previous build
+# We hash package.json and compare to detect when deps need updating
+HASH_FILE="node_modules/.pkg-hash"
+CURRENT_HASH=$(md5sum package.json 2>/dev/null | cut -d' ' -f1)
+STORED_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "none")
+
+if [ ! -d "node_modules/@anthropic-ai" ] || [ "$CURRENT_HASH" != "$STORED_HASH" ]; then
   echo "Installing dependencies..."
-  cd /app && npm ci && cd /workspace
+  npm ci
+  echo "$CURRENT_HASH" > "$HASH_FILE"
 fi
 
-# Run the supervisor (manages server + TUI as separate processes)
+cd /workspace
+
+# Run the supervisor (manages server + TUI)
 exec tsx --tsconfig /app/tsconfig.json /app/src/supervisor.tsx

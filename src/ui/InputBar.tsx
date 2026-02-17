@@ -131,11 +131,11 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
         <Text color="gray">r:<Text color="white">{rText}</Text></Text>
         {effortLetter && <Text color="gray"> {effortLetter}</Text>}
         {contextUsed > 0 && (
-          <>
+          <Text>
             <Text color="gray">{' | '}</Text>
             <Text color={pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green'}>{bar}</Text>
             <Text color="gray"> <Text color="white">{usedStr}</Text>/{totalStr} ({pct}%)</Text>
-          </>
+          </Text>
         )}
         <Text color={borderColor}>{' '}{'\u2500'.repeat(fill)}{'\u2510'}</Text>
       </Box>
