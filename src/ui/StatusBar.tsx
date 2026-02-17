@@ -16,39 +16,18 @@ interface StatusBarProps {
 export function StatusBar({ thinking, usage }: StatusBarProps): React.JSX.Element {
   const totalTokens = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 
+  const parts: string[] = [];
+  if (thinking && thinking !== 'off') parts.push(`reasoning:${thinking}`);
+  if (totalTokens > 0) {
+    let tokens = `in:${formatTokens(usage.input)} out:${formatTokens(usage.output)}`;
+    if (usage.cacheRead > 0) tokens += ` cache:${formatTokens(usage.cacheRead)}`;
+    parts.push(tokens);
+  }
+  parts.push('/help');
+
   return (
-    <Box
-      borderStyle="single"
-      borderColor="gray"
-      paddingX={1}
-      justifyContent="space-between"
-    >
-      <Text>
-        <Text bold>aigent</Text>
-        {thinking && thinking !== 'off' && (
-          <>
-            <Text color="gray"> | reasoning: </Text>
-            <Text color="yellow">{thinking}</Text>
-          </>
-        )}
-      </Text>
-      <Text color="gray">
-        {totalTokens > 0 && (
-          <>
-            <Text color="green">in:{formatTokens(usage.input)}</Text>
-            <Text> </Text>
-            <Text color="cyan">out:{formatTokens(usage.output)}</Text>
-            {usage.cacheRead > 0 && (
-              <>
-                <Text> </Text>
-                <Text color="gray">cache:{formatTokens(usage.cacheRead)}</Text>
-              </>
-            )}
-            <Text> | </Text>
-          </>
-        )}
-        /help | Ctrl+C
-      </Text>
+    <Box borderStyle="single" borderColor="gray" paddingX={1}>
+      <Text color="gray">{parts.join(' | ')}</Text>
     </Box>
   );
 }

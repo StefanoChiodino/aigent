@@ -3,13 +3,15 @@ import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
 import { StatusBar } from './StatusBar.js';
-import type { Agent, TokenUsage } from '../agent.js';
+import type { Agent, TokenUsage, ThinkingLevel } from '../agent.js';
+
+const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: Date;
-  elapsed?: number;
+  elapsed?: number | undefined;
 }
 
 export interface ToolExecution {
@@ -22,7 +24,7 @@ interface AppProps {
   thinking?: string | undefined;
 }
 
-export function App({ agent, thinking }: AppProps): React.JSX.Element {
+export function App({ agent, thinking: initialThinking }: AppProps): React.JSX.Element {
   const { exit } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
@@ -30,6 +32,7 @@ export function App({ agent, thinking }: AppProps): React.JSX.Element {
   const [activeTools, setActiveTools] = useState<ToolExecution[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  const [currentThinking, setCurrentThinking] = useState(initialThinking ?? 'medium');
 
   useInput((_input, key) => {
     if (key.ctrl && _input === 'c') {
@@ -38,28 +41,55 @@ export function App({ agent, thinking }: AppProps): React.JSX.Element {
     }
   });
 
+  const addSystemMessage = useCallback((content: string) => {
+    setMessages((prev) => [...prev, { role: 'system', content, timestamp: new Date() }]);
+  }, []);
+
+  const handleCommand = useCallback((trimmed: string): boolean => {
+    if (trimmed === '/reset') {
+      agent.reset();
+      setUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+      addSystemMessage('Conversation reset.');
+      return true;
+    }
+
+    // /thinking or /reasoning — same command
+    if (trimmed === '/thinking' || trimmed === '/reasoning') {
+      addSystemMessage(`Reasoning: ${currentThinking}\nLevels: ${VALID_THINKING_LEVELS.join(', ')}\nUsage: /thinking <level>`);
+      return true;
+    }
+
+    if (trimmed.startsWith('/thinking ') || trimmed.startsWith('/reasoning ')) {
+      const level = trimmed.split(' ')[1] as ThinkingLevel;
+      if (VALID_THINKING_LEVELS.includes(level)) {
+        agent.thinkingLevel = level;
+        setCurrentThinking(level);
+        addSystemMessage(`Reasoning set to: ${level}`);
+      } else {
+        addSystemMessage(`Invalid level. Options: ${VALID_THINKING_LEVELS.join(', ')}`);
+      }
+      return true;
+    }
+
+    if (trimmed === '/help') {
+      addSystemMessage(
+        'Commands:\n' +
+        '  /reset              Clear conversation\n' +
+        '  /thinking <level>   Set reasoning (off/low/medium/high/max)\n' +
+        '  /reasoning <level>  Same as /thinking\n' +
+        '  Ctrl+C              Exit'
+      );
+      return true;
+    }
+
+    return false;
+  }, [agent, currentThinking, addSystemMessage]);
+
   const handleSubmit = useCallback(async (input: string) => {
     const trimmed = input.trim();
     if (!trimmed) return;
 
-    // Handle commands
-    if (trimmed === '/reset') {
-      agent.reset();
-      setMessages([{ role: 'system', content: 'Conversation reset.', timestamp: new Date() }]);
-      return;
-    }
-
-    if (trimmed === '/help') {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'system',
-          content: '/reset — Clear history\n/help — This message\nCtrl+C — Exit',
-          timestamp: new Date(),
-        },
-      ]);
-      return;
-    }
+    if (handleCommand(trimmed)) return;
 
     // Add user message
     setMessages((prev) => [...prev, { role: 'user', content: trimmed, timestamp: new Date() }]);
@@ -103,11 +133,11 @@ export function App({ agent, thinking }: AppProps): React.JSX.Element {
       setIsLoading(false);
       setActiveTools([]);
     }
-  }, [agent, exit]);
+  }, [agent, handleCommand]);
 
   return (
     <Box flexDirection="column" width="100%">
-      <StatusBar thinking={thinking} usage={usage} />
+      <StatusBar thinking={currentThinking} usage={usage} />
       <ChatView
         messages={messages}
         streaming={streaming}

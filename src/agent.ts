@@ -233,6 +233,15 @@ export class Agent {
     return this.model.includes('opus-4-6') || this.model.includes('opus-4.6');
   }
 
+  /** Get/set thinking level */
+  get thinkingLevel(): ThinkingLevel {
+    return this.thinking;
+  }
+
+  set thinkingLevel(level: ThinkingLevel) {
+    this.thinking = level;
+  }
+
   /** Reset conversation history */
   reset(): void {
     this.messages = [];
