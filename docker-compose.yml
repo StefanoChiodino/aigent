@@ -5,40 +5,10 @@ services:
     tty: true
     environment:
       - ANTHROPIC_API_KEY
-      - OPENAI_API_KEY
-      - AIGENT_PROVIDER
       - AIGENT_MODEL
-      - AIGENT_BASE_URL
       - AIGENT_THINKING
       - AIGENT_WORKSPACE=/workspace
     volumes:
-      - .:/app
-      - /app/node_modules
-      - ./workspace:/workspace
-      - ollama_data:/root/.ollama     # persist downloaded models
-
-  # Local model profile — use: make local
-  local:
-    build: .
-    stdin_open: true
-    tty: true
-    environment:
-      - AIGENT_PROVIDER=local
-      - AIGENT_MODEL=${AIGENT_LOCAL_MODEL:-llama3.2:3b}
-      - AIGENT_THINKING=off
-      - AIGENT_WORKSPACE=/workspace
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - ./workspace:/workspace
-      - ollama_data:/root/.ollama
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-volumes:
-  ollama_data:
+      - .:/app                       # repo mapped in — supervisor handles graceful restart
+      - /app/node_modules            # container's own node_modules
+      - ./workspace:/workspace       # persistent workspace (memory, personality, etc.)
