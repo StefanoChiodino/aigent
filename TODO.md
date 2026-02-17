@@ -8,5 +8,5 @@
 - [x] Context token usage bar like OpenClaw
 - [x] Multiple chats / profiles / personalities with their own memory
 - [x] Context compaction when conversation gets too long
-- [ ] Docker experience not up to date — reasoning:medium showing but no thinking indicator
-- [ ] Makefile for all common commands (start, build, restart, etc.)
+- [x] Docker experience not up to date — thinking indicator now shows "reasoning..." vs "waiting..."
+- [x] Makefile for all common commands (start, build, restart, etc.)

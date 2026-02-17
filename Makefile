@@ -1,44 +1,12 @@
-.PHONY: start stop restart build rebuild logs shell dev typecheck clean
+.PHONY: dev rebuild clean
 
-# Start aigent (interactive)
-start:
-	docker compose run --rm aigent
+# Run aigent (builds if needed, interactive, watch mode)
+dev:
+	docker compose run --rm --build aigent
 
-# Start in background
-up:
-	docker compose up -d
-
-# Stop
-stop:
-	docker compose down
-
-# Restart
-restart:
-	docker compose restart
-
-# Build Docker image
-build:
-	docker compose build
-
-# Full rebuild (no cache)
+# Full rebuild from scratch (no cache)
 rebuild:
 	docker compose build --no-cache
-
-# View logs
-logs:
-	docker compose logs -f
-
-# Shell into running container
-shell:
-	docker compose exec aigent /bin/bash
-
-# Local dev (no Docker, requires Node 22+)
-dev:
-	npm run dev
-
-# Type check without building
-typecheck:
-	npx tsc --noEmit
 
 # Clean build artifacts
 clean:
