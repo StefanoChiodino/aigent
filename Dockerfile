@@ -28,5 +28,7 @@ RUN npx tsc
 RUN mkdir -p /workspace
 WORKDIR /workspace
 
-# Supervisor watches for source changes and gracefully restarts the agent
-ENTRYPOINT ["tsx", "--tsconfig", "/app/tsconfig.json", "/app/src/supervisor.ts"]
+# Entrypoint ensures deps are installed, then starts supervisor
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]
