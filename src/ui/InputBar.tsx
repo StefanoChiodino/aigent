@@ -107,15 +107,16 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
   const usedStr = formatTokens(contextUsed);
   const totalStr = formatTokens(contextWindow);
 
-  // Status line above the input box
-  const statusParts: string[] = [`r:${rText}`];
-  if (effortLetter) statusParts.push(effortLetter);
+  // Measure status display width for top border fill
+  let statusLen = 2 + rText.length; // "r:" + "on"/"off"
+  if (effortLetter) statusLen += 2; // " H"
   if (contextUsed > 0) {
-    statusParts.push(`| ${bar} ${usedStr}/${totalStr} (${pct}%)`);
+    // " | " + bar(12) + " " + used + "/" + total + " (" + pct + "%)"
+    statusLen += 3 + 12 + 1 + usedStr.length + 1 + totalStr.length + 2 + String(pct).length + 2;
   }
-  const statusText = statusParts.join(' ');
-  // Pad to fill width (accounting for 1 char left padding)
-  const padLen = Math.max(0, cols - statusText.length - 1);
+
+  // Top: "┌ " + status + " " + ─fill + "┐" → 2 + statusLen + 1 + fill + 1 = cols
+  const fill = Math.max(0, cols - 4 - statusLen);
 
   return (
     <Box flexDirection="column">
@@ -126,10 +127,21 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
           </Text>
         </Box>
       )}
-      <Box paddingLeft={1}>
-        <Text color="gray">{statusText}{' '.repeat(padLen)}</Text>
+      <Box>
+        <Text color={borderColor}>{'\u250c '}</Text>
+        <Text color="gray">r:<Text color="white">{rText}</Text></Text>
+        {effortLetter && <Text color="gray"> {effortLetter}</Text>}
+        {contextUsed > 0 && (
+          <>
+            <Text color="gray">{' | '}</Text>
+            <Text color={pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green'}>{bar}</Text>
+            <Text color="gray"> <Text color="white">{usedStr}</Text>/{totalStr} ({pct}%)</Text>
+          </>
+        )}
+        <Text color={borderColor}>{' '}{'\u2500'.repeat(fill)}{'\u2510'}</Text>
       </Box>
-      <Box borderStyle="single" borderColor={borderColor} paddingX={1}>
+      <Box>
+        <Text color={borderColor}>{'\u2502 '}</Text>
         <Box flexGrow={1}>
           <Text color={isLoading ? 'gray' : 'cyan'} bold>{'> '}</Text>
           <TextInput
@@ -140,7 +152,9 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
             placeholder={isLoading ? 'Type to queue...' : 'Type a message...'}
           />
         </Box>
+        <Text color={borderColor}>{' \u2502'}</Text>
       </Box>
+      <Text color={borderColor}>{'\u2514'}{'\u2500'.repeat(Math.max(0, cols - 2))}{'\u2518'}</Text>
     </Box>
   );
 }

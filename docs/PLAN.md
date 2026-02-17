@@ -1,129 +1,113 @@
 # aigent — Development Plan
 
-> This file is the source of truth for what's done, what's next, and what's planned.
-> Read this at the start of every session. Update it as you go.
+> Source of truth for what's done, what's next, and what's planned.
+> Read at session start. Update as you go.
 
-## Current State
-
-**v0 CLI agent is functional.** Compiles clean, runs in sandbox, talks to Claude API with OAT auth.
-
-### Architecture
+## Architecture
 
 ```
-src/
-  index.ts   — CLI entry, REPL loop, dotenv loading
-  agent.ts   — Conversation loop (tool-use cycle, iteration limits)
-  auth.ts    — OAT token detection, Claude Code compatible client creation
-  tools.ts   — 6 tools: exec, read_file, write_file, edit_file, list_files, grep
+Docker container
+  └── supervisor.tsx (entrypoint)
+        ├── server.ts (child process — agent backend, Unix socket)
+        │     ├── agent.ts (conversation loop, streaming)
+        │     ├── provider.ts (Anthropic + OpenAI abstraction)
+        │     ├── tools.ts (exec, read_file, write_file, edit_file, list_files, grep)
+        │     ├── auth.ts (API key / OAT token handling)
+        │     ├── workspace.ts (memory system)
+        │     ├── profiles.ts (multi-profile, sessions)
+        │     └── compact.ts (context compaction)
+        └── TUI (in-process — ink v6 + React 19)
+              ├── client.ts (socket connector, auto-reconnect)
+              ├── App.tsx, ChatView.tsx, InputBar.tsx, TextInput.tsx
+              └── Markdown.tsx (terminal markdown rendering)
 ```
 
 - TypeScript strict mode, ESM, Node 22
-- Dependencies: `@anthropic-ai/sdk`, `dotenv`
-- Docker: `node:22-slim`, mounts `./workspace` as `/workspace`
-- Auth: supports both API keys (`sk-ant-api03-...`) and OAT tokens (`sk-ant-oat01-...`)
+- Docker-only execution: `make dev` builds + runs
+- Backend/frontend split: server restarts on code change, TUI survives
+- Protocol: NDJSON over Unix socket (/tmp/aigent.sock)
 
 ---
 
-## Phase 1: Foundation ✅ DONE
+## Done
 
-- [x] Project scaffold (package.json, tsconfig, Dockerfile, docker-compose)
-- [x] CLI REPL with conversation loop
-- [x] Tool-use cycle (exec, read_file, write_file)
-- [x] OAT subscription token auth (Claude Code compatible mode)
+### Foundation
+- [x] Project scaffold, strict TypeScript, Docker, Makefile
+- [x] 6 tools: exec, read_file, write_file, edit_file, list_files, grep
+- [x] Safety: 25-iteration limit, 50KB truncation
+- [x] OAT subscription token auth (Claude Code compatible)
 - [x] dotenv for .env loading
-- [x] Git repo with 3 commits on `main`
 
-## Phase 2: Robustness & UX ✅ DONE
+### TUI
+- [x] ink v6 TUI with streaming, chat view, input bar, spinner
+- [x] Custom TextInput with readline keybindings (Ctrl+W/U/K/A/E, Alt+B/F)
+- [x] Ctrl+C: cancel/clear, double-tap to exit
+- [x] Tab autocomplete for slash commands
+- [x] Fallback readline REPL for non-TTY
+- [x] Human-readable tool summaries
+- [x] Markdown rendering (marked + marked-terminal)
+- [x] Status line: r:on/off, effort letter, context bar with tokens
 
-- [x] edit_file tool (surgical find-replace)
-- [x] list_files tool
-- [x] grep tool
-- [x] REPL commands (/reset, /status, /help)
-- [x] Graceful shutdown (SIGINT/SIGTERM)
-- [x] Iteration safety limit (25 tool calls per turn)
-- [x] Result truncation (50KB cap)
-- [x] Response timing display
-- [x] Committed as v0.2 (925f11e)
+### Agent
+- [x] Streaming API responses (tokens appear live)
+- [x] Extended thinking (Opus 4.6 adaptive, /reasoning + /effort commands)
+- [x] Context compaction at 70% usage
+- [x] Thinking indicator (reasoning... vs waiting...)
 
-## Phase 2.5: UX Polish — PARTIAL
-
-- [x] Streaming output (ink TUI + streaming API)
-- [x] ink TUI with status bar, chat view, input bar, spinner
-- [x] Fallback REPL for non-TTY environments
-- [x] Dev watch mode (tsx --watch)
-- [ ] Conversation persistence (save/load sessions)
-- [ ] Token usage tracking & display
-- [ ] Better error recovery (retry on transient failures)
-- [ ] Multi-line input support
-
-## Phase 3: Self-Authoring ✅ DONE
-
-- [x] Agent can read its own source (`/app/src/`)
-- [x] System prompt describes full codebase architecture
-- [x] Agent can modify code + tsx --watch auto-restarts
-- [x] Instructions: read → edit → typecheck → git diff → commit
-- [x] Encouragement to self-improve when finding limitations
-- [ ] Bootstrap prompt: agent can set up its own workspace (deferred)
-
-## Phase 4: Workspace & Memory ✅ DONE
-
-- [x] Workspace files (SOUL.md, MEMORY.md, etc.) — similar to OpenClaw
-- [x] System prompt loaded from workspace config
+### Workspace & Memory
+- [x] AGENTS.md, SOUL.md, USER.md, MEMORY.md, TOOLS.md loaded into system prompt
 - [x] Daily memory files (memory/YYYY-MM-DD.md)
 - [x] Default templates in workspace/
-- [x] Design doc: docs/workspace-design.md
-- [ ] Session memory (conversation summaries across restarts)
+- [x] Multi-profile system (/profiles, /profile create, /profile switch)
+- [x] Session persistence (/save, /sessions, /load)
 
-## Phase 5: Docker Hardening
+### Self-Authoring
+- [x] System prompt describes full codebase architecture
+- [x] Agent can read/modify its own source at /app/
+- [x] Backend/frontend split — server restarts on code change, TUI reconnects
+- [x] Auto-save/restore conversation across server restarts
 
+### Provider Abstraction
+- [x] Provider interface in src/provider.ts
+- [x] AnthropicProvider (streaming, thinking, cache tracking)
+- [x] OpenAIProvider (streaming, tool call accumulation)
+- [x] Factory + auto-detection (AIGENT_PROVIDER, env vars)
+- [ ] **Integrate into agent.ts** (still uses direct Anthropic SDK path)
+
+---
+
+## Next Up
+
+### Integrate Provider Abstraction
+- [ ] Refactor agent.ts to use Provider interface for all API calls
+- [ ] Update compact.ts to work with any provider
+- [ ] Test with OpenAI-compatible endpoint
+
+### Docker Hardening
 - [ ] Non-root user in container
 - [ ] Resource limits (CPU, memory, disk)
-- [ ] Network policy (allow outbound HTTP, block everything else)
+- [ ] Network policy (allow outbound HTTP, block else)
 - [ ] Read-only source mount, writable workspace mount
-- [ ] Health check endpoint
 
-## Phase 6: Streaming & Extended Thinking ✅ DONE
+### TUI Polish
+- [ ] Display thinking blocks (optional, togglable)
+- [ ] Multi-line input support
+- [ ] Better error recovery (retry on transient failures)
+- [ ] Image input support (file paths/URLs → base64)
 
-- [x] Streaming API responses (show tokens as they arrive)
-- [x] Extended thinking support (Opus 4.6 adaptive thinking)
-- [x] Configurable thinking level (off/low/medium/high/max)
-- [ ] Display thinking blocks in TUI (optional, togglable)
-- [ ] Interleaved thinking display
-
-## Phase 7: Computer Use
-
-- [ ] Research Anthropic's computer-use API
+### Computer Use
+- [ ] Research Anthropic computer-use API
 - [ ] Screenshot capture tool
 - [ ] Mouse/keyboard action tools
-- [ ] Accessibility API integration
-- [ ] VS Code interaction
 
-## Phase 8: Multi-Provider
-
-- [ ] Abstract provider interface
-- [ ] OpenAI / GPT support
-- [ ] Google Gemini support
-- [ ] Provider-specific tool mapping
-- [ ] Model config in workspace files
-
-## Phase 9: Gateway Architecture
-
-- [ ] API key isolation (gateway holds keys, agent doesn't)
-- [ ] Rate limiting
-- [ ] Usage tracking & billing
+### Gateway Architecture
+- [ ] API key isolation (gateway holds keys)
+- [ ] Rate limiting, usage tracking
 - [ ] Multi-agent support
-- [ ] REST API for external integrations
+- [ ] REST API
 
 ---
 
 ## Blocked
 
-- **GitHub push**: no SSH in sandbox — Stefano needs to push from host
-- **Docker build/test**: can't run Docker-in-Docker in sandbox — test locally or in CI
-
-## Notes
-
-- OAT tokens require Claude Code identity headers — see `src/auth.ts` and `docs/secret-management.md`
-- dotenv v17 is noisy — we suppress its console.log during loading
-- The agent responds as "Claude Code" when using OAT — this is required by the API
-- OpenClaw source at `/home/draga/.npm-global/lib/node_modules/openclaw/` is a useful reference
+- **GitHub push**: no SSH in sandbox — Stefano pushes from host
