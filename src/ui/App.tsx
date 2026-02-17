@@ -42,33 +42,60 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
   const [currentProfile, setCurrentProfile] = useState('default');
   const [currentSessionId, setCurrentSessionId] = useState(generateSessionId());
   const ctrlCPending = useRef(false);
+  const messageQueue = useRef<string[]>([]);
+  const abortController = useRef<AbortController | null>(null);
+  const processingQueue = useRef(false);
 
   useInput((_input, key) => {
+    // Esc — cancel current generation or clear input
+    if (key.escape) {
+      if (isLoading && abortController.current) {
+        abortController.current.abort();
+        abortController.current = null;
+        messageQueue.current = [];
+        setIsLoading(false);
+        setStreaming('');
+        setActiveTools([]);
+        addSystemMessage('Cancelled.');
+        return;
+      }
+      if (inputValue.length > 0) {
+        setInputValue('');
+        return;
+      }
+      return;
+    }
+
     if (key.ctrl && _input === 'c') {
-      // First Ctrl+C: clear input if there's text
+      // If generating, cancel first
+      if (isLoading && abortController.current) {
+        abortController.current.abort();
+        abortController.current = null;
+        messageQueue.current = [];
+        setIsLoading(false);
+        setStreaming('');
+        setActiveTools([]);
+        addSystemMessage('Cancelled.');
+        return;
+      }
+      // Clear input if there's text
       if (inputValue.length > 0) {
         setInputValue('');
         ctrlCPending.current = false;
         return;
       }
-      // Second Ctrl+C (or first with empty input): exit
+      // Double-tap to exit
       if (ctrlCPending.current) {
         exit();
         process.exit(0);
       }
       ctrlCPending.current = true;
-      // Show hint
-      setMessages((prev) => [
-        ...prev,
-        { role: 'system', content: 'Press Ctrl+C again to exit.', timestamp: new Date() },
-      ]);
-      // Reset after 2 seconds
+      addSystemMessage('Press Ctrl+C again to exit.');
       setTimeout(() => {
         ctrlCPending.current = false;
       }, 2000);
       return;
     }
-    // Any other key resets the Ctrl+C pending state
     ctrlCPending.current = false;
   });
 
@@ -208,6 +235,7 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
         '  /save               Save current session\n' +
         '  /sessions           List saved sessions\n' +
         '  /load <id>          Load a saved session\n' +
+        '  Esc                 Cancel generation / clear input\n' +
         '  Ctrl+C              Clear input / exit'
       );
       return true;
@@ -216,12 +244,7 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
     return false;
   }, [agent, currentThinking, currentProfile, currentSessionId, workspacePath, addSystemMessage]);
 
-  const handleSubmit = useCallback(async (input: string) => {
-    const trimmed = input.trim();
-    if (!trimmed) return;
-
-    if (handleCommand(trimmed)) return;
-
+  const processMessage = useCallback(async (trimmed: string) => {
     setMessages((prev) => [...prev, { role: 'user', content: trimmed, timestamp: new Date() }]);
     setIsLoading(true);
     setIsThinking(false);
@@ -229,21 +252,27 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
     setStreaming('');
     setActiveTools([]);
 
+    const controller = new AbortController();
+    abortController.current = controller;
     const startTime = Date.now();
 
     try {
       const response = await agent.chat(trimmed, {
         onText: (text) => {
+          if (controller.signal.aborted) return;
           setIsThinking(false);
           setStreaming(text);
         },
         onThinking: () => {
+          if (controller.signal.aborted) return;
           setIsThinking(true);
         },
         onToolStart: (name, toolInput, summary) => {
+          if (controller.signal.aborted) return;
           setActiveTools((prev) => [...prev, { name, input: toolInput, summary }]);
         },
         onToolEnd: () => {
+          if (controller.signal.aborted) return;
           setActiveTools([]);
           setStreaming('');
         },
@@ -252,23 +281,57 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
         },
       });
 
-      const elapsed = (Date.now() - startTime) / 1000;
-      setStreaming('');
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: response, timestamp: new Date(), elapsed },
-      ]);
+      if (!controller.signal.aborted) {
+        const elapsed = (Date.now() - startTime) / 1000;
+        setStreaming('');
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: response, timestamp: new Date(), elapsed },
+        ]);
+      }
     } catch (err: unknown) {
-      const e = err as { status?: number; message?: string };
-      let errorMsg = e.message ?? 'Unknown error';
-      if (e.status === 401) errorMsg = 'Authentication failed. Check ANTHROPIC_API_KEY.';
-      if (e.status === 429) errorMsg = 'Rate limited. Wait a moment.';
-      setError(errorMsg);
+      if (!controller.signal.aborted) {
+        const e = err as { status?: number; message?: string };
+        let errorMsg = e.message ?? 'Unknown error';
+        if (e.status === 401) errorMsg = 'Authentication failed. Check ANTHROPIC_API_KEY.';
+        if (e.status === 429) errorMsg = 'Rate limited. Wait a moment.';
+        setError(errorMsg);
+      }
     } finally {
+      abortController.current = null;
       setIsLoading(false);
       setActiveTools([]);
     }
-  }, [agent, handleCommand]);
+  }, [agent]);
+
+  const processQueue = useCallback(async () => {
+    if (processingQueue.current) return;
+    processingQueue.current = true;
+
+    while (messageQueue.current.length > 0) {
+      const next = messageQueue.current.shift();
+      if (next) await processMessage(next);
+    }
+
+    processingQueue.current = false;
+  }, [processMessage]);
+
+  const handleSubmit = useCallback(async (input: string) => {
+    const trimmed = input.trim();
+    if (!trimmed) return;
+
+    if (handleCommand(trimmed)) return;
+
+    if (isLoading) {
+      // Queue the message — show it in chat immediately
+      messageQueue.current.push(trimmed);
+      setMessages((prev) => [...prev, { role: 'user', content: `[queued] ${trimmed}`, timestamp: new Date() }]);
+      return;
+    }
+
+    messageQueue.current.push(trimmed);
+    await processQueue();
+  }, [handleCommand, isLoading, processQueue]);
 
   return (
     <Box flexDirection="column" width="100%">

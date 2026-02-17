@@ -31,7 +31,6 @@ interface InputBarProps {
 
 export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage, model }: InputBarProps): React.JSX.Element {
   const handleSubmit = (input: string): void => {
-    if (isLoading) return;
     onChange('');
     onSubmit(input);
   };
@@ -49,16 +48,12 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
       <Box justifyContent="space-between" width="100%">
         <Box flexGrow={1}>
           <Text color={isLoading ? 'gray' : 'cyan'} bold>{'> '}</Text>
-          {isLoading ? (
-            <Text color="gray" dimColor>waiting for response...</Text>
-          ) : (
-            <TextInput
-              value={value}
-              onChange={onChange}
-              onSubmit={handleSubmit}
-              placeholder="Type a message..."
-            />
-          )}
+          <TextInput
+            value={value}
+            onChange={onChange}
+            onSubmit={handleSubmit}
+            placeholder={isLoading ? 'Type to queue a message...' : 'Type a message...'}
+          />
         </Box>
         <Box flexShrink={0} marginLeft={1}>
           {effortLabel ? (
