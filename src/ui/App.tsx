@@ -17,6 +17,7 @@ export interface Message {
 export interface ToolExecution {
   name: string;
   input: string;
+  summary: string;
 }
 
 interface AppProps {
@@ -127,8 +128,8 @@ export function App({ agent, thinking: initialThinking }: AppProps): React.JSX.E
         onText: (text) => {
           setStreaming(text);
         },
-        onToolStart: (name, toolInput) => {
-          setActiveTools((prev) => [...prev, { name, input: toolInput }]);
+        onToolStart: (name, toolInput, summary) => {
+          setActiveTools((prev) => [...prev, { name, input: toolInput, summary }]);
         },
         onToolEnd: () => {
           setActiveTools([]);

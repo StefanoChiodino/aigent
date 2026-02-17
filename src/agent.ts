@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages/messages.js';
 import { createClient, buildSystemPrompt } from './auth.js';
-import { getToolDefinitions, executeTool } from './tools.js';
+import { getToolDefinitions, executeTool, summarizeToolCall } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 
 const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container. You have access to:
@@ -71,7 +71,7 @@ export interface TokenUsage {
 export interface ChatCallbacks {
   onText?: (fullText: string) => void;
   onThinking?: (fullText: string) => void;
-  onToolStart?: (name: string, input: string) => void;
+  onToolStart?: (name: string, input: string, summary: string) => void;
   onToolEnd?: () => void;
   onUsage?: (usage: TokenUsage) => void;
 }
@@ -197,15 +197,13 @@ export class Agent {
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
       for (const toolUse of toolUseBlocks) {
+        const toolInput = toolUse.input as Parameters<typeof executeTool>[1];
         const inputStr = JSON.stringify(toolUse.input);
         const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '…' : inputStr;
-        callbacks?.onToolStart?.(toolUse.name, truncatedInput);
+        const summary = summarizeToolCall(toolUse.name, toolInput, this.isOAuth);
+        callbacks?.onToolStart?.(toolUse.name, truncatedInput, summary);
 
-        const result = executeTool(
-          toolUse.name,
-          toolUse.input as Parameters<typeof executeTool>[1],
-          this.isOAuth
-        );
+        const result = executeTool(toolUse.name, toolInput, this.isOAuth);
 
         // Truncate very large results
         const maxResultLen = 50_000;

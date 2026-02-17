@@ -57,7 +57,7 @@ export function ChatView({ messages, streaming, isLoading, activeTools }: ChatVi
         <Box flexDirection="column" marginLeft={3}>
           {activeTools.map((tool, i) => (
             <Text key={`tool-${i}-${tool.name}`} color="gray" dimColor>
-              {'>'} {tool.name}: {tool.input.slice(0, 100)}{tool.input.length > 100 ? '...' : ''}
+              {tool.summary}
             </Text>
           ))}
         </Box>

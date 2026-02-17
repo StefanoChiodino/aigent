@@ -64,8 +64,8 @@ export async function startRepl(agent: Agent, model: string): Promise<void> {
     try {
       const startTime = Date.now();
       const response = await agent.chat(trimmed, {
-        onToolStart: (name, toolInput) => {
-          console.log(`  ⚡ ${name}: ${toolInput}`);
+        onToolStart: (_name, _toolInput, summary) => {
+          console.log(`  > ${summary}`);
         },
       });
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

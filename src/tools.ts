@@ -179,6 +179,37 @@ interface GrepInput { pattern: string; path?: string; include?: string }
 
 type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput;
 
+/**
+ * Produce a short human-readable summary of a tool call for display.
+ */
+export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boolean): string {
+  const internalName = isOAuth ? fromClaudeCodeName(name) : name;
+  switch (internalName) {
+    case 'exec': {
+      const { command } = input as ExecInput;
+      const short = command.length > 80 ? command.slice(0, 80) + '...' : command;
+      return `$ ${short}`;
+    }
+    case 'read_file':
+      return `read ${(input as ReadFileInput).path}`;
+    case 'write_file': {
+      const { path, content } = input as WriteFileInput;
+      const lines = content.split('\n').length;
+      return `write ${path} (${lines} lines)`;
+    }
+    case 'edit_file':
+      return `edit ${(input as EditFileInput).path}`;
+    case 'list_files':
+      return `ls ${(input as ListFilesInput).path ?? '.'}`;
+    case 'grep': {
+      const { pattern, path: p } = input as GrepInput;
+      return `grep "${pattern}" ${p ?? '.'}`;
+    }
+    default:
+      return name;
+  }
+}
+
 // --- Tool Execution ---
 
 export function executeTool(name: string, input: ToolInput, isOAuth: boolean): string {
