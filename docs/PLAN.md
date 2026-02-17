@@ -45,21 +45,25 @@ src/
 - [x] Response timing display
 - [x] Committed as v0.2 (925f11e)
 
-## Phase 2.5: UX Polish — TODO
+## Phase 2.5: UX Polish — PARTIAL
 
-- [ ] Streaming output (show text as it arrives, not all at once)
+- [x] Streaming output (ink TUI + streaming API)
+- [x] ink TUI with status bar, chat view, input bar, spinner
+- [x] Fallback REPL for non-TTY environments
+- [x] Dev watch mode (tsx --watch)
 - [ ] Conversation persistence (save/load sessions)
 - [ ] Token usage tracking & display
 - [ ] Better error recovery (retry on transient failures)
 - [ ] Multi-line input support
 
-## Phase 3: Self-Authoring
+## Phase 3: Self-Authoring ✅ DONE
 
-- [ ] Agent can read its own source (`/app/src/`)
-- [ ] Agent can modify, recompile, and restart itself
-- [ ] Hot-reload or restart mechanism after self-edit
-- [ ] Safety: git diff / review before applying self-edits
-- [ ] Bootstrap prompt: agent can set up its own workspace
+- [x] Agent can read its own source (`/app/src/`)
+- [x] System prompt describes full codebase architecture
+- [x] Agent can modify code + tsx --watch auto-restarts
+- [x] Instructions: read → edit → typecheck → git diff → commit
+- [x] Encouragement to self-improve when finding limitations
+- [ ] Bootstrap prompt: agent can set up its own workspace (deferred)
 
 ## Phase 4: Workspace & Memory ✅ DONE
 
@@ -78,12 +82,13 @@ src/
 - [ ] Read-only source mount, writable workspace mount
 - [ ] Health check endpoint
 
-## Phase 6: Streaming & Extended Thinking
+## Phase 6: Streaming & Extended Thinking ✅ DONE
 
-- [ ] Streaming API responses (show tokens as they arrive)
-- [ ] Extended thinking support (Opus 4.6 adaptive thinking)
-- [ ] Display thinking blocks (optional, togglable)
-- [ ] Interleaved thinking
+- [x] Streaming API responses (show tokens as they arrive)
+- [x] Extended thinking support (Opus 4.6 adaptive thinking)
+- [x] Configurable thinking level (off/low/medium/high/max)
+- [ ] Display thinking blocks in TUI (optional, togglable)
+- [ ] Interleaved thinking display
 
 ## Phase 7: Computer Use
 
