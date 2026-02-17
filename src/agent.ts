@@ -90,6 +90,7 @@ export class Agent {
   private toolDefs: ProviderToolDef[];
   private systemPromptText: string;
   private thinking: ThinkingLevel;
+  private workspacePath: string;
   private _totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   readonly providerType: string;
 
@@ -111,8 +112,8 @@ export class Agent {
     }));
 
     // Load workspace context
-    const workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
-    const workspaceContext = loadWorkspaceContext(workspacePath);
+    this.workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
+    const workspaceContext = loadWorkspaceContext(this.workspacePath);
     this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
   }
 
@@ -189,6 +190,7 @@ export class Agent {
       this.provider,
       this.model,
       this.messages,
+      this.workspacePath,
     );
 
     if (summary) {
