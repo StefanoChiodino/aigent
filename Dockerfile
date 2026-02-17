@@ -11,9 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy package files and install deps (including devDependencies for tsx)
+# Copy package files and install deps
 COPY package.json package-lock.json ./
 RUN npm ci
+
+# Install tsx globally so it's always available (not affected by volume mounts)
+RUN npm install -g tsx
 
 # Copy source and build (for non-watch fallback)
 COPY tsconfig.json ./
@@ -25,4 +28,4 @@ RUN mkdir -p /workspace
 WORKDIR /workspace
 
 # Watch mode by default — edits to mounted /app/src/ auto-restart
-ENTRYPOINT ["npx", "tsx", "--watch", "/app/src/index.tsx"]
+ENTRYPOINT ["tsx", "--watch", "/app/src/index.tsx"]
