@@ -1,4 +1,4 @@
-import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderToolDef, type AnthropicProvider } from './provider.js';
+import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderResponse, type ProviderToolDef, type AnthropicProvider } from './provider.js';
 import { getToolDefinitions, executeTool, summarizeToolCall, fromClaudeCodeName } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
@@ -181,6 +181,38 @@ export class Agent {
     }
 
     return '[agent hit maximum tool-use iterations]';
+  }
+
+  private async sendWithRetry(callbacks?: ChatCallbacks): Promise<ProviderResponse> {
+    const maxRetries = 3;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.provider.sendMessage(
+          this.systemPromptText,
+          this.messages,
+          this.toolDefs,
+          { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking },
+          {
+            onText: callbacks?.onText,
+            onThinking: callbacks?.onThinking,
+          },
+        );
+      } catch (err: unknown) {
+        const e = err as { status?: number; message?: string; code?: string };
+        const status = e.status ?? 0;
+        const isTransient = status === 429 || status === 500 || status === 502 || status === 503 || status === 529
+          || e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.code === 'ENOTFOUND';
+
+        if (!isTransient || attempt === maxRetries) throw err;
+
+        // Exponential backoff: 2s, 4s, 8s
+        const delay = 2000 * Math.pow(2, attempt);
+        const reason = status === 429 ? 'rate limited' : status >= 500 ? `server error (${status})` : (e.code ?? 'network error');
+        console.error(`[agent] ${reason}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${maxRetries})...`);
+        await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      }
+    }
+    throw new Error('unreachable');
   }
 
   private async executeSpawnAgent(input: Record<string, unknown>): Promise<string> {
