@@ -9,14 +9,102 @@
  */
 
 import { createServer, type Server, type Socket } from 'node:net';
-import { existsSync, unlinkSync } from 'node:fs';
+import { existsSync, unlinkSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Agent, type ThinkingLevel, type TokenUsage } from './agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
-import type { ProviderMessage } from './provider.js';
+import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType } from './provider.js';
 import type { ClientCommand, ServerEvent, DisplayMessage, ServerState } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
 
 const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
+
+// --- Image support ---
+
+const IMAGE_EXTENSIONS: Record<string, ImageMediaType> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+};
+
+const IMAGE_PATH_REGEX = /(?:^|\s)(\/\S+\.(?:png|jpg|jpeg|gif|webp))\b/gi;
+
+function getImageMediaType(path: string): ImageMediaType | null {
+  const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
+  return IMAGE_EXTENSIONS[ext] ?? null;
+}
+
+function readImageBase64(filePath: string): { data: string; mediaType: ImageMediaType } | null {
+  const resolved = resolve(filePath);
+  const mediaType = getImageMediaType(resolved);
+  if (!mediaType) return null;
+  try {
+    const buffer = readFileSync(resolved);
+    return { data: buffer.toString('base64'), mediaType };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse a user message for image file paths.
+ * Returns UserContent — either a plain string (no images) or a mixed content array.
+ */
+function parseImagesInMessage(text: string): UserContent {
+  const matches: { path: string; start: number; end: number }[] = [];
+  let match: RegExpExecArray | null;
+  IMAGE_PATH_REGEX.lastIndex = 0;
+  while ((match = IMAGE_PATH_REGEX.exec(text)) !== null) {
+    const path = match[1]!;
+    // Verify file exists and is a valid image
+    if (existsSync(path)) {
+      const fullMatchStart = match.index + match[0].indexOf(path);
+      matches.push({ path, start: fullMatchStart, end: fullMatchStart + path.length });
+    }
+  }
+
+  if (matches.length === 0) return text;
+
+  const parts: (TextContent | ImageContent)[] = [];
+  let lastEnd = 0;
+
+  for (const m of matches) {
+    // Add text before this image
+    if (m.start > lastEnd) {
+      const textBefore = text.slice(lastEnd, m.start).trim();
+      if (textBefore) parts.push({ type: 'text', text: textBefore });
+    }
+
+    const img = readImageBase64(m.path);
+    if (img) {
+      parts.push({ type: 'image', mediaType: img.mediaType, data: img.data });
+    } else {
+      // Failed to read — keep as text
+      parts.push({ type: 'text', text: m.path });
+    }
+    lastEnd = m.end;
+  }
+
+  // Add remaining text
+  if (lastEnd < text.length) {
+    const remaining = text.slice(lastEnd).trim();
+    if (remaining) parts.push({ type: 'text', text: remaining });
+  }
+
+  // If no images were actually loaded, return plain string
+  if (parts.every((p) => p.type === 'text')) {
+    return text;
+  }
+
+  // Ensure there's at least one text block (API requirement)
+  if (!parts.some((p) => p.type === 'text')) {
+    parts.push({ type: 'text', text: 'Describe this image.' });
+  }
+
+  return parts;
+}
 
 // --- State ---
 
@@ -205,12 +293,79 @@ function handleCommand(cmd: string): boolean {
     return true;
   }
 
+  if (trimmed.startsWith('/image ')) {
+    const rest = trimmed.slice('/image '.length).trim();
+    if (!rest) {
+      addSystemMessage('Usage: /image <path> [message]\nExample: /image /tmp/screenshot.png What is this?');
+      return true;
+    }
+    // Split into path and optional message
+    const spaceIdx = rest.indexOf(' ');
+    const imgPath = spaceIdx > 0 ? rest.slice(0, spaceIdx) : rest;
+    const imgText = spaceIdx > 0 ? rest.slice(spaceIdx + 1).trim() : 'Describe this image.';
+
+    const img = readImageBase64(imgPath);
+    if (!img) {
+      addSystemMessage(`Cannot read image: ${imgPath}\nSupported formats: PNG, JPG, GIF, WebP`);
+      return true;
+    }
+
+    // Queue as a message with image content
+    const userContent: UserContent = [
+      { type: 'image', mediaType: img.mediaType, data: img.data },
+      { type: 'text', text: imgText },
+    ];
+    const userMsg: DisplayMessage = { role: 'user', content: `[image: ${imgPath}] ${imgText}`, timestamp: new Date().toISOString() };
+    messages.push(userMsg);
+    broadcast({ type: 'message', message: userMsg });
+
+    isLoading = true;
+    broadcast({ type: 'loading', isLoading: true });
+    const controller = new AbortController();
+    abortController = controller;
+    const startTime = Date.now();
+
+    void (async () => {
+      try {
+        const response = await agent.chat(userContent, {
+          onText: (text) => { if (!controller.signal.aborted) broadcast({ type: 'text', content: text }); },
+          onThinking: (text) => { if (!controller.signal.aborted) broadcast({ type: 'thinking', content: text }); },
+          onToolStart: (name, toolInput, summary) => { if (!controller.signal.aborted) broadcast({ type: 'tool_start', name, input: toolInput, summary }); },
+          onToolEnd: () => { if (!controller.signal.aborted) broadcast({ type: 'tool_end' }); },
+          onUsage: (u) => { usage = u; broadcast({ type: 'usage', usage }); },
+          onCompact: (summary) => { addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`); },
+        });
+
+        if (!controller.signal.aborted) {
+          const elapsed = (Date.now() - startTime) / 1000;
+          broadcast({ type: 'text', content: '' });
+          const assistantMsg: DisplayMessage = { role: 'assistant', content: response, timestamp: new Date().toISOString(), elapsed };
+          messages.push(assistantMsg);
+          broadcast({ type: 'message', message: assistantMsg });
+          doAutoSave();
+        }
+      } catch (err: unknown) {
+        if (!controller.signal.aborted) {
+          const e = err as { status?: number; message?: string };
+          broadcast({ type: 'error', message: e.message ?? 'Unknown error' });
+        }
+      } finally {
+        abortController = null;
+        isLoading = false;
+        broadcast({ type: 'loading', isLoading: false });
+      }
+    })();
+
+    return true;
+  }
+
   if (trimmed === '/help') {
     addSystemMessage(
       'Commands:\n' +
       '  /reset              Clear conversation\n' +
       '  /reasoning on|off   Toggle reasoning\n' +
       '  /effort <level>     Set effort (low/medium/high/max)\n' +
+      '  /image <path> [msg] Send an image with optional message\n' +
       '  /profiles           List profiles\n' +
       '  /profile <name>     Switch profile\n' +
       '  /profile create <n> Create new profile\n' +
@@ -248,8 +403,11 @@ async function processMessage(content: string): Promise<void> {
   abortController = controller;
   const startTime = Date.now();
 
+  // Parse for image file paths
+  const userContent = parseImagesInMessage(content);
+
   try {
-    const response = await agent.chat(content, {
+    const response = await agent.chat(userContent, {
       onText: (text) => {
         if (controller.signal.aborted) return;
         broadcast({ type: 'text', content: text });

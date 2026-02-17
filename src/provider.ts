@@ -36,6 +36,22 @@ export interface ToolResult {
   content: string;
 }
 
+export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+
+export interface ImageContent {
+  type: 'image';
+  mediaType: ImageMediaType;
+  data: string; // base64
+}
+
+export interface TextContent {
+  type: 'text';
+  text: string;
+}
+
+/** User message content — plain string or mixed text+images. */
+export type UserContent = string | (TextContent | ImageContent)[];
+
 // --- Provider interface ---
 
 export interface Provider {
@@ -53,7 +69,7 @@ export interface Provider {
 }
 
 export type ProviderMessage =
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: UserContent }
   | { role: 'assistant'; content: string; toolCalls?: ToolCall[] | undefined }
   | { role: 'tool_result'; results: ToolResult[] };
 
@@ -161,7 +177,25 @@ export class AnthropicProvider implements Provider {
     const result: Anthropic.MessageParam[] = [];
     for (const msg of messages) {
       if (msg.role === 'user') {
-        result.push({ role: 'user', content: msg.content });
+        if (typeof msg.content === 'string') {
+          result.push({ role: 'user', content: msg.content });
+        } else {
+          // Mixed content (text + images)
+          const blocks: Anthropic.ContentBlockParam[] = msg.content.map((part) => {
+            if (part.type === 'text') {
+              return { type: 'text' as const, text: part.text };
+            }
+            return {
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                media_type: part.mediaType,
+                data: part.data,
+              },
+            };
+          });
+          result.push({ role: 'user', content: blocks });
+        }
       } else if (msg.role === 'assistant') {
         const content: Anthropic.ContentBlock[] = [];
         if (msg.content) {
@@ -298,7 +332,21 @@ export class OpenAIProvider implements Provider {
 
     for (const msg of messages) {
       if (msg.role === 'user') {
-        result.push({ role: 'user', content: msg.content });
+        if (typeof msg.content === 'string') {
+          result.push({ role: 'user', content: msg.content });
+        } else {
+          // Mixed content (text + images) for OpenAI vision
+          const parts = msg.content.map((part) => {
+            if (part.type === 'text') {
+              return { type: 'text' as const, text: part.text };
+            }
+            return {
+              type: 'image_url' as const,
+              image_url: { url: `data:${part.mediaType};base64,${part.data}` },
+            };
+          });
+          result.push({ role: 'user', content: parts });
+        }
       } else if (msg.role === 'assistant') {
         const entry: ChatCompletionMessageParam = {
           role: 'assistant',

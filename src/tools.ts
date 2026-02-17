@@ -16,29 +16,33 @@ export interface ToolDef {
 /**
  * Claude Code canonical tool names.
  * When using OAT (subscription) auth, we must use these exact names.
+ * Bidirectional mapping between internal names and CC names.
  */
-const CLAUDE_CODE_TOOLS = [
-  'Read', 'Write', 'Edit', 'Bash', 'Grep', 'Glob',
-] as const;
+const INTERNAL_TO_CC: Record<string, string> = {
+  exec: 'Bash',
+  read_file: 'Read',
+  write_file: 'Write',
+  edit_file: 'Edit',
+  grep: 'Grep',
+  glob: 'Glob',
+  // Tools without CC equivalents pass through unchanged
+};
 
-const CC_NAME_MAP = new Map(CLAUDE_CODE_TOOLS.map((t) => [t.toLowerCase(), t]));
+const CC_TO_INTERNAL: Record<string, string> = {
+  bash: 'exec',
+  read: 'read_file',
+  write: 'write_file',
+  edit: 'edit_file',
+  grep: 'grep',
+  glob: 'glob',
+};
 
 export function toClaudeCodeName(name: string): string {
-  return CC_NAME_MAP.get(name.toLowerCase()) ?? name;
+  return INTERNAL_TO_CC[name] ?? name;
 }
 
 export function fromClaudeCodeName(name: string): string {
-  const lower = name.toLowerCase();
-  // Map CC names back to our internal names
-  switch (lower) {
-    case 'bash': return 'exec';
-    case 'read': return 'read_file';
-    case 'write': return 'write_file';
-    case 'edit': return 'edit_file';
-    case 'grep': return 'grep';
-    case 'glob': return 'list_files';
-    default: return name;
-  }
+  return CC_TO_INTERNAL[name.toLowerCase()] ?? name;
 }
 
 // --- Tool Definitions ---
@@ -54,6 +58,10 @@ const execTool: ToolDef = {
         type: 'string',
         description: 'The shell command to execute',
       },
+      cwd: {
+        type: 'string',
+        description: 'Working directory for the command (default: current directory)',
+      },
       timeout: {
         type: 'number',
         description: 'Timeout in milliseconds (default: 30000)',
@@ -65,13 +73,22 @@ const execTool: ToolDef = {
 
 const readFileTool: ToolDef = {
   name: 'read_file',
-  description: 'Read the contents of a file at the given path.',
+  description:
+    'Read the contents of a file at the given path. Supports reading specific line ranges for large files.',
   input_schema: {
     type: 'object' as const,
     properties: {
       path: {
         type: 'string',
         description: 'Absolute or relative path to the file',
+      },
+      offset: {
+        type: 'number',
+        description: 'Starting line number (1-indexed). If omitted, reads from the beginning.',
+      },
+      limit: {
+        type: 'number',
+        description: 'Maximum number of lines to read. If omitted, reads to end of file.',
       },
     },
     required: ['path'],
@@ -156,6 +173,32 @@ const grepTool: ToolDef = {
       include: {
         type: 'string',
         description: 'File glob pattern to include (e.g. "*.ts")',
+      },
+    },
+    required: ['pattern'],
+  },
+};
+
+const globTool: ToolDef = {
+  name: 'glob',
+  description:
+    'Find files matching a glob pattern recursively. Skips node_modules, .git, dist, ' +
+    '__pycache__, .next, build, coverage by default. Use for finding files by name or extension ' +
+    'across a project. More powerful than list_files for searching.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      pattern: {
+        type: 'string',
+        description: 'File name pattern (e.g. "*.ts", "*.test.*", "package.json", "Dockerfile")',
+      },
+      path: {
+        type: 'string',
+        description: 'Root directory to search from (default: current directory)',
+      },
+      max_results: {
+        type: 'number',
+        description: 'Maximum number of results to return (default: 200)',
       },
     },
     required: ['pattern'],
@@ -288,7 +331,7 @@ const patchTool: ToolDef = {
 
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
-  fetchTool, treeTool, patchTool, spawnAgentTool,
+  globTool, fetchTool, treeTool, patchTool, spawnAgentTool,
 ];
 
 /**
@@ -307,18 +350,19 @@ export function getToolDefinitions(useClaudeCodeNames: boolean): ToolDef[] {
 
 // --- Tool Input Types ---
 
-interface ExecInput { command: string; timeout?: number }
-interface ReadFileInput { path: string }
+interface ExecInput { command: string; cwd?: string; timeout?: number }
+interface ReadFileInput { path: string; offset?: number; limit?: number }
 interface WriteFileInput { path: string; content: string }
 interface EditFileInput { path: string; old_text: string; new_text: string }
 interface ListFilesInput { path?: string }
 interface GrepInput { pattern: string; path?: string; include?: string }
 interface FetchInput { url: string; method?: string; headers?: Record<string, string>; body?: string; text_only?: boolean; max_bytes?: number }
 interface TreeInput { path?: string; max_depth?: number; include_hidden?: boolean }
+interface GlobInput { pattern: string; path?: string; max_results?: number }
 interface PatchInput { path: string; edits: Array<{ old_text: string; new_text: string }> }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | FetchInput | TreeInput | PatchInput | SpawnAgentInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | SpawnAgentInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -327,12 +371,15 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
   const internalName = isOAuth ? fromClaudeCodeName(name) : name;
   switch (internalName) {
     case 'exec': {
-      const { command } = input as ExecInput;
+      const { command, cwd } = input as ExecInput;
       const short = command.length > 80 ? command.slice(0, 80) + '...' : command;
-      return `$ ${short}`;
+      return cwd ? `$ ${short} (in ${cwd})` : `$ ${short}`;
     }
-    case 'read_file':
-      return `read ${(input as ReadFileInput).path}`;
+    case 'read_file': {
+      const { path: rPath, offset, limit } = input as ReadFileInput;
+      const range = offset || limit ? ` [${offset ?? 1}:${limit ? `+${limit}` : 'end'}]` : '';
+      return `read ${rPath}${range}`;
+    }
     case 'write_file': {
       const { path, content } = input as WriteFileInput;
       const lines = content.split('\n').length;
@@ -345,6 +392,10 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
     case 'grep': {
       const { pattern, path: p } = input as GrepInput;
       return `grep "${pattern}" ${p ?? '.'}`;
+    }
+    case 'glob': {
+      const { pattern, path: gp } = input as GlobInput;
+      return `glob "${pattern}" ${gp ?? '.'}`;
     }
     case 'fetch': {
       const { url, method } = input as FetchInput;
@@ -372,13 +423,14 @@ export function executeTool(name: string, input: ToolInput, isOAuth: boolean): s
 
   switch (internalName) {
     case 'exec': {
-      const { command, timeout = 30_000 } = input as ExecInput;
+      const { command, cwd, timeout = 30_000 } = input as ExecInput;
       try {
         const output = execSync(command, {
           encoding: 'utf-8',
           timeout,
           maxBuffer: 1024 * 1024 * 5, // 5MB
           stdio: ['pipe', 'pipe', 'pipe'],
+          ...(cwd ? { cwd: resolve(cwd) } : {}),
         });
         return output || '(no output)';
       } catch (err: unknown) {
@@ -394,9 +446,18 @@ export function executeTool(name: string, input: ToolInput, isOAuth: boolean): s
     }
 
     case 'read_file': {
-      const { path } = input as ReadFileInput;
+      const { path, offset, limit } = input as ReadFileInput;
       try {
-        return readFileSync(path, 'utf-8');
+        const content = readFileSync(path, 'utf-8');
+        if (!offset && !limit) return content;
+
+        const lines = content.split('\n');
+        const start = Math.max(0, (offset ?? 1) - 1); // Convert 1-indexed to 0-indexed
+        const end = limit ? start + limit : lines.length;
+        const slice = lines.slice(start, end);
+
+        const header = `[Lines ${start + 1}-${Math.min(start + slice.length, lines.length)} of ${lines.length}]`;
+        return `${header}\n${slice.join('\n')}`;
       } catch (err: unknown) {
         const fsErr = err as { message?: string };
         return `Error reading file: ${fsErr.message ?? 'unknown error'}`;
@@ -587,6 +648,35 @@ export function executeTool(name: string, input: ToolInput, isOAuth: boolean): s
       lines.push(`\n${dirCount} directories, ${fileCount} files`);
 
       return lines.join('\n');
+    }
+
+    case 'glob': {
+      const { pattern, path: rootPath = '.', max_results = 200 } = input as GlobInput;
+      const SKIP_DIRS = ['node_modules', '.git', 'dist', '__pycache__', '.next', 'build', 'coverage', '.cache'];
+      const pruneArgs = SKIP_DIRS.map((d) => `-name ${JSON.stringify(d)} -prune`).join(' -o ');
+
+      try {
+        // Use find with -name for pattern matching, pruning common noise dirs
+        const cmd = `find ${JSON.stringify(resolve(rootPath))} \\( ${pruneArgs} \\) -o -name ${JSON.stringify(pattern)} -print | head -n ${max_results}`;
+        const output = execSync(cmd, {
+          encoding: 'utf-8',
+          timeout: 10_000,
+          maxBuffer: 1024 * 1024,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+
+        const results = output.trim();
+        if (!results) return '(no matches)';
+
+        const lines = results.split('\n');
+        const count = lines.length;
+        const suffix = count >= max_results ? `\n\n(results capped at ${max_results})` : '';
+        return `${count} file(s) found:\n${results}${suffix}`;
+      } catch (err: unknown) {
+        const e = err as { stdout?: string; status?: number; message?: string };
+        if (e.status === 1 && !e.stdout?.trim()) return '(no matches)';
+        return `Error: ${e.message ?? 'unknown error'}`;
+      }
     }
 
     case 'patch': {

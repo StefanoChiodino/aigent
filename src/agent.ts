@@ -1,12 +1,16 @@
-import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderResponse, type ProviderToolDef, type AnthropicProvider } from './provider.js';
+import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderResponse, type ProviderToolDef, type AnthropicProvider, type UserContent } from './provider.js';
 import { getToolDefinitions, executeTool, summarizeToolCall, fromClaudeCodeName } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
 
 const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container. You have access to:
-- A shell (exec tool) to run any command
-- File read/write/edit to inspect and modify files
-- grep and list_files for searching and navigating
+- A shell (exec tool) to run any command, with optional cwd
+- File read/write/edit to inspect and modify files (read_file supports line ranges via offset/limit)
+- grep, glob, and list_files for searching and navigating
+- tree for visualizing directory structure
+- fetch for HTTP requests (with text_only mode for web pages)
+- patch for applying multiple edits to a file at once
+- spawn_agent to delegate tasks to a sub-agent
 - Internet access via curl, wget, etc.
 
 Be direct. Be helpful. Execute commands to verify things rather than guessing.
@@ -23,7 +27,7 @@ Architecture (backend/frontend split):
   /app/src/protocol.ts  — Shared types for client-server communication
   /app/src/auth.ts      — API key / OAT token handling
   /app/src/provider.ts  — Multi-provider abstraction (Anthropic + OpenAI)
-  /app/src/tools.ts     — Tool definitions and execution
+  /app/src/tools.ts     — Tool definitions and execution (11 tools)
   /app/src/workspace.ts — Workspace file loading
   /app/src/supervisor.tsx — Process manager (server + TUI)
   /app/src/index.tsx    — TUI entry point
@@ -117,8 +121,9 @@ export class Agent {
     this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
   }
 
-  async chat(userMessage: string, callbacks?: ChatCallbacks): Promise<string> {
-    this.messages.push({ role: 'user', content: userMessage });
+  async chat(userMessage: string | UserContent, callbacks?: ChatCallbacks): Promise<string> {
+    const content: UserContent = typeof userMessage === 'string' ? userMessage : userMessage;
+    this.messages.push({ role: 'user', content });
 
     let iterations = 0;
     const maxIterations = 25;

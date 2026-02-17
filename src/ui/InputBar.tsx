@@ -13,6 +13,7 @@ const SLASH_COMMANDS = [
   '/effort medium',
   '/effort high',
   '/effort max',
+  '/image ',
   '/profiles',
   '/profile ',
   '/profile create ',
