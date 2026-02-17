@@ -8,4 +8,4 @@ if [ ! -d "/app/node_modules/@anthropic-ai" ]; then
 fi
 
 # Run the supervisor (manages server + TUI as separate processes)
-exec tsx --tsconfig /app/tsconfig.json /app/src/supervisor.ts
+exec tsx --tsconfig /app/tsconfig.json /app/src/supervisor.tsx

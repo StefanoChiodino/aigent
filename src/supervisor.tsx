@@ -1,15 +1,11 @@
 /**
- * Supervisor — manages the agent server and TUI as separate processes.
+ * Supervisor — manages the agent server, then becomes the TUI.
  *
  * Architecture:
- *   supervisor (this) ─┬─ server process (agent backend, Unix socket)
- *                      └─ TUI process (frontend, inherits stdio)
- *
- * On source file changes:
- *   1. Sends SIGTERM to the server (graceful shutdown, auto-saves state)
- *   2. Respawns the server
- *   3. TUI detects disconnect, reconnects automatically
- *   4. Server reloads auto-saved conversation state
+ *   1. Starts the server as a background child process
+ *   2. Watches source files for changes
+ *   3. On change: kills server, respawns it (TUI reconnects automatically)
+ *   4. Runs the TUI in-process (not as a child) so it gets direct TTY access
  *
  * The TUI is never restarted — it survives server restarts seamlessly.
  */
@@ -19,16 +15,14 @@ import { watch, type FSWatcher } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Resolve paths relative to this file's location (works in Docker /app and local dev)
+// Resolve paths relative to this file's location
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_DIR = resolve(__dirname, '..');
 const SRC_DIR = join(APP_DIR, 'src');
 const SERVER_ENTRY = join(SRC_DIR, 'server.ts');
-const TUI_ENTRY = join(SRC_DIR, 'index.tsx');
 const TSCONFIG = join(APP_DIR, 'tsconfig.json');
 
 let serverProcess: ChildProcess | null = null;
-let tuiProcess: ChildProcess | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let serverRestarting = false;
 
@@ -39,7 +33,7 @@ function startServer(): void {
 
   serverProcess = spawn('tsx', ['--tsconfig', TSCONFIG, SERVER_ENTRY], {
     stdio: ['pipe', 'inherit', 'inherit'],
-    cwd: '/workspace',
+    cwd: process.cwd(),
     env: process.env,
   });
 
@@ -71,25 +65,6 @@ function restartServer(): void {
   // The exit handler will respawn
 }
 
-// --- TUI management ---
-
-function startTUI(): void {
-  // Small delay to let server start up
-  setTimeout(() => {
-    tuiProcess = spawn('tsx', ['--tsconfig', TSCONFIG, TUI_ENTRY], {
-      stdio: 'inherit',
-      cwd: '/workspace',
-      env: process.env,
-    });
-
-    tuiProcess.on('exit', (code) => {
-      tuiProcess = null;
-      // TUI exited (user quit) — shut everything down
-      shutdown(code ?? 0);
-    });
-  }, 500);
-}
-
 // --- File watcher ---
 
 function watchSources(): FSWatcher[] {
@@ -119,23 +94,50 @@ function watchSources(): FSWatcher[] {
   return watchers;
 }
 
-// --- Signal handling ---
+// --- Shutdown ---
 
 function shutdown(code: number = 0): void {
   if (serverProcess) {
     serverProcess.kill('SIGTERM');
   }
-  if (tuiProcess) {
-    tuiProcess.kill('SIGTERM');
-  }
   process.exit(code);
 }
 
-process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
 // --- Start ---
 
+// 1. Watch source files
 watchSources();
+
+// 2. Start the server as a background child
 startServer();
-startTUI();
+
+// 3. Give server a moment to start, then run the TUI in-process
+//    (runs in this process so it gets direct TTY access)
+await new Promise<void>((resolve) => setTimeout(resolve, 500));
+
+// Import and run the TUI entry point directly
+const { AgentClient } = await import('./client.js');
+const client = new AgentClient();
+
+const canUseTUI = Boolean(
+  process.stdin.isTTY &&
+  typeof process.stdin.setRawMode === 'function'
+);
+
+if (canUseTUI) {
+  const { render } = await import('ink');
+  const { App } = await import('./ui/App.js');
+
+  const { waitUntilExit } = render(<App client={client} />);
+  client.connect();
+
+  await waitUntilExit();
+  shutdown(0);
+} else {
+  const { startRepl } = await import('./repl.js');
+  // REPL handles its own exit
+  client.connect();
+  startRepl(client);
+}
