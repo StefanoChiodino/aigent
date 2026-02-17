@@ -8,6 +8,6 @@ services:
       - AIGENT_MODEL
       - AIGENT_WORKSPACE=/workspace
     volumes:
-      - .:/app                       # repo mapped in — agent can modify its own code
-      - /app/node_modules            # keep container's own node_modules (don't use host's)
+      - .:/app                       # repo mapped in — edits trigger auto-restart
+      - /app/node_modules            # container's own node_modules
       - ./workspace:/workspace       # persistent workspace (memory, personality, etc.)

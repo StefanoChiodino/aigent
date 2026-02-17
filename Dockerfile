@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy package files and install deps
+# Copy package files and install deps (including devDependencies for tsx)
 COPY package.json package-lock.json ./
-RUN npm ci --production=false
+RUN npm ci
 
-# Copy source and build
+# Copy source and build (for non-watch fallback)
 COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npx tsc
@@ -24,4 +24,5 @@ RUN npx tsc
 RUN mkdir -p /workspace
 WORKDIR /workspace
 
-ENTRYPOINT ["node", "/app/dist/index.js"]
+# Watch mode by default — edits to mounted /app/src/ auto-restart
+ENTRYPOINT ["npx", "tsx", "--watch", "/app/src/index.tsx"]
