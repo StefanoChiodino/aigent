@@ -172,8 +172,9 @@ export function TextInput({
       return;
     }
 
-    // Ctrl+D — delete char under cursor (or forward delete)
+    // Ctrl+D — on empty input, let parent handle (exit). Otherwise forward-delete.
     if (key.ctrl && input === 'd') {
+      if (value.length === 0) return; // pass through to parent
       if (cursorOffset < value.length) {
         onChange(value.slice(0, cursorOffset) + value.slice(cursorOffset + 1));
       }

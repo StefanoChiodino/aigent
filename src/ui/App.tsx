@@ -175,6 +175,13 @@ export function App({ client }: AppProps): React.JSX.Element {
       return;
     }
 
+    // Ctrl+D on empty input — exit (standard EOF behavior)
+    if (key.ctrl && _input === 'd' && inputValue.length === 0) {
+      client.disconnect();
+      exit();
+      process.exit(0);
+    }
+
     if (key.ctrl && _input === 'c') {
       // Double-tap Ctrl+C to exit
       if (ctrlCPending.current) {
