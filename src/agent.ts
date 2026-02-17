@@ -3,6 +3,7 @@ import type { TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources/messag
 import { createClient, buildSystemPrompt } from './auth.js';
 import { getToolDefinitions, executeTool, summarizeToolCall } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
+import { compactConversation } from './compact.js';
 
 const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container. You have access to:
 - A shell (exec tool) to run any command
@@ -74,6 +75,7 @@ export interface ChatCallbacks {
   onToolStart?: (name: string, input: string, summary: string) => void;
   onToolEnd?: () => void;
   onUsage?: (usage: TokenUsage) => void;
+  onCompact?: (summary: string) => void;
 }
 
 export interface AgentInit {
@@ -180,6 +182,21 @@ export class Agent {
       // Add assistant response to history
       this.messages.push({ role: 'assistant', content: response.content });
 
+      // Auto-compact when context gets too large (>70% of window)
+      const contextUsed = usage.input_tokens + usage.output_tokens;
+      const contextWindow = this.getContextWindow();
+      if (contextUsed > contextWindow * 0.7 && this.messages.length > 12) {
+        const { messages: compacted, summary } = await compactConversation(
+          this.client,
+          this.model,
+          this.messages,
+        );
+        this.messages = compacted;
+        if (summary) {
+          callbacks?.onCompact?.(summary);
+        }
+      }
+
       // Find tool use blocks
       const toolUseBlocks = response.content.filter(
         (block): block is ToolUseBlock => block.type === 'tool_use'
@@ -231,6 +248,11 @@ export class Agent {
     return this.model.includes('opus-4-6') || this.model.includes('opus-4.6');
   }
 
+  /** Get context window size for current model */
+  private getContextWindow(): number {
+    return 200_000; // All current Anthropic models
+  }
+
   /** Get/set thinking level */
   get thinkingLevel(): ThinkingLevel {
     return this.thinking;
@@ -243,6 +265,23 @@ export class Agent {
   /** Reset conversation history */
   reset(): void {
     this.messages = [];
+    this._totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  }
+
+  /** Get raw messages (for saving sessions) */
+  getMessages(): Anthropic.MessageParam[] {
+    return [...this.messages];
+  }
+
+  /** Load messages (for restoring sessions) */
+  setMessages(messages: Anthropic.MessageParam[]): void {
+    this.messages = [...messages];
+  }
+
+  /** Reload workspace context (for profile switching) */
+  reloadWorkspace(workspacePath: string): void {
+    const workspaceContext = loadWorkspaceContext(workspacePath);
+    this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
   }
 
   /** Get current conversation length */

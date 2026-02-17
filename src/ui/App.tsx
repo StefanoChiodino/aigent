@@ -4,6 +4,7 @@ import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
 import { StatusBar } from './StatusBar.js';
 import type { Agent, TokenUsage, ThinkingLevel } from '../agent.js';
+import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId } from '../profiles.js';
 
 const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
 
@@ -24,10 +25,12 @@ interface AppProps {
   agent: Agent;
   thinking?: string | undefined;
   model?: string | undefined;
+  workspacePath?: string | undefined;
 }
 
-export function App({ agent, thinking: initialThinking, model }: AppProps): React.JSX.Element {
+export function App({ agent, thinking: initialThinking, model, workspacePath: wp }: AppProps): React.JSX.Element {
   const { exit } = useApp();
+  const workspacePath = wp ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -36,6 +39,8 @@ export function App({ agent, thinking: initialThinking, model }: AppProps): Reac
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const [currentThinking, setCurrentThinking] = useState(initialThinking ?? 'medium');
   const [inputValue, setInputValue] = useState('');
+  const [currentProfile, setCurrentProfile] = useState('default');
+  const [currentSessionId, setCurrentSessionId] = useState(generateSessionId());
   const ctrlCPending = useRef(false);
 
   useInput((_input, key) => {
@@ -96,19 +101,94 @@ export function App({ agent, thinking: initialThinking, model }: AppProps): Reac
       return true;
     }
 
+    // Profile commands
+    if (trimmed === '/profiles' || trimmed === '/profile list') {
+      const profiles = listProfiles(workspacePath);
+      if (profiles.length === 0) {
+        addSystemMessage(`No profiles yet. Current: ${currentProfile}\nCreate one: /profile create <name>`);
+      } else {
+        const list = profiles.map((p) => `  ${p.name === currentProfile ? '>' : ' '} ${p.name}`).join('\n');
+        addSystemMessage(`Profiles:\n${list}`);
+      }
+      return true;
+    }
+
+    if (trimmed.startsWith('/profile create ')) {
+      const name = trimmed.slice('/profile create '.length).trim();
+      if (!name || name.includes('/') || name.includes('..')) {
+        addSystemMessage('Invalid profile name.');
+        return true;
+      }
+      getProfilePath(workspacePath, name);
+      addSystemMessage(`Profile "${name}" created. Switch to it: /profile ${name}`);
+      return true;
+    }
+
+    if (trimmed.startsWith('/profile ') && !trimmed.startsWith('/profile list') && !trimmed.startsWith('/profile create')) {
+      const name = trimmed.slice('/profile '.length).trim();
+      const profileDir = getProfilePath(workspacePath, name);
+      agent.reset();
+      agent.reloadWorkspace(profileDir);
+      setCurrentProfile(name);
+      setCurrentSessionId(generateSessionId());
+      setUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+      addSystemMessage(`Switched to profile: ${name}`);
+      return true;
+    }
+
+    // Session commands
+    if (trimmed === '/save') {
+      saveSession(workspacePath, currentProfile, currentSessionId, agent.getMessages());
+      addSystemMessage(`Session saved: ${currentSessionId}`);
+      return true;
+    }
+
+    if (trimmed === '/sessions') {
+      const sessions = listSessions(workspacePath, currentProfile);
+      if (sessions.length === 0) {
+        addSystemMessage('No saved sessions. Use /save to save current session.');
+      } else {
+        const list = sessions.map((s) =>
+          `  ${s.id === currentSessionId ? '>' : ' '} ${s.id} (${s.messageCount} msgs, ${s.lastActiveAt.slice(0, 10)})`
+        ).join('\n');
+        addSystemMessage(`Sessions (${currentProfile}):\n${list}`);
+      }
+      return true;
+    }
+
+    if (trimmed.startsWith('/load ')) {
+      const sessionId = trimmed.slice('/load '.length).trim();
+      const data = loadSession(workspacePath, currentProfile, sessionId);
+      if (!data) {
+        addSystemMessage(`Session not found: ${sessionId}`);
+        return true;
+      }
+      agent.setMessages(data.messages as Parameters<typeof agent.setMessages>[0]);
+      setCurrentSessionId(sessionId);
+      setUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+      addSystemMessage(`Loaded session: ${sessionId} (${data.messages.length} messages)`);
+      return true;
+    }
+
     if (trimmed === '/help') {
       addSystemMessage(
         'Commands:\n' +
         '  /reset              Clear conversation\n' +
         '  /thinking <level>   Set reasoning (off/low/medium/high/max)\n' +
         '  /reasoning <level>  Same as /thinking\n' +
+        '  /profiles           List profiles\n' +
+        '  /profile <name>     Switch profile\n' +
+        '  /profile create <n> Create new profile\n' +
+        '  /save               Save current session\n' +
+        '  /sessions           List saved sessions\n' +
+        '  /load <id>          Load a saved session\n' +
         '  Ctrl+C              Clear input / exit'
       );
       return true;
     }
 
     return false;
-  }, [agent, currentThinking, addSystemMessage]);
+  }, [agent, currentThinking, currentProfile, currentSessionId, workspacePath, addSystemMessage]);
 
   const handleSubmit = useCallback(async (input: string) => {
     const trimmed = input.trim();

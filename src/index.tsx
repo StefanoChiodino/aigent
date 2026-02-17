@@ -33,7 +33,8 @@ if (canUseTUI) {
   // Dynamic import to avoid loading ink/react when not needed
   const { render } = await import('ink');
   const { App } = await import('./ui/App.js');
-  render(<App agent={agent} thinking={thinking} model={model} />);
+  const workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
+  render(<App agent={agent} thinking={thinking} model={model} workspacePath={workspacePath} />);
 } else {
   // Fallback: simple readline REPL for non-TTY environments
   const { startRepl } = await import('./repl.js');

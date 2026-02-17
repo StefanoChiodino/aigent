@@ -1,21 +1,15 @@
 # TODO
 
-- [x] Implement /thinking and /reasoning commands — done (deb9242)
-- [x] Reasoning text shouldn't be yellow — fixed, all gray now
-- [x] Remove "aigent |" prefix from status bar — removed, bar starts with reasoning:
+- [x] Implement /thinking and /reasoning commands
+- [x] Reasoning text shouldn't be yellow
+- [x] Remove "aigent |" prefix from status bar
+- [x] Ctrl+C: clear input first, double-tap to exit
+- [x] Better tool call display when it makes files
+- [x] Context token usage bar like OpenClaw
+The other thing that I would like to do is to implement uh multiple chats in such a way that you can reuse the same personality and have multiple chats with the same personality, but also you can implement different personalities. And so that is because, for example, if I have a personality that helps me to write a book, I may have different streams with that personality. But if I have a personality that I use to write code, I could have that in parallel as well. I could I just want to have as many shots as possible with however many profiles that optimized or tune for one thing or another and now they have their own memory.
 
-Status bar now shows: `reasoning:medium | in:1.2k out:340 | /help`
+What are we gonna do with compacting uh the context when it goes too long? Does it just come back down to a type of memory or w what happens then? What do we do?
 
-If you're still seeing the old UI, the container might need a restart to pick up changes:
-`docker compose restart`
+I can still see reasoning medium and no thinking indicator, so there's that's something that I need to work on, or my Docker experience is not quite up to date.
 
-- [x] The first time the one presses Ctrl C, if there is already something typed, it should clear up the thing, and it should also make you have to type it twice, instead of just once, just like it would do in Open Claw. I want it to feel like a good CLI like the terminal normally would, you know what I mean?
-
-- [x] We need to make something a little bit more useful usable when it make files. — tool calls now show human-readable summaries (read/write/edit/exec/ls/grep)
-
-Shall we work on the number of tokens used on the context most importantly? I like how OpenCloud has it
-
-Also thinking could be just a letter, you know, and reasoning should be on or off, not reasoning medium. What has that got to do? Reasoning and thinking is a different situation, so it should be reasoning following by on or off. Or you know a check mark or whatever, and then thinking should be L for low, M for medium, etcetera.
-
-I would also like a way to use all the possible rounds as in uh if I want to go out and have it running for five hours on something, can I do that? Is that feasible?
-
+I want a make file to start things I should I need to remember the Docker commands and this kind of things. Start working on a make file and make sure that it's always kept uh kept uh up to date and perfect and spotless.
