@@ -16,9 +16,12 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { watch, type FSWatcher } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const APP_DIR = resolve('/app');
+// Resolve paths relative to this file's location (works in Docker /app and local dev)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const APP_DIR = resolve(__dirname, '..');
 const SRC_DIR = join(APP_DIR, 'src');
 const SERVER_ENTRY = join(SRC_DIR, 'server.ts');
 const TUI_ENTRY = join(SRC_DIR, 'index.tsx');
