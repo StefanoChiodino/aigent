@@ -28,5 +28,5 @@ if [ "$AIGENT_PROVIDER" = "openai" ] || [ "$AIGENT_PROVIDER" = "local" ]; then
   export AIGENT_PROVIDER="openai"
 fi
 
-# Run the agent
-exec tsx --tsconfig /app/tsconfig.json --watch /app/src/index.tsx
+# Run the supervisor (watches for source changes, gracefully restarts the agent)
+exec tsx --tsconfig /app/tsconfig.json /app/src/supervisor.ts
