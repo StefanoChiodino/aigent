@@ -11,7 +11,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { watch, type FSWatcher } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,7 +23,6 @@ const SERVER_ENTRY = join(SRC_DIR, 'server.ts');
 const TSCONFIG = join(APP_DIR, 'tsconfig.json');
 
 let serverProcess: ChildProcess | null = null;
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let serverRestarting = false;
 
 // --- Server management ---
@@ -65,38 +64,71 @@ function restartServer(): void {
   // The exit handler will respawn
 }
 
-// --- File watcher ---
+// --- File watcher (polling — fs.watch doesn't work in Docker bind mounts) ---
 
-function watchSources(): FSWatcher[] {
-  const watchers: FSWatcher[] = [];
+function collectSourceFiles(dir: string): string[] {
+  const files: string[] = [];
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory() && entry.name !== 'node_modules') {
+        files.push(...collectSourceFiles(full));
+      } else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))) {
+        files.push(full);
+      }
+    }
+  } catch {
+    // Directory might not exist
+  }
+  return files;
+}
 
-  function watchDir(dir: string): void {
+function getMtimes(dir: string): Map<string, number> {
+  const mtimes = new Map<string, number>();
+  for (const file of collectSourceFiles(dir)) {
     try {
-      const watcher = watch(dir, { recursive: true }, (_eventType, filename) => {
-        if (!filename) return;
-        if (!filename.endsWith('.ts') && !filename.endsWith('.tsx')) return;
-        if (filename.includes('node_modules')) return;
-
-        // Debounce: wait 500ms after last change
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          console.error(`\n[supervisor] Source changed: ${filename} — restarting server...`);
-          restartServer();
-        }, 500);
-      });
-      watchers.push(watcher);
+      mtimes.set(file, statSync(file).mtimeMs);
     } catch {
-      // Directory might not exist yet
+      // File may have been deleted
     }
   }
+  return mtimes;
+}
 
-  watchDir(SRC_DIR);
-  return watchers;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function watchSources(): void {
+  let known = getMtimes(SRC_DIR);
+
+  pollTimer = setInterval(() => {
+    const current = getMtimes(SRC_DIR);
+
+    // Check for changed or new files
+    for (const [file, mtime] of current) {
+      const prev = known.get(file);
+      if (prev === undefined || prev !== mtime) {
+        const rel = file.replace(SRC_DIR + '/', '');
+        known = current;
+        console.error(`\n[supervisor] Source changed: ${rel} — restarting server...`);
+        restartServer();
+        return;
+      }
+    }
+
+    // Check for deleted files
+    if (current.size !== known.size) {
+      known = current;
+      console.error(`\n[supervisor] Source file removed — restarting server...`);
+      restartServer();
+      return;
+    }
+  }, 1000);
 }
 
 // --- Shutdown ---
 
 function shutdown(code: number = 0): void {
+  if (pollTimer) clearInterval(pollTimer);
   if (serverProcess) {
     serverProcess.kill('SIGTERM');
   }
