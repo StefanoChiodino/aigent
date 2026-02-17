@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
@@ -33,12 +33,36 @@ export function App({ agent, thinking: initialThinking }: AppProps): React.JSX.E
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const [currentThinking, setCurrentThinking] = useState(initialThinking ?? 'medium');
+  const [inputValue, setInputValue] = useState('');
+  const ctrlCPending = useRef(false);
 
   useInput((_input, key) => {
     if (key.ctrl && _input === 'c') {
-      exit();
-      process.exit(0);
+      // First Ctrl+C: clear input if there's text
+      if (inputValue.length > 0) {
+        setInputValue('');
+        ctrlCPending.current = false;
+        return;
+      }
+      // Second Ctrl+C (or first with empty input): exit
+      if (ctrlCPending.current) {
+        exit();
+        process.exit(0);
+      }
+      ctrlCPending.current = true;
+      // Show hint
+      setMessages((prev) => [
+        ...prev,
+        { role: 'system', content: 'Press Ctrl+C again to exit.', timestamp: new Date() },
+      ]);
+      // Reset after 2 seconds
+      setTimeout(() => {
+        ctrlCPending.current = false;
+      }, 2000);
+      return;
     }
+    // Any other key resets the Ctrl+C pending state
+    ctrlCPending.current = false;
   });
 
   const addSystemMessage = useCallback((content: string) => {
@@ -53,7 +77,6 @@ export function App({ agent, thinking: initialThinking }: AppProps): React.JSX.E
       return true;
     }
 
-    // /thinking or /reasoning — same command
     if (trimmed === '/thinking' || trimmed === '/reasoning') {
       addSystemMessage(`Reasoning: ${currentThinking}\nLevels: ${VALID_THINKING_LEVELS.join(', ')}\nUsage: /thinking <level>`);
       return true;
@@ -77,7 +100,7 @@ export function App({ agent, thinking: initialThinking }: AppProps): React.JSX.E
         '  /reset              Clear conversation\n' +
         '  /thinking <level>   Set reasoning (off/low/medium/high/max)\n' +
         '  /reasoning <level>  Same as /thinking\n' +
-        '  Ctrl+C              Exit'
+        '  Ctrl+C              Clear input / exit'
       );
       return true;
     }
@@ -91,7 +114,6 @@ export function App({ agent, thinking: initialThinking }: AppProps): React.JSX.E
 
     if (handleCommand(trimmed)) return;
 
-    // Add user message
     setMessages((prev) => [...prev, { role: 'user', content: trimmed, timestamp: new Date() }]);
     setIsLoading(true);
     setError(null);
@@ -149,7 +171,12 @@ export function App({ agent, thinking: initialThinking }: AppProps): React.JSX.E
           <Text color="red">Error: {error}</Text>
         </Box>
       )}
-      <InputBar onSubmit={handleSubmit} isLoading={isLoading} />
+      <InputBar
+        value={inputValue}
+        onChange={setInputValue}
+        onSubmit={handleSubmit}
+        isLoading={isLoading}
+      />
     </Box>
   );
 }

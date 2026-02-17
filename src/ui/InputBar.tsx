@@ -1,18 +1,17 @@
-import { useState } from 'react';
 import { Box, Text } from 'ink';
 import { TextInput } from './TextInput.js';
 
 interface InputBarProps {
+  value: string;
+  onChange: (value: string) => void;
   onSubmit: (value: string) => void;
   isLoading: boolean;
 }
 
-export function InputBar({ onSubmit, isLoading }: InputBarProps): React.JSX.Element {
-  const [value, setValue] = useState('');
-
+export function InputBar({ value, onChange, onSubmit, isLoading }: InputBarProps): React.JSX.Element {
   const handleSubmit = (input: string): void => {
     if (isLoading) return;
-    setValue('');
+    onChange('');
     onSubmit(input);
   };
 
@@ -24,7 +23,7 @@ export function InputBar({ onSubmit, isLoading }: InputBarProps): React.JSX.Elem
       ) : (
         <TextInput
           value={value}
-          onChange={setValue}
+          onChange={onChange}
           onSubmit={handleSubmit}
           placeholder="Type a message..."
         />
