@@ -194,7 +194,102 @@ const spawnAgentTool: ToolDef = {
   },
 };
 
-const internalTools = [execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool, spawnAgentTool];
+const fetchTool: ToolDef = {
+  name: 'fetch',
+  description:
+    'Fetch a URL and return the response. Supports HTTP/HTTPS. Returns headers and body. ' +
+    'For HTML pages, can optionally extract just the text content (strips tags). ' +
+    'Use for: reading web pages, calling APIs, downloading data.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      url: {
+        type: 'string',
+        description: 'URL to fetch',
+      },
+      method: {
+        type: 'string',
+        description: 'HTTP method (default: GET)',
+      },
+      headers: {
+        type: 'object',
+        description: 'Request headers as key-value pairs',
+      },
+      body: {
+        type: 'string',
+        description: 'Request body (for POST/PUT/PATCH)',
+      },
+      text_only: {
+        type: 'boolean',
+        description: 'Strip HTML tags and return plain text (default: false)',
+      },
+      max_bytes: {
+        type: 'number',
+        description: 'Maximum response size in bytes (default: 100000)',
+      },
+    },
+    required: ['url'],
+  },
+};
+
+const treeTool: ToolDef = {
+  name: 'tree',
+  description:
+    'Show directory structure as a tree. Like the `tree` command but built-in. ' +
+    'Respects .gitignore patterns and skips node_modules/dist/.git by default.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Root directory (default: current directory)',
+      },
+      max_depth: {
+        type: 'number',
+        description: 'Maximum depth to recurse (default: 4)',
+      },
+      include_hidden: {
+        type: 'boolean',
+        description: 'Include hidden files/directories (default: false)',
+      },
+    },
+    required: [],
+  },
+};
+
+const patchTool: ToolDef = {
+  name: 'patch',
+  description:
+    'Apply multiple edits to a file in one operation. More efficient than multiple edit_file calls. ' +
+    'Each edit is a find-replace pair applied in order.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Path to the file to edit',
+      },
+      edits: {
+        type: 'array',
+        description: 'Array of {old_text, new_text} pairs to apply in order',
+        items: {
+          type: 'object',
+          properties: {
+            old_text: { type: 'string', description: 'Exact text to find' },
+            new_text: { type: 'string', description: 'Replacement text' },
+          },
+          required: ['old_text', 'new_text'],
+        },
+      },
+    },
+    required: ['path', 'edits'],
+  },
+};
+
+const internalTools = [
+  execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
+  fetchTool, treeTool, patchTool, spawnAgentTool,
+];
 
 /**
  * Get tool definitions, optionally mapped to Claude Code names for OAT auth.
@@ -218,9 +313,12 @@ interface WriteFileInput { path: string; content: string }
 interface EditFileInput { path: string; old_text: string; new_text: string }
 interface ListFilesInput { path?: string }
 interface GrepInput { pattern: string; path?: string; include?: string }
+interface FetchInput { url: string; method?: string; headers?: Record<string, string>; body?: string; text_only?: boolean; max_bytes?: number }
+interface TreeInput { path?: string; max_depth?: number; include_hidden?: boolean }
+interface PatchInput { path: string; edits: Array<{ old_text: string; new_text: string }> }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | SpawnAgentInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | FetchInput | TreeInput | PatchInput | SpawnAgentInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -248,6 +346,14 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       const { pattern, path: p } = input as GrepInput;
       return `grep "${pattern}" ${p ?? '.'}`;
     }
+    case 'fetch': {
+      const { url, method } = input as FetchInput;
+      return `${(method ?? 'GET').toUpperCase()} ${url.length > 60 ? url.slice(0, 60) + '...' : url}`;
+    }
+    case 'tree':
+      return `tree ${(input as TreeInput).path ?? '.'}`;
+    case 'patch':
+      return `patch ${(input as PatchInput).path} (${(input as PatchInput).edits?.length ?? 0} edits)`;
     case 'spawn_agent': {
       const { task } = input as SpawnAgentInput;
       const short = task.length > 60 ? task.slice(0, 60) + '...' : task;
@@ -370,6 +476,151 @@ export function executeTool(name: string, input: ToolInput, isOAuth: boolean): s
           return '(no matches)';
         }
         return `Error: ${(err as { message?: string }).message ?? 'unknown error'}`;
+      }
+    }
+
+    case 'fetch': {
+      const { url, method = 'GET', headers: reqHeaders, body: reqBody, text_only = false, max_bytes = 100_000 } = input as FetchInput;
+      try {
+        const args: string[] = ['-sS', '-L', '--max-time', '30', '--max-filesize', String(max_bytes)];
+        args.push('-X', method.toUpperCase());
+        args.push('-D', '-'); // dump headers to stdout
+        if (reqHeaders) {
+          for (const [k, v] of Object.entries(reqHeaders)) {
+            args.push('-H', `${k}: ${v}`);
+          }
+        }
+        if (reqBody) {
+          args.push('-d', reqBody);
+        }
+        args.push(url);
+
+        const raw = execSync(`curl ${args.map((a) => JSON.stringify(a)).join(' ')}`, {
+          encoding: 'utf-8',
+          timeout: 35_000,
+          maxBuffer: max_bytes + 10_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+
+        if (text_only) {
+          // Strip HTML tags, decode entities, collapse whitespace
+          const bodyStart = raw.indexOf('\r\n\r\n');
+          const body = bodyStart >= 0 ? raw.slice(bodyStart + 4) : raw;
+          const text = body
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/\s+/g, ' ')
+            .trim();
+          return text || '(empty response)';
+        }
+
+        return raw || '(empty response)';
+      } catch (err: unknown) {
+        const e = err as { stdout?: string; stderr?: string; message?: string };
+        return `Error fetching ${url}: ${e.stderr ?? e.message ?? 'unknown error'}`;
+      }
+    }
+
+    case 'tree': {
+      const { path: rootPath = '.', max_depth = 4, include_hidden = false } = input as TreeInput;
+      const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '__pycache__', '.next', 'build', 'coverage', '.cache']);
+      const lines: string[] = [];
+      let fileCount = 0;
+      let dirCount = 0;
+
+      function walk(dir: string, prefix: string, depth: number): void {
+        if (depth > max_depth) return;
+        let entries: string[];
+        try {
+          entries = readdirSync(resolve(dir)).sort();
+        } catch {
+          return;
+        }
+
+        if (!include_hidden) {
+          entries = entries.filter((e) => !e.startsWith('.'));
+        }
+        entries = entries.filter((e) => !SKIP_DIRS.has(e));
+
+        // Cap entries to avoid huge output
+        const maxEntries = 100;
+        const truncated = entries.length > maxEntries;
+        if (truncated) entries = entries.slice(0, maxEntries);
+
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries[i]!;
+          const isLast = i === entries.length - 1 && !truncated;
+          const connector = isLast ? '\u2514\u2500\u2500 ' : '\u251c\u2500\u2500 ';
+          const childPrefix = isLast ? '    ' : '\u2502   ';
+          const fullPath = resolve(dir, entry);
+
+          try {
+            const stat = statSync(fullPath);
+            if (stat.isDirectory()) {
+              dirCount++;
+              lines.push(`${prefix}${connector}${entry}/`);
+              walk(fullPath, prefix + childPrefix, depth + 1);
+            } else {
+              fileCount++;
+              lines.push(`${prefix}${connector}${entry}`);
+            }
+          } catch {
+            lines.push(`${prefix}${connector}${entry} [error]`);
+          }
+        }
+
+        if (truncated) {
+          lines.push(`${prefix}\u2514\u2500\u2500 ... (${entries.length - maxEntries} more)`);
+        }
+      }
+
+      const resolvedRoot = resolve(rootPath);
+      lines.push(resolvedRoot);
+      walk(resolvedRoot, '', 0);
+      lines.push(`\n${dirCount} directories, ${fileCount} files`);
+
+      return lines.join('\n');
+    }
+
+    case 'patch': {
+      const { path: filePath, edits } = input as PatchInput;
+      if (!edits || edits.length === 0) {
+        return 'Error: no edits provided';
+      }
+      try {
+        let content = readFileSync(filePath, 'utf-8');
+        const applied: string[] = [];
+        const failed: string[] = [];
+
+        for (let i = 0; i < edits.length; i++) {
+          const edit = edits[i]!;
+          const idx = content.indexOf(edit.old_text);
+          if (idx === -1) {
+            failed.push(`Edit ${i + 1}: old_text not found`);
+            continue;
+          }
+          const secondIdx = content.indexOf(edit.old_text, idx + 1);
+          if (secondIdx !== -1) {
+            failed.push(`Edit ${i + 1}: old_text appears multiple times`);
+            continue;
+          }
+          content = content.slice(0, idx) + edit.new_text + content.slice(idx + edit.old_text.length);
+          applied.push(`Edit ${i + 1}: applied`);
+        }
+
+        writeFileSync(filePath, content, 'utf-8');
+        const result = [...applied, ...failed].join('\n');
+        return `Patched ${filePath} (${applied.length}/${edits.length} edits applied)\n${result}`;
+      } catch (err: unknown) {
+        const fsErr = err as { message?: string };
+        return `Error patching file: ${fsErr.message ?? 'unknown error'}`;
       }
     }
 
