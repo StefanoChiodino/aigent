@@ -42,19 +42,20 @@ export function StatusBar({ thinking, usage, model }: StatusBarProps): React.JSX
   const contextWindow = getContextWindow(model ?? '');
   const pct = contextUsed > 0 ? Math.round((contextUsed / contextWindow) * 100) : 0;
 
-  const thinkingLabel = thinking && thinking !== 'off'
+  const effortLabel = thinking && thinking !== 'off'
     ? ({ low: 'L', medium: 'M', high: 'H', max: 'X' } as Record<string, string>)[thinking] ?? thinking
     : null;
 
   return (
     <Box borderStyle="single" borderColor="gray" paddingX={1} justifyContent="space-between">
       <Text>
-        {thinkingLabel && (
-          <Text color="gray">reasoning:<Text color="white">{thinkingLabel}</Text></Text>
+        <Text color="gray">reasoning:<Text color="white">{effortLabel ? 'on' : 'off'}</Text></Text>
+        {effortLabel && (
+          <Text color="gray"> effort:<Text color="white">{effortLabel}</Text></Text>
         )}
         {contextUsed > 0 && (
           <Text color="gray">
-            {thinkingLabel ? ' | ' : ''}
+            {' | '}
             <Text color={pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green'}>{contextBar(contextUsed, contextWindow, 12)}</Text>
             {' '}
             <Text color="white">{formatTokens(contextUsed)}</Text>
