@@ -29,6 +29,18 @@ export interface AgentOptions {
   workspacePath?: string;
 }
 
+export interface ChatCallbacks {
+  onText?: (fullText: string) => void;
+  onToolStart?: (name: string, input: string) => void;
+  onToolEnd?: () => void;
+}
+
+export interface AgentInit {
+  isOAuth: boolean;
+  workspaceFileCount: number;
+  workspacePath: string;
+}
+
 export class Agent {
   private client: Anthropic;
   private messages: Anthropic.MessageParam[] = [];
@@ -57,35 +69,52 @@ export class Agent {
     const workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
     const workspaceContext = loadWorkspaceContext(workspacePath);
     this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
-
-    if (workspaceContext) {
-      const fileCount = (workspaceContext.match(/^## /gm) ?? []).length;
-      console.log(`  (loaded ${fileCount} workspace files from ${workspacePath})`);
-    }
-
-    if (isOAuth) {
-      console.log('  (using subscription auth — Claude Code compatible mode)');
-    }
   }
 
-  async chat(userMessage: string): Promise<string> {
+  /** Get initialization info for display */
+  getInitInfo(): AgentInit {
+    const workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
+    const workspaceContext = loadWorkspaceContext(workspacePath);
+    const fileCount = workspaceContext ? (workspaceContext.match(/^## /gm) ?? []).length : 0;
+    return {
+      isOAuth: this.isOAuth,
+      workspaceFileCount: fileCount,
+      workspacePath,
+    };
+  }
+
+  /**
+   * Send a message and get a response.
+   * Supports streaming callbacks for real-time UI updates.
+   */
+  async chat(userMessage: string, callbacks?: ChatCallbacks): Promise<string> {
     this.messages.push({ role: 'user', content: userMessage });
 
     let iterations = 0;
-    const maxIterations = 25; // Safety limit
+    const maxIterations = 25;
 
     while (iterations < maxIterations) {
       iterations++;
 
       const systemPrompt = buildSystemPrompt(this.systemPromptText, this.isOAuth);
 
-      const response = await this.client.messages.create({
+      // Use streaming API
+      const stream = this.client.messages.stream({
         model: this.model,
         max_tokens: this.maxTokens,
         system: systemPrompt,
         tools: this.tools,
         messages: this.messages,
       });
+
+      // Accumulate streaming text for real-time display
+      let currentText = '';
+      stream.on('text', (text) => {
+        currentText += text;
+        callbacks?.onText?.(currentText);
+      });
+
+      const response = await stream.finalMessage();
 
       // Add assistant response to history
       this.messages.push({ role: 'assistant', content: response.content });
@@ -107,10 +136,9 @@ export class Agent {
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
       for (const toolUse of toolUseBlocks) {
-        const displayName = toolUse.name;
         const inputStr = JSON.stringify(toolUse.input);
-        const truncated = inputStr.length > 120 ? inputStr.slice(0, 120) + '...' : inputStr;
-        console.log(`  ⚡ ${displayName}: ${truncated}`);
+        const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '…' : inputStr;
+        callbacks?.onToolStart?.(toolUse.name, truncatedInput);
 
         const result = executeTool(
           toolUse.name,
@@ -118,7 +146,7 @@ export class Agent {
           this.isOAuth
         );
 
-        // Truncate very large results to avoid context bloat
+        // Truncate very large results
         const maxResultLen = 50_000;
         const truncatedResult =
           result.length > maxResultLen
@@ -132,6 +160,7 @@ export class Agent {
         });
       }
 
+      callbacks?.onToolEnd?.();
       this.messages.push({ role: 'user', content: toolResults });
     }
 
