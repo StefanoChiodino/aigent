@@ -33,7 +33,7 @@ src/
 - [x] dotenv for .env loading
 - [x] Git repo with 3 commits on `main`
 
-## Phase 2: Robustness & UX — IN PROGRESS
+## Phase 2: Robustness & UX ✅ DONE
 
 - [x] edit_file tool (surgical find-replace)
 - [x] list_files tool
@@ -43,12 +43,15 @@ src/
 - [x] Iteration safety limit (25 tool calls per turn)
 - [x] Result truncation (50KB cap)
 - [x] Response timing display
+- [x] Committed as v0.2 (925f11e)
+
+## Phase 2.5: UX Polish — TODO
+
 - [ ] Streaming output (show text as it arrives, not all at once)
 - [ ] Conversation persistence (save/load sessions)
 - [ ] Token usage tracking & display
 - [ ] Better error recovery (retry on transient failures)
 - [ ] Multi-line input support
-- [ ] Commit all Phase 2 work
 
 ## Phase 3: Self-Authoring
 
@@ -58,12 +61,14 @@ src/
 - [ ] Safety: git diff / review before applying self-edits
 - [ ] Bootstrap prompt: agent can set up its own workspace
 
-## Phase 4: Workspace & Memory
+## Phase 4: Workspace & Memory ✅ DONE
 
-- [ ] Workspace files (SOUL.md, MEMORY.md, etc.) — similar to OpenClaw
-- [ ] System prompt loaded from workspace config
+- [x] Workspace files (SOUL.md, MEMORY.md, etc.) — similar to OpenClaw
+- [x] System prompt loaded from workspace config
+- [x] Daily memory files (memory/YYYY-MM-DD.md)
+- [x] Default templates in workspace/
+- [x] Design doc: docs/workspace-design.md
 - [ ] Session memory (conversation summaries across restarts)
-- [ ] Daily memory files (like OpenClaw's memory/ dir)
 
 ## Phase 5: Docker Hardening
 
