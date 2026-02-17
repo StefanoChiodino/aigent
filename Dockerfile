@@ -28,4 +28,4 @@ RUN mkdir -p /workspace
 WORKDIR /workspace
 
 # Watch mode by default — edits to mounted /app/src/ auto-restart
-ENTRYPOINT ["tsx", "--watch", "/app/src/index.tsx"]
+ENTRYPOINT ["tsx", "--watch", "--tsconfig", "/app/tsconfig.json", "/app/src/index.tsx"]
