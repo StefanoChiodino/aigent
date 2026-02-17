@@ -3,7 +3,7 @@ import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
 import { StatusBar } from './StatusBar.js';
-import type { Agent } from '../agent.js';
+import type { Agent, TokenUsage } from '../agent.js';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -19,17 +19,17 @@ export interface ToolExecution {
 
 interface AppProps {
   agent: Agent;
-  model: string;
-  thinking?: string;
+  thinking?: string | undefined;
 }
 
-export function App({ agent, model, thinking }: AppProps): React.JSX.Element {
+export function App({ agent, thinking }: AppProps): React.JSX.Element {
   const { exit } = useApp();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streaming, setStreaming] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [activeTools, setActiveTools] = useState<ToolExecution[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 
   useInput((_input, key) => {
     if (key.ctrl && _input === 'c') {
@@ -45,7 +45,7 @@ export function App({ agent, model, thinking }: AppProps): React.JSX.Element {
     // Handle commands
     if (trimmed === '/reset') {
       agent.reset();
-      setMessages([{ role: 'system', content: '🔄 Conversation reset.', timestamp: new Date() }]);
+      setMessages([{ role: 'system', content: 'Conversation reset.', timestamp: new Date() }]);
       return;
     }
 
@@ -54,19 +54,7 @@ export function App({ agent, model, thinking }: AppProps): React.JSX.Element {
         ...prev,
         {
           role: 'system',
-          content: '/reset — Clear history\n/status — Show info\n/help — This message\nCtrl+C — Exit',
-          timestamp: new Date(),
-        },
-      ]);
-      return;
-    }
-
-    if (trimmed === '/status') {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'system',
-          content: `Model: ${model}\nMessages: ${agent.conversationLength}`,
+          content: '/reset — Clear history\n/help — This message\nCtrl+C — Exit',
           timestamp: new Date(),
         },
       ]);
@@ -94,6 +82,9 @@ export function App({ agent, model, thinking }: AppProps): React.JSX.Element {
           setActiveTools([]);
           setStreaming('');
         },
+        onUsage: (u) => {
+          setUsage(u);
+        },
       });
 
       const elapsed = (Date.now() - startTime) / 1000;
@@ -112,11 +103,11 @@ export function App({ agent, model, thinking }: AppProps): React.JSX.Element {
       setIsLoading(false);
       setActiveTools([]);
     }
-  }, [agent, model, exit]);
+  }, [agent, exit]);
 
   return (
     <Box flexDirection="column" width="100%">
-      <StatusBar model={model} messageCount={agent.conversationLength} thinking={thinking} />
+      <StatusBar thinking={thinking} usage={usage} />
       <ChatView
         messages={messages}
         streaming={streaming}
@@ -125,7 +116,7 @@ export function App({ agent, model, thinking }: AppProps): React.JSX.Element {
       />
       {error && (
         <Box marginLeft={1}>
-          <Text color="red">❌ {error}</Text>
+          <Text color="red">Error: {error}</Text>
         </Box>
       )}
       <InputBar onSubmit={handleSubmit} isLoading={isLoading} />

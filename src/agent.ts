@@ -61,11 +61,19 @@ export interface AgentOptions {
   thinking?: ThinkingLevel;
 }
 
+export interface TokenUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
 export interface ChatCallbacks {
   onText?: (fullText: string) => void;
   onThinking?: (fullText: string) => void;
   onToolStart?: (name: string, input: string) => void;
   onToolEnd?: () => void;
+  onUsage?: (usage: TokenUsage) => void;
 }
 
 export interface AgentInit {
@@ -83,6 +91,7 @@ export class Agent {
   private tools: Anthropic.Tool[];
   private systemPromptText: string;
   private thinking: ThinkingLevel;
+  private _totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 
   constructor(options: AgentOptions = {}) {
     const apiKey = options.apiKey ?? process.env['ANTHROPIC_API_KEY'] ?? '';
@@ -160,6 +169,14 @@ export class Agent {
 
       const response = await stream.finalMessage();
 
+      // Track token usage
+      const usage = response.usage;
+      this._totalUsage.input += usage.input_tokens;
+      this._totalUsage.output += usage.output_tokens;
+      this._totalUsage.cacheRead += (usage as unknown as Record<string, number>)['cache_read_input_tokens'] ?? 0;
+      this._totalUsage.cacheWrite += (usage as unknown as Record<string, number>)['cache_creation_input_tokens'] ?? 0;
+      callbacks?.onUsage?.({ ...this._totalUsage });
+
       // Add assistant response to history
       this.messages.push({ role: 'assistant', content: response.content });
 
@@ -224,5 +241,10 @@ export class Agent {
   /** Get current conversation length */
   get conversationLength(): number {
     return this.messages.length;
+  }
+
+  /** Get cumulative token usage for this session */
+  get totalUsage(): TokenUsage {
+    return { ...this._totalUsage };
   }
 }

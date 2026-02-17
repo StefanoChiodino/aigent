@@ -15,7 +15,7 @@ function MessageBubble({ message }: { message: Message }): React.JSX.Element {
       <Box marginY={0} marginLeft={1}>
         <Text>
           <Text color="blue" bold>you</Text>
-          <Text color="gray"> › </Text>
+          <Text color="gray"> {'>'} </Text>
           <Text>{message.content}</Text>
         </Text>
       </Box>
@@ -25,7 +25,7 @@ function MessageBubble({ message }: { message: Message }): React.JSX.Element {
   if (message.role === 'system') {
     return (
       <Box marginY={0} marginLeft={1}>
-        <Text color="yellow">{message.content}</Text>
+        <Text color="yellow" dimColor>{message.content}</Text>
       </Box>
     );
   }
@@ -34,12 +34,12 @@ function MessageBubble({ message }: { message: Message }): React.JSX.Element {
   return (
     <Box flexDirection="column" marginY={0} marginLeft={1}>
       <Text>
-        <Text color="magenta" bold>🌸</Text>
-        <Text color="gray"> › </Text>
+        <Text color="magenta" bold>agent</Text>
+        <Text color="gray"> {'>'} </Text>
         <Text>{message.content}</Text>
       </Text>
       {message.elapsed !== undefined && (
-        <Text color="gray" dimColor>   ({message.elapsed.toFixed(1)}s)</Text>
+        <Text color="gray" dimColor>      ({message.elapsed.toFixed(1)}s)</Text>
       )}
     </Box>
   );
@@ -57,7 +57,7 @@ export function ChatView({ messages, streaming, isLoading, activeTools }: ChatVi
         <Box flexDirection="column" marginLeft={3}>
           {activeTools.map((tool, i) => (
             <Text key={`tool-${i}-${tool.name}`} color="gray" dimColor>
-              <Text color="yellow">⚡</Text> {tool.name}: {tool.input.slice(0, 100)}{tool.input.length > 100 ? '…' : ''}
+              {'>'} {tool.name}: {tool.input.slice(0, 100)}{tool.input.length > 100 ? '...' : ''}
             </Text>
           ))}
         </Box>
@@ -67,10 +67,10 @@ export function ChatView({ messages, streaming, isLoading, activeTools }: ChatVi
       {streaming && (
         <Box marginLeft={1}>
           <Text>
-            <Text color="magenta" bold>🌸</Text>
-            <Text color="gray"> › </Text>
+            <Text color="magenta" bold>agent</Text>
+            <Text color="gray"> {'>'} </Text>
             <Text>{streaming}</Text>
-            <Text color="gray">▊</Text>
+            <Text color="gray">_</Text>
           </Text>
         </Box>
       )}
@@ -81,7 +81,7 @@ export function ChatView({ messages, streaming, isLoading, activeTools }: ChatVi
           <Text color="magenta">
             <Spinner type="dots" />
           </Text>
-          <Text color="gray"> thinking…</Text>
+          <Text color="gray"> thinking...</Text>
         </Box>
       )}
     </Box>

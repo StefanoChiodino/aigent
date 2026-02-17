@@ -21,9 +21,9 @@ export async function startRepl(agent: Agent, model: string): Promise<void> {
     output: process.stdout,
   });
 
-  console.log(`🌸 aigent v0 — model: ${model}`);
-  console.log('  (fallback mode — no TUI support detected)');
-  console.log('Type your message. /reset to clear history. Ctrl+C to exit.\n');
+  console.log(`aigent — model: ${model}`);
+  console.log('  (fallback mode — no TUI support)');
+  console.log('Type your message. /reset to clear. Ctrl+C to exit.\n');
 
   const shutdown = (): void => {
     console.log('\n👋 Goodbye.');
@@ -47,7 +47,7 @@ export async function startRepl(agent: Agent, model: string): Promise<void> {
 
     if (trimmed === '/reset') {
       agent.reset();
-      console.log('🔄 Conversation reset.\n');
+      console.log('Conversation reset.\n');
       continue;
     }
 
@@ -69,7 +69,7 @@ export async function startRepl(agent: Agent, model: string): Promise<void> {
         },
       });
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`\n🌸 ${response}`);
+      console.log(`\nagent > ${response}`);
       console.log(`  (${elapsed}s)\n`);
     } catch (err: unknown) {
       const error = err as { status?: number; message?: string };
