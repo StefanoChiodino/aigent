@@ -33,6 +33,7 @@ export class AgentClient extends EventEmitter {
   private reconnectAttempt = 0;
   private shouldReconnect = true;
   private _connected = false;
+  private pendingCommands: ClientCommand[] = [];
 
   get connected(): boolean {
     return this._connected;
@@ -108,6 +109,7 @@ export class AgentClient extends EventEmitter {
     switch (event.type) {
       case 'connected':
         this.emit('connected', event.state);
+        this.flushPending();
         break;
       case 'text':
         this.emit('text', event.content);
@@ -145,11 +147,26 @@ export class AgentClient extends EventEmitter {
   }
 
   send(command: ClientCommand): void {
-    if (!this.socket || !this._connected) return;
+    if (!this.socket || !this._connected) {
+      this.pendingCommands.push(command);
+      return;
+    }
     try {
       this.socket.write(JSON.stringify(command) + '\n');
     } catch {
-      // Socket gone
+      this.pendingCommands.push(command);
+    }
+  }
+
+  private flushPending(): void {
+    while (this.pendingCommands.length > 0 && this._connected && this.socket) {
+      const cmd = this.pendingCommands.shift()!;
+      try {
+        this.socket.write(JSON.stringify(cmd) + '\n');
+      } catch {
+        this.pendingCommands.unshift(cmd);
+        break;
+      }
     }
   }
 
