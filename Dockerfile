@@ -1,5 +1,9 @@
 FROM node:22-slim
 
+# Create non-root user for the agent
+RUN groupadd --gid 1000 aigent && \
+    useradd --uid 1000 --gid aigent --shell /bin/bash --create-home aigent
+
 WORKDIR /app
 
 # Install common tools the agent might need
@@ -12,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy package files and install deps
+# Copy package files and install deps (as root, before switching user)
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -22,11 +26,19 @@ RUN npm install -g tsx
 # Copy tsconfig (needed by tsx at runtime)
 COPY tsconfig.json ./
 
-# Default working directory for the agent's workspace
-RUN mkdir -p /workspace
-WORKDIR /workspace
+# Create workspace directory and give agent ownership
+RUN mkdir -p /workspace && chown aigent:aigent /workspace
 
-# Entrypoint ensures deps are installed, then starts supervisor
+# Give agent ownership of the app directory (for node_modules anonymous volume)
+RUN chown -R aigent:aigent /app
+
+# Copy entrypoint
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
+
+# Switch to non-root user
+USER aigent
+
+WORKDIR /workspace
+
 ENTRYPOINT ["/app/entrypoint.sh"]

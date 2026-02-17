@@ -5,10 +5,40 @@ services:
     tty: true
     environment:
       - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
       - AIGENT_MODEL
       - AIGENT_THINKING
+      - AIGENT_PROVIDER
+      - AIGENT_BASE_URL
       - AIGENT_WORKSPACE=/workspace
     volumes:
-      - .:/app                       # repo mapped in — supervisor handles graceful restart
-      - /app/node_modules            # container's own node_modules
-      - ./workspace:/workspace       # persistent workspace (memory, personality, etc.)
+      - .:/app:ro                    # repo mounted read-only by default
+      - /app/node_modules            # container's own node_modules (anonymous volume)
+      - ./workspace:/workspace       # persistent workspace (read-write)
+      - ./src:/app/src               # source: read-write (agent can self-modify)
+      - ./.git:/app/.git             # git: read-write (agent can commit)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    # Drop all capabilities, add back only what's needed
+    cap_drop:
+      - ALL
+    # No privilege escalation
+    security_opt:
+      - no-new-privileges:true
+    # Limit open files and processes
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+      nproc:
+        soft: 256
+        hard: 512
+    # Tmpfs for /tmp (fast, size-limited, not persisted)
+    tmpfs:
+      - /tmp:size=100M
