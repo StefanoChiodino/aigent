@@ -1,0 +1,357 @@
+import type Anthropic from '@anthropic-ai/sdk';
+import type { TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages/messages.js';
+import OpenAI from 'openai';
+import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions.js';
+import { createClient, buildSystemPrompt } from './auth.js';
+import type { ThinkingLevel, TokenUsage } from './agent.js';
+
+// --- Unified types ---
+
+export interface StreamCallbacks {
+  onText?: ((fullText: string) => void) | undefined;
+  onThinking?: ((fullText: string) => void) | undefined;
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface ProviderResponse {
+  text: string;
+  toolCalls: ToolCall[];
+  stopReason: 'end_turn' | 'tool_use' | 'max_tokens';
+  usage: TokenUsage;
+}
+
+export interface ProviderToolDef {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+}
+
+export interface ToolResult {
+  id: string;
+  content: string;
+}
+
+// --- Provider interface ---
+
+export interface Provider {
+  sendMessage(
+    systemPrompt: string,
+    messages: ProviderMessage[],
+    tools: ProviderToolDef[],
+    options: {
+      model: string;
+      maxTokens: number;
+      thinking: ThinkingLevel;
+    },
+    callbacks?: StreamCallbacks,
+  ): Promise<ProviderResponse>;
+}
+
+export type ProviderMessage =
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCall[] | undefined }
+  | { role: 'tool_result'; results: ToolResult[] };
+
+// --- Anthropic provider ---
+
+export class AnthropicProvider implements Provider {
+  private client: Anthropic;
+  private isOAuth: boolean;
+
+  constructor(apiKey: string) {
+    const { client, isOAuth } = createClient(apiKey);
+    this.client = client;
+    this.isOAuth = isOAuth;
+  }
+
+  get isOAuthToken(): boolean {
+    return this.isOAuth;
+  }
+
+  async sendMessage(
+    systemPrompt: string,
+    messages: ProviderMessage[],
+    tools: ProviderToolDef[],
+    options: { model: string; maxTokens: number; thinking: ThinkingLevel },
+    callbacks?: StreamCallbacks,
+  ): Promise<ProviderResponse> {
+    const anthropicMessages = this.convertMessages(messages);
+    const anthropicTools = tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.input_schema,
+    })) as Anthropic.Tool[];
+
+    const system = buildSystemPrompt(systemPrompt, this.isOAuth);
+
+    const params: Record<string, unknown> = {
+      model: options.model,
+      max_tokens: options.maxTokens,
+      system,
+      tools: anthropicTools,
+      messages: anthropicMessages,
+    };
+
+    // Adaptive thinking for Opus 4.6+
+    if (options.thinking !== 'off' && (options.model.includes('opus-4-6') || options.model.includes('opus-4.6'))) {
+      params['thinking'] = { type: 'adaptive' };
+      params['output_config'] = { effort: options.thinking };
+    }
+
+    const stream = this.client.messages.stream(
+      params as Parameters<typeof this.client.messages.stream>[0],
+    );
+
+    let currentText = '';
+    let thinkingText = '';
+    stream.on('text', (text) => {
+      currentText += text;
+      callbacks?.onText?.(currentText);
+    });
+    (stream as unknown as { on(e: string, cb: (d: unknown) => void): void }).on('contentBlock', (block: unknown) => {
+      const b = block as { type: string; thinking?: string };
+      if (b.type === 'thinking' && b.thinking) {
+        thinkingText += b.thinking;
+        callbacks?.onThinking?.(thinkingText);
+      }
+    });
+
+    const response = await stream.finalMessage();
+
+    const usage = response.usage;
+    const rawUsage = usage as unknown as Record<string, number>;
+
+    const textBlocks = response.content.filter(
+      (block): block is TextBlock => block.type === 'text',
+    );
+    const toolUseBlocks = response.content.filter(
+      (block): block is ToolUseBlock => block.type === 'tool_use',
+    );
+
+    const stopReason: ProviderResponse['stopReason'] =
+      toolUseBlocks.length > 0 && response.stop_reason !== 'end_turn'
+        ? 'tool_use'
+        : response.stop_reason === 'max_tokens'
+          ? 'max_tokens'
+          : 'end_turn';
+
+    return {
+      text: textBlocks.map((b) => b.text).join('\n'),
+      toolCalls: toolUseBlocks.map((b) => ({
+        id: b.id,
+        name: b.name,
+        input: b.input as Record<string, unknown>,
+      })),
+      stopReason,
+      usage: {
+        input: usage.input_tokens,
+        output: usage.output_tokens,
+        cacheRead: rawUsage['cache_read_input_tokens'] ?? 0,
+        cacheWrite: rawUsage['cache_creation_input_tokens'] ?? 0,
+      },
+    };
+  }
+
+  private convertMessages(messages: ProviderMessage[]): Anthropic.MessageParam[] {
+    const result: Anthropic.MessageParam[] = [];
+    for (const msg of messages) {
+      if (msg.role === 'user') {
+        result.push({ role: 'user', content: msg.content });
+      } else if (msg.role === 'assistant') {
+        const content: Anthropic.ContentBlock[] = [];
+        if (msg.content) {
+          content.push({ type: 'text', text: msg.content } as Anthropic.TextBlock);
+        }
+        if (msg.toolCalls) {
+          for (const tc of msg.toolCalls) {
+            content.push({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.name,
+              input: tc.input,
+            } as Anthropic.ToolUseBlock);
+          }
+        }
+        result.push({ role: 'assistant', content });
+      } else if (msg.role === 'tool_result') {
+        result.push({
+          role: 'user',
+          content: msg.results.map((r) => ({
+            type: 'tool_result' as const,
+            tool_use_id: r.id,
+            content: r.content,
+          })),
+        });
+      }
+    }
+    return result;
+  }
+}
+
+// --- OpenAI-compatible provider ---
+
+export class OpenAIProvider implements Provider {
+  private client: OpenAI;
+
+  constructor(apiKey: string, baseURL?: string) {
+    this.client = new OpenAI({
+      apiKey: apiKey || 'not-needed',
+      baseURL: baseURL ?? undefined,
+    });
+  }
+
+  async sendMessage(
+    systemPrompt: string,
+    messages: ProviderMessage[],
+    tools: ProviderToolDef[],
+    options: { model: string; maxTokens: number; thinking: ThinkingLevel },
+    callbacks?: StreamCallbacks,
+  ): Promise<ProviderResponse> {
+    const openaiMessages = this.convertMessages(systemPrompt, messages);
+    const openaiTools: ChatCompletionTool[] = tools.map((t) => ({
+      type: 'function' as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.input_schema,
+      },
+    }));
+
+    const stream = await this.client.chat.completions.create({
+      model: options.model,
+      max_tokens: options.maxTokens,
+      messages: openaiMessages,
+      ...(openaiTools.length > 0 ? { tools: openaiTools } : {}),
+      stream: true,
+    });
+
+    let currentText = '';
+    const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map();
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+      if (!delta) continue;
+
+      if (delta.content) {
+        currentText += delta.content;
+        callbacks?.onText?.(currentText);
+      }
+
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const existing = toolCallAccum.get(tc.index);
+          if (existing) {
+            existing.args += tc.function?.arguments ?? '';
+          } else {
+            toolCallAccum.set(tc.index, {
+              id: tc.id ?? `call_${tc.index}`,
+              name: tc.function?.name ?? '',
+              args: tc.function?.arguments ?? '',
+            });
+          }
+        }
+      }
+
+      if (chunk.usage) {
+        inputTokens = chunk.usage.prompt_tokens;
+        outputTokens = chunk.usage.completion_tokens;
+      }
+    }
+
+    const toolCalls: ToolCall[] = [];
+    for (const [, tc] of toolCallAccum) {
+      try {
+        toolCalls.push({
+          id: tc.id,
+          name: tc.name,
+          input: JSON.parse(tc.args || '{}') as Record<string, unknown>,
+        });
+      } catch {
+        toolCalls.push({ id: tc.id, name: tc.name, input: {} });
+      }
+    }
+
+    return {
+      text: currentText,
+      toolCalls,
+      stopReason: toolCalls.length > 0 ? 'tool_use' : 'end_turn',
+      usage: {
+        input: inputTokens,
+        output: outputTokens,
+        cacheRead: 0,
+        cacheWrite: 0,
+      },
+    };
+  }
+
+  private convertMessages(systemPrompt: string, messages: ProviderMessage[]): ChatCompletionMessageParam[] {
+    const result: ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+    ];
+
+    for (const msg of messages) {
+      if (msg.role === 'user') {
+        result.push({ role: 'user', content: msg.content });
+      } else if (msg.role === 'assistant') {
+        const entry: ChatCompletionMessageParam = {
+          role: 'assistant',
+          content: msg.content || null,
+        };
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          (entry as unknown as Record<string, unknown>)['tool_calls'] = msg.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function',
+            function: { name: tc.name, arguments: JSON.stringify(tc.input) },
+          }));
+        }
+        result.push(entry);
+      } else if (msg.role === 'tool_result') {
+        for (const r of msg.results) {
+          result.push({
+            role: 'tool',
+            tool_call_id: r.id,
+            content: r.content,
+          });
+        }
+      }
+    }
+
+    return result;
+  }
+}
+
+// --- Factory ---
+
+export type ProviderType = 'anthropic' | 'openai';
+
+export function createProvider(type: ProviderType): Provider {
+  if (type === 'openai') {
+    const apiKey = process.env['OPENAI_API_KEY'] ?? process.env['AIGENT_API_KEY'] ?? '';
+    const baseURL = process.env['AIGENT_BASE_URL'];
+    return new OpenAIProvider(apiKey, baseURL);
+  }
+
+  const apiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
+  if (!apiKey) {
+    throw new Error('No API key. Set ANTHROPIC_API_KEY.');
+  }
+  return new AnthropicProvider(apiKey);
+}
+
+export function detectProvider(): ProviderType {
+  const explicit = process.env['AIGENT_PROVIDER'];
+  if (explicit === 'openai') return 'openai';
+  if (explicit === 'anthropic') return 'anthropic';
+
+  // Auto-detect from available keys
+  if (process.env['AIGENT_BASE_URL']) return 'openai';
+  if (process.env['OPENAI_API_KEY'] && !process.env['ANTHROPIC_API_KEY']) return 'openai';
+  return 'anthropic';
+}

@@ -1,6 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import type { TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages/messages.js';
-import { createClient, buildSystemPrompt } from './auth.js';
+import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderToolDef, type AnthropicProvider } from './provider.js';
 import { getToolDefinitions, executeTool, summarizeToolCall } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
@@ -22,11 +21,11 @@ Architecture:
   /app/src/index.tsx    — Entry point, TUI/REPL launcher
   /app/src/agent.ts     — Agent class, conversation loop, streaming
   /app/src/auth.ts      — API key / OAT token handling
+  /app/src/provider.ts  — Multi-provider abstraction (Anthropic + OpenAI)
   /app/src/tools.ts     — Tool definitions and execution
   /app/src/workspace.ts — Workspace file loading
   /app/src/repl.ts      — Fallback readline REPL
   /app/src/ui/          — ink (React) TUI components
-    App.tsx, ChatView.tsx, InputBar.tsx, StatusBar.tsx
 
 The container runs tsx --watch, so saving any source file auto-restarts the process.
 Your conversation will reset on restart, but workspace memory persists.
@@ -57,7 +56,6 @@ export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 export interface AgentOptions {
   model?: string;
   maxTokens?: number;
-  apiKey?: string;
   workspacePath?: string;
   thinking?: ThinkingLevel;
 }
@@ -78,61 +76,41 @@ export interface ChatCallbacks {
   onCompact?: (summary: string) => void;
 }
 
-export interface AgentInit {
-  isOAuth: boolean;
-  workspaceFileCount: number;
-  workspacePath: string;
-}
-
 export class Agent {
-  private client: Anthropic;
-  private messages: Anthropic.MessageParam[] = [];
+  private provider: Provider;
+  private messages: ProviderMessage[] = [];
   private model: string;
   private maxTokens: number;
   private isOAuth: boolean;
-  private tools: Anthropic.Tool[];
+  private toolDefs: ProviderToolDef[];
   private systemPromptText: string;
   private thinking: ThinkingLevel;
   private _totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  readonly providerType: string;
 
   constructor(options: AgentOptions = {}) {
-    const apiKey = options.apiKey ?? process.env['ANTHROPIC_API_KEY'] ?? '';
-    if (!apiKey) {
-      throw new Error(
-        'No API key found. Set ANTHROPIC_API_KEY in your environment or .env file.'
-      );
-    }
-
-    const { client, isOAuth } = createClient(apiKey);
-    this.client = client;
-    this.isOAuth = isOAuth;
+    const providerType = detectProvider();
+    this.providerType = providerType;
+    this.provider = createProvider(providerType);
+    this.isOAuth = providerType === 'anthropic' && (this.provider as AnthropicProvider).isOAuthToken;
     this.model = options.model ?? process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
     this.maxTokens = options.maxTokens ?? 16384;
-    this.tools = getToolDefinitions(isOAuth);
     this.thinking = options.thinking ?? (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'medium';
 
-    // Load workspace context into system prompt
+    // Get tool definitions
+    const rawTools = getToolDefinitions(this.isOAuth);
+    this.toolDefs = rawTools.map((t) => ({
+      name: t.name,
+      description: t.description ?? '',
+      input_schema: t.input_schema as Record<string, unknown>,
+    }));
+
+    // Load workspace context
     const workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
     const workspaceContext = loadWorkspaceContext(workspacePath);
     this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
   }
 
-  /** Get initialization info for display */
-  getInitInfo(): AgentInit {
-    const workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
-    const workspaceContext = loadWorkspaceContext(workspacePath);
-    const fileCount = workspaceContext ? (workspaceContext.match(/^## /gm) ?? []).length : 0;
-    return {
-      isOAuth: this.isOAuth,
-      workspaceFileCount: fileCount,
-      workspacePath,
-    };
-  }
-
-  /**
-   * Send a message and get a response.
-   * Supports streaming callbacks for real-time UI updates.
-   */
   async chat(userMessage: string, callbacks?: ChatCallbacks): Promise<string> {
     this.messages.push({ role: 'user', content: userMessage });
 
@@ -142,166 +120,121 @@ export class Agent {
     while (iterations < maxIterations) {
       iterations++;
 
-      const systemPrompt = buildSystemPrompt(this.systemPromptText, this.isOAuth);
+      const response = await this.provider.sendMessage(
+        this.systemPromptText,
+        this.messages,
+        this.toolDefs,
+        { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking },
+        {
+          onText: callbacks?.onText,
+          onThinking: callbacks?.onThinking,
+        },
+      );
 
-      // Build request params
-      const params: Record<string, unknown> = {
-        model: this.model,
-        max_tokens: this.maxTokens,
-        system: systemPrompt,
-        tools: this.tools,
-        messages: this.messages,
-      };
-
-      // Add extended thinking for supported models
-      if (this.thinking !== 'off' && this.supportsAdaptiveThinking()) {
-        params['thinking'] = { type: 'adaptive' };
-        params['output_config'] = { effort: this.thinking };
-      }
-
-      // Use streaming API
-      const stream = this.client.messages.stream(params as Parameters<typeof this.client.messages.stream>[0]);
-
-      // Accumulate streaming text for real-time display
-      let currentText = '';
-      let thinkingText = '';
-      stream.on('text', (text) => {
-        currentText += text;
-        callbacks?.onText?.(currentText);
-      });
-
-      // Track thinking blocks
-      stream.on('inputJSON' as 'text', () => { /* noop, just for type safety */ });
-      (stream as unknown as { on(event: string, cb: (data: unknown) => void): void }).on('contentBlock', (block: unknown) => {
-        const b = block as { type: string; thinking?: string };
-        if (b.type === 'thinking' && b.thinking) {
-          thinkingText += b.thinking;
-          callbacks?.onThinking?.(thinkingText);
-        }
-      });
-
-      const response = await stream.finalMessage();
-
-      // Track token usage
-      const usage = response.usage;
-      this._totalUsage.input += usage.input_tokens;
-      this._totalUsage.output += usage.output_tokens;
-      this._totalUsage.cacheRead += (usage as unknown as Record<string, number>)['cache_read_input_tokens'] ?? 0;
-      this._totalUsage.cacheWrite += (usage as unknown as Record<string, number>)['cache_creation_input_tokens'] ?? 0;
+      // Track usage
+      this._totalUsage.input += response.usage.input;
+      this._totalUsage.output += response.usage.output;
+      this._totalUsage.cacheRead += response.usage.cacheRead;
+      this._totalUsage.cacheWrite += response.usage.cacheWrite;
       callbacks?.onUsage?.({ ...this._totalUsage });
 
       // Add assistant response to history
-      this.messages.push({ role: 'assistant', content: response.content });
+      this.messages.push({
+        role: 'assistant',
+        content: response.text,
+        toolCalls: response.toolCalls.length > 0 ? response.toolCalls : undefined,
+      });
 
-      // Auto-compact when context gets too large (>70% of window)
-      const contextUsed = usage.input_tokens + usage.output_tokens;
-      const contextWindow = this.getContextWindow();
-      if (contextUsed > contextWindow * 0.7 && this.messages.length > 12) {
-        const { messages: compacted, summary } = await compactConversation(
-          this.client,
-          this.model,
-          this.messages,
-        );
-        this.messages = compacted;
-        if (summary) {
-          callbacks?.onCompact?.(summary);
+      // No tool calls — return text
+      if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
+        // Auto-compact check
+        const contextUsed = response.usage.input + response.usage.output;
+        if (contextUsed > this.getContextWindow() * 0.7 && this.messages.length > 12) {
+          await this.compact(callbacks);
         }
+        return response.text;
       }
 
-      // Find tool use blocks
-      const toolUseBlocks = response.content.filter(
-        (block): block is ToolUseBlock => block.type === 'tool_use'
-      );
-
-      // If no tool calls or end of turn, extract text and return
-      if (toolUseBlocks.length === 0 || response.stop_reason === 'end_turn') {
-        const textBlocks = response.content.filter(
-          (block): block is TextBlock => block.type === 'text'
-        );
-        return textBlocks.map((b) => b.text).join('\n');
-      }
-
-      // Execute tools and collect results
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-
-      for (const toolUse of toolUseBlocks) {
-        const toolInput = toolUse.input as Parameters<typeof executeTool>[1];
-        const inputStr = JSON.stringify(toolUse.input);
+      // Execute tools
+      const results: { id: string; content: string }[] = [];
+      for (const tc of response.toolCalls) {
+        const inputStr = JSON.stringify(tc.input);
         const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '…' : inputStr;
-        const summary = summarizeToolCall(toolUse.name, toolInput, this.isOAuth);
-        callbacks?.onToolStart?.(toolUse.name, truncatedInput, summary);
+        const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
+        callbacks?.onToolStart?.(tc.name, truncatedInput, summary);
 
-        const result = executeTool(toolUse.name, toolInput, this.isOAuth);
+        const result = executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
+        const maxLen = 50_000;
+        const truncated = result.length > maxLen
+          ? result.slice(0, maxLen) + `\n\n... [truncated, ${result.length} bytes total]`
+          : result;
 
-        // Truncate very large results
-        const maxResultLen = 50_000;
-        const truncatedResult =
-          result.length > maxResultLen
-            ? result.slice(0, maxResultLen) + `\n\n... [truncated, ${result.length} bytes total]`
-            : result;
-
-        toolResults.push({
-          type: 'tool_result' as const,
-          tool_use_id: toolUse.id,
-          content: truncatedResult,
-        });
+        results.push({ id: tc.id, content: truncated });
       }
 
       callbacks?.onToolEnd?.();
-      this.messages.push({ role: 'user', content: toolResults });
+      this.messages.push({ role: 'tool_result', results });
     }
 
     return '[agent hit maximum tool-use iterations]';
   }
 
-  /** Check if the current model supports adaptive thinking */
-  private supportsAdaptiveThinking(): boolean {
-    return this.model.includes('opus-4-6') || this.model.includes('opus-4.6');
+  private async compact(callbacks?: ChatCallbacks): Promise<void> {
+    // Only works with Anthropic provider for now (needs raw client for summary call)
+    if (this.providerType !== 'anthropic') return;
+
+    const { createClient } = await import('./auth.js');
+    const apiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
+    const { client } = createClient(apiKey);
+
+    // Convert to Anthropic message format for compaction
+    const anthropicMsgs: Anthropic.MessageParam[] = [];
+    for (const msg of this.messages) {
+      if (msg.role === 'user') {
+        anthropicMsgs.push({ role: 'user', content: msg.content });
+      } else if (msg.role === 'assistant') {
+        anthropicMsgs.push({ role: 'assistant', content: [{ type: 'text', text: msg.content }] as Anthropic.ContentBlock[] });
+      }
+    }
+
+    const { messages: compacted, summary } = await compactConversation(client, this.model, anthropicMsgs);
+
+    // Convert back
+    this.messages = [];
+    for (const msg of compacted) {
+      if (msg.role === 'user') {
+        this.messages.push({ role: 'user', content: typeof msg.content === 'string' ? msg.content : '(context)' });
+      } else if (msg.role === 'assistant') {
+        const text = Array.isArray(msg.content)
+          ? (msg.content as Array<{ type: string; text?: string }>).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n')
+          : String(msg.content);
+        this.messages.push({ role: 'assistant', content: text });
+      }
+    }
+
+    if (summary) callbacks?.onCompact?.(summary);
   }
 
-  /** Get context window size for current model */
   private getContextWindow(): number {
-    return 200_000; // All current Anthropic models
+    return 200_000;
   }
 
-  /** Get/set thinking level */
-  get thinkingLevel(): ThinkingLevel {
-    return this.thinking;
-  }
+  get thinkingLevel(): ThinkingLevel { return this.thinking; }
+  set thinkingLevel(level: ThinkingLevel) { this.thinking = level; }
 
-  set thinkingLevel(level: ThinkingLevel) {
-    this.thinking = level;
-  }
-
-  /** Reset conversation history */
   reset(): void {
     this.messages = [];
     this._totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   }
 
-  /** Get raw messages (for saving sessions) */
-  getMessages(): Anthropic.MessageParam[] {
-    return [...this.messages];
-  }
+  get conversationLength(): number { return this.messages.length; }
+  get totalUsage(): TokenUsage { return { ...this._totalUsage }; }
 
-  /** Load messages (for restoring sessions) */
-  setMessages(messages: Anthropic.MessageParam[]): void {
-    this.messages = [...messages];
-  }
+  getMessages(): ProviderMessage[] { return [...this.messages]; }
+  setMessages(messages: ProviderMessage[]): void { this.messages = [...messages]; }
 
-  /** Reload workspace context (for profile switching) */
   reloadWorkspace(workspacePath: string): void {
     const workspaceContext = loadWorkspaceContext(workspacePath);
     this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
-  }
-
-  /** Get current conversation length */
-  get conversationLength(): number {
-    return this.messages.length;
-  }
-
-  /** Get cumulative token usage for this session */
-  get totalUsage(): TokenUsage {
-    return { ...this._totalUsage };
   }
 }

@@ -273,6 +273,7 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
 
   return (
     <Box flexDirection="column" width="100%">
+      <StatusBar thinking={currentThinking} usage={usage} model={model} />
       <ChatView
         messages={messages}
         streaming={streaming}
@@ -285,7 +286,6 @@ export function App({ agent, thinking: initialThinking, model, workspacePath: wp
           <Text color="red">Error: {error}</Text>
         </Box>
       )}
-      <StatusBar thinking={currentThinking} usage={usage} model={model} />
       <InputBar
         value={inputValue}
         onChange={setInputValue}

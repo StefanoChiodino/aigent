@@ -171,3 +171,65 @@ export function listSessions(workspacePath: string, profileName: string): Sessio
 export function generateSessionId(): string {
   return `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
+
+/**
+ * Auto-save session to a well-known file for automatic restore on restart.
+ * Saves both the agent messages (for API continuity) and UI messages (for display).
+ */
+export function autoSaveSession(
+  workspacePath: string,
+  agentMessages: unknown[],
+  uiMessages: unknown[],
+): void {
+  const autoSavePath = join(workspacePath, '.autosave.json');
+  const data = {
+    savedAt: new Date().toISOString(),
+    agentMessages,
+    uiMessages,
+  };
+  try {
+    writeFileSync(autoSavePath, JSON.stringify(data, null, 2));
+  } catch {
+    // Silently fail — don't break the agent over a save failure
+  }
+}
+
+/**
+ * Auto-load the most recent auto-saved session.
+ */
+export function autoLoadSession(
+  workspacePath: string,
+): { agentMessages: unknown[]; uiMessages: unknown[] } | null {
+  const autoSavePath = join(workspacePath, '.autosave.json');
+  if (!existsSync(autoSavePath)) return null;
+
+  try {
+    const raw = readFileSync(autoSavePath, 'utf-8');
+    const data = JSON.parse(raw) as {
+      savedAt: string;
+      agentMessages: unknown[];
+      uiMessages: unknown[];
+    };
+    // Only restore if saved within the last hour
+    const savedAt = new Date(data.savedAt).getTime();
+    const age = Date.now() - savedAt;
+    if (age > 60 * 60 * 1000) return null;
+    return { agentMessages: data.agentMessages, uiMessages: data.uiMessages };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clear the auto-save file (e.g. on /reset).
+ */
+export function clearAutoSave(workspacePath: string): void {
+  const autoSavePath = join(workspacePath, '.autosave.json');
+  try {
+    if (existsSync(autoSavePath)) {
+      writeFileSync(autoSavePath, '');
+    }
+  } catch {
+    // ignore
+  }
+}

@@ -1,6 +1,10 @@
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
 import { Agent } from './agent.js';
+import { installRestartHandler } from './restart.js';
+
+// Install graceful restart handler (listens for SIGUSR1 from supervisor)
+installRestartHandler();
 
 // Load .env files silently
 const _origLog = console.log;
