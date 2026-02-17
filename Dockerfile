@@ -1,9 +1,5 @@
 FROM node:22-slim
 
-# Create non-root user for the agent
-RUN groupadd --gid 1000 aigent && \
-    useradd --uid 1000 --gid aigent --shell /bin/bash --create-home aigent
-
 WORKDIR /app
 
 # Install common tools the agent might need
@@ -26,18 +22,18 @@ RUN npm install -g tsx
 # Copy tsconfig (needed by tsx at runtime)
 COPY tsconfig.json ./
 
-# Create workspace directory and give agent ownership
-RUN mkdir -p /workspace && chown aigent:aigent /workspace
+# Create workspace directory and give node user ownership
+RUN mkdir -p /workspace && chown node:node /workspace
 
-# Give agent ownership of the app directory (for node_modules anonymous volume)
-RUN chown -R aigent:aigent /app
+# Give node user ownership of the app directory (for node_modules anonymous volume)
+RUN chown -R node:node /app
 
 # Copy entrypoint
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Switch to non-root user
-USER aigent
+# Switch to non-root user (node:22-slim ships with uid/gid 1000 'node' user)
+USER node
 
 WORKDIR /workspace
 
