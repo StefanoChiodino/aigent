@@ -48,6 +48,9 @@ export function TextInput({
   const [cursorOffset, setCursorOffset] = useState(value.length);
   const valueRef = useRef(value);
   valueRef.current = value;
+  const cursorOffsetRef = useRef(cursorOffset);
+  cursorOffsetRef.current = cursorOffset;
+  const isPastingRef = useRef(false);
 
   // Keep cursor in bounds when value changes externally
   useEffect(() => {
@@ -56,30 +59,110 @@ export function TextInput({
     }
   }, [value, cursorOffset]);
 
-  // Home/End keys — ink's useInput doesn't expose these, so we listen
-  // to raw stdin. Both listeners see the same data; ink ignores Home/End
-  // (no matching key flags), we handle them here.
+  // Bracket paste mode + Home/End key handling.
+  // Patches stdin.emit to intercept bracket paste data BEFORE Ink/readline
+  // ever see it. Using prependListener alone isn't enough because all data
+  // listeners still receive the same buffer — Ink's parser leaks the markers.
   useEffect(() => {
     if (!focus) return;
 
-    const onData = (data: Buffer): void => {
-      const seq = data.toString();
-      // Home: CSI H, SS3 H, CSI 1~
-      if (seq === '\x1b[H' || seq === '\x1bOH' || seq === '\x1b[1~') {
-        setCursorOffset(0);
+    let pasteBuffer = '';
+    const PASTE_START = '\x1b[200~';
+    const PASTE_END = '\x1b[201~';
+
+    // Enable bracket paste mode
+    process.stdout.write('\x1b[?2004h');
+
+    // Find paste marker, tolerating split ESC delivery (ESC in prior chunk)
+    function findPasteStart(s: string): { idx: number; len: number } | null {
+      const full = s.indexOf(PASTE_START);
+      if (full !== -1) return { idx: full, len: PASTE_START.length };
+      const split = s.indexOf('[200~');
+      if (split !== -1) return { idx: split, len: 5 };
+      return null;
+    }
+    function findPasteEnd(s: string): number {
+      const full = s.indexOf(PASTE_END);
+      if (full !== -1) return full;
+      return s.indexOf('[201~');
+    }
+
+    function finishPaste(text: string): void {
+      if (text) {
+        const v = valueRef.current;
+        const c = cursorOffsetRef.current;
+        const newValue = v.slice(0, c) + text + v.slice(c);
+        onChange(newValue);
+        setCursorOffset(c + text.length);
       }
-      // End: CSI F, SS3 F, CSI 4~
-      else if (seq === '\x1b[F' || seq === '\x1bOF' || seq === '\x1b[4~') {
-        setCursorOffset(valueRef.current.length);
+      // Defer reset so any synchronous Ink handlers still see isPasting=true
+      setTimeout(() => { isPastingRef.current = false; }, 0);
+    }
+
+    const origEmit = process.stdin.emit.bind(process.stdin) as typeof process.stdin.emit;
+
+    (process.stdin as NodeJS.ReadStream & { emit: typeof process.stdin.emit }).emit = function (
+      event: string | symbol,
+      ...args: unknown[]
+    ): boolean {
+      if (event === 'data') {
+        const seq = (args[0] as Buffer).toString();
+
+        // Bracket paste start — suppress entirely so Ink never sees it
+        const start = findPasteStart(seq);
+        if (start) {
+          isPastingRef.current = true;
+          const afterStart = seq.slice(start.idx + start.len);
+          const endIdx = findPasteEnd(afterStart);
+          if (endIdx !== -1) {
+            finishPaste(afterStart.slice(0, endIdx));
+          } else {
+            pasteBuffer = afterStart;
+          }
+          return true;
+        }
+
+        // Mid-paste — buffer and suppress
+        if (isPastingRef.current) {
+          const endIdx = findPasteEnd(seq);
+          if (endIdx !== -1) {
+            pasteBuffer += seq.slice(0, endIdx);
+            finishPaste(pasteBuffer);
+            pasteBuffer = '';
+          } else {
+            pasteBuffer += seq;
+          }
+          return true;
+        }
+
+        // Home/End — handle here, pass through to Ink (it ignores them)
+        if (seq === '\x1b[H' || seq === '\x1bOH' || seq === '\x1b[1~') {
+          setCursorOffset(0);
+        } else if (seq === '\x1b[F' || seq === '\x1bOF' || seq === '\x1b[4~') {
+          setCursorOffset(valueRef.current.length);
+        }
+
+        // Remap \x7f → \b so Ink maps Backspace to key.backspace (not key.delete).
+        // Most terminals send \x7f for Backspace, but Ink treats \x7f as delete.
+        if (seq === '\x7f') {
+          return origEmit(event, Buffer.from('\b'));
+        }
+        if (seq === '\x1b\x7f') {
+          return origEmit(event, Buffer.from('\x1b\b'));
+        }
       }
+
+      return origEmit(event, ...args);
     };
 
-    process.stdin.on('data', onData);
-    return () => { process.stdin.off('data', onData); };
-  }, [focus]);
+    return () => {
+      (process.stdin as NodeJS.ReadStream & { emit: typeof process.stdin.emit }).emit = origEmit;
+      process.stdout.write('\x1b[?2004l');
+    };
+  }, [focus, onChange]);
 
   useInput((input, key) => {
-    if (!focus) return;
+    if (!focus || isPastingRef.current) return;
 
     // Ignore certain keys we don't handle
     if (key.upArrow || key.downArrow || (key.shift && key.tab)) return;
@@ -216,12 +299,20 @@ export function TextInput({
       return;
     }
 
-    // Backspace / Delete
-    if (key.backspace || key.delete) {
+    // Backspace
+    if (key.backspace) {
       if (cursorOffset > 0) {
         const newValue = value.slice(0, cursorOffset - 1) + value.slice(cursorOffset);
         onChange(newValue);
         setCursorOffset(cursorOffset - 1);
+      }
+      return;
+    }
+
+    // Delete — forward-delete character to the right
+    if (key.delete) {
+      if (cursorOffset < value.length) {
+        onChange(value.slice(0, cursorOffset) + value.slice(cursorOffset + 1));
       }
       return;
     }

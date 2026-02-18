@@ -55,12 +55,7 @@ function findPricing(model: string): ModelPricing | null {
   return null;
 }
 
-export interface TokenUsage {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
+import type { TokenUsage } from './protocol.js';
 
 /**
  * Compute cost in USD from token usage and model.

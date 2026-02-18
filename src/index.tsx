@@ -21,7 +21,7 @@ const canUseTUI = Boolean(
 if (canUseTUI) {
   const { render } = await import('ink');
   const { App } = await import('./ui/App.js');
-  render(<App client={client} />);
+  render(<App client={client} />, { exitOnCtrlC: false });
   client.connect();
 } else {
   // Fallback: simple readline REPL

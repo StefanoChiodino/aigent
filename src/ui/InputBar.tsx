@@ -58,9 +58,10 @@ interface InputBarProps {
   thinking?: string | undefined;
   usage?: TokenUsage | undefined;
   runningTasks?: number | undefined;
+  ctrlCHint?: boolean | undefined;
 }
 
-export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage, runningTasks = 0 }: InputBarProps): React.JSX.Element {
+export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage, runningTasks = 0, ctrlCHint = false }: InputBarProps): React.JSX.Element {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const borderColor = isLoading ? 'gray' : 'cyan';
@@ -171,7 +172,7 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
             onChange={handleChange}
             onSubmit={handleSubmit}
             onTab={handleTab}
-            placeholder={isLoading ? 'Type to queue...' : 'Type a message...'}
+            placeholder={ctrlCHint ? 'Press Ctrl+C again to exit...' : isLoading ? 'Type to queue...' : 'Type a message...'}
           />
         </Box>
         <Text color={borderColor}>{' \u2502'}</Text>

@@ -14,7 +14,7 @@ import { resolve, join } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
 import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType, ToolResult } from './provider.js';
-import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage, BackgroundTaskInfo } from './protocol.js';
+import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
 import { computeCost } from './pricing.js';
 import { loadMCP, type MCPManager } from './mcp.js';
@@ -316,6 +316,7 @@ function dispatchBackgroundTask(input: {
     try {
       while (iterations < maxIter) {
         iterations++;
+        console.error(`[dispatch ${taskId}] iteration ${iterations}/${maxIter}`);
 
         const response = await subProvider.sendMessage(
           systemPrompt,
@@ -323,6 +324,8 @@ function dispatchBackgroundTask(input: {
           subToolDefs,
           { model: taskModel, maxTokens: 16384, thinking: agent.thinkingLevel },
         );
+
+        console.error(`[dispatch ${taskId}] response: stopReason=${response.stopReason}, tools=${response.toolCalls.length}, text=${response.text.slice(0, 100)}`);
 
         subMessages.push({
           role: 'assistant',
@@ -337,7 +340,10 @@ function dispatchBackgroundTask(input: {
 
         const results: ToolResult[] = [];
         for (const tc of response.toolCalls) {
+          console.error(`[dispatch ${taskId}] executing tool: ${tc.name} ${JSON.stringify(tc.input).slice(0, 100)}`);
           const result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], false);
+          const resultPreview = typeof result === 'string' ? result.slice(0, 100) : '[non-string]';
+          console.error(`[dispatch ${taskId}] tool result: ${resultPreview}`);
           if (typeof result === 'string') {
             const truncated = result.length > 50_000
               ? result.slice(0, 50_000) + '\n\n... [truncated]'
@@ -355,7 +361,8 @@ function dispatchBackgroundTask(input: {
       taskQueue.complete(taskId, finalText);
 
     } catch (err: unknown) {
-      const e = err as { message?: string };
+      const e = err as { message?: string; stack?: string };
+      console.error(`[dispatch ${taskId}] error:`, e.message, e.stack);
       taskQueue.fail(taskId, e.message ?? 'unknown error');
     }
   })();
