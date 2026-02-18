@@ -182,7 +182,7 @@ async function processTaskResults(): Promise<void> {
       'Summarize the key findings and let me know if anything needs my attention.',
     ].join('\n');
 
-    await processAgentTurn(reviewPrompt, /* isTaskResult */ true);
+    await processAgentTurn(reviewPrompt, { isTaskResult: true });
 
     // Prune old tasks periodically
     taskQueue.prune();
@@ -631,7 +631,6 @@ function handleCommand(cmd: string): boolean {
       addSystemMessage('Usage: /image <path> [message]\nExample: /image /tmp/screenshot.png What is this?');
       return true;
     }
-    // Split into path and optional message
     const spaceIdx = rest.indexOf(' ');
     const imgPath = spaceIdx > 0 ? rest.slice(0, spaceIdx) : rest;
     const imgText = spaceIdx > 0 ? rest.slice(spaceIdx + 1).trim() : 'Describe this image.';
@@ -642,55 +641,16 @@ function handleCommand(cmd: string): boolean {
       return true;
     }
 
-    // Queue as a message with image content
     const userContent: UserContent = [
       { type: 'image', mediaType: img.mediaType, data: img.data },
       { type: 'text', text: imgText },
     ];
-    const userMsg: DisplayMessage = { role: 'user', content: `[image: ${imgPath}] ${imgText}`, timestamp: new Date().toISOString() };
-    messages.push(userMsg);
-    broadcast({ type: 'message', message: userMsg });
 
-    isLoading = true;
-    broadcast({ type: 'loading', isLoading: true });
-    const controller = new AbortController();
-    abortController = controller;
-    const startTime = Date.now();
-
-    void (async () => {
-      try {
-        const response = await agent.chat(userContent, {
-          signal: controller.signal,
-          onText: (text) => { if (!controller.signal.aborted) broadcast({ type: 'text', content: text }); },
-          onThinking: (text) => { if (!controller.signal.aborted) broadcast({ type: 'thinking', content: text }); },
-          onToolStart: (name, toolInput, summary) => { if (!controller.signal.aborted) broadcast({ type: 'tool_start', name, input: toolInput, summary }); },
-          onToolOutput: (content) => { if (!controller.signal.aborted) broadcast({ type: 'tool_output', content }); },
-          onToolEnd: () => { if (!controller.signal.aborted) broadcast({ type: 'tool_end' }); },
-          onUsage: (u) => { usage = { ...u, cost: computeCost(model, u) }; broadcast({ type: 'usage', usage }); },
-          onCompact: (summary) => { addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`); },
-          onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; max_iterations?: number }),
-        });
-
-        if (!controller.signal.aborted) {
-          const elapsed = (Date.now() - startTime) / 1000;
-          broadcast({ type: 'text', content: '' });
-          const assistantMsg: DisplayMessage = { role: 'assistant', content: response, timestamp: new Date().toISOString(), elapsed };
-          messages.push(assistantMsg);
-          broadcast({ type: 'message', message: assistantMsg });
-          doAutoSave();
-        }
-      } catch (err: unknown) {
-        if (!controller.signal.aborted) {
-          const e = err as { status?: number; message?: string };
-          broadcast({ type: 'error', message: e.message ?? 'Unknown error' });
-        }
-      } finally {
-        abortController = null;
-        isLoading = false;
-        broadcast({ type: 'loading', isLoading: false });
-      }
-    })();
-
+    if (isLoading) {
+      addSystemMessage('Cannot send image while processing. Wait for the current request to finish.');
+      return true;
+    }
+    void processAgentTurn(userContent, { displayText: `[image: ${imgPath}] ${imgText}` });
     return true;
   }
 
@@ -788,7 +748,7 @@ const messageQueue: string[] = [];
 let processingQueue = false;
 
 async function processMessage(content: string): Promise<void> {
-  await processAgentTurn(content, false);
+  await processAgentTurn(content);
 }
 
 async function processQueue(): Promise<void> {
