@@ -239,11 +239,12 @@ export class Agent {
     const maxRetries = 3;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        const signal = callbacks?.signal;
         return await this.provider.sendMessage(
           this.systemPromptText,
           this.messages,
           this.toolDefs,
-          { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking, signal: callbacks?.signal },
+          { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking, ...(signal ? { signal } : {}) },
           {
             onText: callbacks?.onText,
             onThinking: callbacks?.onThinking,

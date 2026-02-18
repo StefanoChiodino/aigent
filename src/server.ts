@@ -13,7 +13,7 @@ import { existsSync, unlinkSync, readFileSync, writeFileSync, appendFileSync, mk
 import { resolve, join } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
-import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType, ToolResult, ToolContentBlock } from './provider.js';
+import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType, ToolResult } from './provider.js';
 import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage, BackgroundTaskInfo } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
 import { computeCost } from './pricing.js';
@@ -142,7 +142,8 @@ function generateTaskId(): string {
 
 function getTaskInfos(): BackgroundTaskInfo[] {
   return Array.from(backgroundTasks.values()).map(({ id, description, status, startedAt, completedAt }) => ({
-    id, description, status, startedAt, completedAt,
+    id, description, status, startedAt,
+    ...(completedAt ? { completedAt } : {}),
   }));
 }
 
