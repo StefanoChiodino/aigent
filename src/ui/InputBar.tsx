@@ -1,6 +1,5 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { Box, Text, useStdout } from 'ink';
-import Spinner from 'ink-spinner';
 import { TextInput } from './TextInput.js';
 import type { TokenUsage, BackgroundTaskInfo } from '../protocol.js';
 
@@ -38,29 +37,10 @@ function commonPrefix(strings: string[]): string {
   return prefix;
 }
 
-function elapsed(startedAt: string): string {
-  const secs = Math.round((Date.now() - new Date(startedAt).getTime()) / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const rem = secs % 60;
-  return `${mins}m${rem > 0 ? `${rem}s` : ''}`;
-}
-
 export interface ToolExecution {
   name: string;
   input: string;
   summary: string;
-}
-
-/** A bordered row: │ content ... (padded) │ */
-function BorderRow({ children, cols, borderColor }: { children: React.ReactNode; cols: number; borderColor: string }): React.JSX.Element {
-  return (
-    <Box width={cols}>
-      <Text color={borderColor}>│ </Text>
-      <Box flexGrow={1}>{children}</Box>
-      <Text color={borderColor}> │</Text>
-    </Box>
-  );
 }
 
 interface InputBarProps {
@@ -90,20 +70,6 @@ export function InputBar({
   const [suggestions, setSuggestions] = useState<string[]>([]);
 
   const running = tasks.filter((t) => t.status === 'running');
-  const maxStatusLinesRef = useRef(0);
-
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (running.length === 0 && !isLoading) return;
-    const timer = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(timer);
-  }, [running.length, isLoading]);
-
-  useEffect(() => {
-    if (running.length === 0 && !isLoading && activeTools.length === 0 && notifications.length === 0) {
-      maxStatusLinesRef.current = 0;
-    }
-  }, [running.length, isLoading, activeTools.length, notifications.length]);
 
   const handleSubmit = (input: string): void => {
     setSuggestions([]);
@@ -126,71 +92,52 @@ export function InputBar({
     return prefix.length > currentValue.length ? prefix : null;
   }, []);
 
-  // --- Top border status ---
+  // --- Build the single status line for the top border ---
+  const parts: string[] = [];
+
+  // Activity
+  if (isLoading && !streaming && activeTools.length === 0 && !isThinking) {
+    parts.push('⟳ thinking');
+  } else if (isThinking) {
+    parts.push('⟳ reasoning');
+  } else if (activeTools.length > 0) {
+    const tool = activeTools[activeTools.length - 1]!;
+    const desc = tool.summary.length > 25 ? tool.summary.slice(0, 25) + '…' : tool.summary;
+    parts.push('⟳ ' + desc);
+  }
+
+  // Tasks
+  if (running.length > 0) {
+    parts.push(`${running.length} task${running.length > 1 ? 's' : ''} running`);
+  }
+
+  // Notifications
+  if (notifications.length > 0) {
+    const note = notifications[notifications.length - 1]!;
+    const short = note.length > 35 ? note.slice(0, 35) + '…' : note;
+    parts.push(short);
+  }
+
+  // Reasoning
   const effortLetter = thinking && thinking !== 'off'
     ? ({ low: 'L', medium: 'M', high: 'H', max: 'X' } as Record<string, string>)[thinking] ?? '?'
     : null;
+  parts.push(`r:${effortLetter ? 'on ' + effortLetter : 'off'}`);
 
-  let activityText = '';
-  if (isLoading && !streaming && activeTools.length === 0 && !isThinking) {
-    activityText = 'thinking…';
-  } else if (isThinking) {
-    activityText = 'reasoning…';
-  } else if (activeTools.length > 0) {
-    const tool = activeTools[activeTools.length - 1]!;
-    activityText = tool.summary.length > 30 ? tool.summary.slice(0, 30) + '…' : tool.summary;
-  }
-
-  const statusParts: string[] = [];
-  statusParts.push(`r:${effortLetter ? 'on ' + effortLetter : 'off'}`);
+  // Cost
   const cost = usage?.cost ?? 0;
-  if (cost > 0) statusParts.push(cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`);
+  if (cost > 0) parts.push(cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`);
+
+  // Context
   const contextUsed = usage?.contextTokens ?? 0;
   const contextWindow = 200_000;
   if (contextUsed > 0) {
     const pct = Math.round((contextUsed / contextWindow) * 100);
-    statusParts.push(`${contextBar(contextUsed, contextWindow, 8)} ${formatTokens(contextUsed)}/${formatTokens(contextWindow)} (${pct}%)`);
-  }
-  const rightStatus = statusParts.join(' │ ');
-  const needsSpinner = isLoading || running.length > 0;
-  const spinnerW = needsSpinner ? 2 : 0;
-  const sepW = activityText ? 3 : 0;
-  const fillW = Math.max(0, cols - 4 - spinnerW - activityText.length - sepW - rightStatus.length);
-
-  // --- Status rows ---
-  const statusRows: React.JSX.Element[] = [];
-
-  for (const task of running) {
-    const maxDesc = cols - 16;
-    const short = task.description.length > maxDesc ? task.description.slice(0, maxDesc) + '…' : task.description;
-    statusRows.push(
-      <BorderRow key={task.id} cols={cols} borderColor={borderColor}>
-        <Text color="cyan"><Spinner type="dots" /></Text>
-        <Text color="gray"> {short} </Text>
-        <Text color="gray" dimColor>({elapsed(task.startedAt)})</Text>
-      </BorderRow>
-    );
+    parts.push(`${contextBar(contextUsed, contextWindow, 8)} ${formatTokens(contextUsed)}/${formatTokens(contextWindow)} (${pct}%)`);
   }
 
-  for (let i = 0; i < notifications.length; i++) {
-    statusRows.push(
-      <BorderRow key={`note-${i}`} cols={cols} borderColor={borderColor}>
-        <Text color="yellow" dimColor>{notifications[i]!.slice(0, cols - 6)}</Text>
-      </BorderRow>
-    );
-  }
-
-  // Pad to prevent shrinking
-  if (statusRows.length > maxStatusLinesRef.current) {
-    maxStatusLinesRef.current = statusRows.length;
-  }
-  while (statusRows.length < maxStatusLinesRef.current) {
-    statusRows.push(
-      <BorderRow key={`pad-${statusRows.length}`} cols={cols} borderColor={borderColor}>
-        <Text> </Text>
-      </BorderRow>
-    );
-  }
+  const statusText = parts.join(' │ ');
+  const fillW = Math.max(0, cols - 4 - statusText.length);
 
   return (
     <Box flexDirection="column" width={cols}>
@@ -200,27 +147,12 @@ export function InputBar({
         </Box>
       )}
 
-      {/* Top border */}
+      {/* Top border — single line, no spinners, no timers */}
       <Box width={cols}>
-        <Text color={borderColor}>┌─</Text>
-        {needsSpinner && <Text color="magenta"><Spinner type="dots" /></Text>}
-        {needsSpinner && <Text> </Text>}
-        {activityText ? <Text color={isLoading ? 'magenta' : 'gray'}>{activityText}</Text> : null}
-        {activityText ? <Text color="gray"> │ </Text> : null}
-        <Text color={borderColor}>{'─'.repeat(fillW)} </Text>
-        <Text color="gray">{rightStatus}</Text>
+        <Text color={borderColor}>┌{'─'.repeat(fillW)} </Text>
+        <Text color="gray">{statusText}</Text>
         <Text color={borderColor}> ┐</Text>
       </Box>
-
-      {/* Status rows */}
-      {statusRows}
-
-      {/* Separator */}
-      {maxStatusLinesRef.current > 0 && (
-        <Box width={cols}>
-          <Text color={borderColor}>├{'─'.repeat(Math.max(0, cols - 2))}┤</Text>
-        </Box>
-      )}
 
       {/* Input row */}
       <Box width={cols}>
