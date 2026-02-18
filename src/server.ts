@@ -509,6 +509,12 @@ function handleCommand(cmd: string): boolean {
     return true;
   }
 
+  if (trimmed === '/refresh') {
+    agent.reloadSystemPrompt();
+    addSystemMessage('Workspace files reloaded.');
+    return true;
+  }
+
   if (trimmed === '/reasoning') {
     const isOn = currentThinking !== 'off';
     addSystemMessage(`Reasoning: ${isOn ? 'on' : 'off'}\nUsage: /reasoning on | /reasoning off`);
@@ -716,6 +722,7 @@ function handleCommand(cmd: string): boolean {
     addSystemMessage(
       'Commands:\n' +
       '  /reset              Clear conversation\n' +
+      '  /refresh            Reload workspace files\n' +
       '  /compact            Compact context (free up space)\n' +
       '  /reasoning on|off   Toggle reasoning\n' +
       '  /effort <level>     Set effort (low/medium/high/max)\n' +
