@@ -8,12 +8,7 @@ import { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import Spinner from 'ink-spinner';
 import type { BackgroundTaskInfo } from '../protocol.js';
-
-export interface ToolExecution {
-  name: string;
-  input: string;
-  summary: string;
-}
+import type { ToolExecution } from './App.js';
 
 interface StatusBarProps {
   isLoading: boolean;

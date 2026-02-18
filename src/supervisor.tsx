@@ -57,15 +57,6 @@ function startServer(): void {
   });
 }
 
-function restartServer(): void {
-  if (!serverProcess) {
-    startServer();
-    return;
-  }
-  isRestarting = true;
-  serverProcess.kill('SIGTERM');
-}
-
 // --- Shutdown ---
 
 function shutdown(code: number = 0): void {

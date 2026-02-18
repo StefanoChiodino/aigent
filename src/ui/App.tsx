@@ -20,8 +20,6 @@ export interface ToolExecution {
   summary: string;
 }
 
-export type { ToolExecution as ToolExecutionType };
-
 interface AppProps {
   client: AgentClient;
 }
