@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from 'ink';
+import { Box, Text, Static, useStdout } from 'ink';
 import Spinner from 'ink-spinner';
 import { renderMarkdown } from './Markdown.js';
 import type { Message, ToolExecution } from './App.js';
@@ -84,11 +84,26 @@ export function ChatView({ messages, streaming, thinkingText, isLoading, isThink
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
 
+  // Completed messages are rendered once via <Static> and pushed into
+  // terminal scrollback. This prevents re-renders from yanking the viewport
+  // when the user has scrolled up to read older messages.
+  const staticMessages = messages.map((msg, i) => ({
+    id: `msg-${i}-${msg.role}-${msg.timestamp.getTime()}`,
+    msg,
+  }));
+
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {messages.map((msg, i) => (
-        <MessageBubble key={`msg-${i}-${msg.role}`} message={msg} cols={cols} />
-      ))}
+      {/* Completed messages — rendered once, never re-rendered */}
+      <Static items={staticMessages}>
+        {(item) => (
+          <Box key={item.id}>
+            <MessageBubble message={item.msg} cols={cols} />
+          </Box>
+        )}
+      </Static>
+
+      {/* Active content below — this is the only part that re-renders */}
 
       {/* Thinking text */}
       {isThinking && thinkingText && (
