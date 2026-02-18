@@ -32,7 +32,11 @@ RUN chown -R node:node /app
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Switch to non-root user (node:22-slim ships with uid/gid 1000 'node' user)
+# Non-root user. Uses node:22-slim's built-in 'node' user (uid 1000).
+# This matches typical host user UIDs, which means bind-mounted volumes
+# work without permission issues. The tradeoff: nproc ulimits are shared
+# with host processes under the same UID. We set nproc high enough to
+# accommodate both, and rely on memory/CPU limits as the primary safeguard.
 USER node
 
 WORKDIR /workspace

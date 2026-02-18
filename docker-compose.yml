@@ -33,10 +33,11 @@ services:
       nofile:
         soft: 4096
         hard: 4096
-      # nproc not set — Docker shares nproc across all processes with the same
-      # UID on the host. Since node (uid 1000) is typically the host user too,
-      # a low limit kills the container before it starts. Memory + CPU limits
-      # are the real safeguard against resource exhaustion.
+      # nproc shared with host (same uid 1000) — set high enough for both.
+      # Primary fork bomb protection is the 4GB memory limit.
+      nproc:
+        soft: 4096
+        hard: 4096
     # Tmpfs for /tmp (fast, size-limited, not persisted)
     tmpfs:
       - /tmp:size=100M
