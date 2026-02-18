@@ -161,12 +161,12 @@ export function App({ client }: AppProps): React.JSX.Element {
 
     const onLoading = (loading: boolean) => {
       setIsLoading(loading);
-      if (!loading) {
-        setStreaming('');
-        setThinkingText('');
-        setActiveTools([]);
-        setIsThinking(false);
-      }
+      // Reset all streaming state on both transitions
+      setStreaming('');
+      setThinkingText('');
+      setActiveTools([]);
+      setToolOutput('');
+      setIsThinking(false);
     };
 
     const onError = (message: string) => {
