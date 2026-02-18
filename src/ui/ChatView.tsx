@@ -4,7 +4,6 @@ import type { Message } from './App.js';
 
 interface ChatViewProps {
   messages: Message[];
-  streaming: string;
 }
 
 function UserMessage({ content, cols }: { content: string; cols: number }): React.JSX.Element {
@@ -54,7 +53,7 @@ function MessageBubble({ message, cols }: { message: Message; cols: number }): R
   return <AssistantMessage content={message.content} elapsed={message.elapsed} />;
 }
 
-export function ChatView({ messages, streaming }: ChatViewProps): React.JSX.Element {
+export function ChatView({ messages }: ChatViewProps): React.JSX.Element {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
 
@@ -64,7 +63,7 @@ export function ChatView({ messages, streaming }: ChatViewProps): React.JSX.Elem
   }));
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column">
       {/* Completed messages — rendered once, pushed to scrollback */}
       <Static items={staticMessages}>
         {(item) => (
@@ -73,17 +72,6 @@ export function ChatView({ messages, streaming }: ChatViewProps): React.JSX.Elem
           </Box>
         )}
       </Static>
-
-      {/* Streaming text — the only live-updating part */}
-      {streaming && (
-        <Box flexDirection="column" paddingLeft={1}>
-          <Text color="magenta" dimColor>agent</Text>
-          <Box marginLeft={1}>
-            <Text>{streaming}</Text>
-            <Text color="gray">_</Text>
-          </Box>
-        </Box>
-      )}
     </Box>
   );
 }

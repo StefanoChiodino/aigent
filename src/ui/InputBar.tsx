@@ -10,8 +10,6 @@ const SLASH_COMMANDS = [
   '/image ', '/usage', '/tasks',
   '/profiles', '/profile ', '/profile create ',
   '/save', '/sessions', '/load ',
-  '/mount ', '/unmount ', '/mounts',
-  '/grant ', '/deny ',
 ];
 
 function formatTokens(n: number): string {
@@ -55,21 +53,34 @@ interface InputBarProps {
   ctrlCHint?: boolean | undefined;
   isThinking?: boolean | undefined;
   activeTools?: ToolExecution[] | undefined;
-  streaming?: boolean | undefined;
+  streaming?: string | undefined;
   tasks?: BackgroundTaskInfo[] | undefined;
   notifications?: string[] | undefined;
+  error?: string | undefined;
 }
 
+/**
+ * InputBar — FIXED 4-LINE component. The ONLY live (non-Static) element.
+ *
+ * Line 1: ┌── status ─── context/cost ┐
+ * Line 2: │ streaming preview / status │
+ * Line 3: │ > input                   │
+ * Line 4: └───────────────────────────┘
+ *
+ * Height NEVER changes. This prevents ink re-render artifacts.
+ */
 export function InputBar({
   value, onChange, onSubmit, isLoading, thinking, usage,
   ctrlCHint = false,
   isThinking = false, activeTools = [],
-  streaming = false, tasks = [], notifications = [],
+  streaming, tasks = [], notifications = [],
+  error,
 }: InputBarProps): React.JSX.Element {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const borderColor = isLoading ? 'gray' : 'cyan';
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const innerWidth = cols - 4; // space between │ and │
 
   const running = tasks.filter((t) => t.status === 'running');
 
@@ -94,52 +105,65 @@ export function InputBar({
     return prefix.length > currentValue.length ? prefix : null;
   }, []);
 
-  // --- Build the single status line for the top border ---
-  const parts: string[] = [];
-
-  // Activity
-  if (isLoading && !streaming && activeTools.length === 0 && !isThinking) {
-    parts.push('⟳ thinking');
-  } else if (isThinking) {
-    parts.push('⟳ reasoning');
-  } else if (activeTools.length > 0) {
-    const tool = activeTools[activeTools.length - 1]!;
-    const desc = tool.summary.length > 25 ? tool.summary.slice(0, 25) + '…' : tool.summary;
-    parts.push('⟳ ' + desc);
-  }
-
-  // Tasks
-  if (running.length > 0) {
-    parts.push(`${running.length} task${running.length > 1 ? 's' : ''} running`);
-  }
-
-  // Notifications
-  if (notifications.length > 0) {
-    const note = notifications[notifications.length - 1]!;
-    const short = note.length > 35 ? note.slice(0, 35) + '…' : note;
-    parts.push(short);
-  }
-
-  // Reasoning
+  // --- Top border status (right side) ---
   const effortLetter = thinking && thinking !== 'off'
     ? ({ low: 'L', medium: 'M', high: 'H', max: 'X' } as Record<string, string>)[thinking] ?? '?'
     : null;
-  parts.push(`r:${effortLetter ? 'on ' + effortLetter : 'off'}`);
 
-  // Cost
+  const statusParts: string[] = [];
+  statusParts.push(`r:${effortLetter ? 'on ' + effortLetter : 'off'}`);
   const cost = usage?.cost ?? 0;
-  if (cost > 0) parts.push(cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`);
-
-  // Context
+  if (cost > 0) statusParts.push(cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`);
   const contextUsed = usage?.contextTokens ?? 0;
   const contextWindow = 200_000;
   if (contextUsed > 0) {
     const pct = Math.round((contextUsed / contextWindow) * 100);
-    parts.push(`${contextBar(contextUsed, contextWindow, 8)} ${formatTokens(contextUsed)}/${formatTokens(contextWindow)} (${pct}%)`);
+    statusParts.push(`${contextBar(contextUsed, contextWindow, 8)} ${formatTokens(contextUsed)}/${formatTokens(contextWindow)} (${pct}%)`);
   }
+  const rightStatus = statusParts.join(' │ ');
+  const fillW = Math.max(0, cols - 4 - rightStatus.length);
 
-  const statusText = parts.join(' │ ');
-  const fillW = Math.max(0, cols - 4 - statusText.length);
+  // --- Middle line: streaming preview OR status info ---
+  let middleContent: React.JSX.Element;
+  if (error) {
+    const errText = error.length > innerWidth ? error.slice(0, innerWidth - 1) + '…' : error;
+    middleContent = <Text color="red">{errText}</Text>;
+  } else if (streaming) {
+    // Show last line of streaming text, truncated to fit
+    const lines = streaming.split('\n');
+    const lastLine = lines[lines.length - 1] ?? '';
+    const preview = lastLine.length > innerWidth - 2
+      ? lastLine.slice(lastLine.length - innerWidth + 2)
+      : lastLine;
+    middleContent = (
+      <>
+        <Text color="magenta" dimColor>{'▸ '}</Text>
+        <Text>{preview}</Text>
+        <Text color="gray">_</Text>
+      </>
+    );
+  } else if (isLoading) {
+    // Show what we're doing
+    let activity = '⟳ thinking…';
+    if (isThinking) {
+      activity = '⟳ reasoning…';
+    } else if (activeTools.length > 0) {
+      const tool = activeTools[activeTools.length - 1]!;
+      const desc = tool.summary.length > innerWidth - 4 ? tool.summary.slice(0, innerWidth - 5) + '…' : tool.summary;
+      activity = '⟳ ' + desc;
+    }
+
+    middleContent = <Text color="magenta">{activity}</Text>;
+  } else if (notifications.length > 0) {
+    const note = notifications[notifications.length - 1]!;
+    const short = note.length > innerWidth ? note.slice(0, innerWidth - 1) + '…' : note;
+    middleContent = <Text color="yellow" dimColor>{short}</Text>;
+  } else if (running.length > 0) {
+    const taskSummary = `${running.length} background task${running.length > 1 ? 's' : ''} running`;
+    middleContent = <Text color="gray" dimColor>{taskSummary}</Text>;
+  } else {
+    middleContent = <Text> </Text>;
+  }
 
   return (
     <Box flexDirection="column" width={cols}>
@@ -149,16 +173,25 @@ export function InputBar({
         </Box>
       )}
 
-      {/* Top border — single line, no spinners, no timers */}
+      {/* Line 1: Top border */}
       <Box width={cols}>
-        <Text color={borderColor}>┌{'─'.repeat(fillW)} </Text>
-        <Text color="gray">{statusText}</Text>
-        <Text color={borderColor}> ┐</Text>
+        <Text color={borderColor}>{'┌' + '─'.repeat(fillW) + ' '}</Text>
+        <Text color="gray">{rightStatus}</Text>
+        <Text color={borderColor}>{' ┐'}</Text>
       </Box>
 
-      {/* Input row */}
+      {/* Line 2: Status / streaming preview */}
       <Box width={cols}>
-        <Text color={borderColor}>│ </Text>
+        <Text color={borderColor}>{'│ '}</Text>
+        <Box flexGrow={1} width={innerWidth}>
+          {middleContent}
+        </Box>
+        <Text color={borderColor}>{' │'}</Text>
+      </Box>
+
+      {/* Line 3: Input */}
+      <Box width={cols}>
+        <Text color={borderColor}>{'│ '}</Text>
         <Box flexGrow={1}>
           <Text color={isLoading ? 'gray' : 'cyan'} bold>{'> '}</Text>
           <TextInput
@@ -169,12 +202,12 @@ export function InputBar({
             placeholder={ctrlCHint ? 'Press Ctrl+C again to exit...' : isLoading ? 'Type to queue...' : 'Type a message...'}
           />
         </Box>
-        <Text color={borderColor}> │</Text>
+        <Text color={borderColor}>{' │'}</Text>
       </Box>
 
-      {/* Bottom border */}
+      {/* Line 4: Bottom border */}
       <Box width={cols}>
-        <Text color={borderColor}>└{'─'.repeat(Math.max(0, cols - 2))}┘</Text>
+        <Text color={borderColor}>{'└' + '─'.repeat(Math.max(0, cols - 2)) + '┘'}</Text>
       </Box>
     </Box>
   );

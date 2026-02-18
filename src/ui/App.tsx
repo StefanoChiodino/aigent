@@ -295,13 +295,7 @@ export function App({ client }: AppProps): React.JSX.Element {
       )}
       <ChatView
         messages={messages}
-        streaming={streaming}
       />
-      {error && (
-        <Box marginLeft={1}>
-          <Text color="red">Error: {error}</Text>
-        </Box>
-      )}
       <InputBar
         value={inputValue}
         onChange={setInputValue}
@@ -312,9 +306,10 @@ export function App({ client }: AppProps): React.JSX.Element {
         ctrlCHint={ctrlCHint}
         isThinking={isThinking}
         activeTools={activeTools}
-        streaming={!!streaming}
+        streaming={streaming || undefined}
         tasks={taskList}
         notifications={notifications}
+        error={error ?? undefined}
       />
     </Box>
   );
