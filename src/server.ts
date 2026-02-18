@@ -157,16 +157,10 @@ async function processTaskResults(): Promise<void> {
 
     const statusLabel = result.status === 'completed' ? 'completed' : 'FAILED';
     const secs = ((new Date(result.completedAt).getTime() - new Date(result.startedAt).getTime()) / 1000).toFixed(1);
+    const shortDesc = result.description.length > 50 ? result.description.slice(0, 50) + '…' : result.description;
 
-    // Show the result as a system message so the user can see it
-    const resultText = [
-      `Background task ${statusLabel}: ${result.id}`,
-      `Task: ${result.description}`,
-      `Duration: ${secs}s`,
-      '',
-      result.result.length > 2000 ? result.result.slice(0, 2000) + '\n\n... [truncated — full result available]' : result.result,
-    ].join('\n');
-    addSystemMessage(resultText);
+    // Brief notification — not the full dump
+    addSystemMessage(`Task ${statusLabel} (${secs}s): ${shortDesc}`);
 
     // Now trigger an agent turn to process the result.
     // The agent sees it as a user message asking for review.

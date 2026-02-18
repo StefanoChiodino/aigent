@@ -89,6 +89,8 @@ export function App({ client }: AppProps): React.JSX.Element {
       // Persistent system messages go to chat, transient ones to notifications
       const isTransient = content.startsWith('Cancelled') ||
         content.startsWith('Context compacted') ||
+        content.startsWith('Task completed') ||
+        content.startsWith('Task FAILED') ||
         content.includes('background task');
 
       if (isTransient) {

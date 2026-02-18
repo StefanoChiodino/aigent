@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import Spinner from 'ink-spinner';
 import { TextInput } from './TextInput.js';
@@ -74,7 +74,7 @@ interface InputBarProps {
   thinking?: string | undefined;
   usage?: TokenUsage | undefined;
   ctrlCHint?: boolean | undefined;
-  // Status — shown in the top border, single line
+  // Status
   isThinking?: boolean | undefined;
   activeTools?: ToolExecution[] | undefined;
   streaming?: boolean | undefined;
@@ -95,13 +95,23 @@ export function InputBar({
 
   const running = tasks.filter((t) => t.status === 'running');
 
+  // Track max status lines we've shown so we can pad to prevent shrinking
+  const maxStatusLinesRef = useRef(0);
+
   // Tick every second to update task elapsed times
   const [, setTick] = useState(0);
   useEffect(() => {
-    if (running.length === 0) return;
+    if (running.length === 0 && !isLoading) return;
     const timer = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(timer);
-  }, [running.length]);
+  }, [running.length, isLoading]);
+
+  // Reset max lines when nothing is active
+  useEffect(() => {
+    if (running.length === 0 && !isLoading && activeTools.length === 0) {
+      maxStatusLinesRef.current = 0;
+    }
+  }, [running.length, isLoading, activeTools.length]);
 
   const handleSubmit = (input: string): void => {
     setSuggestions([]);
@@ -136,67 +146,84 @@ export function InputBar({
     return prefix.length > currentValue.length ? prefix : null;
   }, []);
 
-  // --- Build status segments for the top border ---
-  const segments: Array<{ text: string; color: string }> = [];
-
-  // Activity indicator
-  if (isLoading && !streaming && activeTools.length === 0 && !isThinking) {
-    segments.push({ text: 'thinking…', color: 'magenta' });
-  } else if (isThinking) {
-    segments.push({ text: 'reasoning…', color: 'magenta' });
-  } else if (activeTools.length > 0) {
-    const tool = activeTools[activeTools.length - 1]!;
-    const desc = tool.summary.length > 30 ? tool.summary.slice(0, 30) + '…' : tool.summary;
-    segments.push({ text: desc, color: 'gray' });
-  }
-
-  // Running tasks
-  if (running.length > 0) {
-    const taskDescs = running.map((t) => {
-      const short = t.description.length > 20 ? t.description.slice(0, 20) + '…' : t.description;
-      return `${short} (${elapsed(t.startedAt)})`;
-    });
-    segments.push({ text: `${running.length} task${running.length > 1 ? 's' : ''}: ${taskDescs.join(', ')}`, color: 'cyan' });
-  }
-
-  // Notifications (most recent only)
-  if (notifications.length > 0) {
-    const note = notifications[notifications.length - 1]!;
-    const short = note.length > 40 ? note.slice(0, 40) + '…' : note;
-    segments.push({ text: short, color: 'yellow' });
-  }
-
-  // Reasoning level
+  // --- Top border status ---
   const effortLetter = thinking && thinking !== 'off'
     ? ({ low: 'L', medium: 'M', high: 'H', max: 'X' } as Record<string, string>)[thinking] ?? '?'
     : null;
   const rText = effortLetter ? 'on' : 'off';
-  segments.push({ text: `r:${rText}${effortLetter ? ' ' + effortLetter : ''}`, color: 'gray' });
 
-  // Cost
-  const cost = usage?.cost ?? 0;
-  if (cost > 0) {
-    const costStr = cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`;
-    segments.push({ text: costStr, color: 'yellow' });
-  }
-
-  // Context bar
   const contextUsed = usage?.contextTokens ?? 0;
   const contextWindow = 200_000;
-  if (contextUsed > 0) {
-    const pct = Math.round((contextUsed / contextWindow) * 100);
-    const bar = contextBar(contextUsed, contextWindow, 10);
-    const usedStr = formatTokens(contextUsed);
-    const totalStr = formatTokens(contextWindow);
-    segments.push({ text: `${bar} ${usedStr}/${totalStr} (${pct}%)`, color: pct > 80 ? 'red' : pct > 50 ? 'yellow' : 'green' });
+  const pct = contextUsed > 0 ? Math.round((contextUsed / contextWindow) * 100) : 0;
+  const cost = usage?.cost ?? 0;
+  const costStr = cost > 0 ? (cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`) : '';
+
+  // Activity text for top border
+  let activityText = '';
+  if (isLoading && !streaming && activeTools.length === 0 && !isThinking) {
+    activityText = 'thinking…';
+  } else if (isThinking) {
+    activityText = 'reasoning…';
+  } else if (activeTools.length > 0) {
+    const tool = activeTools[activeTools.length - 1]!;
+    activityText = tool.summary.length > 30 ? tool.summary.slice(0, 30) + '…' : tool.summary;
   }
 
-  // Calculate total status text length for border fill
-  const statusText = segments.map((s) => s.text).join(' │ ');
-  const fill = Math.max(0, cols - 4 - statusText.length - (segments.length - 1) * 0); // separators already in statusText
+  // Build concise top-right status string
+  const statusParts: string[] = [];
+  statusParts.push(`r:${rText}${effortLetter ? ' ' + effortLetter : ''}`);
+  if (costStr) statusParts.push(costStr);
+  if (contextUsed > 0) {
+    const bar = contextBar(contextUsed, contextWindow, 8);
+    statusParts.push(`${bar} ${formatTokens(contextUsed)}/${formatTokens(contextWindow)} (${pct}%)`);
+  }
+  const rightStatus = statusParts.join(' │ ');
 
-  // Render status with spinners for active items
+  // Left side: activity
   const needsSpinner = isLoading || running.length > 0;
+  const leftContent = activityText;
+  const spinnerWidth = needsSpinner ? 2 : 0;
+  const leftWidth = leftContent.length + spinnerWidth;
+  const rightWidth = rightStatus.length;
+  const fillWidth = Math.max(0, cols - 4 - leftWidth - rightWidth - (leftContent ? 3 : 0));
+
+  // --- Status lines (tasks + notifications) ---
+  const statusLines: React.JSX.Element[] = [];
+
+  for (const task of running) {
+    const short = task.description.length > cols - 15
+      ? task.description.slice(0, cols - 15) + '…'
+      : task.description;
+    statusLines.push(
+      <Box key={task.id}>
+        <Text color={borderColor}>│ </Text>
+        <Text color="cyan"><Spinner type="dots" /></Text>
+        <Text color="gray"> {short} </Text>
+        <Text color="gray" dimColor>({elapsed(task.startedAt)})</Text>
+      </Box>
+    );
+  }
+
+  for (let i = 0; i < notifications.length; i++) {
+    statusLines.push(
+      <Box key={`note-${i}`}>
+        <Text color={borderColor}>│ </Text>
+        <Text color="yellow" dimColor>  {notifications[i]!.slice(0, cols - 6)}</Text>
+      </Box>
+    );
+  }
+
+  // Pad to max height to prevent shrinking
+  if (statusLines.length > maxStatusLinesRef.current) {
+    maxStatusLinesRef.current = statusLines.length;
+  }
+  while (statusLines.length < maxStatusLinesRef.current) {
+    statusLines.push(
+      <Box key={`pad-${statusLines.length}`}>
+        <Text color={borderColor}>│</Text>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column">
@@ -207,19 +234,27 @@ export function InputBar({
           </Text>
         </Box>
       )}
-      {/* Top border with all status info */}
+      {/* Top border */}
       <Box>
-        <Text color={borderColor}>┌{'─'.repeat(Math.max(0, fill))}{' '}</Text>
+        <Text color={borderColor}>┌─</Text>
         {needsSpinner && <Text color="magenta"><Spinner type="dots" /></Text>}
         {needsSpinner && <Text> </Text>}
-        {segments.map((seg, i) => (
-          <Text key={i}>
-            {i > 0 && <Text color="gray"> │ </Text>}
-            <Text color={seg.color}>{seg.text}</Text>
-          </Text>
-        ))}
-        <Text color={borderColor}>{' ┐'}</Text>
+        {leftContent && <Text color={isLoading ? 'magenta' : 'gray'}>{leftContent}</Text>}
+        {leftContent && <Text color="gray"> │ </Text>}
+        <Text color={borderColor}>{'─'.repeat(fillWidth)} </Text>
+        <Text color="gray">{rightStatus}</Text>
+        <Text color={borderColor}> ┐</Text>
       </Box>
+
+      {/* Status lines (tasks, notifications) */}
+      {statusLines}
+
+      {/* Separator if we have status lines */}
+      {maxStatusLinesRef.current > 0 && (
+        <Box>
+          <Text color={borderColor}>├{'─'.repeat(Math.max(0, cols - 2))}┤</Text>
+        </Box>
+      )}
 
       {/* Input line */}
       <Box>
