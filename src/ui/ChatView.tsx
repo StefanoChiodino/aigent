@@ -31,19 +31,16 @@ function ThinkingBlock({ text }: { text: string }): React.JSX.Element {
 }
 
 function UserMessage({ content, cols }: { content: string; cols: number }): React.JSX.Element {
-  // Right-aligned, with a max width
   const maxWidth = Math.min(Math.floor(cols * 0.7), cols - 4);
 
   return (
-    <Box justifyContent="flex-end" paddingRight={1} marginY={0}>
+    <Box justifyContent="flex-end" marginY={0}>
       <Box flexDirection="column" width={maxWidth}>
         <Box justifyContent="flex-end">
-          <Text color="blue" dimColor>you</Text>
-        </Box>
-        <Box justifyContent="flex-end">
-          <Text color="white">{content}</Text>
+          <Text color="cyan" dimColor>{content}</Text>
         </Box>
       </Box>
+      <Text color="cyan" dimColor> ▎</Text>
     </Box>
   );
 }
