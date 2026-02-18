@@ -97,7 +97,7 @@ export function ChatView({ messages, streaming, thinkingText, isLoading, isThink
       {/* Completed messages — rendered once, never re-rendered */}
       <Static items={staticMessages}>
         {(item) => (
-          <Box key={item.id}>
+          <Box key={item.id} width={cols}>
             <MessageBubble message={item.msg} cols={cols} />
           </Box>
         )}
