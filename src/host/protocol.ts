@@ -76,5 +76,6 @@ export interface CapabilityProvider {
   execute(capability: CapabilityName, params: Record<string, unknown>): Promise<CapabilityResult>;
 }
 
-// Default socket path
-export const HOST_SOCKET_PATH = '/tmp/aigent-host.sock';
+// Default socket path — inside the shared socket directory so it's
+// automatically available in the container via the existing volume mount.
+export const HOST_SOCKET_PATH = '/tmp/aigent/host.sock';

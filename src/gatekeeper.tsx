@@ -15,12 +15,15 @@
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createWriteStream } from 'node:fs';
 import { resolve, basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('gatekeeper');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_DIR = resolve(__dirname, '..');
@@ -61,9 +64,9 @@ function parseArgs(): GatekeeperArgs {
     if (arg === '--rw') {
       result.writeAccess = true;
     } else if (arg === '--model' && args[i + 1]) {
-      result.model = args[++i];
+      result.model = args[++i]!;
     } else if (arg === '--thinking' && args[i + 1]) {
-      result.thinking = args[++i];
+      result.thinking = args[++i]!;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`aigent — AI agent with sandboxed execution
 
@@ -109,6 +112,33 @@ function toContainerPath(hostPath: string): string {
   return `/project/${basename(hostPath)}`;
 }
 
+/** Reverse-map a container path to a host path.
+ *  The agent sees paths like /app/src or /project/myapp inside the container.
+ *  This maps them back to the corresponding host paths using known mounts. */
+function resolveContainerToHost(containerPath: string): string | null {
+  // Check dynamic mounts first (e.g., /project/myapp → host path)
+  for (const m of mounts) {
+    if (containerPath === m.containerPath || containerPath.startsWith(m.containerPath + '/')) {
+      const relative = containerPath.slice(m.containerPath.length);
+      return m.hostPath + relative;
+    }
+  }
+
+  // Implicit mount: /app → REPO_DIR (from docker-compose.yml)
+  if (containerPath === '/app' || containerPath.startsWith('/app/')) {
+    const relative = containerPath.slice('/app'.length);
+    return REPO_DIR + relative;
+  }
+
+  // Implicit mount: /workspace → REPO_DIR/workspace
+  if (containerPath === '/workspace' || containerPath.startsWith('/workspace/')) {
+    const relative = containerPath.slice('/workspace'.length);
+    return resolve(REPO_DIR, 'workspace') + relative;
+  }
+
+  return null;
+}
+
 /** Paths that must never be mounted. */
 const FORBIDDEN_PATHS = ['/', '/etc', '/var', '/usr', '/bin', '/sbin', '/lib', '/boot', '/dev', '/proc', '/sys'];
 
@@ -140,7 +170,7 @@ function addMount(hostPath: string, mode: 'ro' | 'rw'): { ok: boolean; message: 
     }
     // Upgrade/downgrade mode
     existing.mode = mode;
-    return { ok: true, message: `Updated ${normalized} to ${mode}. Sandbox restarting...` };
+    return { ok: true, message: `Updated ${normalized} to ${mode}.` };
   }
 
   mounts.push({
@@ -149,7 +179,7 @@ function addMount(hostPath: string, mode: 'ro' | 'rw'): { ok: boolean; message: 
     mode,
   });
 
-  return { ok: true, message: `Mounted ${normalized} (${mode}). Sandbox restarting...` };
+  return { ok: true, message: `Mounted ${normalized} (${mode}).` };
 }
 
 function removeMount(hostPath: string): { ok: boolean; message: string } {
@@ -159,7 +189,7 @@ function removeMount(hostPath: string): { ok: boolean; message: string } {
     return { ok: false, message: `Not mounted: ${normalized}` };
   }
   mounts.splice(idx, 1);
-  return { ok: true, message: `Unmounted ${normalized}. Sandbox restarting...` };
+  return { ok: true, message: `Unmounted ${normalized}.` };
 }
 
 function listMounts(): string {
@@ -194,6 +224,12 @@ function buildDockerArgs(): string[] {
   if (gatekeeperArgs.thinking) {
     args.push('-e', `AIGENT_THINKING=${gatekeeperArgs.thinking}`);
   }
+  if (process.env['AIGENT_DEBUG']) {
+    args.push('-e', `AIGENT_DEBUG=${process.env['AIGENT_DEBUG']}`);
+  }
+  if (process.env['AIGENT_LOG_LEVEL']) {
+    args.push('-e', `AIGENT_LOG_LEVEL=${process.env['AIGENT_LOG_LEVEL']}`);
+  }
 
   args.push('aigent');
   return args;
@@ -203,27 +239,33 @@ async function startContainer(): Promise<void> {
   containerName = `aigent-worker-${Date.now()}`;
 
   const dockerArgs = buildDockerArgs();
-  log('Starting sandbox...');
+  log.info('Starting sandbox...');
   if (mounts.length > 0) {
     for (const m of mounts) {
-      log(`  ${m.hostPath} (${m.mode})`);
+      log.info('Mount', { path: m.hostPath, mode: m.mode });
     }
   }
 
   containerProcess = spawn('docker', dockerArgs, {
-    stdio: ['ignore', 'inherit', 'inherit'],
+    stdio: ['ignore', 'pipe', 'pipe'],
     cwd: REPO_DIR,
   });
 
+  // Pipe container stdout/stderr to log file instead of terminal.
+  // Without this, server console.error (via worker → container → gatekeeper) corrupts the TUI.
+  // { end: false } prevents pipe from closing logStream when the container exits.
+  containerProcess.stdout?.pipe(logStream, { end: false });
+  containerProcess.stderr?.pipe(logStream, { end: false });
+
   containerProcess.on('error', (err) => {
-    log(`Failed to start container: ${err.message}`);
+    log.error('Failed to start container', { error: err.message });
     if (!isRestarting) process.exit(1);
   });
 
   containerProcess.on('exit', (code, signal) => {
     containerProcess = null;
     if (!isRestarting) {
-      log(`Sandbox exited (code=${code}, signal=${signal})`);
+      log.info('Sandbox exited', { code, signal });
       cleanupSocket();
       process.exit(code ?? 1);
     }
@@ -231,19 +273,18 @@ async function startContainer(): Promise<void> {
 
   // Wait for socket
   await waitForSocket();
-  log('Sandbox ready');
+  log.info('Sandbox ready');
 }
 
 async function restartContainer(): Promise<void> {
   isRestarting = true;
 
-  // Tell client it's about to disconnect
-  if (client) {
-    // Client will auto-reconnect when the new container comes up
-  }
-
-  // Stop current container
+  // Remove exit handler from old process BEFORE killing it.
+  // Without this, the async 'exit' event fires after isRestarting is cleared,
+  // causing the handler to call process.exit() and kill the gatekeeper.
   if (containerProcess) {
+    containerProcess.removeAllListeners('exit');
+    containerProcess.removeAllListeners('error');
     try {
       execSync(`docker rm -f ${containerName} 2>/dev/null`, { stdio: 'ignore' });
     } catch {}
@@ -256,33 +297,45 @@ async function restartContainer(): Promise<void> {
   // Small delay for clean shutdown
   await new Promise<void>((r) => setTimeout(r, 500));
 
-  isRestarting = false;
-
-  // Start new container with updated mounts
-  await startContainer();
+  // Start new container with updated mounts.
+  // isRestarting stays true until startContainer() completes, so the new
+  // process's exit handler won't prematurely kill the gatekeeper if the
+  // container takes a moment to stabilize.
+  try {
+    await startContainer();
+  } catch (err) {
+    // Socket timeout — the container may still be starting (Docker can be slow).
+    // Don't throw — the client's auto-reconnect will recover once the socket appears.
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn('Container restart slow', { error: msg });
+    injectSystemMessage(
+      `Sandbox is slow to start. Will auto-reconnect when ready.\n` +
+      `If it doesn't recover, try /restart.`
+    );
+  } finally {
+    isRestarting = false;
+  }
 }
 
-async function waitForSocket(timeoutMs = 30_000): Promise<void> {
+async function waitForSocket(timeoutMs = 60_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (existsSync(SOCKET_PATH)) return;
     await new Promise<void>((r) => setTimeout(r, 200));
   }
-  throw new Error(`Worker socket not found after ${timeoutMs / 1000}s`);
+  throw new Error(`Worker socket not found after ${Math.round(timeoutMs / 1000)}s`);
 }
 
 function cleanupSocket(): void {
   try {
     if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
   } catch {}
-  // Also clean LLM proxy socket
-  try {
-    const llmSocket = `${SOCKET_DIR}/llm-proxy.sock`;
-    if (existsSync(llmSocket)) unlinkSync(llmSocket);
-  } catch {}
+  // NOTE: Do NOT delete the LLM proxy socket here — the proxy keeps running
+  // across container restarts. It cleans up its own socket in LLMProxy.start().
 }
 
 function cleanupAll(): void {
+  stopHostDaemon();
   if (containerProcess) {
     try {
       execSync(`docker rm -f ${containerName} 2>/dev/null`, { stdio: 'ignore' });
@@ -328,6 +381,7 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
       injectSystemMessage(result.message);
 
       if (result.ok) {
+        injectSystemMessage('Sandbox restarting...');
         await restartContainer();
       }
       break;
@@ -345,6 +399,7 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
       injectSystemMessage(result.message);
 
       if (result.ok) {
+        injectSystemMessage('Sandbox restarting...');
         await restartContainer();
       }
       break;
@@ -369,13 +424,14 @@ async function handleAgentMountRequest(
   mode: 'ro' | 'rw',
   reason?: string,
 ): Promise<void> {
-  const hostPath = resolveHostPath(path);
+  // The agent sends container paths (e.g., /app/src). Try to reverse-map first.
+  const hostPath = resolveContainerToHost(path) ?? resolveHostPath(path);
 
   // Show the request to the user
   const reasonText = reason ? `\n  Reason: "${reason}"` : '';
   injectSystemMessage(
     `Agent requests access to: ${hostPath} (${mode})${reasonText}\n` +
-    `Reply: /grant ${id} [ro|rw] or /deny ${id}`
+    `Reply: /grant or /deny`
   );
 
   // Store pending request — resolved when user replies /grant or /deny
@@ -389,8 +445,17 @@ async function handleGrantDeny(input: string): Promise<boolean> {
   const cmd = parts[0]?.toLowerCase();
 
   if (cmd === '/grant') {
-    const id = parts[1];
-    if (!id) return false;
+    let id = parts[1];
+    // Auto-infer ID when there's exactly one pending request
+    if (!id && pendingAgentMountRequests.size === 1) {
+      id = pendingAgentMountRequests.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingAgentMountRequests.size === 0
+        ? 'No pending mount requests.'
+        : `Multiple pending requests — specify ID: ${[...pendingAgentMountRequests.keys()].join(', ')}`);
+      return true;
+    }
 
     const pending = pendingAgentMountRequests.get(id);
     if (!pending) {
@@ -409,20 +474,30 @@ async function handleGrantDeny(input: string): Promise<boolean> {
       type: 'mount_response',
       id,
       ok: result.ok,
-      containerPath: result.ok ? containerPath : undefined,
+      ...(result.ok ? { containerPath } : {}),
       message: result.message,
     });
 
+    log.info('Mount granted', { id, path: pending.hostPath, mode });
     injectSystemMessage(result.message);
     if (result.ok) {
+      injectSystemMessage('Sandbox restarting...');
       await restartContainer();
     }
     return true;
   }
 
   if (cmd === '/deny') {
-    const id = parts[1];
-    if (!id) return false;
+    let id = parts[1];
+    if (!id && pendingAgentMountRequests.size === 1) {
+      id = pendingAgentMountRequests.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingAgentMountRequests.size === 0
+        ? 'No pending mount requests.'
+        : `Multiple pending requests — specify ID: ${[...pendingAgentMountRequests.keys()].join(', ')}`);
+      return true;
+    }
 
     const pending = pendingAgentMountRequests.get(id);
     if (!pending) {
@@ -439,6 +514,7 @@ async function handleGrantDeny(input: string): Promise<boolean> {
       message: 'Mount denied by user',
     });
 
+    log.info('Mount denied', { id, path: pending.hostPath });
     injectSystemMessage(`Denied mount request for ${pending.hostPath}`);
     return true;
   }
@@ -479,8 +555,8 @@ function handleConfigWriteRequest(id: string, file: string, content: string, rea
     `  Reason: "${reason}"\n` +
     `  Changes: +${added} lines, -${removed} lines\n` +
     `  New size: ${content.length} bytes\n\n` +
-    `Reply: /approve ${id} or /reject ${id}\n` +
-    `Preview: /preview ${id}`
+    `Reply: /approve or /reject\n` +
+    `Preview: /preview`
   );
 }
 
@@ -489,8 +565,16 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
   const cmd = parts[0]?.toLowerCase();
 
   if (cmd === '/approve') {
-    const id = parts[1];
-    if (!id) return false;
+    let id = parts[1];
+    if (!id && pendingConfigWriteRequests.size === 1) {
+      id = pendingConfigWriteRequests.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingConfigWriteRequests.size === 0
+        ? 'No pending config writes.'
+        : `Multiple pending — specify ID: ${[...pendingConfigWriteRequests.keys()].join(', ')}`);
+      return true;
+    }
 
     const pending = pendingConfigWriteRequests.get(id);
     if (!pending) {
@@ -509,6 +593,7 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
       // Also write to workspace root for backward compat
       writeFileSync(join(REPO_DIR, 'workspace', pending.file), pending.content);
 
+      log.info('Config write approved', { id, file: pending.file });
       client!.send({ type: 'config_write_response', id, ok: true, message: `${pending.file} updated` });
       injectSystemMessage(`Approved: config/${pending.file} updated`);
     } catch (err) {
@@ -520,8 +605,16 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
   }
 
   if (cmd === '/reject') {
-    const id = parts[1];
-    if (!id) return false;
+    let id = parts[1];
+    if (!id && pendingConfigWriteRequests.size === 1) {
+      id = pendingConfigWriteRequests.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingConfigWriteRequests.size === 0
+        ? 'No pending config writes.'
+        : `Multiple pending — specify ID: ${[...pendingConfigWriteRequests.keys()].join(', ')}`);
+      return true;
+    }
 
     const pending = pendingConfigWriteRequests.get(id);
     if (!pending) {
@@ -530,14 +623,23 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
     }
 
     pendingConfigWriteRequests.delete(id);
+    log.info('Config write rejected', { id, file: pending.file });
     client!.send({ type: 'config_write_response', id, ok: false, message: 'Config write rejected by user' });
     injectSystemMessage(`Rejected config write to ${pending.file}`);
     return true;
   }
 
   if (cmd === '/preview') {
-    const id = parts[1];
-    if (!id) return false;
+    let id = parts[1];
+    if (!id && pendingConfigWriteRequests.size === 1) {
+      id = pendingConfigWriteRequests.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingConfigWriteRequests.size === 0
+        ? 'No pending config writes.'
+        : `Multiple pending — specify ID: ${[...pendingConfigWriteRequests.keys()].join(', ')}`);
+      return true;
+    }
 
     const pending = pendingConfigWriteRequests.get(id);
     if (!pending) {
@@ -556,11 +658,69 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
   return false;
 }
 
-// --- Helpers ---
+// --- Host Daemon ---
 
-function log(msg: string): void {
-  const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
-  process.stderr.write(`[gatekeeper ${ts}] ${msg}\n`);
+let hostDaemonProcess: ChildProcess | null = null;
+
+async function startHostDaemon(): Promise<void> {
+  const { HOST_SOCKET_PATH } = await import('./host/protocol.js');
+
+  // Clean up stale socket
+  if (existsSync(HOST_SOCKET_PATH)) {
+    try { unlinkSync(HOST_SOCKET_PATH); } catch {}
+  }
+
+  // Spawn the host daemon as a child process.
+  // It runs on the host (not in Docker) so it has access to clipboard, screen, etc.
+  // --allow clipboard.read,clipboard.write — pre-approve clipboard (no prompts)
+  const daemonScript = resolve(__dirname, 'host', 'daemon.js');
+  
+  // Check if compiled JS exists, fall back to tsx for .ts
+  const scriptPath = existsSync(daemonScript) ? daemonScript : resolve(__dirname, 'host', 'daemon.ts');
+  const runner = existsSync(daemonScript) ? 'node' : 'tsx';
+
+  hostDaemonProcess = spawn(runner, [
+    scriptPath,
+    '--allow', 'clipboard.read,clipboard.write',
+    '--socket', HOST_SOCKET_PATH,
+  ], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  // Pipe daemon output to log file
+  hostDaemonProcess.stdout?.pipe(logStream, { end: false });
+  hostDaemonProcess.stderr?.pipe(logStream, { end: false });
+
+  hostDaemonProcess.on('error', (err) => {
+    log.warn('Host daemon failed to start', { error: err.message });
+    hostDaemonProcess = null;
+  });
+
+  hostDaemonProcess.on('exit', (code) => {
+    if (code !== 0 && code !== null) {
+      log.warn('Host daemon exited', { code });
+    }
+    hostDaemonProcess = null;
+  });
+
+  // Wait briefly for socket to appear
+  const start = Date.now();
+  while (Date.now() - start < 3000) {
+    if (existsSync(HOST_SOCKET_PATH)) {
+      log.info('Host daemon ready');
+      return;
+    }
+    await new Promise<void>((r) => setTimeout(r, 100));
+  }
+
+  log.warn('Host daemon socket not found after 3s — continuing without it');
+}
+
+function stopHostDaemon(): void {
+  if (hostDaemonProcess) {
+    hostDaemonProcess.kill('SIGTERM');
+    hostDaemonProcess = null;
+  }
 }
 
 // --- LLM Proxy ---
@@ -569,7 +729,7 @@ async function startLLMProxy(): Promise<void> {
   const { createProvider, detectProvider } = await import('./provider.js');
   const providerType = detectProvider();
   const provider = createProvider(providerType);
-  log(`LLM proxy: ${providerType} provider`);
+  log.info('LLM proxy provider', { provider: providerType });
 
   const { LLMProxy } = await import('./llm-proxy.js');
   const proxy = new LLMProxy(provider);
@@ -583,6 +743,21 @@ async function startLLMProxy(): Promise<void> {
 
 gatekeeperArgs = parseArgs();
 
+// --- Log setup ---
+// Redirect ALL console/stderr output to a log file.
+// The TUI writes directly via process.stdout.write(); everything else must go to the log file.
+// Without this, stray writes (from libraries, Node internals, container output) corrupt the terminal.
+const LOG_PATH = process.env['AIGENT_LOG'] ?? '/tmp/aigent-gatekeeper.log';
+const logStream = createWriteStream(LOG_PATH, { flags: 'a' });
+
+console.log = (...args: unknown[]) => { logStream.write(args.join(' ') + '\n'); };
+console.error = (...args: unknown[]) => { logStream.write(args.join(' ') + '\n'); };
+console.warn = (...args: unknown[]) => { logStream.write(args.join(' ') + '\n'); };
+process.stderr.write = ((chunk: string | Uint8Array) => {
+  logStream.write(chunk);
+  return true;
+}) as typeof process.stderr.write;
+
 // Set up initial mount from CLI
 if (gatekeeperArgs.projectFolder) {
   const mode = gatekeeperArgs.writeAccess ? 'rw' as const : 'ro' as const;
@@ -593,19 +768,22 @@ if (gatekeeperArgs.projectFolder) {
   });
 }
 
-// Ensure socket directory
-mkdirSync(SOCKET_DIR, { recursive: true });
+// Ensure socket directory — mode 0o777 so the container's `node` user can create sockets too
+mkdirSync(SOCKET_DIR, { recursive: true, mode: 0o777 });
 cleanupSocket();
+
+// Start host daemon (clipboard, screen capture, etc.)
+await startHostDaemon();
 
 // Start LLM proxy (holds API keys, worker connects to this)
 await startLLMProxy();
-log('LLM proxy ready');
+log.info('LLM proxy ready');
 
 // Start container
 try {
   await startContainer();
 } catch (err) {
-  log((err as Error).message);
+  log.error('Container start failed', { error: (err as Error).message });
   cleanupAll();
   process.exit(1);
 }
@@ -618,7 +796,11 @@ client = new AgentClient();
 const originalSendMessage = client.sendMessage.bind(client);
 client.sendMessage = (content: string) => {
   if (isGatekeeperCommand(content)) {
-    void handleGatekeeperCommand(content);
+    handleGatekeeperCommand(content).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error('Gatekeeper command error', { error: msg });
+      injectSystemMessage(`Error: ${msg}`);
+    });
     return;
   }
   originalSendMessage(content);
@@ -641,18 +823,18 @@ const canUseTUI = Boolean(
 );
 
 if (canUseTUI) {
-  const { render } = await import('ink');
-  const { App } = await import('./ui/App.js');
+  const { AnsiTUI } = await import('./ui/AnsiTUI.js');
+  const tui = new AnsiTUI(client);
+  tui.start();
 
-  const { waitUntilExit } = render(<App client={client} />, { exitOnCtrlC: false });
-  client.connect();
-
-  await waitUntilExit();
+  await tui.waitForExit();
 } else {
   const { startRepl } = await import('./repl.js');
   client.connect();
+  startRepl(client);
   await new Promise<void>((r) => {
     if (containerProcess) containerProcess.on('exit', r);
+    else r();
   });
 }
 

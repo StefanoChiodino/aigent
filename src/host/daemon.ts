@@ -22,12 +22,13 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PermissionStore } from './permissions.js';
 import { ClipboardProvider } from './providers/clipboard.js';
-import type {
-  CapabilityName,
-  CapabilityProvider,
-  HostRequest,
-  HostResponse,
-  HostEvent,
+import {
+  HOST_SOCKET_PATH,
+  type CapabilityName,
+  type CapabilityProvider,
+  type HostRequest,
+  type HostResponse,
+  type HostEvent,
 } from './protocol.js';
 
 // --- Parse CLI args ---
@@ -41,7 +42,7 @@ function parseArgs(argv: string[]): {
   const result = {
     allow: [] as CapabilityName[],
     deny: [] as CapabilityName[],
-    socket: '/tmp/aigent-host.sock',
+    socket: HOST_SOCKET_PATH,
     config: join(homedir(), '.config', 'aigent', 'permissions.json'),
   };
 
@@ -224,7 +225,8 @@ class HostDaemon {
 
     server.listen(this.socketPath, () => {
       // Restrict socket to owner only
-      try { chmodSync(this.socketPath, 0o600); } catch {}
+      // 0o666 so the container (uid 1000) can connect to the host daemon
+      try { chmodSync(this.socketPath, 0o666); } catch {}
       log(`Listening on ${this.socketPath}`);
       log('Waiting for agent connection...');
     });
