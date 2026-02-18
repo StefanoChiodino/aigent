@@ -31,6 +31,14 @@ export interface DisplayMessage {
   elapsed?: number | undefined;
 }
 
+export interface BackgroundTaskInfo {
+  id: string;
+  description: string;
+  status: 'running' | 'completed' | 'failed';
+  startedAt: string;
+  completedAt?: string;
+}
+
 export interface ServerState {
   messages: DisplayMessage[];
   usage: TokenUsage;
@@ -39,6 +47,7 @@ export interface ServerState {
   sessionId: string;
   model: string;
   isLoading: boolean;
+  tasks: BackgroundTaskInfo[];
 }
 
 export type ServerEvent =
@@ -54,6 +63,7 @@ export type ServerEvent =
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
   | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string }
+  | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'pong' };
 
 // Socket path

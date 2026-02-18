@@ -16,6 +16,7 @@ const SLASH_COMMANDS = [
   '/effort max',
   '/image ',
   '/usage',
+  '/tasks',
   '/profiles',
   '/profile ',
   '/profile create ',
@@ -56,9 +57,10 @@ interface InputBarProps {
   isLoading: boolean;
   thinking?: string | undefined;
   usage?: TokenUsage | undefined;
+  runningTasks?: number | undefined;
 }
 
-export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage }: InputBarProps): React.JSX.Element {
+export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage, runningTasks = 0 }: InputBarProps): React.JSX.Element {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const borderColor = isLoading ? 'gray' : 'cyan';
@@ -111,10 +113,12 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
   const totalStr = formatTokens(contextWindow);
   const cost = usage?.cost ?? 0;
   const costStr = cost > 0 ? (cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`) : '';
+  const taskStr = runningTasks > 0 ? `${runningTasks} task${runningTasks > 1 ? 's' : ''}` : '';
 
   // Measure status display width for top border fill
   let statusLen = 2 + rText.length; // "r:" + "on"/"off"
   if (effortLetter) statusLen += 2; // " H"
+  if (taskStr) statusLen += 3 + taskStr.length; // " | N tasks"
   if (costStr) statusLen += 3 + costStr.length; // " | $X.XX"
   if (contextUsed > 0) {
     // " | " + bar(12) + " " + used + "/" + total + " (" + pct + "%)"
@@ -137,6 +141,12 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
         <Text color={borderColor}>{'\u250c'}{'\u2500'.repeat(fill)}{' '}</Text>
         <Text color="gray">r:<Text color="white">{rText}</Text></Text>
         {effortLetter && <Text color="gray"> {effortLetter}</Text>}
+        {taskStr && (
+          <>
+            <Text color="gray">{' | '}</Text>
+            <Text color="cyan">{taskStr}</Text>
+          </>
+        )}
         {costStr && (
           <>
             <Text color="gray">{' | '}</Text>

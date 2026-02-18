@@ -18,5 +18,13 @@ fi
 
 cd /workspace
 
+# Start virtual display for screenshot support
+if [ -z "$DISPLAY" ]; then
+  export DISPLAY=:99
+  mkdir -p /tmp/.X11-unix
+  Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
+  sleep 0.3
+fi
+
 # Run the supervisor (manages server + TUI)
 exec tsx --tsconfig /app/tsconfig.json /app/src/supervisor.tsx

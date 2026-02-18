@@ -17,6 +17,7 @@ export interface AgentClientEvents {
   tool_start: (name: string, input: string, summary: string) => void;
   tool_output: (content: string) => void;
   tool_end: () => void;
+  task_update: (task: { id: string; description: string; status: string; startedAt: string; completedAt?: string }) => void;
   message: (message: ServerState['messages'][number]) => void;
   system: (content: string) => void;
   usage: (usage: ServerState['usage']) => void;
@@ -126,6 +127,9 @@ export class AgentClient extends EventEmitter {
         break;
       case 'tool_end':
         this.emit('tool_end');
+        break;
+      case 'task_update':
+        this.emit('task_update', event.task);
         break;
       case 'message':
         this.emit('message', event.message);

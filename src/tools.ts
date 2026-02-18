@@ -1,7 +1,8 @@
 import { execSync, spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { sanitizedEnv, validateWritePath, validateFetchUrl, checkCommandSafety } from './safety.js';
+import type { ToolContentBlock } from './provider.js';
 
 /** Tool definition — provider-agnostic. */
 export interface ToolDef {
@@ -238,6 +239,38 @@ const spawnAgentTool: ToolDef = {
   },
 };
 
+const dispatchTaskTool: ToolDef = {
+  name: 'dispatch_task',
+  description:
+    'Dispatch a task to a background agent. Returns immediately with a task ID — the main ' +
+    'conversation stays unblocked while the background agent works. Use this for any task that ' +
+    'takes more than a few seconds: refactoring, writing tests, research, code review, etc. ' +
+    'When the background task completes, its result will be injected back into the conversation. ' +
+    'Prefer this over spawn_agent for long-running work so the user can keep chatting.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      task: {
+        type: 'string',
+        description: 'Clear description of what the background agent should do.',
+      },
+      context: {
+        type: 'string',
+        description: 'Optional context (relevant file paths, decisions, constraints)',
+      },
+      model: {
+        type: 'string',
+        description: 'Model to use (default: same as parent). Use a smaller model for simple tasks.',
+      },
+      max_iterations: {
+        type: 'number',
+        description: 'Maximum tool-use iterations (default: 25, max: 50)',
+      },
+    },
+    required: ['task'],
+  },
+};
+
 const fetchTool: ToolDef = {
   name: 'fetch',
   description:
@@ -330,9 +363,27 @@ const patchTool: ToolDef = {
   },
 };
 
+const screenshotTool: ToolDef = {
+  name: 'screenshot',
+  description:
+    'Take a screenshot of the virtual display (Xvfb) and return it as an image. ' +
+    'Use this to see what is currently displayed on screen (browser, GUI app, terminal, etc). ' +
+    'Requires a running virtual display (DISPLAY env var). Returns a PNG image.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      region: {
+        type: 'string',
+        description: 'Optional crop geometry as "WxH+X+Y" (e.g. "640x480+0+0"). Default: full screen.',
+      },
+    },
+    required: [],
+  },
+};
+
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
-  globTool, fetchTool, treeTool, patchTool, spawnAgentTool,
+  globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
 ];
 
 /**
@@ -361,9 +412,11 @@ interface FetchInput { url: string; method?: string; headers?: Record<string, st
 interface TreeInput { path?: string; max_depth?: number; include_hidden?: boolean }
 interface GlobInput { pattern: string; path?: string; max_results?: number }
 interface PatchInput { path: string; edits: Array<{ old_text: string; new_text: string }> }
+interface ScreenshotInput { region?: string }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
+interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | SpawnAgentInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -406,10 +459,19 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       return `tree ${(input as TreeInput).path ?? '.'}`;
     case 'patch':
       return `patch ${(input as PatchInput).path} (${(input as PatchInput).edits?.length ?? 0} edits)`;
+    case 'screenshot': {
+      const { region } = input as ScreenshotInput;
+      return region ? `screenshot (${region})` : 'screenshot';
+    }
     case 'spawn_agent': {
       const { task } = input as SpawnAgentInput;
       const short = task.length > 60 ? task.slice(0, 60) + '...' : task;
       return `spawn: ${short}`;
+    }
+    case 'dispatch_task': {
+      const { task } = input as DispatchTaskInput;
+      const short = task.length > 60 ? task.slice(0, 60) + '...' : task;
+      return `dispatch: ${short}`;
     }
     default:
       return name;
@@ -427,7 +489,7 @@ export async function executeTool(
   input: ToolInput,
   isOAuth: boolean,
   onOutput?: (chunk: string) => void,
-): Promise<string> {
+): Promise<string | ToolContentBlock[]> {
   // Map Claude Code names back to internal names if needed
   const internalName = isOAuth ? fromClaudeCodeName(name) : name;
 
@@ -762,6 +824,40 @@ export async function executeTool(
       } catch (err: unknown) {
         const fsErr = err as { message?: string };
         return `Error patching file: ${fsErr.message ?? 'unknown error'}`;
+      }
+    }
+
+    case 'screenshot': {
+      const { region } = input as ScreenshotInput;
+      const display = process.env['DISPLAY'];
+      if (!display) {
+        return 'Error: No DISPLAY environment variable set. Virtual display (Xvfb) may not be running.';
+      }
+
+      try {
+        const tmpPath = `/tmp/screenshot-${Date.now()}.png`;
+        const importArgs = ['-window', 'root'];
+        if (region) {
+          importArgs.push('-crop', region);
+        }
+        importArgs.push(tmpPath);
+
+        execSync(['import', ...importArgs].map((a) => JSON.stringify(a)).join(' '), {
+          encoding: 'utf-8',
+          timeout: 10_000,
+          env: { ...sanitizedEnv(), DISPLAY: display },
+        });
+
+        const buffer = readFileSync(tmpPath);
+        try { unlinkSync(tmpPath); } catch { /* ignore */ }
+
+        return [
+          { type: 'text', text: `Screenshot captured (${buffer.length} bytes, display ${display})` },
+          { type: 'image', mediaType: 'image/png', data: buffer.toString('base64') },
+        ] satisfies ToolContentBlock[];
+      } catch (err: unknown) {
+        const e = err as { stderr?: string; message?: string };
+        return `Error taking screenshot: ${e.stderr ?? e.message ?? 'unknown error'}`;
       }
     }
 

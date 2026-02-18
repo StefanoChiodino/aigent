@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     ca-certificates \
     procps \
+    xvfb \
+    imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy package files and install deps (as root, before switching user)

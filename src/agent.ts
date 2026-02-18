@@ -1,4 +1,4 @@
-import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderResponse, type ProviderToolDef, type AnthropicProvider, type UserContent } from './provider.js';
+import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderResponse, type ProviderToolDef, type AnthropicProvider, type UserContent, type ToolContentBlock, type ToolResult } from './provider.js';
 import { getToolDefinitions, executeTool, summarizeToolCall, fromClaudeCodeName } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
@@ -11,7 +11,9 @@ const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker containe
 - tree for visualizing directory structure
 - fetch for HTTP requests (with text_only mode for web pages)
 - patch for applying multiple edits to a file at once
-- spawn_agent to delegate tasks to a sub-agent
+- screenshot to capture the virtual display (verify GUI state, browser content, etc.)
+- dispatch_task to run long tasks in the background (non-blocking — you keep chatting)
+- spawn_agent to run a sub-agent synchronously (blocks until complete)
 - MCP tools from connected servers (if configured via mcp.json)
 - Internet access via curl, wget, etc.
 
@@ -84,6 +86,8 @@ export interface ChatCallbacks {
   onToolEnd?: () => void;
   onUsage?: (usage: TokenUsage) => void;
   onCompact?: (summary: string) => void;
+  onDispatchTask?: (input: Record<string, unknown>) => string; // returns task ID
+  signal?: AbortSignal;
 }
 
 export class Agent {
@@ -137,6 +141,7 @@ export class Agent {
 
   async chat(userMessage: string | UserContent, callbacks?: ChatCallbacks): Promise<string> {
     this.reloadSystemPrompt();
+    const signal = callbacks?.signal;
 
     const content: UserContent = typeof userMessage === 'string' ? userMessage : userMessage;
     this.messages.push({ role: 'user', content });
@@ -145,6 +150,11 @@ export class Agent {
     const maxIterations = 25;
 
     while (iterations < maxIterations) {
+      // Check abort before each iteration
+      if (signal?.aborted) {
+        this.cleanupAfterAbort();
+        throw new DOMException('Aborted', 'AbortError');
+      }
       iterations++;
 
       // Mid-loop compaction: check context before sending to avoid blowing the window
@@ -184,7 +194,7 @@ export class Agent {
       }
 
       // Execute tools
-      const results: { id: string; content: string }[] = [];
+      const results: ToolResult[] = [];
       for (const tc of response.toolCalls) {
         const inputStr = JSON.stringify(tc.input);
         const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '\u2026' : inputStr;
@@ -192,8 +202,11 @@ export class Agent {
         const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
         callbacks?.onToolStart?.(tc.name, truncatedInput, summary);
 
-        let result: string;
-        if (toolName === 'spawn_agent') {
+        let result: string | ToolContentBlock[];
+        if (toolName === 'dispatch_task' && callbacks?.onDispatchTask) {
+          const taskId = callbacks.onDispatchTask(tc.input as Record<string, unknown>);
+          result = `Task dispatched: ${taskId}. The background agent is working on it. You'll be notified when it completes. Continue chatting normally.`;
+        } else if (toolName === 'spawn_agent') {
           result = await this.executeSpawnAgent(tc.input as Record<string, unknown>);
         } else if (this.mcpManager?.isMCPTool(toolName)) {
           result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
@@ -201,12 +214,16 @@ export class Agent {
           result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput);
         }
 
-        const maxLen = 50_000;
-        const truncated = result.length > maxLen
-          ? result.slice(0, maxLen) + `\n\n... [truncated, ${result.length} bytes total]`
-          : result;
-
-        results.push({ id: tc.id, content: truncated });
+        // Truncate string results; image results pass through
+        if (typeof result === 'string') {
+          const maxLen = 50_000;
+          const truncated = result.length > maxLen
+            ? result.slice(0, maxLen) + `\n\n... [truncated, ${result.length} bytes total]`
+            : result;
+          results.push({ id: tc.id, content: truncated });
+        } else {
+          results.push({ id: tc.id, content: result });
+        }
       }
 
       callbacks?.onToolEnd?.();
@@ -226,14 +243,18 @@ export class Agent {
           this.systemPromptText,
           this.messages,
           this.toolDefs,
-          { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking },
+          { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking, signal: callbacks?.signal },
           {
             onText: callbacks?.onText,
             onThinking: callbacks?.onThinking,
           },
         );
       } catch (err: unknown) {
-        const e = err as { status?: number; message?: string; code?: string };
+        const e = err as { status?: number; message?: string; code?: string; name?: string };
+
+        // Don't retry aborts
+        if (e.name === 'AbortError' || callbacks?.signal?.aborted) throw err;
+
         const status = e.status ?? 0;
         const isTransient = status === 429 || status === 500 || status === 502 || status === 503 || status === 529
           || e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.code === 'ENOTFOUND';
@@ -303,13 +324,17 @@ export class Agent {
         }
 
         // Execute sub-agent tools (no spawn_agent)
-        const results: { id: string; content: string }[] = [];
+        const results: ToolResult[] = [];
         for (const tc of response.toolCalls) {
           const result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
-          const truncated = result.length > 50_000
-            ? result.slice(0, 50_000) + '\n\n... [truncated]'
-            : result;
-          results.push({ id: tc.id, content: truncated });
+          if (typeof result === 'string') {
+            const truncated = result.length > 50_000
+              ? result.slice(0, 50_000) + '\n\n... [truncated]'
+              : result;
+            results.push({ id: tc.id, content: truncated });
+          } else {
+            results.push({ id: tc.id, content: result });
+          }
         }
 
         subMessages.push({ role: 'tool_result', results });
@@ -357,6 +382,39 @@ export class Agent {
     return `Compacted: ${before} → ${after} messages`;
   }
 
+  /**
+   * Clean up message history after an abort.
+   * Removes trailing incomplete exchanges (user message without assistant response,
+   * or assistant message with tool_calls but no tool_result).
+   */
+  private cleanupAfterAbort(): void {
+    // Walk backward and remove trailing incomplete messages
+    while (this.messages.length > 0) {
+      const last = this.messages[this.messages.length - 1]!;
+
+      // Remove trailing user message (we aborted before getting a response)
+      if (last.role === 'user') {
+        this.messages.pop();
+        break;
+      }
+
+      // Remove trailing tool_result (orphaned — assistant that requested it may be gone)
+      if (last.role === 'tool_result') {
+        this.messages.pop();
+        continue;
+      }
+
+      // Remove trailing assistant message with tool calls (incomplete exchange)
+      if (last.role === 'assistant' && last.toolCalls && last.toolCalls.length > 0) {
+        this.messages.pop();
+        continue;
+      }
+
+      // Trailing assistant with no tool calls is fine — it's a complete response
+      break;
+    }
+  }
+
   get thinkingLevel(): ThinkingLevel { return this.thinking; }
   set thinkingLevel(level: ThinkingLevel) { this.thinking = level; }
 
@@ -370,6 +428,7 @@ export class Agent {
 
   getMessages(): ProviderMessage[] { return [...this.messages]; }
   setMessages(messages: ProviderMessage[]): void { this.messages = [...messages]; }
+  getToolDefs(): ProviderToolDef[] { return [...this.toolDefs]; }
 
   reloadSystemPrompt(): void {
     const workspaceContext = loadWorkspaceContext(this.workspacePath);

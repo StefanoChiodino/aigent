@@ -13,8 +13,8 @@ import { existsSync, unlinkSync, readFileSync, writeFileSync, appendFileSync, mk
 import { resolve, join } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
-import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType } from './provider.js';
-import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage } from './protocol.js';
+import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType, ToolResult, ToolContentBlock } from './provider.js';
+import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage, BackgroundTaskInfo } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
 import { computeCost } from './pricing.js';
 import { loadMCP, type MCPManager } from './mcp.js';
@@ -122,6 +122,145 @@ let isLoading = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
 
+// --- Background tasks ---
+
+interface BackgroundTask {
+  id: string;
+  description: string;
+  status: 'running' | 'completed' | 'failed';
+  startedAt: string;
+  completedAt?: string;
+  result?: string;
+}
+
+const backgroundTasks = new Map<string, BackgroundTask>();
+let taskCounter = 0;
+
+function generateTaskId(): string {
+  return `task-${++taskCounter}-${Date.now().toString(36)}`;
+}
+
+function getTaskInfos(): BackgroundTaskInfo[] {
+  return Array.from(backgroundTasks.values()).map(({ id, description, status, startedAt, completedAt }) => ({
+    id, description, status, startedAt, completedAt,
+  }));
+}
+
+/**
+ * Dispatch a task to a background agent. Runs independently of the main
+ * conversation. When complete, the result is injected as a system message.
+ */
+function dispatchBackgroundTask(input: {
+  task: string;
+  context?: string;
+  model?: string;
+  max_iterations?: number;
+}): string {
+  const taskId = generateTaskId();
+  const description = input.task.length > 80 ? input.task.slice(0, 80) + '...' : input.task;
+
+  const task: BackgroundTask = {
+    id: taskId,
+    description,
+    status: 'running',
+    startedAt: new Date().toISOString(),
+  };
+  backgroundTasks.set(taskId, task);
+  broadcast({ type: 'task_update', task: { id: taskId, description, status: 'running', startedAt: task.startedAt } });
+
+  // Fire and forget — run the sub-agent in the background
+  void (async () => {
+    const taskModel = input.model ?? model;
+    const maxIter = Math.min(input.max_iterations ?? 25, 50);
+
+    const systemPrompt = [
+      'You are a background agent dispatched to complete a specific task.',
+      'Work independently and return a clear, complete result.',
+      'You have full tool access: exec, file read/write/edit, grep, glob, fetch, tree, patch.',
+      'Do NOT spawn further agents or dispatch tasks.',
+      '',
+      `Task: ${input.task}`,
+      input.context ? `\nContext: ${input.context}` : '',
+    ].join('\n');
+
+    const { createProvider, detectProvider } = await import('./provider.js');
+    const { executeTool } = await import('./tools.js');
+    const subProvider = createProvider(detectProvider());
+
+    // Exclude agent-spawning tools to prevent recursion
+    const subToolDefs = agent.getToolDefs().filter((t) =>
+      t.name !== 'spawn_agent' && t.name !== 'dispatch_task'
+    );
+
+    const subMessages: ProviderMessage[] = [
+      { role: 'user', content: input.task + (input.context ? `\n\nContext: ${input.context}` : '') },
+    ];
+
+    let iterations = 0;
+    let finalText = '';
+
+    try {
+      while (iterations < maxIter) {
+        iterations++;
+
+        const response = await subProvider.sendMessage(
+          systemPrompt,
+          subMessages,
+          subToolDefs,
+          { model: taskModel, maxTokens: 16384, thinking: agent.thinkingLevel },
+        );
+
+        subMessages.push({
+          role: 'assistant',
+          content: response.text,
+          toolCalls: response.toolCalls.length > 0 ? response.toolCalls : undefined,
+        });
+
+        if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
+          finalText = response.text;
+          break;
+        }
+
+        const results: ToolResult[] = [];
+        for (const tc of response.toolCalls) {
+          const result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], false);
+          if (typeof result === 'string') {
+            const truncated = result.length > 50_000
+              ? result.slice(0, 50_000) + '\n\n... [truncated]'
+              : result;
+            results.push({ id: tc.id, content: truncated });
+          } else {
+            results.push({ id: tc.id, content: result });
+          }
+        }
+
+        subMessages.push({ role: 'tool_result', results });
+      }
+
+      if (!finalText) finalText = '[background agent hit iteration limit]';
+
+      // Task completed — inject result into main conversation
+      task.status = 'completed';
+      task.completedAt = new Date().toISOString();
+      task.result = finalText;
+
+      const summary = finalText.length > 500 ? finalText.slice(0, 500) + '...' : finalText;
+      addSystemMessage(`[Task ${taskId} completed: ${description}]\n\n${summary}`);
+      broadcast({ type: 'task_update', task: { id: taskId, description, status: 'completed', startedAt: task.startedAt, completedAt: task.completedAt } });
+
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      task.status = 'failed';
+      task.completedAt = new Date().toISOString();
+
+      addSystemMessage(`[Task ${taskId} failed: ${e.message ?? 'unknown error'}]`);
+      broadcast({ type: 'task_update', task: { id: taskId, description, status: 'failed', startedAt: task.startedAt, completedAt: task.completedAt } });
+    }
+  })();
+
+  return taskId;
+}
+
 // --- Persistent usage tracking ---
 
 interface LifetimeUsage {
@@ -218,6 +357,7 @@ function getState(): ServerState {
     sessionId: currentSessionId,
     model,
     isLoading,
+    tasks: getTaskInfos(),
   };
 }
 
@@ -395,6 +535,7 @@ function handleCommand(cmd: string): boolean {
     void (async () => {
       try {
         const response = await agent.chat(userContent, {
+          signal: controller.signal,
           onText: (text) => { if (!controller.signal.aborted) broadcast({ type: 'text', content: text }); },
           onThinking: (text) => { if (!controller.signal.aborted) broadcast({ type: 'thinking', content: text }); },
           onToolStart: (name, toolInput, summary) => { if (!controller.signal.aborted) broadcast({ type: 'tool_start', name, input: toolInput, summary }); },
@@ -402,6 +543,7 @@ function handleCommand(cmd: string): boolean {
           onToolEnd: () => { if (!controller.signal.aborted) broadcast({ type: 'tool_end' }); },
           onUsage: (u) => { usage = { ...u, cost: computeCost(model, u) }; broadcast({ type: 'usage', usage }); },
           onCompact: (summary) => { addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`); },
+          onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; max_iterations?: number }),
         });
 
         if (!controller.signal.aborted) {
@@ -455,6 +597,32 @@ function handleCommand(cmd: string): boolean {
     return true;
   }
 
+  if (trimmed === '/tasks') {
+    const tasks = Array.from(backgroundTasks.values());
+    if (tasks.length === 0) {
+      addSystemMessage('No background tasks.');
+    } else {
+      const running = tasks.filter((t) => t.status === 'running');
+      const completed = tasks.filter((t) => t.status !== 'running');
+      const lines: string[] = [];
+      if (running.length > 0) {
+        lines.push(`Running (${running.length}):`);
+        for (const t of running) {
+          const elapsed = ((Date.now() - new Date(t.startedAt).getTime()) / 1000).toFixed(0);
+          lines.push(`  ${t.id}: ${t.description} (${elapsed}s)`);
+        }
+      }
+      if (completed.length > 0) {
+        lines.push(`Completed (${completed.length}):`);
+        for (const t of completed.slice(-5)) {
+          lines.push(`  ${t.id}: ${t.description} [${t.status}]`);
+        }
+      }
+      addSystemMessage(lines.join('\n'));
+    }
+    return true;
+  }
+
   if (trimmed === '/help') {
     addSystemMessage(
       'Commands:\n' +
@@ -464,6 +632,7 @@ function handleCommand(cmd: string): boolean {
       '  /effort <level>     Set effort (low/medium/high/max)\n' +
       '  /image <path> [msg] Send an image with optional message\n' +
       '  /usage              Show token usage (session + lifetime)\n' +
+      '  /tasks              Show background tasks\n' +
       '  /profiles           List profiles\n' +
       '  /profile <name>     Switch profile\n' +
       '  /profile create <n> Create new profile\n' +
@@ -506,6 +675,7 @@ async function processMessage(content: string): Promise<void> {
 
   try {
     const response = await agent.chat(userContent, {
+      signal: controller.signal,
       onText: (text) => {
         if (controller.signal.aborted) return;
         broadcast({ type: 'text', content: text });
@@ -533,6 +703,7 @@ async function processMessage(content: string): Promise<void> {
       onCompact: (summary) => {
         addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
       },
+      onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; max_iterations?: number }),
     });
 
     if (!controller.signal.aborted) {
@@ -582,6 +753,13 @@ function handleCancel(): void {
     abortController = null;
     messageQueue.length = 0;
     isLoading = false;
+
+    // Remove the trailing user message from display if the last message is from the user
+    // (agent.cleanupAfterAbort handles the internal message state)
+    if (messages.length > 0 && messages[messages.length - 1]!.role === 'user') {
+      messages.pop();
+    }
+
     broadcast({ type: 'text', content: '' });
     broadcast({ type: 'loading', isLoading: false });
     addSystemMessage('Cancelled.');

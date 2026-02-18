@@ -41,6 +41,7 @@ export function App({ client }: AppProps): React.JSX.Element {
   const [isThinking, setIsThinking] = useState(false);
   const [activeTools, setActiveTools] = useState<ToolExecution[]>([]);
   const [toolOutput, setToolOutput] = useState('');
+  const [runningTasks, setRunningTasks] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const [currentThinking, setCurrentThinking] = useState<ThinkingLevel>('high');
@@ -62,6 +63,7 @@ export function App({ client }: AppProps): React.JSX.Element {
       setUsage(state.usage);
       setCurrentThinking(state.thinking);
       setIsLoading(state.isLoading);
+      setRunningTasks(state.tasks?.filter((t) => t.status === 'running').length ?? 0);
       setError(null);
     };
 
@@ -119,6 +121,14 @@ export function App({ client }: AppProps): React.JSX.Element {
       setStreaming('');
     };
 
+    const onTaskUpdate = (task: { status: string }) => {
+      if (task.status === 'running') {
+        setRunningTasks((prev) => prev + 1);
+      } else {
+        setRunningTasks((prev) => Math.max(0, prev - 1));
+      }
+    };
+
     const onUsage = (u: TokenUsage) => {
       setUsage(u);
     };
@@ -151,6 +161,7 @@ export function App({ client }: AppProps): React.JSX.Element {
     client.on('tool_start', onToolStart);
     client.on('tool_output', onToolOutput);
     client.on('tool_end', onToolEnd);
+    client.on('task_update', onTaskUpdate);
     client.on('usage', onUsage);
     client.on('loading', onLoading);
     client.on('error', onError);
@@ -167,6 +178,7 @@ export function App({ client }: AppProps): React.JSX.Element {
       client.removeListener('tool_start', onToolStart);
       client.removeListener('tool_output', onToolOutput);
       client.removeListener('tool_end', onToolEnd);
+      client.removeListener('task_update', onTaskUpdate);
       client.removeListener('usage', onUsage);
       client.removeListener('loading', onLoading);
       client.removeListener('error', onError);
@@ -262,6 +274,7 @@ export function App({ client }: AppProps): React.JSX.Element {
         isLoading={isLoading}
         thinking={currentThinking}
         usage={usage}
+        runningTasks={runningTasks}
       />
     </Box>
   );

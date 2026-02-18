@@ -71,10 +71,21 @@ function messagesToSummaryInput(messages: ProviderMessage[]): ProviderMessage[] 
       // Include abbreviated tool results as a user message
       // (API requires alternating user/assistant, and tool results are context)
       const parts = msg.results.map((r) => {
-        const content = r.content;
-        const truncated = content.length > 500
-          ? content.slice(0, 500) + `… [${content.length} bytes total]`
-          : content;
+        let textContent: string;
+        if (typeof r.content === 'string') {
+          textContent = r.content;
+        } else {
+          // Extract text from mixed content, note images
+          const textParts = r.content
+            .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+            .map((b) => b.text);
+          const imageCount = r.content.filter((b) => b.type === 'image').length;
+          textContent = textParts.join('\n');
+          if (imageCount > 0) textContent += ` [+${imageCount} image(s)]`;
+        }
+        const truncated = textContent.length > 500
+          ? textContent.slice(0, 500) + `… [${textContent.length} bytes total]`
+          : textContent;
         return `[Tool result]: ${truncated}`;
       });
       result.push({ role: 'user', content: parts.join('\n') });

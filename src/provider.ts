@@ -31,9 +31,14 @@ export interface ProviderToolDef {
   input_schema: Record<string, unknown>;
 }
 
+/** Content block for tool results — text or image. */
+export type ToolContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; mediaType: ImageMediaType; data: string };
+
 export interface ToolResult {
   id: string;
-  content: string;
+  content: string | ToolContentBlock[];
 }
 
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
@@ -63,6 +68,7 @@ export interface Provider {
       model: string;
       maxTokens: number;
       thinking: ThinkingLevel;
+      signal?: AbortSignal;
     },
     callbacks?: StreamCallbacks,
   ): Promise<ProviderResponse>;
@@ -93,7 +99,7 @@ export class AnthropicProvider implements Provider {
     systemPrompt: string,
     messages: ProviderMessage[],
     tools: ProviderToolDef[],
-    options: { model: string; maxTokens: number; thinking: ThinkingLevel },
+    options: { model: string; maxTokens: number; thinking: ThinkingLevel; signal?: AbortSignal },
     callbacks?: StreamCallbacks,
   ): Promise<ProviderResponse> {
     const anthropicMessages = this.convertMessages(messages);
@@ -122,6 +128,15 @@ export class AnthropicProvider implements Provider {
     const stream = this.client.messages.stream(
       params as Parameters<typeof this.client.messages.stream>[0],
     );
+
+    // Abort the stream when the signal fires
+    if (options.signal) {
+      if (options.signal.aborted) {
+        stream.abort();
+        throw new DOMException('Aborted', 'AbortError');
+      }
+      options.signal.addEventListener('abort', () => stream.abort(), { once: true });
+    }
 
     let currentText = '';
     let thinkingText = '';
@@ -218,7 +233,21 @@ export class AnthropicProvider implements Provider {
           content: msg.results.map((r) => ({
             type: 'tool_result' as const,
             tool_use_id: r.id,
-            content: r.content,
+            content: typeof r.content === 'string'
+              ? r.content
+              : r.content.map((block) => {
+                  if (block.type === 'text') {
+                    return { type: 'text' as const, text: block.text };
+                  }
+                  return {
+                    type: 'image' as const,
+                    source: {
+                      type: 'base64' as const,
+                      media_type: block.mediaType,
+                      data: block.data,
+                    },
+                  };
+                }),
           })),
         });
       }
@@ -243,7 +272,7 @@ export class OpenAIProvider implements Provider {
     systemPrompt: string,
     messages: ProviderMessage[],
     tools: ProviderToolDef[],
-    options: { model: string; maxTokens: number; thinking: ThinkingLevel },
+    options: { model: string; maxTokens: number; thinking: ThinkingLevel; signal?: AbortSignal },
     callbacks?: StreamCallbacks,
   ): Promise<ProviderResponse> {
     const openaiMessages = this.convertMessages(systemPrompt, messages);
@@ -362,10 +391,23 @@ export class OpenAIProvider implements Provider {
         result.push(entry);
       } else if (msg.role === 'tool_result') {
         for (const r of msg.results) {
+          let textContent: string;
+          if (typeof r.content === 'string') {
+            textContent = r.content;
+          } else {
+            const textParts = r.content
+              .filter((b): b is Extract<ToolContentBlock, { type: 'text' }> => b.type === 'text')
+              .map((b) => b.text);
+            const imageCount = r.content.filter((b) => b.type === 'image').length;
+            textContent = textParts.join('\n');
+            if (imageCount > 0) {
+              textContent += `\n[${imageCount} image(s) captured — not supported by this provider]`;
+            }
+          }
           result.push({
             role: 'tool',
             tool_call_id: r.id,
-            content: r.content,
+            content: textContent,
           });
         }
       }
