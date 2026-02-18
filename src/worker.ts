@@ -6,7 +6,7 @@
  * No TUI — the TUI runs on the host via the gatekeeper.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { resolve, join, dirname } from 'node:path';
 import { mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -73,7 +73,7 @@ process.on('SIGINT', () => shutdown(0));
 
 // --- File watcher (for self-modification auto-restart) ---
 
-import { readdirSync, statSync, readFileSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 
 function getFileHashes(dir: string): Map<string, number> {
   const hashes = new Map<string, number>();
@@ -113,7 +113,29 @@ setInterval(() => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      console.error('[worker] Source files changed — restarting server...');
+
+      // Typecheck before restarting — don't break the running server
+      console.error('[worker] Source files changed — typechecking...');
+      try {
+        execSync('npx tsc --noEmit', {
+          cwd: APP_DIR,
+          stdio: ['ignore', 'ignore', 'pipe'],
+          timeout: 30_000,
+        });
+        console.error('[worker] Typecheck passed — restarting server...');
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
+        const errorLines = stderr.split('\n').filter((l) => l.includes('error TS')).slice(0, 5);
+        console.error('[worker] Typecheck failed — not restarting:');
+        for (const line of errorLines) {
+          console.error(`  ${line.trim()}`);
+        }
+        if (errorLines.length === 0) {
+          console.error(`  ${stderr.slice(0, 500)}`);
+        }
+        return; // Don't restart — current code is still running fine
+      }
+
       if (serverProcess) {
         isRestarting = true;
         serverProcess.kill('SIGTERM');

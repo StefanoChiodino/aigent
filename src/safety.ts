@@ -61,43 +61,35 @@ export function sanitizedEnv(): Record<string, string | undefined> {
 
 // --- Path validation ---
 
-/** Directories the agent is allowed to write to. */
+/**
+ * Directories the agent is allowed to write to.
+ *
+ * In the gatekeeper architecture, /app is read-only by default.
+ * Additional writable directories are added dynamically when the user
+ * mounts folders via /mount (these appear under /project/).
+ * The Docker mounts are the real security boundary — this is defense in depth.
+ */
 const WRITABLE_ROOTS = [
   '/workspace',     // Workspace (memory, config, sessions)
-  '/app/src',       // Source code (self-authoring)
+  '/project',       // User-mounted project folders (gatekeeper-controlled)
   '/tmp',           // Temp files
-];
-
-/** Files/paths that should never be written to, even within writable roots. */
-const BLOCKED_PATHS = [
-  '/app/entrypoint.sh',
-  '/app/package.json',
-  '/app/package-lock.json',
-  '/app/tsconfig.json',
-  '/app/Dockerfile',
-  '/app/docker-compose.yml',
-  '/app/Makefile',
-  '/app/.env',
 ];
 
 /**
  * Check if a file path is safe to write to.
  * Returns null if safe, or an error message if blocked.
+ *
+ * Note: this is defense-in-depth. The real write protection comes from
+ * Docker mount modes (ro/rw) controlled by the gatekeeper. The kernel
+ * enforces those regardless of what this function says.
  */
 export function validateWritePath(filePath: string): string | null {
   const resolved = resolve(filePath);
 
-  // Check blocked paths first
-  for (const blocked of BLOCKED_PATHS) {
-    if (resolved === blocked || resolved.startsWith(blocked + '/')) {
-      return `Blocked: cannot write to ${blocked} (infrastructure file)`;
-    }
-  }
-
   // Check if within a writable root
   const inWritableRoot = WRITABLE_ROOTS.some((root) => resolved.startsWith(root + '/') || resolved === root);
   if (!inWritableRoot) {
-    return `Blocked: writes only allowed under ${WRITABLE_ROOTS.join(', ')}`;
+    return `Blocked: writes only allowed under ${WRITABLE_ROOTS.join(', ')}. Use request_mount to ask for access to other folders.`;
   }
 
   return null; // Safe
