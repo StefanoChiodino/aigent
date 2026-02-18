@@ -103,10 +103,12 @@ export class AnthropicProvider implements Provider {
     callbacks?: StreamCallbacks,
   ): Promise<ProviderResponse> {
     const anthropicMessages = this.convertMessages(messages);
-    const anthropicTools = tools.map((t) => ({
+    const anthropicTools = tools.map((t, i) => ({
       name: t.name,
       description: t.description,
       input_schema: t.input_schema,
+      // Cache the last tool definition so all tools are covered by prompt caching
+      ...(i === tools.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {}),
     })) as Anthropic.Tool[];
 
     const system = buildSystemPrompt(systemPrompt, this.isOAuth);

@@ -46,12 +46,19 @@ export function createClient(apiKey: string): { client: Anthropic; isOAuth: bool
 }
 
 /**
- * OAT tokens require the system prompt to start with the Claude Code identity.
- * Additional system instructions are appended after it.
+ * Build system prompt with cache control for prompt caching.
+ * OAT tokens additionally require the Claude Code identity prefix.
+ * Always returns an array with cache_control so the system prompt is cached.
  */
-export function buildSystemPrompt(basePrompt: string, isOAuth: boolean): string | Anthropic.TextBlockParam[] {
+export function buildSystemPrompt(basePrompt: string, isOAuth: boolean): Anthropic.TextBlockParam[] {
   if (!isOAuth) {
-    return basePrompt;
+    return [
+      {
+        type: 'text' as const,
+        text: basePrompt,
+        cache_control: { type: 'ephemeral' as const },
+      },
+    ];
   }
 
   return [
