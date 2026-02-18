@@ -11,6 +11,7 @@ export interface TokenUsage {
   cacheRead: number;
   cacheWrite: number;
   cost?: number; // Estimated cost in USD
+  contextTokens?: number; // Latest API call's input tokens = actual context window fill
 }
 
 // --- Client → Server ---

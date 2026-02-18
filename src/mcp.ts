@@ -18,7 +18,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { join } from 'node:path';
 import type { ToolDef } from './tools.js';
 
 // --- JSON-RPC types ---
@@ -27,7 +27,7 @@ interface JsonRpcRequest {
   jsonrpc: '2.0';
   id?: number;
   method: string;
-  params?: Record<string, unknown>;
+  params: Record<string, unknown> | undefined;
 }
 
 interface JsonRpcResponse {
@@ -303,10 +303,17 @@ export class MCPManager {
               // Prefix with server name to avoid collisions
               const prefixedName = `mcp_${name}_${tool.name}`;
               this.toolToServer.set(prefixedName, name);
+              const schema: ToolDef['input_schema'] = {
+                type: 'object' as const,
+                properties: tool.inputSchema.properties ?? {},
+              };
+              if (tool.inputSchema.required) {
+                schema.required = tool.inputSchema.required;
+              }
               this._tools.push({
                 name: prefixedName,
                 description: `[MCP:${name}] ${tool.description ?? tool.name}`,
-                input_schema: tool.inputSchema,
+                input_schema: schema,
               });
             }
           })

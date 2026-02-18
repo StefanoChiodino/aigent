@@ -5,6 +5,7 @@ import type { TokenUsage } from '../protocol.js';
 
 const SLASH_COMMANDS = [
   '/help',
+  '/compact',
   '/refresh',
   '/reset',
   '/reasoning on',
@@ -101,7 +102,7 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
     : null;
   const rText = effortLetter ? 'on' : 'off';
 
-  const contextUsed = (usage?.input ?? 0) + (usage?.output ?? 0);
+  const contextUsed = usage?.contextTokens ?? 0;
   const contextWindow = 200_000;
   const pct = contextUsed > 0 ? Math.round((contextUsed / contextWindow) * 100) : 0;
   const bar = contextBar(contextUsed, contextWindow, 12);

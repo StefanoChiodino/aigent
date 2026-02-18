@@ -362,10 +362,34 @@ function handleCommand(cmd: string): boolean {
     return true;
   }
 
+  if (trimmed === '/compact') {
+    if (isLoading) {
+      addSystemMessage('Cannot compact while loading.');
+      return true;
+    }
+    addSystemMessage('Compacting conversation...');
+    void (async () => {
+      try {
+        const result = await agent.forceCompact({
+          onCompact: (summary) => {
+            addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
+          },
+        });
+        addSystemMessage(result);
+        doAutoSave();
+      } catch (err: unknown) {
+        const e = err as { message?: string };
+        addSystemMessage(`Compaction failed: ${e.message ?? 'unknown error'}`);
+      }
+    })();
+    return true;
+  }
+
   if (trimmed === '/help') {
     addSystemMessage(
       'Commands:\n' +
       '  /reset              Clear conversation\n' +
+      '  /compact            Compact context (free up space)\n' +
       '  /reasoning on|off   Toggle reasoning\n' +
       '  /effort <level>     Set effort (low/medium/high/max)\n' +
       '  /image <path> [msg] Send an image with optional message\n' +
@@ -631,22 +655,30 @@ function writeEndOfSessionSummary(): void {
   try {
     if (messages.length < 4) return;
 
-    const userMessages = messages.filter((m) => m.role === 'user');
+    const userMessages = messages.filter((m) => m.role === 'user' && !m.content.startsWith('[queued]'));
     const assistantMessages = messages.filter((m) => m.role === 'assistant');
+    const systemMessages = messages.filter((m) => m.role === 'system');
 
     if (userMessages.length === 0) return;
-
-    const firstUserContent = String(userMessages[0]!.content).slice(0, 100);
-    const lastUserContent = String(userMessages[userMessages.length - 1]!.content).slice(0, 100);
 
     const now = new Date();
     const time = now.toTimeString().slice(0, 8);
     const dateStr = now.toISOString().slice(0, 10);
 
+    // Collect user topics (first 80 chars of each message)
+    const topics = userMessages
+      .map((m) => String(m.content).slice(0, 80).replace(/\n/g, ' '))
+      .slice(0, 10) // max 10 topics
+      .map((t) => `  - ${t}`);
+
+    // Estimate cost
+    const costStr = usage.cost ? `$${usage.cost < 0.01 ? usage.cost.toFixed(3) : usage.cost.toFixed(2)}` : 'n/a';
+
     const summary =
-      `- Messages: ${messages.length} total (${userMessages.length} user, ${assistantMessages.length} assistant)\n` +
-      `- First user message: ${firstUserContent}\n` +
-      `- Last user message: ${lastUserContent}\n`;
+      `- Messages: ${messages.length} total (${userMessages.length} user, ${assistantMessages.length} assistant, ${systemMessages.length} system)\n` +
+      `- Model: ${model}\n` +
+      `- Cost: ${costStr}\n` +
+      `- Topics discussed:\n${topics.join('\n')}\n`;
 
     const memoryDir = join(workspacePath, 'memory');
     if (!existsSync(memoryDir)) {

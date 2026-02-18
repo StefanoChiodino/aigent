@@ -147,6 +147,14 @@ export class Agent {
     while (iterations < maxIterations) {
       iterations++;
 
+      // Mid-loop compaction: check context before sending to avoid blowing the window
+      if (iterations > 1 && this._totalUsage.contextTokens) {
+        const contextUsed = this._totalUsage.contextTokens;
+        if (contextUsed > this.getContextWindow() * 0.6 && this.messages.length > 8) {
+          await this.compact(callbacks);
+        }
+      }
+
       const response = await this.sendWithRetry(callbacks);
 
       // Track usage
@@ -154,6 +162,8 @@ export class Agent {
       this._totalUsage.output += response.usage.output;
       this._totalUsage.cacheRead += response.usage.cacheRead;
       this._totalUsage.cacheWrite += response.usage.cacheWrite;
+      // contextTokens = latest call's input tokens (actual context window fill)
+      this._totalUsage.contextTokens = response.usage.input;
       callbacks?.onUsage?.({ ...this._totalUsage });
 
       // Add assistant response to history
@@ -165,9 +175,9 @@ export class Agent {
 
       // No tool calls — return text
       if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
-        // Auto-compact check
-        const contextUsed = this._totalUsage.input + this._totalUsage.output;
-        if (contextUsed > this.getContextWindow() * 0.7 && this.messages.length > 12) {
+        // Auto-compact check after final response
+        const contextUsed = response.usage.input;
+        if (contextUsed > this.getContextWindow() * 0.7 && this.messages.length > 8) {
           await this.compact(callbacks);
         }
         return response.text;
@@ -203,6 +213,8 @@ export class Agent {
       this.messages.push({ role: 'tool_result', results });
     }
 
+    // Hit iteration limit — compact before returning to salvage context
+    await this.compact(callbacks);
     return '[agent hit maximum tool-use iterations]';
   }
 
@@ -330,6 +342,19 @@ export class Agent {
 
   private getContextWindow(): number {
     return 200_000;
+  }
+
+  /**
+   * Force a compaction of the conversation. Useful for /compact command.
+   */
+  async forceCompact(callbacks?: ChatCallbacks): Promise<string> {
+    if (this.messages.length < 4) {
+      return 'Conversation too short to compact.';
+    }
+    const before = this.messages.length;
+    await this.compact(callbacks);
+    const after = this.messages.length;
+    return `Compacted: ${before} → ${after} messages`;
   }
 
   get thinkingLevel(): ThinkingLevel { return this.thinking; }
