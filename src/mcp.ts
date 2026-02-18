@@ -18,6 +18,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
+import { sanitizedEnv } from './safety.js';
 import { join } from 'node:path';
 import type { ToolDef } from './tools.js';
 
@@ -84,9 +85,10 @@ class MCPClient {
   async start(): Promise<void> {
     const { command, args = [], env, cwd } = this.config;
 
+    // Use sanitized env — MCP servers only get safe vars + their configured env
     this.process = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...env },
+      env: { ...sanitizedEnv(), ...env },
       cwd: cwd ?? process.cwd(),
     });
 

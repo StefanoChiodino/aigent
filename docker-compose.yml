@@ -22,9 +22,20 @@ services:
         limits:
           cpus: '4'
           memory: 4G
+    # Drop all capabilities — agent doesn't need any
+    cap_drop:
+      - ALL
     # No privilege escalation
     security_opt:
       - no-new-privileges:true
+    # Resource limits — prevent fork bombs and fd exhaustion
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 4096
+      nproc:
+        soft: 256
+        hard: 256
     # Tmpfs for /tmp (fast, size-limited, not persisted)
     tmpfs:
       - /tmp:size=100M

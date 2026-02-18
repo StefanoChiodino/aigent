@@ -1,6 +1,7 @@
 import { execSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { sanitizedEnv, validateWritePath, validateFetchUrl, checkCommandSafety } from './safety.js';
 
 /** Tool definition — provider-agnostic. */
 export interface ToolDef {
@@ -433,13 +434,20 @@ export async function executeTool(
   switch (internalName) {
     case 'exec': {
       const { command, cwd, timeout = 30_000 } = input as ExecInput;
+
+      // Advisory safety check — logged but not blocking
+      const safetyWarning = checkCommandSafety(command);
+      if (safetyWarning) {
+        onOutput?.(`[safety] ${safetyWarning}\n`);
+      }
+
       return new Promise<string>((res) => {
         let stdout = '';
         let stderr = '';
 
         const proc = spawn('sh', ['-c', command], {
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: process.env,
+          env: sanitizedEnv(),
           ...(cwd ? { cwd: resolve(cwd) } : {}),
         });
 
@@ -498,6 +506,8 @@ export async function executeTool(
 
     case 'write_file': {
       const { path, content } = input as WriteFileInput;
+      const writeErr = validateWritePath(path);
+      if (writeErr) return writeErr;
       try {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, content, 'utf-8');
@@ -510,6 +520,8 @@ export async function executeTool(
 
     case 'edit_file': {
       const { path, old_text, new_text } = input as EditFileInput;
+      const editErr = validateWritePath(path);
+      if (editErr) return editErr;
       try {
         const content = readFileSync(path, 'utf-8');
         const index = content.indexOf(old_text);
@@ -561,6 +573,7 @@ export async function executeTool(
           timeout: 10_000,
           maxBuffer: 1024 * 1024,
           stdio: ['pipe', 'pipe', 'pipe'],
+          env: sanitizedEnv(),
         });
         return output || '(no matches)';
       } catch (err: unknown) {
@@ -574,6 +587,8 @@ export async function executeTool(
 
     case 'fetch': {
       const { url, method = 'GET', headers: reqHeaders, body: reqBody, text_only = false, max_bytes = 100_000 } = input as FetchInput;
+      const ssrfErr = validateFetchUrl(url);
+      if (ssrfErr) return ssrfErr;
       try {
         const args: string[] = ['-sS', '-L', '--max-time', '30', '--max-filesize', String(max_bytes)];
         args.push('-X', method.toUpperCase());
@@ -593,6 +608,7 @@ export async function executeTool(
           timeout: 35_000,
           maxBuffer: max_bytes + 10_000,
           stdio: ['pipe', 'pipe', 'pipe'],
+          env: sanitizedEnv(),
         });
 
         if (text_only) {
@@ -695,6 +711,7 @@ export async function executeTool(
           timeout: 10_000,
           maxBuffer: 1024 * 1024,
           stdio: ['pipe', 'pipe', 'pipe'],
+          env: sanitizedEnv(),
         });
 
         const results = output.trim();
@@ -713,6 +730,8 @@ export async function executeTool(
 
     case 'patch': {
       const { path: filePath, edits } = input as PatchInput;
+      const patchErr = validateWritePath(filePath);
+      if (patchErr) return patchErr;
       if (!edits || edits.length === 0) {
         return 'Error: no edits provided';
       }
