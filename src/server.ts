@@ -168,6 +168,49 @@ function resolveMountRequest(id: string, response: { ok: boolean; containerPath?
   }
 }
 
+// --- Config write request handling ---
+
+const pendingConfigWriteRequests = new Map<string, {
+  resolve: (response: { ok: boolean; message: string }) => void;
+}>();
+let configWriteCounter = 0;
+
+/**
+ * Send a config write request to the gatekeeper and wait for approval.
+ * The gatekeeper shows a diff to the user, who approves or denies.
+ */
+export function requestConfigWrite(
+  file: string,
+  content: string,
+  reason: string,
+): Promise<{ ok: boolean; message: string }> {
+  const id = `config_${++configWriteCounter}`;
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingConfigWriteRequests.delete(id);
+      resolve({ ok: false, message: 'Config write request timed out (60s)' });
+    }, 60_000);
+
+    pendingConfigWriteRequests.set(id, {
+      resolve: (response) => {
+        clearTimeout(timer);
+        resolve(response);
+      },
+    });
+
+    broadcast({ type: 'config_write_request', id, file, content, reason });
+  });
+}
+
+function resolveConfigWriteRequest(id: string, response: { ok: boolean; message: string }): void {
+  const pending = pendingConfigWriteRequests.get(id);
+  if (pending) {
+    pendingConfigWriteRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
 // --- Background task queue ---
 
 import { TaskQueue } from './tasks.js';
@@ -895,6 +938,9 @@ function handleClient(socket: Socket): void {
             break;
           case 'mount_response':
             resolveMountRequest(cmd.id, cmd);
+            break;
+          case 'config_write_response':
+            resolveConfigWriteRequest(cmd.id, cmd);
             break;
           case 'ping':
             send(socket, { type: 'pong' });

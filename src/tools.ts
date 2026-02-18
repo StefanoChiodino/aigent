@@ -444,10 +444,36 @@ const requestMountTool: ToolDef = {
   },
 };
 
+const requestConfigWriteTool: ToolDef = {
+  name: 'request_config_write',
+  description:
+    'Request to edit a config file (SOUL.md, AGENTS.md, USER.md, TOOLS.md, IDENTITY.md). ' +
+    'These files are read-only in the sandbox. The user will see a diff and approve or deny. ' +
+    'Use this when you want to update your own personality, instructions, or tool notes.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      file: {
+        type: 'string',
+        description: 'Config file name (e.g., SOUL.md, AGENTS.md, USER.md, TOOLS.md)',
+      },
+      content: {
+        type: 'string',
+        description: 'The new full content of the file',
+      },
+      reason: {
+        type: 'string',
+        description: 'Why you want to change this file. Shown to the user.',
+      },
+    },
+    required: ['file', 'content', 'reason'],
+  },
+};
+
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
-  hostTool, requestMountTool,
+  hostTool, requestMountTool, requestConfigWriteTool,
 ];
 
 /**
@@ -481,8 +507,9 @@ interface SpawnAgentInput { task: string; context?: string; model?: string; max_
 interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number }
 interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
 interface RequestMountInput { path: string; mode?: string; reason: string }
+interface RequestConfigWriteInput { file: string; content: string; reason: string }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -546,6 +573,10 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
     case 'request_mount': {
       const { path, mode } = input as RequestMountInput;
       return `mount: ${path} (${mode ?? 'ro'})`;
+    }
+    case 'request_config_write': {
+      const { file } = input as RequestConfigWriteInput;
+      return `config write: ${file}`;
     }
     default:
       return name;
@@ -934,6 +965,20 @@ export async function executeTool(
         const e = err as { stderr?: string; message?: string };
         return `Error taking screenshot: ${e.stderr ?? e.message ?? 'unknown error'}`;
       }
+    }
+
+    case 'request_config_write': {
+      const { file, content, reason } = input as RequestConfigWriteInput;
+      const validFiles = ['AGENTS.md', 'SOUL.md', 'USER.md', 'TOOLS.md', 'IDENTITY.md'];
+      if (!validFiles.includes(file)) {
+        return `Error: ${file} is not a config file. Valid files: ${validFiles.join(', ')}`;
+      }
+      const { requestConfigWrite } = await import('./server.js');
+      const res = await requestConfigWrite(file, content, reason);
+      if (res.ok) {
+        return `Config file ${file} updated. ${res.message}`;
+      }
+      return `Config write denied: ${res.message}`;
     }
 
     case 'request_mount': {

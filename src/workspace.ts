@@ -1,13 +1,25 @@
 import { readFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-const WORKSPACE_FILES = [
+/**
+ * Config files — instruction files that define the agent's behaviour.
+ * These live in workspace/config/ and are mounted read-only in the sandbox.
+ * Edits require gatekeeper approval (diff shown to user).
+ */
+const CONFIG_FILES = [
   { name: 'AGENTS.md', label: 'Operating Instructions' },
   { name: 'SOUL.md', label: 'Personality' },
   { name: 'IDENTITY.md', label: 'Identity' },
   { name: 'USER.md', label: 'User Profile' },
-  { name: 'MEMORY.md', label: 'Long-Term Memory' },
   { name: 'TOOLS.md', label: 'Tool Notes' },
+] as const;
+
+/**
+ * Memory files — freely writable by the agent.
+ * These live in the workspace root (not in config/).
+ */
+const MEMORY_FILES = [
+  { name: 'MEMORY.md', label: 'Long-Term Memory' },
 ] as const;
 
 /** Days of full daily logs to include in the system prompt */
@@ -68,8 +80,20 @@ export function loadWorkspaceContext(workspacePath: string): string {
     mkdirSync(memoryDir, { recursive: true });
   }
 
-  // Load core workspace files
-  for (const file of WORKSPACE_FILES) {
+  // Load config files (read-only instruction files)
+  // Look in config/ first, fall back to workspace root for backward compat
+  const configDir = join(workspacePath, 'config');
+  for (const file of CONFIG_FILES) {
+    const content =
+      readIfExists(join(configDir, file.name)) ??
+      readIfExists(join(workspacePath, file.name));
+    if (content?.trim()) {
+      sections.push(`## ${file.label} (config/${file.name}) [read-only]\n\n${content.trim()}`);
+    }
+  }
+
+  // Load memory files (freely writable)
+  for (const file of MEMORY_FILES) {
     const content = readIfExists(join(workspacePath, file.name));
     if (content?.trim()) {
       sections.push(`## ${file.label} (${file.name})\n\n${content.trim()}`);
@@ -110,7 +134,7 @@ export function loadWorkspaceContext(workspacePath: string): string {
     return '';
   }
 
-  return `\n\n---\n# Workspace Context\n\nThe following files define who you are and what you know.\nYou can update these files at any time using your tools.\nWorkspace path: ${workspacePath}\n\n${sections.join('\n\n---\n\n')}`;
+  return `\n\n---\n# Workspace Context\n\nThe following files define who you are and what you know.\n\nConfig files (${configDir}/) are read-only in the sandbox. To edit them, use the\nrequest_config_write tool — the user will see a diff and approve or deny.\n\nMemory files (${workspacePath}/) are freely writable — update them as you learn.\n\n${sections.join('\n\n---\n\n')}`;
 }
 
 /**

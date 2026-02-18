@@ -13,7 +13,12 @@ services:
     volumes:
       - .:/app:ro                    # repo read-only
       - node_modules:/app/node_modules  # persistent named volume (survives --rm)
-      - ./workspace:/workspace       # workspace (read-write — TODO: split config ro / memory rw)
+      - ./workspace/config:/workspace/config:ro   # instruction files (read-only)
+      - ./workspace:/workspace                    # memory, sessions, usage (read-write)
+      # Config files (SOUL.md, AGENTS.md, etc.) are read-only in the sandbox.
+      # The agent can request config edits via the gatekeeper, which shows
+      # a diff to the user for approval. The ro mount on /workspace/config
+      # overlays the rw mount on /workspace, so config/ is truly read-only.
       # No writable source or git mounts by default.
       # Self-modification requires explicit grant via /mount.
     deploy:

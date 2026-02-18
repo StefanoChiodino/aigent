@@ -15,8 +15,8 @@
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
-import { resolve, basename, dirname } from 'node:path';
+import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve, basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
@@ -288,7 +288,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny']);
+const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -296,8 +296,9 @@ function isGatekeeperCommand(input: string): boolean {
 }
 
 async function handleGatekeeperCommand(input: string): Promise<void> {
-  // Check for /grant and /deny first (dynamic commands)
+  // Check dynamic commands first (grant/deny, approve/reject/preview)
   if (await handleGrantDeny(input)) return;
+  if (await handleConfigApproveReject(input)) return;
 
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
@@ -439,6 +440,116 @@ async function handleGrantDeny(input: string): Promise<boolean> {
   return false;
 }
 
+// --- Config write requests ---
+
+const VALID_CONFIG_FILES = new Set(['AGENTS.md', 'SOUL.md', 'USER.md', 'TOOLS.md', 'IDENTITY.md']);
+const pendingConfigWriteRequests = new Map<string, { file: string; content: string }>();
+
+function handleConfigWriteRequest(id: string, file: string, content: string, reason: string): void {
+  if (!VALID_CONFIG_FILES.has(file)) {
+    client!.send({ type: 'config_write_response', id, ok: false, message: `${file} is not a config file` });
+    return;
+  }
+
+  // Read current content for diff
+  const configPath = join(REPO_DIR, 'workspace', 'config', file);
+  const fallbackPath = join(REPO_DIR, 'workspace', file);
+  let current = '';
+  try {
+    current = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : 
+              existsSync(fallbackPath) ? readFileSync(fallbackPath, 'utf-8') : '';
+  } catch {}
+
+  // Generate a simple diff summary
+  const currentLines = current.split('\n');
+  const newLines = content.split('\n');
+  const added = newLines.filter((l) => !currentLines.includes(l)).length;
+  const removed = currentLines.filter((l) => !newLines.includes(l)).length;
+
+  pendingConfigWriteRequests.set(id, { file, content });
+
+  injectSystemMessage(
+    `Agent wants to edit config/${file}:\n` +
+    `  Reason: "${reason}"\n` +
+    `  Changes: +${added} lines, -${removed} lines\n` +
+    `  New size: ${content.length} bytes\n\n` +
+    `Reply: /approve ${id} or /reject ${id}\n` +
+    `Preview: /preview ${id}`
+  );
+}
+
+async function handleConfigApproveReject(input: string): Promise<boolean> {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  if (cmd === '/approve') {
+    const id = parts[1];
+    if (!id) return false;
+
+    const pending = pendingConfigWriteRequests.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending config write: ${id}`);
+      return true;
+    }
+
+    pendingConfigWriteRequests.delete(id);
+
+    // Write the file on the host side
+    const configDir = join(REPO_DIR, 'workspace', 'config');
+    mkdirSync(configDir, { recursive: true });
+    const filePath = join(configDir, pending.file);
+    try {
+      writeFileSync(filePath, pending.content);
+      // Also write to workspace root for backward compat
+      writeFileSync(join(REPO_DIR, 'workspace', pending.file), pending.content);
+
+      client!.send({ type: 'config_write_response', id, ok: true, message: `${pending.file} updated` });
+      injectSystemMessage(`Approved: config/${pending.file} updated`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      client!.send({ type: 'config_write_response', id, ok: false, message: msg });
+      injectSystemMessage(`Failed to write ${pending.file}: ${msg}`);
+    }
+    return true;
+  }
+
+  if (cmd === '/reject') {
+    const id = parts[1];
+    if (!id) return false;
+
+    const pending = pendingConfigWriteRequests.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending config write: ${id}`);
+      return true;
+    }
+
+    pendingConfigWriteRequests.delete(id);
+    client!.send({ type: 'config_write_response', id, ok: false, message: 'Config write rejected by user' });
+    injectSystemMessage(`Rejected config write to ${pending.file}`);
+    return true;
+  }
+
+  if (cmd === '/preview') {
+    const id = parts[1];
+    if (!id) return false;
+
+    const pending = pendingConfigWriteRequests.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending config write: ${id}`);
+      return true;
+    }
+
+    // Show the proposed content (truncated if very long)
+    const preview = pending.content.length > 2000
+      ? pending.content.slice(0, 2000) + '\n\n... [truncated]'
+      : pending.content;
+    injectSystemMessage(`Preview of ${pending.file}:\n\n${preview}`);
+    return true;
+  }
+
+  return false;
+}
+
 // --- Helpers ---
 
 function log(msg: string): void {
@@ -490,6 +601,11 @@ client.sendMessage = (content: string) => {
 // Handle mount requests from the worker (agent requests a folder)
 client.on('mount_request', (id: string, path: string, mode: 'ro' | 'rw', reason?: string) => {
   void handleAgentMountRequest(id, path, mode, reason);
+});
+
+// Handle config write requests from the worker
+client.on('config_write_request', (id: string, file: string, content: string, reason: string) => {
+  handleConfigWriteRequest(id, file, content, reason);
 });
 
 // Run TUI

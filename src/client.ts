@@ -152,6 +152,9 @@ export class AgentClient extends EventEmitter {
       case 'mount_request':
         this.emit('mount_request', event.id, event.path, event.mode, event.reason);
         break;
+      case 'config_write_request':
+        this.emit('config_write_request', event.id, event.file, event.content, event.reason);
+        break;
       case 'pong':
         break;
     }
