@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Text, useInput } from 'ink';
 import chalk from 'chalk';
 
@@ -16,12 +16,12 @@ interface TextInputProps {
  * Custom text input with readline-style keybindings:
  *
  * Navigation:
- *   Ctrl+A       — move to beginning of line
- *   Ctrl+E       — move to end of line
- *   Ctrl+B       — move back one character (same as left arrow)
- *   Ctrl+F       — move forward one character (same as right arrow)
- *   Alt+B        — move back one word
- *   Alt+F        — move forward one word
+ *   Ctrl+A / Home — move to beginning of line
+ *   Ctrl+E / End  — move to end of line
+ *   Ctrl+B        — move back one character (same as left arrow)
+ *   Ctrl+F        — move forward one character (same as right arrow)
+ *   Alt+B / Ctrl+Left  — move back one word
+ *   Alt+F / Ctrl+Right — move forward one word
  *
  * Deletion:
  *   Ctrl+W       — delete word before cursor
@@ -46,6 +46,8 @@ export function TextInput({
   showCursor = true,
 }: TextInputProps): React.JSX.Element {
   const [cursorOffset, setCursorOffset] = useState(value.length);
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   // Keep cursor in bounds when value changes externally
   useEffect(() => {
@@ -53,6 +55,28 @@ export function TextInput({
       setCursorOffset(value.length);
     }
   }, [value, cursorOffset]);
+
+  // Home/End keys — ink's useInput doesn't expose these, so we listen
+  // to raw stdin. Both listeners see the same data; ink ignores Home/End
+  // (no matching key flags), we handle them here.
+  useEffect(() => {
+    if (!focus) return;
+
+    const onData = (data: Buffer): void => {
+      const seq = data.toString();
+      // Home: CSI H, SS3 H, CSI 1~
+      if (seq === '\x1b[H' || seq === '\x1bOH' || seq === '\x1b[1~') {
+        setCursorOffset(0);
+      }
+      // End: CSI F, SS3 F, CSI 4~
+      else if (seq === '\x1b[F' || seq === '\x1bOF' || seq === '\x1b[4~') {
+        setCursorOffset(valueRef.current.length);
+      }
+    };
+
+    process.stdin.on('data', onData);
+    return () => { process.stdin.off('data', onData); };
+  }, [focus]);
 
   useInput((input, key) => {
     if (!focus) return;
@@ -117,8 +141,8 @@ export function TextInput({
 
     // Left arrow
     if (key.leftArrow) {
-      if (key.meta) {
-        // Alt+Left — back one word
+      if (key.meta || key.ctrl) {
+        // Alt+Left or Ctrl+Left — back one word
         setCursorOffset(findWordBoundaryLeft(value, cursorOffset));
       } else {
         setCursorOffset(Math.max(0, cursorOffset - 1));
@@ -128,8 +152,8 @@ export function TextInput({
 
     // Right arrow
     if (key.rightArrow) {
-      if (key.meta) {
-        // Alt+Right — forward one word
+      if (key.meta || key.ctrl) {
+        // Alt+Right or Ctrl+Right — forward one word
         setCursorOffset(findWordBoundaryRight(value, cursorOffset));
       } else {
         setCursorOffset(Math.min(value.length, cursorOffset + 1));
