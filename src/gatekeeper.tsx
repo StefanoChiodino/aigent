@@ -42,6 +42,7 @@ interface GatekeeperArgs {
   writeAccess: boolean;
   model?: string;
   thinking?: string;
+  headless: boolean;
 }
 
 // --- State ---
@@ -57,7 +58,7 @@ let isRestarting = false;
 
 function parseArgs(): GatekeeperArgs {
   const args = process.argv.slice(2);
-  const result: GatekeeperArgs = { writeAccess: false };
+  const result: GatekeeperArgs = { writeAccess: false, headless: false };
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -67,6 +68,8 @@ function parseArgs(): GatekeeperArgs {
       result.model = args[++i]!;
     } else if (arg === '--thinking' && args[i + 1]) {
       result.thinking = args[++i]!;
+    } else if (arg === '--headless') {
+      result.headless = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`aigent — AI agent with sandboxed execution
 
@@ -76,11 +79,13 @@ Options:
   --rw              Mount project folder read-write (default: read-only)
   --model <model>   Model to use (default: claude-opus-4-6-20250514)
   --thinking <level> Thinking level: off, low, medium, high, max
+  --headless        Web UI only, no terminal interface
 
 Examples:
   aigent                           # Start with no project folder
   aigent ~/projects/myapp          # Mount project read-only
   aigent ~/projects/myapp --rw     # Mount project read-write
+  aigent --headless                # Web UI only at localhost:3141
 
 Mount management (inside the TUI):
   /mount <path> [ro|rw]   Mount a host folder into the sandbox
@@ -201,6 +206,48 @@ function listMounts(): string {
   return `Active mounts:\n${lines.join('\n')}`;
 }
 
+/** Read capability permissions from the host daemon's config file. */
+function readCapabilities(): Record<string, string> {
+  const configPath = join(homedir(), '.config', 'aigent', 'permissions.json');
+  try {
+    const raw = readFileSync(configPath, 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, { grant: string }>;
+    const result: Record<string, string> = {};
+    for (const [cap, entry] of Object.entries(parsed)) {
+      result[cap] = entry.grant;
+    }
+    return result;
+  } catch {
+    // No config or invalid — return defaults
+    return {
+      'clipboard.read': 'prompt',
+      'clipboard.write': 'prompt',
+      'screen.capture': 'prompt',
+      'screen.list': 'prompt',
+      'audio.play': 'prompt',
+      'audio.record': 'prompt',
+      'notify': 'prompt',
+      'open': 'prompt',
+      'fs.read': 'deny',
+      'fs.write': 'deny',
+    };
+  }
+}
+
+/** Push current host state (mounts + capabilities) to all UI listeners. */
+function emitHostState(): void {
+  if (!client) return;
+  client.emit(
+    'host_state',
+    mounts.map((m) => ({
+      hostPath: m.hostPath,
+      containerPath: m.containerPath,
+      mode: m.mode,
+    })),
+    readCapabilities(),
+  );
+}
+
 // --- Container lifecycle ---
 
 function buildDockerArgs(): string[] {
@@ -314,6 +361,7 @@ async function restartContainer(): Promise<void> {
     );
   } finally {
     isRestarting = false;
+    emitHostState();
   }
 }
 
@@ -792,6 +840,19 @@ try {
 const { AgentClient } = await import('./client.js');
 client = new AgentClient();
 
+// Start web UI server (non-blocking, runs alongside TUI)
+const { startWebServer } = await import('./web-bridge.js');
+startWebServer(client).then(({ port }) => {
+  log.info('Web UI ready', { url: `http://localhost:${port}` });
+}).catch((err) => {
+  log.error('Web UI failed to start', { error: (err as Error).message });
+});
+
+// Push mount state to web UI when client connects to the worker
+client.on('connected', () => {
+  setTimeout(() => emitHostState(), 100);
+});
+
 // Intercept commands: wrap the client's sendMessage to catch gatekeeper commands
 const originalSendMessage = client.sendMessage.bind(client);
 client.sendMessage = (content: string) => {
@@ -816,26 +877,38 @@ client.on('config_write_request', (id: string, file: string, content: string, re
   handleConfigWriteRequest(id, file, content, reason);
 });
 
-// Run TUI
-const canUseTUI = Boolean(
-  process.stdin.isTTY &&
-  typeof process.stdin.setRawMode === 'function'
-);
-
-if (canUseTUI) {
-  const { AnsiTUI } = await import('./ui/AnsiTUI.js');
-  const tui = new AnsiTUI(client);
-  tui.start();
-
-  await tui.waitForExit();
-} else {
-  const { startRepl } = await import('./repl.js');
+// Run UI
+if (gatekeeperArgs.headless) {
+  // Headless mode: web UI only, no terminal interface
   client.connect();
-  startRepl(client);
+  log.info('Running in headless mode (web UI only)');
+  // Keep process alive until container exits or SIGINT
   await new Promise<void>((r) => {
+    process.on('SIGINT', r);
+    process.on('SIGTERM', r);
     if (containerProcess) containerProcess.on('exit', r);
-    else r();
   });
+} else {
+  const canUseTUI = Boolean(
+    process.stdin.isTTY &&
+    typeof process.stdin.setRawMode === 'function'
+  );
+
+  if (canUseTUI) {
+    const { AnsiTUI } = await import('./ui/AnsiTUI.js');
+    const tui = new AnsiTUI(client);
+    tui.start();
+
+    await tui.waitForExit();
+  } else {
+    const { startRepl } = await import('./repl.js');
+    client.connect();
+    startRepl(client);
+    await new Promise<void>((r) => {
+      if (containerProcess) containerProcess.on('exit', r);
+      else r();
+    });
+  }
 }
 
 // Shutdown

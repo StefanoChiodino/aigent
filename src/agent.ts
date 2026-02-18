@@ -3,6 +3,9 @@ import { getToolDefinitions, executeTool, summarizeToolCall, fromClaudeCodeName 
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
 import type { MCPManager } from './mcp.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('agent');
 
 const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container. You have access to:
 - A shell (exec tool) to run any command, with optional cwd
@@ -220,6 +223,7 @@ export class Agent {
         const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
         callbacks?.onToolStart?.(tc.name, truncatedInput, summary);
 
+        const toolStart = performance.now();
         let result: string | ToolContentBlock[];
         if (toolName === 'dispatch_task' && callbacks?.onDispatchTask) {
           const taskId = callbacks.onDispatchTask(tc.input as Record<string, unknown>);
@@ -231,6 +235,8 @@ export class Agent {
         } else {
           result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput);
         }
+        const toolMs = (performance.now() - toolStart).toFixed(0);
+        log.info('Tool executed', { tool: toolName, ms: toolMs });
 
         // Truncate string results; image results pass through
         if (typeof result === 'string') {
@@ -283,7 +289,7 @@ export class Agent {
         // Exponential backoff: 2s, 4s, 8s
         const delay = 2000 * Math.pow(2, attempt);
         const reason = status === 429 ? 'rate limited' : status >= 500 ? `server error (${status})` : (e.code ?? 'network error');
-        console.error(`[agent] ${reason}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${maxRetries})...`);
+        log.warn('Retrying', { reason, attempt: attempt + 1, maxRetries, delayMs: delay });
         await new Promise<void>((resolve) => setTimeout(resolve, delay));
       }
     }
@@ -308,9 +314,10 @@ export class Agent {
       context ? `\nContext: ${context}` : '',
     ].join('\n');
 
-    // Create a sub-agent with its own conversation but same provider/tools
+    // Reuse the agent's provider — creating a new one would fail in the
+    // sandbox (no API keys; the SocketProvider proxies through the gatekeeper).
+    const subProvider = this.provider;
     // Exclude spawn_agent from sub-agent tools to prevent recursion
-    const subProvider = createProvider(detectProvider());
     const subToolDefs = this.toolDefs.filter((t) => t.name !== 'spawn_agent');
 
     const subMessages: ProviderMessage[] = [
@@ -371,6 +378,9 @@ export class Agent {
   }
 
   private async compact(callbacks?: ChatCallbacks): Promise<void> {
+    const before = this.messages.length;
+    log.info('Compacting', { messagesBefore: before });
+
     const { messages: compacted, summary } = await compactConversation(
       this.provider,
       this.model,
@@ -380,6 +390,7 @@ export class Agent {
 
     if (summary) {
       this.messages = compacted;
+      log.info('Compacted', { messagesBefore: before, messagesAfter: this.messages.length });
       callbacks?.onCompact?.(summary);
     }
   }

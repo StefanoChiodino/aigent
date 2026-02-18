@@ -134,8 +134,10 @@ Shows ONE thing at a time, priority order:
 3. **Tool activity** — `⟳ reading src/agent.ts:1-50`
 4. **Reasoning indicator** — `⟳ reasoning…`
 5. **Notification** — transient system messages (auto-clear after 5s)
-6. **Background tasks** — `N background tasks running` (when idle)
-7. **Empty** — single space (maintains height)
+6. **Empty** — single space (maintains height)
+
+Note: background task count moved to the status chips (line 1) so it's
+always visible, even during streaming or tool activity.
 
 ### Why this works
 
@@ -147,6 +149,21 @@ and are never touched.
 The only way the box grows is the user typing a multi-line message (e.g.,
 pasting). This is slow, user-initiated, and infrequent — not a rapid
 automated state change.
+
+### Critical rule: nothing else may write to the terminal
+
+Ink manages the terminal exclusively. Any `console.log`, `console.error`,
+or `process.stdout.write` from other code writes directly to the terminal
+between Ink's erase-and-render cycles. These stray lines get stuck in
+scrollback and cause the input box to appear duplicated in the chat area.
+
+**The server runs as a child process.** Its `stdio` must be piped, not
+inherited. Server logs go to `server.log` via the supervisor. The
+supervisor itself also logs to the file, not stderr.
+
+**Never use `console.log` or `console.error` in any code that runs while
+the TUI is active.** Use Ink's event system (broadcast system messages) to
+show information to the user.
 
 ---
 

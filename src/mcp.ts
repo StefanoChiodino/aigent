@@ -21,6 +21,9 @@ import { readFileSync, existsSync } from 'node:fs';
 import { sanitizedEnv } from './safety.js';
 import { join } from 'node:path';
 import type { ToolDef } from './tools.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('mcp');
 
 // --- JSON-RPC types ---
 
@@ -101,11 +104,11 @@ class MCPClient {
     this.process.stderr?.on('data', (data: Buffer) => {
       // Log MCP server errors but don't crash
       const text = data.toString().trim();
-      if (text) console.error(`[mcp:${this.serverName}] ${text}`);
+      if (text) log.debug('Server stderr', { server: this.serverName, text: text.slice(0, 200) });
     });
 
     this.process.on('exit', (code) => {
-      console.error(`[mcp:${this.serverName}] Process exited (code=${code})`);
+      log.warn('Server exited', { server: this.serverName, code });
       // Reject all pending requests
       for (const [, { reject, timer }] of this.pending) {
         clearTimeout(timer);
@@ -284,7 +287,7 @@ export class MCPManager {
       config = JSON.parse(raw) as MCPConfig;
     } catch (err: unknown) {
       const e = err as { message?: string };
-      console.error(`[mcp] Failed to parse config: ${e.message}`);
+      log.error('Failed to parse config', { error: e.message });
       return;
     }
 
@@ -300,7 +303,7 @@ export class MCPManager {
         client.start()
           .then(() => {
             const tools = client.getTools();
-            console.error(`[mcp:${name}] Connected — ${tools.length} tool(s)`);
+            log.info('Server connected', { server: name, tools: tools.length });
             for (const tool of tools) {
               // Prefix with server name to avoid collisions
               const prefixedName = `mcp_${name}_${tool.name}`;
@@ -321,7 +324,7 @@ export class MCPManager {
           })
           .catch((err: unknown) => {
             const e = err as { message?: string };
-            console.error(`[mcp:${name}] Failed to start: ${e.message}`);
+            log.error('Server failed to start', { server: name, error: e.message });
             this.clients.delete(name);
           }),
       );
@@ -377,7 +380,7 @@ export class MCPManager {
    */
   shutdown(): void {
     for (const [name, client] of this.clients) {
-      console.error(`[mcp:${name}] Shutting down`);
+      log.info('Server shutting down', { server: name });
       client.shutdown();
     }
     this.clients.clear();

@@ -1,20 +1,29 @@
-.PHONY: start dev run build rebuild clean
+.PHONY: dev serve web web-watch build rebuild typecheck clean
 
-# --- Primary: gatekeeper on host, worker in Docker ---
+# --- Development ---
 
-# Start aigent (gatekeeper + sandbox)
-start:
-	npx tsx src/gatekeeper.tsx $(ARGS)
+# Run everything with hot reload (server + web frontend)
+# Server restarts on .ts changes, frontend rebundles on save
+dev:
+	@mkdir -p web/dist
+	@echo "Starting dev server with hot reload..."
+	@echo "Web UI: http://localhost:$${AIGENT_WEB_PORT:-3141}"
+	@npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*' &
+	npx tsx --watch src/gatekeeper.tsx --headless $(ARGS)
 
-# --- Legacy: everything in Docker (backward compat) ---
+# Server only (no frontend rebuild)
+serve:
+	npx tsx --watch src/gatekeeper.tsx --headless $(ARGS)
 
-# Build + run in Docker (old architecture)
-dev: build
-	docker compose run --rm -it aigent
+# --- Web UI ---
 
-# Run without building
-run:
-	docker compose run --rm -it aigent
+web:
+	@mkdir -p web/dist
+	npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --minify '--external:/vendor/*'
+
+web-watch:
+	@mkdir -p web/dist
+	npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*'
 
 # --- Build ---
 
@@ -27,7 +36,7 @@ rebuild:
 # --- Utilities ---
 
 typecheck:
-	docker compose run --rm --no-deps aigent npx tsc --noEmit
+	npx tsc --noEmit
 
 clean:
-	rm -rf dist/
+	rm -rf dist/ web/dist/

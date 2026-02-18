@@ -11,7 +11,9 @@
     "build": "tsc",
     "dev": "tsx --watch src/index.tsx",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "web:build": "esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --minify --external:/vendor/*",
+    "web:watch": "esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch --external:/vendor/*"
   },
   "keywords": [],
   "author": "",
@@ -19,19 +21,22 @@
   "description": "",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.75.0",
+    "@types/ws": "^8.18.1",
+    "chalk": "^5.6.0",
     "dotenv": "^17.3.1",
     "ink": "^6.7.0",
     "ink-spinner": "^5.0.0",
-    "chalk": "^5.6.0",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
     "openai": "^6.22.0",
     "react": "^19.2.4",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/node": "^25.2.3",
     "@types/react": "^19.2.14",
+    "esbuild": "^0.27.3",
     "tsx": "^4.21.0"
   }
 }

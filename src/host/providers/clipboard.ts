@@ -12,7 +12,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writeFileSync, readFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, unlinkSync } from 'node:fs';
 import type { CapabilityName, CapabilityProvider, CapabilityResult } from '../protocol.js';
 
 type ClipboardBackend = 'wsl' | 'macos' | 'xclip' | 'wayland';

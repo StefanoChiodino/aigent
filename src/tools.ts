@@ -1,8 +1,11 @@
 import { execSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { sanitizedEnv, validateWritePath, validateFetchUrl, checkCommandSafety } from './safety.js';
-import type { ToolContentBlock } from './provider.js';
+import { sanitizedEnv, validateWritePath, validateFetchUrl, checkCommandSafety, validateReadonlyCommand } from './safety.js';
+import type { ToolContentBlock, ImageMediaType } from './provider.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('tools');
 
 /** Tool definition — provider-agnostic. */
 export interface ToolDef {
@@ -244,9 +247,11 @@ const dispatchTaskTool: ToolDef = {
   description:
     'Dispatch a task to a background agent. Returns immediately with a task ID — the main ' +
     'conversation stays unblocked while the background agent works. Use this for any task that ' +
-    'takes more than a few seconds: refactoring, writing tests, research, code review, etc. ' +
+    'takes more than a few seconds: research, code review, analysis, etc. ' +
     'When the background task completes, its result will be injected back into the conversation. ' +
-    'Prefer this over spawn_agent for long-running work so the user can keep chatting.',
+    'Prefer this over spawn_agent for long-running work so the user can keep chatting.\n\n' +
+    'By default, background agents are READ-ONLY (no file writes, no network). ' +
+    'Grant additional capabilities via the capabilities parameter when needed.',
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -266,8 +271,77 @@ const dispatchTaskTool: ToolDef = {
         type: 'number',
         description: 'Maximum tool-use iterations (default: 25, max: 50)',
       },
+      capabilities: {
+        type: 'array',
+        items: { type: 'string', enum: ['net_ro', 'net_rw', 'fs_write'] },
+        description:
+          'Capabilities to grant the background agent. Default: read-only filesystem, no network.\n' +
+          '  net_ro  — fetch URLs (GET/HEAD only)\n' +
+          '  net_rw  — fetch URLs (all HTTP methods)\n' +
+          '  fs_write — write/edit files + full shell exec',
+      },
     },
     required: ['task'],
+  },
+};
+
+// --- Restricted tool variants (for background agents) ---
+
+/** Read-only exec — blocks destructive commands. */
+export const execReadonlyTool: ToolDef = {
+  name: 'exec_readonly',
+  description:
+    'Execute a read-only shell command and return stdout/stderr. Only allows read-only operations: ' +
+    'git log/diff/status/show/blame, ls, find, cat, head, tail, wc, grep, rg, ag, file, stat, du, ' +
+    'npm list, pip list, python -c, curl (GET). Write operations are blocked.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      command: {
+        type: 'string',
+        description: 'The shell command to execute (read-only commands only)',
+      },
+      cwd: {
+        type: 'string',
+        description: 'Working directory for the command (default: current directory)',
+      },
+      timeout: {
+        type: 'number',
+        description: 'Timeout in milliseconds (default: 30000)',
+      },
+    },
+    required: ['command'],
+  },
+};
+
+/** Read-only fetch — GET/HEAD only. */
+export const fetchReadonlyTool: ToolDef = {
+  name: 'fetch_readonly',
+  description:
+    'Fetch a URL using GET or HEAD and return the response. Supports HTTP/HTTPS. ' +
+    'For HTML pages, can optionally extract just the text content. ' +
+    'Only GET and HEAD methods are allowed (no POST/PUT/DELETE).',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      url: {
+        type: 'string',
+        description: 'URL to fetch',
+      },
+      headers: {
+        type: 'object',
+        description: 'Request headers as key-value pairs',
+      },
+      text_only: {
+        type: 'boolean',
+        description: 'Strip HTML tags and return plain text (default: false)',
+      },
+      max_bytes: {
+        type: 'number',
+        description: 'Maximum response size in bytes (default: 100000)',
+      },
+    },
+    required: ['url'],
   },
 };
 
@@ -517,7 +591,8 @@ type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | Li
 export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boolean): string {
   const internalName = isOAuth ? fromClaudeCodeName(name) : name;
   switch (internalName) {
-    case 'exec': {
+    case 'exec':
+    case 'exec_readonly': {
       const { command, cwd } = input as ExecInput;
       const short = command.length > 80 ? command.slice(0, 80) + '...' : command;
       return cwd ? `$ ${short} (in ${cwd})` : `$ ${short}`;
@@ -544,7 +619,8 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       const { pattern, path: gp } = input as GlobInput;
       return `glob "${pattern}" ${gp ?? '.'}`;
     }
-    case 'fetch': {
+    case 'fetch':
+    case 'fetch_readonly': {
       const { url, method } = input as FetchInput;
       return `${(method ?? 'GET').toUpperCase()} ${url.length > 60 ? url.slice(0, 60) + '...' : url}`;
     }
@@ -585,6 +661,57 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
 
 // --- Tool Execution ---
 
+/** Shared shell command execution helper. */
+function executeCommand(
+  command: string,
+  cwd?: string,
+  timeout = 30_000,
+  onOutput?: (chunk: string) => void,
+): Promise<string> {
+  return new Promise<string>((res) => {
+    let stdout = '';
+    let stderr = '';
+
+    const proc = spawn('sh', ['-c', command], {
+      stdio: ['ignore', 'pipe', 'pipe'],  // no stdin — prevents hangs on sudo, passwd, etc.
+      env: sanitizedEnv(),
+      ...(cwd ? { cwd: resolve(cwd) } : {}),
+    });
+
+    const timer = setTimeout(() => {
+      proc.kill('SIGTERM');
+      setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 2000);
+    }, timeout);
+
+    proc.stdout?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stdout += chunk;
+      onOutput?.(chunk);
+    });
+
+    proc.stderr?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stderr += chunk;
+      onOutput?.(chunk);
+    });
+
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        res(stdout || '(no output)');
+      } else {
+        const output = `Exit code: ${code ?? 1}\n${stdout}\n${stderr}`.trim();
+        res(output || `Exit code: ${code ?? 1}`);
+      }
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      res(`Error: ${err.message}`);
+    });
+  });
+}
+
 /**
  * Execute a tool and return the result.
  * For exec, output is streamed via onOutput callback if provided.
@@ -597,6 +724,7 @@ export async function executeTool(
 ): Promise<string | ToolContentBlock[]> {
   // Map Claude Code names back to internal names if needed
   const internalName = isOAuth ? fromClaudeCodeName(name) : name;
+  log.debug('Executing tool', { tool: internalName });
 
   switch (internalName) {
     case 'exec': {
@@ -608,48 +736,22 @@ export async function executeTool(
         onOutput?.(`[safety] ${safetyWarning}\n`);
       }
 
-      return new Promise<string>((res) => {
-        let stdout = '';
-        let stderr = '';
+      return executeCommand(command, cwd, timeout, onOutput);
+    }
 
-        const proc = spawn('sh', ['-c', command], {
-          stdio: ['ignore', 'pipe', 'pipe'],  // no stdin — prevents hangs on sudo, passwd, etc.
-          env: sanitizedEnv(),
-          ...(cwd ? { cwd: resolve(cwd) } : {}),
-        });
+    case 'exec_readonly': {
+      const { command, cwd, timeout = 30_000 } = input as ExecInput;
 
-        const timer = setTimeout(() => {
-          proc.kill('SIGTERM');
-          setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} }, 2000);
-        }, timeout);
+      const readonlyErr = validateReadonlyCommand(command);
+      if (readonlyErr) return readonlyErr;
 
-        proc.stdout?.on('data', (data: Buffer) => {
-          const chunk = data.toString();
-          stdout += chunk;
-          onOutput?.(chunk);
-        });
+      return executeCommand(command, cwd, timeout, onOutput);
+    }
 
-        proc.stderr?.on('data', (data: Buffer) => {
-          const chunk = data.toString();
-          stderr += chunk;
-          onOutput?.(chunk);
-        });
-
-        proc.on('close', (code) => {
-          clearTimeout(timer);
-          if (code === 0) {
-            res(stdout || '(no output)');
-          } else {
-            const output = `Exit code: ${code ?? 1}\n${stdout}\n${stderr}`.trim();
-            res(output || `Exit code: ${code ?? 1}`);
-          }
-        });
-
-        proc.on('error', (err) => {
-          clearTimeout(timer);
-          res(`Error: ${err.message}`);
-        });
-      });
+    case 'fetch_readonly': {
+      const fi = input as FetchInput;
+      // Force GET method for read-only fetch
+      return executeTool('fetch', { ...fi, method: 'GET' }, false, onOutput) as Promise<string>;
     }
 
     case 'read_file': {
@@ -1017,7 +1119,7 @@ export async function executeTool(
       if (result.type === 'image' && typeof result.data === 'string' && typeof result.mediaType === 'string') {
         return [
           { type: 'text', text: `Clipboard image (${result.mediaType})` },
-          { type: 'image', mediaType: result.mediaType, data: result.data },
+          { type: 'image', mediaType: result.mediaType as ImageMediaType, data: result.data },
         ] satisfies ToolContentBlock[];
       }
 

@@ -12,6 +12,9 @@
  */
 
 import type { BackgroundTaskInfo } from './protocol.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('tasks');
 
 export interface TaskResult {
   id: string;
@@ -63,6 +66,7 @@ export class TaskQueue {
       startedAt: new Date().toISOString(),
     };
     this.tasks.set(id, task);
+    log.info('Task registered', { id, description: task.description });
     this.opts.onTaskUpdate?.({ id, description: task.description, status: 'running', startedAt: task.startedAt });
     return id;
   }
@@ -75,6 +79,8 @@ export class TaskQueue {
     task.status = 'completed';
     task.completedAt = new Date().toISOString();
     task.result = result;
+    const durationMs = new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime();
+    log.info('Task completed', { id, durationMs });
 
     this.completionQueue.push({
       id: task.id,
@@ -105,6 +111,8 @@ export class TaskQueue {
     task.status = 'failed';
     task.completedAt = new Date().toISOString();
     task.result = error;
+    const durationMs = new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime();
+    log.error('Task failed', { id, error, durationMs });
 
     this.completionQueue.push({
       id: task.id,

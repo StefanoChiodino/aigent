@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>aigent</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#x1F916;</text></svg>">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <div id="header-left">
+        <span id="logo">aigent</span>
+        <span id="conn-badge" class="badge connecting">connecting</span>
+      </div>
+      <div id="header-right">
+        <span id="task-badge" class="badge dim hidden"></span>
+        <span id="cost-badge" class="badge dim hidden"></span>
+        <div id="ctx-meter" class="hidden" title="Context usage">
+          <div id="ctx-fill"></div>
+          <span id="ctx-label"></span>
+        </div>
+      </div>
+    </header>
+
+    <div id="body">
+      <aside id="sidebar">
+        <div id="sidebar-spacer"></div>
+        <div id="sidebar-panel">
+          <div class="sidebar-section">
+            <div class="sidebar-label">Model</div>
+            <div class="sidebar-value" id="sb-model-value">--</div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-label">Reasoning</div>
+            <div class="sb-reasoning-controls">
+              <button id="sb-reasoning-toggle" class="sb-toggle on" title="Toggle reasoning">ON</button>
+              <div id="sb-effort-pills" class="sb-pills">
+                <button class="sb-pill" data-level="low">L</button>
+                <button class="sb-pill active" data-level="medium">M</button>
+                <button class="sb-pill" data-level="high">H</button>
+                <button class="sb-pill" data-level="max">MAX</button>
+              </div>
+            </div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-label">Context</div>
+            <div id="sb-ctx-meter">
+              <div id="sb-ctx-fill"></div>
+              <span id="sb-ctx-label"></span>
+            </div>
+            <div class="sidebar-value" id="sb-ctx-tokens">--</div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-label">Cost</div>
+            <div class="sidebar-value" id="sb-cost-value">$0.00</div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-label">Mounts</div>
+            <div id="sb-mounts-list" class="sidebar-value">none</div>
+          </div>
+          <div class="sidebar-section">
+            <div class="sidebar-label">Permissions</div>
+            <div id="sb-caps-list" class="sidebar-value">--</div>
+          </div>
+        </div>
+      </aside>
+
+      <div id="main-col">
+        <main id="messages">
+          <div id="empty-state">
+            <div class="empty-icon">&#x2728;</div>
+            <div class="empty-title">Ready to go</div>
+            <div class="empty-hint">Type a message below or use <kbd>/</kbd> for commands</div>
+          </div>
+        </main>
+
+        <div id="tool-bar" class="hidden">
+          <div class="tool-spinner"></div>
+          <span id="tool-label"></span>
+        </div>
+
+        <footer id="input-area">
+          <div id="error-bar" class="hidden"></div>
+          <div id="command-palette" class="hidden"></div>
+          <div id="input-row">
+            <textarea id="input" rows="1" placeholder="Message aigent&#x2026;" autocomplete="off" spellcheck="false"></textarea>
+            <button id="send" title="Send (Enter)">
+              <svg class="icon-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+              <svg class="icon-brain hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M12 18v4"/></svg>
+            </button>
+            <button id="cancel" class="hidden" title="Cancel (Esc)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="9" x2="15" y2="15"></line><line x1="15" y1="9" x2="9" y2="15"></line></svg>
+            </button>
+          </div>
+          <div id="input-hint">
+            <kbd>Enter</kbd> send &middot; <kbd>Ctrl+Enter</kbd> <span id="hint-ctrl">think</span> &middot; <kbd>Shift+Enter</kbd> newline &middot; <kbd>Esc</kbd> cancel &middot; <kbd>/</kbd> commands
+          </div>
+        </footer>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/dist/app.js"></script>
+</body>
+</html>

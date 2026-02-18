@@ -18,6 +18,11 @@ import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsag
 import { SOCKET_PATH } from './protocol.js';
 import { computeCost } from './pricing.js';
 import { loadMCP, type MCPManager } from './mcp.js';
+import { createLogger } from './logger.js';
+import { execReadonlyTool, fetchReadonlyTool } from './tools.js';
+import type { ProviderToolDef } from './provider.js';
+
+const log = createLogger('server');
 
 const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
 
@@ -111,9 +116,11 @@ function parseImagesInMessage(text: string): UserContent {
 // --- State ---
 
 let agent: Agent;
+let agentProvider: import('./provider.js').Provider | undefined;
 let messages: DisplayMessage[] = [];
 let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 let currentThinking: ThinkingLevel;
+let savedEffortLevel: ThinkingLevel = 'high';
 let currentProfile = 'default';
 let currentSessionId = generateSessionId();
 let model: string;
@@ -156,7 +163,7 @@ export function requestMount(
     });
 
     // Send to gatekeeper via the socket
-    broadcast({ type: 'mount_request', id, path, mode, reason });
+    broadcast({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}) });
   });
 }
 
@@ -294,6 +301,7 @@ async function processAgentTurn(
   isLoading = true;
   isProcessingTaskResult = isTaskResult;
   broadcast({ type: 'loading', isLoading: true });
+  log.info('Agent turn start', { isTaskResult });
 
   const controller = new AbortController();
   abortController = controller;
@@ -339,6 +347,7 @@ async function processAgentTurn(
 
     if (!controller.signal.aborted) {
       const elapsed = (Date.now() - startTime) / 1000;
+      log.info('Agent turn complete', { elapsed, messages: messages.length });
       broadcast({ type: 'text', content: '' });
       const assistantMsg: DisplayMessage = {
         role: 'assistant',
@@ -367,53 +376,116 @@ async function processAgentTurn(
 }
 
 /**
+ * Build the tool set for a background agent based on granted capabilities.
+ *
+ * Default (no capabilities): read-only filesystem, no network.
+ * Capabilities:
+ *   net_ro   — fetch URLs (GET/HEAD only)
+ *   net_rw   — fetch URLs (all HTTP methods)
+ *   fs_write — write/edit files + full shell exec
+ */
+function buildBackgroundToolSet(allTools: ProviderToolDef[], capabilities: Set<string>): ProviderToolDef[] {
+  // Always blocked — no recursion, no host interaction
+  const blocked = new Set([
+    'spawn_agent', 'dispatch_task',
+    'request_mount', 'request_config_write',
+    'host', 'screenshot',
+  ]);
+
+  // Without fs_write: block write tools, swap exec → exec_readonly
+  if (!capabilities.has('fs_write')) {
+    blocked.add('write_file');
+    blocked.add('edit_file');
+    blocked.add('patch');
+    blocked.add('exec');
+  }
+
+  // Without any net capability: block fetch entirely
+  if (!capabilities.has('net_ro') && !capabilities.has('net_rw')) {
+    blocked.add('fetch');
+  }
+
+  const tools = allTools.filter((t) => !blocked.has(t.name));
+
+  // Inject restricted variants
+  if (!capabilities.has('fs_write')) {
+    tools.push(execReadonlyTool);
+  }
+  if (capabilities.has('net_ro') && !capabilities.has('net_rw')) {
+    // Replace full fetch with read-only fetch
+    const idx = tools.findIndex((t) => t.name === 'fetch');
+    if (idx >= 0) tools.splice(idx, 1, fetchReadonlyTool);
+  }
+
+  return tools;
+}
+
+/**
  * Dispatch a task to a background agent. Runs independently of the main
  * conversation. When complete, the result is queued for the main agent
  * to review and present to the user.
+ *
+ * Background agents are capability-restricted by default (read-only, no network).
+ * The caller can grant additional capabilities via the `capabilities` field.
  */
 function dispatchBackgroundTask(input: {
   task: string;
   context?: string;
   model?: string;
   max_iterations?: number;
+  capabilities?: string[];
 }): string {
   const taskId = taskQueue.register(input.task);
 
   // Fire and forget — run the sub-agent in the background
   void (async () => {
-    const taskModel = input.model ?? model;
-    const maxIter = Math.min(input.max_iterations ?? 25, 50);
-
-    const systemPrompt = [
-      'You are a background agent dispatched to complete a specific task.',
-      'Work independently and return a clear, complete result.',
-      'You have full tool access: exec, file read/write/edit, grep, glob, fetch, tree, patch.',
-      'Do NOT spawn further agents or dispatch tasks.',
-      '',
-      `Task: ${input.task}`,
-      input.context ? `\nContext: ${input.context}` : '',
-    ].join('\n');
-
-    const { createProvider, detectProvider } = await import('./provider.js');
-    const { executeTool } = await import('./tools.js');
-    const subProvider = createProvider(detectProvider());
-
-    // Exclude agent-spawning tools to prevent recursion
-    const subToolDefs = agent.getToolDefs().filter((t) =>
-      t.name !== 'spawn_agent' && t.name !== 'dispatch_task'
-    );
-
-    const subMessages: ProviderMessage[] = [
-      { role: 'user', content: input.task + (input.context ? `\n\nContext: ${input.context}` : '') },
-    ];
-
-    let iterations = 0;
-    let finalText = '';
-
     try {
+      const taskModel = input.model ?? model;
+      const maxIter = Math.min(input.max_iterations ?? 25, 50);
+      const capabilities = new Set(input.capabilities ?? []);
+
+      // Build capability-restricted tool set
+      const subToolDefs = buildBackgroundToolSet(agent.getToolDefs(), capabilities);
+      const toolNames = subToolDefs.map((t) => t.name).join(', ');
+
+      const systemPrompt = [
+        'You are a background research agent dispatched to complete a specific task.',
+        'Work independently and return a clear, complete result.',
+        '',
+        capabilities.has('fs_write')
+          ? 'You have read-write filesystem access and full shell exec.'
+          : 'IMPORTANT: You are READ-ONLY. You CANNOT modify files, run destructive commands,\nor change repository state (no git commit/push/stash/checkout, no rm/mv/cp, no file writes).',
+        '',
+        `Available tools: ${toolNames}`,
+        '',
+        'Do NOT spawn further agents or dispatch tasks.',
+        '',
+        `Task: ${input.task}`,
+        input.context ? `\nContext: ${input.context}` : '',
+      ].join('\n');
+
+      const { executeTool } = await import('./tools.js');
+
+      // Reuse the agent's provider (SocketProvider in gatekeeper mode).
+      // Creating a direct provider would fail in the sandbox (no API keys).
+      let subProvider: import('./provider.js').Provider;
+      if (agentProvider) {
+        subProvider = agentProvider;
+      } else {
+        const { createProvider, detectProvider } = await import('./provider.js');
+        subProvider = createProvider(detectProvider());
+      }
+
+      const subMessages: ProviderMessage[] = [
+        { role: 'user', content: input.task + (input.context ? `\n\nContext: ${input.context}` : '') },
+      ];
+
+      let iterations = 0;
+      let finalText = '';
+
       while (iterations < maxIter) {
         iterations++;
-        console.error(`[dispatch ${taskId}] iteration ${iterations}/${maxIter}`);
+        log.debug('Dispatch iteration', { taskId, iteration: iterations, maxIter });
 
         const response = await subProvider.sendMessage(
           systemPrompt,
@@ -422,7 +494,7 @@ function dispatchBackgroundTask(input: {
           { model: taskModel, maxTokens: 16384, thinking: agent.thinkingLevel },
         );
 
-        console.error(`[dispatch ${taskId}] response: stopReason=${response.stopReason}, tools=${response.toolCalls.length}, text=${response.text.slice(0, 100)}`);
+        log.debug('Dispatch response', { taskId, stopReason: response.stopReason, toolCalls: response.toolCalls.length });
 
         subMessages.push({
           role: 'assistant',
@@ -437,10 +509,8 @@ function dispatchBackgroundTask(input: {
 
         const results: ToolResult[] = [];
         for (const tc of response.toolCalls) {
-          console.error(`[dispatch ${taskId}] executing tool: ${tc.name} ${JSON.stringify(tc.input).slice(0, 100)}`);
+          log.debug('Dispatch tool', { taskId, tool: tc.name });
           const result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], agent.usingOAuth);
-          const resultPreview = typeof result === 'string' ? result.slice(0, 100) : '[non-string]';
-          console.error(`[dispatch ${taskId}] tool result: ${resultPreview}`);
           if (typeof result === 'string') {
             const truncated = result.length > 50_000
               ? result.slice(0, 50_000) + '\n\n... [truncated]'
@@ -459,7 +529,7 @@ function dispatchBackgroundTask(input: {
 
     } catch (err: unknown) {
       const e = err as { message?: string; stack?: string };
-      console.error(`[dispatch ${taskId}] error:`, e.message, e.stack);
+      log.error('Dispatch error', { taskId, error: e.message });
       taskQueue.fail(taskId, e.message ?? 'unknown error');
     }
   })();
@@ -612,15 +682,18 @@ function handleCommand(cmd: string): boolean {
 
   if (trimmed === '/reasoning on') {
     if (currentThinking === 'off') {
-      agent.thinkingLevel = 'medium';
-      currentThinking = 'medium';
+      agent.thinkingLevel = savedEffortLevel;
+      currentThinking = savedEffortLevel;
     }
-    addSystemMessage('Reasoning: on');
+    addSystemMessage(`Reasoning: on (${currentThinking})`);
     broadcast({ type: 'state', thinking: currentThinking });
     return true;
   }
 
   if (trimmed === '/reasoning off') {
+    if (currentThinking !== 'off') {
+      savedEffortLevel = currentThinking;
+    }
     agent.thinkingLevel = 'off';
     currentThinking = 'off';
     addSystemMessage('Reasoning: off');
@@ -848,11 +921,24 @@ function handleCommand(cmd: string): boolean {
 
 // --- Message processing ---
 
-const messageQueue: string[] = [];
+interface QueuedMessage { content: string; thinkingOverride?: ThinkingLevel | undefined }
+const messageQueue: QueuedMessage[] = [];
 let processingQueue = false;
 
-async function processMessage(content: string): Promise<void> {
-  await processAgentTurn(content);
+async function processMessage(msg: QueuedMessage): Promise<void> {
+  // Apply one-shot thinking override if requested (Ctrl+Enter toggle)
+  const savedThinking = msg.thinkingOverride ? agent.thinkingLevel : undefined;
+  if (msg.thinkingOverride) {
+    agent.thinkingLevel = msg.thinkingOverride;
+  }
+  try {
+    await processAgentTurn(msg.content);
+  } finally {
+    // Restore previous thinking level after one-shot override
+    if (savedThinking !== undefined) {
+      agent.thinkingLevel = savedThinking;
+    }
+  }
 }
 
 async function processQueue(): Promise<void> {
@@ -915,8 +1001,9 @@ function handleClient(socket: Socket): void {
             const trimmed = cmd.content.trim();
             if (!trimmed) break;
             if (handleCommand(trimmed)) break;
+            const queued: QueuedMessage = { content: trimmed, thinkingOverride: cmd.thinkingOverride };
             if (isLoading) {
-              messageQueue.push(trimmed);
+              messageQueue.push(queued);
               const queuedMsg: DisplayMessage = {
                 role: 'user',
                 content: `[queued] ${trimmed}`,
@@ -925,7 +1012,7 @@ function handleClient(socket: Socket): void {
               messages.push(queuedMsg);
               broadcast({ type: 'message', message: queuedMsg });
             } else {
-              messageQueue.push(trimmed);
+              messageQueue.push(queued);
               void processQueue();
             }
             break;
@@ -986,14 +1073,27 @@ function startServer(): Server {
 function restoreSession(): void {
   const saved = autoLoadSession(workspacePath);
   if (saved) {
-    agent.setMessages(saved.agentMessages as ProviderMessage[]);
+    const agentMessages = saved.agentMessages as ProviderMessage[];
+
+    // If the conversation ends mid-tool-loop (last message is a tool_result),
+    // the model will try to continue the previous work instead of handling new
+    // user input. Cap it with a synthetic assistant message so the model knows
+    // the previous turn is complete.
+    if (agentMessages.length > 0 && agentMessages[agentMessages.length - 1]!.role === 'tool_result') {
+      agentMessages.push({
+        role: 'assistant',
+        content: '[Previous session ended. Awaiting new instructions.]',
+      });
+    }
+
+    agent.setMessages(agentMessages);
     messages = saved.uiMessages as DisplayMessage[];
     // Restore saved usage so token counts are continuous across restarts
     if (saved.usage) {
       usage = saved.usage;
       agent.setUsage(saved.usage);
     }
-    console.error(`[server] Restored session (${messages.length} messages, ${usage.input + usage.output} tokens)`);
+    log.info('Session restored', { messages: messages.length, tokens: usage.input + usage.output });
   }
 }
 
@@ -1039,17 +1139,17 @@ async function initAgent(): Promise<void> {
     mcpManager = await loadMCP(workspacePath);
     const { servers, tools } = mcpManager.stats;
     if (servers > 0) {
-      console.error(`[server] MCP: ${servers} server(s), ${tools} tool(s)`);
+      log.info('MCP initialized', { servers, tools });
     }
   } catch (err: unknown) {
     const e = err as { message?: string };
-    console.error(`[server] MCP init failed (non-fatal): ${e.message}`);
+    log.warn('MCP init failed (non-fatal)', { error: e.message });
   }
 
   // Connect to host daemon (non-blocking — agent works without it)
   hostClient = initHostClient();
   if (hostClient) {
-    console.error('[server] Host daemon connected');
+    log.info('Host daemon connected');
     // Wait briefly for capabilities event
     await new Promise<void>((r) => setTimeout(r, 200));
   }
@@ -1067,11 +1167,15 @@ async function initAgent(): Promise<void> {
         await new Promise<void>((r) => setTimeout(r, 300));
         if (sp.isConnected()) {
           proxyProvider = sp;
-          console.error('[server] Using LLM proxy (API keys on host)');
+          log.info('Using LLM proxy (API keys on host)');
         }
       }
     }
   } catch {}
+
+  // Store provider at module level so background tasks can reuse it
+  // (in the sandbox there are no API keys — only the SocketProvider works)
+  agentProvider = proxyProvider;
 
   agent = new Agent({
     model,
@@ -1087,13 +1191,13 @@ try {
   await initAgent();
 } catch (err: unknown) {
   const error = err as { message?: string };
-  console.error(`Fatal: ${error.message ?? 'Failed to initialize agent'}`);
+  log.error('Fatal', { error: error.message ?? 'Failed to initialize agent' });
   process.exit(1);
 }
 
 restoreSession();
 const server = startServer();
-console.error(`[server] Listening on ${SOCKET_PATH}`);
+log.info('Listening', { socket: SOCKET_PATH });
 
 // --- End-of-session summary ---
 
@@ -1144,6 +1248,15 @@ let restartRequested = false;
 function shutdown(): void {
   writeEndOfSessionSummary();
   saveLifetimeUsage(usage);
+
+  // If the agent was mid-tool-loop, cancel before saving to avoid
+  // autosaving a conversation that ends with tool_result (which would
+  // cause the model to continue previous work on restore).
+  if (isLoading && abortController) {
+    abortController.abort();
+    abortController = null;
+    isLoading = false;
+  }
   doAutoSave();
   if (mcpManager) mcpManager.shutdown();
   server.close();

@@ -3,7 +3,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { CapabilityName, GrantLevel, PermissionEntry } from './protocol.js';
 

@@ -13,10 +13,12 @@ import type {
   Provider,
   ProviderMessage,
   ProviderToolDef,
-  ProviderResponse,
 } from './provider.js';
 import type { LLMRequest, LLMEvent } from './socket-provider.js';
 import { LLM_PROXY_SOCKET } from './socket-provider.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('llm-proxy');
 
 function writeLine(socket: Socket, data: LLMEvent): void {
   try {
@@ -64,16 +66,22 @@ export class LLMProxy {
     });
 
     this.server.listen(LLM_PROXY_SOCKET, () => {
-      // LLM proxy ready
+      log.info('Listening', { socket: LLM_PROXY_SOCKET });
     });
 
     this.server.on('error', (err) => {
-      console.error(`[llm-proxy] Error: ${err.message}`);
+      log.error('Server error', { error: err.message });
     });
   }
 
   private async handleRequest(socket: Socket, req: LLMRequest): Promise<void> {
     const { id, system, messages, tools, options } = req;
+
+    log.info('LLM request', {
+      id, model: options.model, messages: messages.length,
+      tools: tools.length, thinking: options.thinking,
+    });
+    const start = performance.now();
 
     try {
       const response = await this.provider.sendMessage(
@@ -95,15 +103,25 @@ export class LLMProxy {
         },
       );
 
+      const ms = (performance.now() - start).toFixed(0);
+      log.info('LLM response', {
+        id, ms, stopReason: response.stopReason,
+        inputTokens: response.usage.input, outputTokens: response.usage.output,
+        cacheRead: response.usage.cacheRead, toolCalls: response.toolCalls.length,
+      });
+
       writeLine(socket, { type: 'llm_done', id, response });
     } catch (err: unknown) {
       const e = err as { message?: string; status?: number; code?: string };
+      const ms = (performance.now() - start).toFixed(0);
+      log.error('LLM error', { id, ms, error: e.message, status: e.status, code: e.code });
+
       writeLine(socket, {
         type: 'llm_error',
         id,
         message: e.message ?? 'Unknown LLM error',
-        status: e.status,
-        code: e.code,
+        ...(e.status !== undefined ? { status: e.status } : {}),
+        ...(e.code !== undefined ? { code: e.code } : {}),
       });
     }
   }

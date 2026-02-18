@@ -10,27 +10,57 @@ function UserMessage({ content, cols }: { content: string; cols: number }): Reac
   const maxWidth = Math.min(Math.floor(cols * 0.7), cols - 4);
 
   return (
-    <Box justifyContent="flex-end" marginY={0}>
-      <Box flexDirection="column" width={maxWidth}>
-        <Box justifyContent="flex-end">
-          <Text color="cyan" dimColor>{content}</Text>
+    <Box flexDirection="column" marginY={0}>
+      <Box justifyContent="flex-end">
+        <Text color="cyan" dimColor>you</Text>
+      </Box>
+      <Box justifyContent="flex-end">
+        <Box
+          flexDirection="column"
+          width={maxWidth}
+          borderStyle="bold"
+          borderRight
+          borderLeft={false}
+          borderTop={false}
+          borderBottom={false}
+          borderColor="cyan"
+          borderDimColor
+        >
+          <Box justifyContent="flex-end">
+            <Text>{renderMarkdown(content)}</Text>
+          </Box>
         </Box>
       </Box>
-      <Text color="cyan" dimColor> ▎</Text>
     </Box>
   );
 }
 
-function AssistantMessage({ content, elapsed }: { content: string; elapsed?: number | undefined }): React.JSX.Element {
+function AssistantMessage({ content, elapsed, cols }: { content: string; elapsed?: number | undefined; cols: number }): React.JSX.Element {
+  const maxWidth = Math.min(Math.floor(cols * 0.7), cols - 4);
+
   return (
-    <Box flexDirection="column" marginY={0} paddingLeft={1}>
-      <Text color="magenta" dimColor>agent</Text>
-      <Box marginLeft={1}>
+    <Box flexDirection="column" marginY={0}>
+      <Box>
+        <Text color="magenta" dimColor>
+          agent
+          {elapsed !== undefined && (
+            <Text color="gray" dimColor> ({elapsed.toFixed(1)}s)</Text>
+          )}
+        </Text>
+      </Box>
+      <Box
+        width={maxWidth}
+        borderStyle="bold"
+        borderLeft
+        borderRight={false}
+        borderTop={false}
+        borderBottom={false}
+        borderColor="magenta"
+        borderDimColor
+        paddingLeft={1}
+      >
         <Text>{renderMarkdown(content)}</Text>
       </Box>
-      {elapsed !== undefined && (
-        <Text color="gray" dimColor> ({elapsed.toFixed(1)}s)</Text>
-      )}
     </Box>
   );
 }
@@ -50,7 +80,7 @@ function MessageBubble({ message, cols }: { message: Message; cols: number }): R
   if (message.role === 'system') {
     return <SystemMessage content={message.content} />;
   }
-  return <AssistantMessage content={message.content} elapsed={message.elapsed} />;
+  return <AssistantMessage content={message.content} elapsed={message.elapsed} cols={cols} />;
 }
 
 export function ChatView({ messages }: ChatViewProps): React.JSX.Element {

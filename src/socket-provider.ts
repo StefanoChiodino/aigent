@@ -16,9 +16,11 @@ import type {
   ProviderToolDef,
   ProviderResponse,
   StreamCallbacks,
-  ToolCall,
 } from './provider.js';
-import type { ThinkingLevel, TokenUsage } from './agent.js';
+import type { ThinkingLevel } from './agent.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('socket-provider');
 
 /** Path for the LLM proxy socket (separate from the worker↔gatekeeper socket). */
 export const LLM_PROXY_SOCKET = `${SOCKET_DIR}/llm-proxy.sock`;
@@ -69,6 +71,7 @@ export class SocketProvider implements Provider {
 
       this.socket.on('connect', () => {
         this.connected = true;
+        log.debug('Connected to LLM proxy');
       });
 
       this.socket.on('data', (chunk) => {
@@ -86,10 +89,11 @@ export class SocketProvider implements Provider {
       });
 
       this.socket.on('close', () => {
+        log.warn('LLM proxy disconnected', { pendingRequests: this.pending.size });
         this.connected = false;
         this.socket = null;
         // Reject all pending
-        for (const [id, p] of this.pending) {
+        for (const [, p] of this.pending) {
           p.reject(Object.assign(new Error('LLM proxy disconnected'), { code: 'ECONNRESET' }));
         }
         this.pending.clear();
@@ -122,9 +126,10 @@ export class SocketProvider implements Provider {
         break;
       case 'llm_error': {
         this.pending.delete(event.id);
+        log.warn('LLM error received', { id: event.id, message: event.message });
         const err = Object.assign(new Error(event.message), {
-          status: event.status,
-          code: event.code,
+          ...(event.status !== undefined ? { status: event.status } : {}),
+          ...(event.code !== undefined ? { code: event.code } : {}),
         });
         p.reject(err);
         break;
@@ -166,7 +171,7 @@ export class SocketProvider implements Provider {
     };
 
     return new Promise<ProviderResponse>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, callbacks });
+      this.pending.set(id, { resolve, reject, ...(callbacks ? { callbacks } : {}) });
 
       // Handle abort
       if (options.signal) {

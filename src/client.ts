@@ -8,7 +8,11 @@
 import { connect, type Socket } from 'node:net';
 import { EventEmitter } from 'node:events';
 import type { ClientCommand, ServerEvent, ServerState } from './protocol.js';
+import type { ThinkingLevel } from './agent.js';
 import { SOCKET_PATH } from './protocol.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('client');
 
 export interface AgentClientEvents {
   connected: (state: ServerState) => void;
@@ -24,6 +28,7 @@ export interface AgentClientEvents {
   loading: (isLoading: boolean) => void;
   error: (message: string) => void;
   state: (partial: { thinking?: string; profile?: string; sessionId?: string }) => void;
+  host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[], capabilities?: Record<string, string>) => void;
   disconnected: () => void;
   reconnecting: (attempt: number) => void;
 }
@@ -58,6 +63,7 @@ export class AgentClient extends EventEmitter {
     this.socket.on('connect', () => {
       this._connected = true;
       this.reconnectAttempt = 0;
+      log.debug('Connected to server');
     });
 
     this.socket.on('data', (data) => {
@@ -100,6 +106,7 @@ export class AgentClient extends EventEmitter {
     // Backoff: 200ms, 500ms, 1s, 1s, 1s...
     const delay = this.reconnectAttempt <= 1 ? 200 : this.reconnectAttempt <= 3 ? 500 : 1000;
 
+    log.debug('Reconnecting', { attempt: this.reconnectAttempt, delayMs: delay });
     this.emit('reconnecting', this.reconnectAttempt);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -184,8 +191,12 @@ export class AgentClient extends EventEmitter {
     }
   }
 
-  sendMessage(content: string): void {
-    this.send({ type: 'message', content });
+  sendMessage(content: string, thinkingOverride?: ThinkingLevel): void {
+    if (thinkingOverride) {
+      this.send({ type: 'message', content, thinkingOverride });
+    } else {
+      this.send({ type: 'message', content });
+    }
   }
 
   cancel(): void {

@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Read(//home/draga/repos/openclaw/**)"
+      "Read(//home/draga/repos/openclaw/**)",
+      "Bash(npx esbuild:*)",
+      "Bash(make:*)"
     ]
   }
 }

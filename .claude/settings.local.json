@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Read(//tmp/**)",
+      "Bash(npm run web:build:*)",
+      "Bash(npm run build:*)",
+      "Bash(npx tsx:*)",
+      "Bash(node:*)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }

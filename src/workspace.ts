@@ -1,5 +1,8 @@
 import { readFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { createLogger } from './logger.js';
+
+const log = createLogger('workspace');
 
 /**
  * Config files — instruction files that define the agent's behaviour.
@@ -129,6 +132,8 @@ export function loadWorkspaceContext(workspacePath: string): string {
       `## Older Memory Files\n\nThese daily logs exist but aren't loaded. Use read_file to access them if needed.\nPath: ${memoryDir}/YYYY-MM-DD.md\n\n${index.join('\n')}`
     );
   }
+
+  log.debug('Workspace context loaded', { sections: sections.length, recentDays: recentFiles.length, olderFiles: olderFiles.length });
 
   if (sections.length === 0) {
     return '';

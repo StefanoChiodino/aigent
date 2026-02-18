@@ -185,3 +185,72 @@ export function checkCommandSafety(command: string): string | null {
   }
   return null;
 }
+
+// --- Read-only command validation (for background agents) ---
+
+/** Patterns that indicate write/destructive operations. */
+const READONLY_BLOCKLIST: [RegExp, string][] = [
+  // File mutation
+  [/\brm\b/, 'rm (file deletion)'],
+  [/\bmv\b/, 'mv (file move/rename)'],
+  [/\bcp\b/, 'cp (file copy)'],
+  [/\bmkdir\b/, 'mkdir (directory creation)'],
+  [/\brmdir\b/, 'rmdir (directory removal)'],
+  [/\btouch\b/, 'touch (file creation)'],
+  [/\bchmod\b/, 'chmod (permission change)'],
+  [/\bchown\b/, 'chown (ownership change)'],
+  [/\bln\b/, 'ln (link creation)'],
+  [/\btee\b/, 'tee (write to file)'],
+  [/\bdd\b/, 'dd (disk/file write)'],
+  [/\btruncate\b/, 'truncate (file truncation)'],
+
+  // In-place edits
+  [/\bsed\s+(-[a-zA-Z]*i|--in-place)/, 'sed -i (in-place edit)'],
+  [/\bperl\s+(-[a-zA-Z]*[pi]){2}/, 'perl -pi (in-place edit)'],
+
+  // Git write operations
+  [/\bgit\s+(add|commit|push|stash|checkout|reset|rebase|merge|cherry-pick|revert|clean|rm|mv)\b/, 'git write operation'],
+  [/\bgit\s+branch\s+-[dD]\b/, 'git branch delete'],
+  [/\bgit\s+tag\s+-d\b/, 'git tag delete'],
+
+  // Package manager writes
+  [/\b(npm|yarn|pnpm)\s+(install|uninstall|remove|add|update|publish|init|create)\b/, 'package manager write'],
+  [/\bpip\s+(install|uninstall)\b/, 'pip write operation'],
+
+  // Process/system mutation
+  [/\bkill\b/, 'kill (process termination)'],
+  [/\bpkill\b/, 'pkill (process termination)'],
+  [/\bsudo\b/, 'sudo (privilege escalation)'],
+  [/\bsu\s/, 'su (user switch)'],
+
+  // Pipe to shell
+  [/\bcurl\b.*\|\s*(ba)?sh/, 'pipe to shell'],
+  [/\bwget\b.*\|\s*(ba)?sh/, 'pipe to shell'],
+];
+
+/**
+ * Validate a command for read-only execution (background agents).
+ * Returns null if safe, or an error message describing what was blocked.
+ *
+ * Strategy: blocklist of known destructive patterns + redirect detection.
+ * Defense-in-depth — the system prompt also instructs read-only behavior.
+ */
+export function validateReadonlyCommand(command: string): string | null {
+  // Check for output redirection on the full command
+  if (/>{1,2}\s*[^&]/.test(command)) {
+    return 'Blocked: output redirection — background agents are read-only';
+  }
+
+  // Split on shell operators and check each sub-command
+  const subCommands = command.split(/\s*(?:\|{1,2}|;|&&)\s*/);
+
+  for (const sub of subCommands) {
+    for (const [pattern, description] of READONLY_BLOCKLIST) {
+      if (pattern.test(sub)) {
+        return `Blocked: ${description} — background agents are read-only`;
+      }
+    }
+  }
+
+  return null;
+}

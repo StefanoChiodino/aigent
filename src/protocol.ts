@@ -17,7 +17,7 @@ export interface TokenUsage {
 // --- Client → Server ---
 
 export type ClientCommand =
-  | { type: 'message'; content: string }
+  | { type: 'message'; content: string; thinkingOverride?: ThinkingLevel }
   | { type: 'cancel' }
   | { type: 'command'; cmd: string }
   | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
@@ -69,6 +69,7 @@ export type ServerEvent =
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
+  | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
   | { type: 'pong' };
 
 // --- Worker → Gatekeeper (capability/mount requests) ---

@@ -1,6 +1,9 @@
 import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Provider, ProviderMessage } from './provider.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('compact');
 
 const COMPACT_PROMPT = `Summarize the conversation so far into a concise but thorough summary. Include:
 - The user's goals and what they asked for
@@ -152,6 +155,8 @@ export async function compactConversation(
     return { messages, summary: '' };
   }
 
+  log.info('Compaction starting', { totalMessages: messages.length, splitIdx, keepRecentTurns });
+
   const oldMessages = messages.slice(0, splitIdx);
   const recentMessages = messages.slice(splitIdx);
 
@@ -189,5 +194,6 @@ export async function compactConversation(
     ...recentMessages,
   ];
 
+  log.info('Compaction complete', { messagesBefore: messages.length, messagesAfter: compacted.length, summaryLength: summary.length });
   return { messages: compacted, summary };
 }
