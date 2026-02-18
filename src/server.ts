@@ -515,6 +515,16 @@ function handleCommand(cmd: string): boolean {
     return true;
   }
 
+  if (trimmed === '/restart') {
+    addSystemMessage('Restarting server...');
+    doAutoSave();
+    saveLifetimeUsage(usage);
+    // Give the client a moment to receive the message, then exit.
+    // The supervisor will restart us.
+    setTimeout(() => process.exit(0), 200);
+    return true;
+  }
+
   if (trimmed === '/reasoning') {
     const isOn = currentThinking !== 'off';
     addSystemMessage(`Reasoning: ${isOn ? 'on' : 'off'}\nUsage: /reasoning on | /reasoning off`);
@@ -722,6 +732,7 @@ function handleCommand(cmd: string): boolean {
     addSystemMessage(
       'Commands:\n' +
       '  /reset              Clear conversation\n' +
+      '  /restart            Restart server (picks up code changes)\n' +
       '  /refresh            Reload workspace files\n' +
       '  /compact            Compact context (free up space)\n' +
       '  /reasoning on|off   Toggle reasoning\n' +

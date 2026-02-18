@@ -8,6 +8,7 @@ const SLASH_COMMANDS = [
   '/compact',
   '/refresh',
   '/reset',
+  '/restart',
   '/reasoning on',
   '/reasoning off',
   '/effort low',

@@ -27,7 +27,8 @@ interface TextInputProps {
  *   Ctrl+W       — delete word before cursor
  *   Ctrl+U       — delete from cursor to beginning of line
  *   Ctrl+K       — delete from cursor to end of line
- *   Ctrl+H       — delete character before cursor (same as backspace)
+ *   Backspace / Ctrl+H — delete character before cursor
+ *   Delete       — delete character after cursor
  *   Ctrl+D       — delete character under cursor
  *
  * Multi-line:
@@ -142,13 +143,26 @@ export function TextInput({
           setCursorOffset(valueRef.current.length);
         }
 
-        // Remap \x7f → \b so Ink maps Backspace to key.backspace (not key.delete).
-        // Most terminals send \x7f for Backspace, but Ink treats \x7f as delete.
-        if (seq === '\x7f') {
-          return origEmit(event, Buffer.from('\b'));
+        // Backspace — most terminals send \x7f, but Ink misidentifies it as
+        // key.delete. Handle directly here and suppress from Ink.
+        if (seq === '\x7f' || seq === '\b') {
+          const v = valueRef.current;
+          const c = cursorOffsetRef.current;
+          if (c > 0) {
+            onChange(v.slice(0, c - 1) + v.slice(c));
+            setCursorOffset(c - 1);
+          }
+          return true;
         }
-        if (seq === '\x1b\x7f') {
-          return origEmit(event, Buffer.from('\x1b\b'));
+
+        // Delete key — \x1b[3~ (xterm). Handle directly and suppress.
+        if (seq === '\x1b[3~') {
+          const v = valueRef.current;
+          const c = cursorOffsetRef.current;
+          if (c < v.length) {
+            onChange(v.slice(0, c) + v.slice(c + 1));
+          }
+          return true;
         }
       }
 
@@ -280,16 +294,6 @@ export function TextInput({
       return;
     }
 
-    // Ctrl+H — backspace
-    if (key.ctrl && input === 'h') {
-      if (cursorOffset > 0) {
-        const newValue = value.slice(0, cursorOffset - 1) + value.slice(cursorOffset);
-        onChange(newValue);
-        setCursorOffset(cursorOffset - 1);
-      }
-      return;
-    }
-
     // Ctrl+D — on empty input, let parent handle (exit). Otherwise forward-delete.
     if (key.ctrl && input === 'd') {
       if (value.length === 0) return; // pass through to parent
@@ -299,23 +303,9 @@ export function TextInput({
       return;
     }
 
-    // Backspace
-    if (key.backspace) {
-      if (cursorOffset > 0) {
-        const newValue = value.slice(0, cursorOffset - 1) + value.slice(cursorOffset);
-        onChange(newValue);
-        setCursorOffset(cursorOffset - 1);
-      }
-      return;
-    }
-
-    // Delete — forward-delete character to the right
-    if (key.delete) {
-      if (cursorOffset < value.length) {
-        onChange(value.slice(0, cursorOffset) + value.slice(cursorOffset + 1));
-      }
-      return;
-    }
+    // Backspace / Delete / Ctrl+H — handled in raw stdin handler above
+    // (Ink misidentifies \x7f as key.delete, so we bypass its key parsing)
+    if (key.backspace || key.delete) return;
 
     // --- Regular character input ---
     if (input && !key.ctrl && !key.meta) {
