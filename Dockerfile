@@ -28,9 +28,9 @@ RUN mkdir -p /workspace && chown node:node /workspace
 # Give node user ownership of the app directory (for node_modules anonymous volume)
 RUN chown -R node:node /app
 
-# Copy entrypoint
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+# Copy entrypoint outside bind-mount path to avoid WSL2/volume lock issues
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Non-root user. Uses node:22-slim's built-in 'node' user (uid 1000).
 # This matches typical host user UIDs, which means bind-mounted volumes
@@ -41,4 +41,4 @@ USER node
 
 WORKDIR /workspace
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
