@@ -112,6 +112,7 @@ export function InputBar({
 
   const statusParts: string[] = [];
   statusParts.push(`r:${effortLetter ? 'on ' + effortLetter : 'off'}`);
+  if (running.length > 0) statusParts.push(`${running.length} task${running.length > 1 ? 's' : ''}`);
   const cost = usage?.cost ?? 0;
   if (cost > 0) statusParts.push(cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`);
   const contextUsed = usage?.contextTokens ?? 0;
@@ -158,9 +159,6 @@ export function InputBar({
     const note = notifications[notifications.length - 1]!;
     const short = note.length > innerWidth ? note.slice(0, innerWidth - 1) + '…' : note;
     middleContent = <Text color="yellow" dimColor>{short}</Text>;
-  } else if (running.length > 0) {
-    const taskSummary = `${running.length} background task${running.length > 1 ? 's' : ''} running`;
-    middleContent = <Text color="gray" dimColor>{taskSummary}</Text>;
   } else {
     middleContent = <Text> </Text>;
   }

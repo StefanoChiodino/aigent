@@ -120,36 +120,46 @@ Docker container (worker.ts → server.ts)
 - [x] Client command queue (reliable message delivery during reconnection)
 - [x] Proper cancel support: abort signal through agent → provider → API stream
 
+### Gatekeeper/Sandbox Architecture (Phase 1)
+- [x] Gatekeeper on host (gatekeeper.tsx) — TUI + container lifecycle
+- [x] Worker in Docker (worker.ts) — server management + file watcher
+- [x] Socket in shared directory (/tmp/aigent/worker.sock)
+- [x] /app read-only by default — self-modification requires explicit grant
+- [x] Mount management: /mount, /unmount, /mounts commands in TUI
+- [x] Agent mount requests: request_mount tool → user approves via /grant or /deny
+- [x] Forbidden path protection (/, /etc, /home root, etc.)
+- [x] Safety paths updated for gatekeeper model (/workspace, /project, /tmp)
+- [x] Pre-restart typecheck in worker file watcher
+- [x] Legacy backward compat: make dev still works (everything in Docker)
+
 ---
 
 ## Next Up
 
-### Host Daemon (docs/host-daemon.md)
-- [ ] Phase 1: Socket + permissions + clipboard (MVP)
-  - [ ] `aigent-host` CLI daemon (socket listener, permission store, prompt UX)
-  - [ ] Clipboard provider (platform-detected, read/write, text + image)
-  - [ ] `host-client.ts` in agent (socket client, request/response)
-  - [ ] `host` tool wired into tools.ts
-  - [ ] Docker compose conditional socket mount
-  - [ ] System prompt advertises available/denied capabilities
-- [ ] Phase 2: Screen + audio
-- [ ] Phase 3: notify, open, external fs, timed permissions, /permissions command
+### Gatekeeper (Phase 2 — LLM proxy + workspace split)
+- [ ] LLM proxy: gatekeeper proxies API calls, keys never in sandbox
+- [ ] Workspace split: config files (ro) vs memory files (rw)
+- [ ] Config writes require gatekeeper approval with diff shown to user
+- [ ] Tool call inspection at gatekeeper level
+
+### Gatekeeper (Phase 3 — OS bridge)
+- [ ] Clipboard push (/clipboard command, Ctrl+V image paste)
+- [ ] File attach (/attach command)
+- [ ] Audio play (agent → host speakers)
+- [ ] Notifications
+- [ ] Timed grants with auto-expiry
+- [ ] Audit log
+- [ ] Browser plugin integration
 
 ### Stabilize
-- [ ] End-to-end test in Docker (make dev) — many untested changes
-- [ ] Pre-restart typecheck: tsc --noEmit before server restart in file watcher
+- [x] End-to-end test: gatekeeper/sandbox split works (2026-02-18)
+- [x] Pre-restart typecheck: tsc --noEmit before server restart in file watcher
 - [ ] Test with OpenAI-compatible endpoint (e.g., Ollama)
 
 ### Computer Use
 - [ ] Research Anthropic computer-use API
 - [ ] Screenshot capture tool
 - [ ] Mouse/keyboard action tools
-
-### Gateway Architecture
-- [ ] API key isolation (gateway holds keys)
-- [ ] Rate limiting, usage tracking
-- [ ] Multi-agent support
-- [ ] REST API
 
 ### Polish
 - [ ] Better image UX (drag-and-drop paths, URL fetch)
