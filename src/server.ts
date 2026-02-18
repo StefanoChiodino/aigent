@@ -119,6 +119,7 @@ let currentSessionId = generateSessionId();
 let model: string;
 let workspacePath: string;
 let isLoading = false;
+let isProcessingTaskResult = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
 
@@ -189,24 +190,37 @@ async function processTaskResults(): Promise<void> {
 }
 
 /**
- * Run a single agent turn. Used by both user messages and task result processing.
- * When isTaskResult is true, the triggering message is not displayed as a user message.
+ * Run a single agent turn. Used by user messages, image commands, and task result processing.
+ *
+ * @param content - Text content or pre-built UserContent (for images)
+ * @param opts.isTaskResult - Don't display as a user message (task result injection)
+ * @param opts.displayText - Custom display text for the user message (e.g., "[image: path]")
  */
-async function processAgentTurn(content: string, isTaskResult = false): Promise<void> {
+async function processAgentTurn(
+  content: string | UserContent,
+  opts: { isTaskResult?: boolean; displayText?: string } = {},
+): Promise<void> {
+  const { isTaskResult = false, displayText } = opts;
+
   if (!isTaskResult) {
-    const userMsg: DisplayMessage = { role: 'user', content, timestamp: new Date().toISOString() };
+    const text = displayText ?? (typeof content === 'string' ? content : '[message with attachments]');
+    const userMsg: DisplayMessage = { role: 'user', content: text, timestamp: new Date().toISOString() };
     messages.push(userMsg);
     broadcast({ type: 'message', message: userMsg });
   }
 
   isLoading = true;
+  isProcessingTaskResult = isTaskResult;
   broadcast({ type: 'loading', isLoading: true });
 
   const controller = new AbortController();
   abortController = controller;
   const startTime = Date.now();
 
-  const userContent = isTaskResult ? content : parseImagesInMessage(content);
+  // Parse for images only if it's a plain text user message
+  const userContent = typeof content === 'string' && !isTaskResult
+    ? parseImagesInMessage(content)
+    : content;
 
   try {
     const response = await agent.chat(userContent, {
@@ -265,6 +279,7 @@ async function processAgentTurn(content: string, isTaskResult = false): Promise<
   } finally {
     abortController = null;
     isLoading = false;
+    isProcessingTaskResult = false;
     broadcast({ type: 'loading', isLoading: false });
   }
 }
@@ -341,7 +356,7 @@ function dispatchBackgroundTask(input: {
         const results: ToolResult[] = [];
         for (const tc of response.toolCalls) {
           console.error(`[dispatch ${taskId}] executing tool: ${tc.name} ${JSON.stringify(tc.input).slice(0, 100)}`);
-          const result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], false);
+          const result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], agent.usingOAuth);
           const resultPreview = typeof result === 'string' ? result.slice(0, 100) : '[non-string]';
           console.error(`[dispatch ${taskId}] tool result: ${resultPreview}`);
           if (typeof result === 'string') {
@@ -800,11 +815,12 @@ function handleCancel(): void {
     messageQueue.length = 0;
     isLoading = false;
 
-    // Remove the trailing user message from display if the last message is from the user
-    // (agent.cleanupAfterAbort handles the internal message state)
-    if (messages.length > 0 && messages[messages.length - 1]!.role === 'user') {
+    // Remove the trailing user message — but only for normal user turns.
+    // Task result turns don't add user messages to the display.
+    if (!isProcessingTaskResult && messages.length > 0 && messages[messages.length - 1]!.role === 'user') {
       messages.pop();
     }
+    isProcessingTaskResult = false;
 
     broadcast({ type: 'text', content: '' });
     broadcast({ type: 'loading', isLoading: false });

@@ -430,6 +430,7 @@ export class Agent {
   getMessages(): ProviderMessage[] { return [...this.messages]; }
   setMessages(messages: ProviderMessage[]): void { this.messages = [...messages]; }
   getToolDefs(): ProviderToolDef[] { return [...this.toolDefs]; }
+  get usingOAuth(): boolean { return this.isOAuth; }
 
   reloadSystemPrompt(): void {
     const workspaceContext = loadWorkspaceContext(this.workspacePath);

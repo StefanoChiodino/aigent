@@ -4,11 +4,11 @@ import type { ServerState } from './protocol.js';
 
 function prompt(rl: ReturnType<typeof createInterface>, query: string): Promise<string> {
   return new Promise((resolve, reject) => {
+    const onClose = (): void => { reject(new Error('Input closed')); };
+    rl.once('close', onClose);
     rl.question(query, (answer) => {
+      rl.removeListener('close', onClose);
       resolve(answer);
-    });
-    rl.once('close', () => {
-      reject(new Error('Input closed'));
     });
   });
 }
