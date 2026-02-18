@@ -78,6 +78,8 @@ export interface AgentOptions {
   mcpManager?: MCPManager;
   /** Extra system prompt sections (e.g., host daemon capabilities). */
   extraSystemPrompt?: string;
+  /** Pre-created provider (e.g., SocketProvider for gatekeeper proxy). */
+  provider?: Provider;
 }
 
 // Re-export TokenUsage from protocol (single source of truth)
@@ -112,10 +114,16 @@ export class Agent {
   readonly providerType: string;
 
   constructor(options: AgentOptions = {}) {
-    const providerType = detectProvider();
-    this.providerType = providerType;
-    this.provider = createProvider(providerType);
-    this.isOAuth = providerType === 'anthropic' && (this.provider as AnthropicProvider).isOAuthToken;
+    if (options.provider) {
+      this.provider = options.provider;
+      this.providerType = 'proxy';
+      this.isOAuth = false;
+    } else {
+      const providerType = detectProvider();
+      this.providerType = providerType;
+      this.provider = createProvider(providerType);
+      this.isOAuth = providerType === 'anthropic' && (this.provider as AnthropicProvider).isOAuthToken;
+    }
     this.model = options.model ?? process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
     this.maxTokens = options.maxTokens ?? 16384;
     this.thinking = options.thinking ?? (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';

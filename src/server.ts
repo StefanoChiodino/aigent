@@ -1054,11 +1054,31 @@ async function initAgent(): Promise<void> {
     await new Promise<void>((r) => setTimeout(r, 200));
   }
 
+  // Check for LLM proxy socket — if present, use SocketProvider
+  // (API keys stay on the host, worker proxies through gatekeeper)
+  let proxyProvider: import('./provider.js').Provider | undefined;
+  try {
+    const { SocketProvider, LLM_PROXY_SOCKET } = await import('./socket-provider.js');
+    const { existsSync: exists } = await import('node:fs');
+    if (exists(LLM_PROXY_SOCKET)) {
+      const sp = new SocketProvider();
+      if (sp.connect()) {
+        // Wait for connection to establish
+        await new Promise<void>((r) => setTimeout(r, 300));
+        if (sp.isConnected()) {
+          proxyProvider = sp;
+          console.error('[server] Using LLM proxy (API keys on host)');
+        }
+      }
+    }
+  } catch {}
+
   agent = new Agent({
     model,
     thinking: currentThinking,
     workspacePath,
     ...(mcpManager ? { mcpManager } : {}),
+    ...(proxyProvider ? { provider: proxyProvider } : {}),
     extraSystemPrompt: buildHostSystemPrompt(),
   });
 }

@@ -3,12 +3,11 @@ services:
     build: .
     # No tty/stdin — the TUI runs on the host (gatekeeper)
     environment:
-      - ANTHROPIC_API_KEY
-      - OPENAI_API_KEY
+      # API keys are NOT passed to the sandbox.
+      # The gatekeeper proxies LLM calls and holds the keys on the host.
+      # For legacy mode (make dev), set keys in .env or pass explicitly.
       - AIGENT_MODEL
       - AIGENT_THINKING
-      - AIGENT_PROVIDER
-      - AIGENT_BASE_URL
       - AIGENT_WORKSPACE=/workspace
     volumes:
       - .:/app:ro                    # repo read-only

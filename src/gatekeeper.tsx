@@ -274,6 +274,11 @@ function cleanupSocket(): void {
   try {
     if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
   } catch {}
+  // Also clean LLM proxy socket
+  try {
+    const llmSocket = `${SOCKET_DIR}/llm-proxy.sock`;
+    if (existsSync(llmSocket)) unlinkSync(llmSocket);
+  } catch {}
 }
 
 function cleanupAll(): void {
@@ -557,6 +562,22 @@ function log(msg: string): void {
   process.stderr.write(`[gatekeeper ${ts}] ${msg}\n`);
 }
 
+// --- LLM Proxy ---
+
+async function startLLMProxy(): Promise<void> {
+  const { createProvider, detectProvider } = await import('./provider.js');
+  const providerType = detectProvider();
+  const provider = createProvider(providerType);
+  log(`LLM proxy: ${providerType} provider`);
+
+  const { LLMProxy } = await import('./llm-proxy.js');
+  const proxy = new LLMProxy(provider);
+  proxy.start();
+
+  // Clean up on exit
+  process.on('exit', () => proxy.stop());
+}
+
 // --- Main ---
 
 gatekeeperArgs = parseArgs();
@@ -574,6 +595,10 @@ if (gatekeeperArgs.projectFolder) {
 // Ensure socket directory
 mkdirSync(SOCKET_DIR, { recursive: true });
 cleanupSocket();
+
+// Start LLM proxy (holds API keys, worker connects to this)
+await startLLMProxy();
+log('LLM proxy ready');
 
 // Start container
 try {
