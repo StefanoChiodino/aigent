@@ -13,7 +13,7 @@ services:
       - AIGENT_WORKSPACE=/workspace
     volumes:
       - .:/app:ro                    # repo mounted read-only by default
-      - /app/node_modules            # container's own node_modules (anonymous volume)
+      - node_modules:/app/node_modules  # persistent named volume (survives --rm)
       - ./workspace:/workspace       # persistent workspace (read-write)
       - ./src:/app/src               # source: read-write (agent can self-modify)
       - ./.git:/app/.git             # git: read-write (agent can commit)
@@ -41,3 +41,6 @@ services:
     # Tmpfs for /tmp (fast, size-limited, not persisted)
     tmpfs:
       - /tmp:size=100M
+
+volumes:
+  node_modules:
