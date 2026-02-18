@@ -174,13 +174,15 @@ export class Agent {
 
       const response = await this.sendWithRetry(callbacks);
 
-      // Track usage
+      // Track usage — accumulate all fields for billing/cost accuracy.
       this._totalUsage.input += response.usage.input;
       this._totalUsage.output += response.usage.output;
       this._totalUsage.cacheRead += response.usage.cacheRead;
       this._totalUsage.cacheWrite += response.usage.cacheWrite;
-      // contextTokens = latest call's input tokens (actual context window fill)
-      this._totalUsage.contextTokens = response.usage.input;
+      // contextTokens = actual context window fill from latest call
+      // (input + cached = total prompt tokens sent to the model)
+      this._totalUsage.contextTokens =
+        response.usage.input + response.usage.cacheRead + response.usage.cacheWrite;
       callbacks?.onUsage?.({ ...this._totalUsage });
 
       // Add assistant response to history
@@ -193,7 +195,7 @@ export class Agent {
       // No tool calls — return text
       if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
         // Auto-compact check after final response
-        const contextUsed = response.usage.input;
+        const contextUsed = response.usage.input + response.usage.cacheRead + response.usage.cacheWrite;
         if (contextUsed > this.getContextWindow() * 0.7 && this.messages.length > 8) {
           await this.compact(callbacks);
         }

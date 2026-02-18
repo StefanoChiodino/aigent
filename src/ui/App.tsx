@@ -1,8 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
-import { InputBar } from './InputBar.js';
-import { StatusBar } from './StatusBar.js';
+import { InputBar, type ToolExecution } from './InputBar.js';
 import type { AgentClient } from '../client.js';
 import type { ThinkingLevel } from '../agent.js';
 import type { DisplayMessage, ServerState, TokenUsage, BackgroundTaskInfo } from '../protocol.js';
@@ -12,12 +11,6 @@ export interface Message {
   content: string;
   timestamp: Date;
   elapsed?: number | undefined;
-}
-
-export interface ToolExecution {
-  name: string;
-  input: string;
-  summary: string;
 }
 
 interface AppProps {
@@ -307,16 +300,6 @@ export function App({ client }: AppProps): React.JSX.Element {
           <Text color="red">Error: {error}</Text>
         </Box>
       )}
-      <StatusBar
-        isLoading={isLoading}
-        isThinking={isThinking}
-        thinkingText={thinkingText}
-        activeTools={activeTools}
-        toolOutput={toolOutput}
-        streaming={!!streaming}
-        tasks={taskList}
-        notifications={notifications}
-      />
       <InputBar
         value={inputValue}
         onChange={setInputValue}
@@ -326,6 +309,13 @@ export function App({ client }: AppProps): React.JSX.Element {
         usage={usage}
         runningTasks={runningTasks}
         ctrlCHint={ctrlCHint}
+        isThinking={isThinking}
+        thinkingText={thinkingText}
+        activeTools={activeTools}
+        toolOutput={toolOutput}
+        streaming={!!streaming}
+        tasks={taskList}
+        notifications={notifications}
       />
     </Box>
   );

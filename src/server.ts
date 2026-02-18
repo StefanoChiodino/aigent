@@ -885,13 +885,7 @@ function startServer(): Server {
 function restoreSession(): void {
   const saved = autoLoadSession(workspacePath);
   if (saved) {
-    const agentMessages = saved.agentMessages as ProviderMessage[];
-    // Inject session boundary so the AI focuses on new messages, not old ones
-    agentMessages.push(
-      { role: 'user', content: '[Session restored from auto-save. The conversation above is prior context. Wait for my next message — do not re-execute old tasks or continue previous work unless I explicitly ask.]' },
-      { role: 'assistant', content: 'Understood. I\'ll wait for your next message and focus only on what you ask.' },
-    );
-    agent.setMessages(agentMessages);
+    agent.setMessages(saved.agentMessages as ProviderMessage[]);
     messages = saved.uiMessages as DisplayMessage[];
     // Restore saved usage so token counts are continuous across restarts
     if (saved.usage) {

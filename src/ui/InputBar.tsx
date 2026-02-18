@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Box, Text, useStdout } from 'ink';
+import Spinner from 'ink-spinner';
 import { TextInput } from './TextInput.js';
-import type { TokenUsage } from '../protocol.js';
+import type { TokenUsage, BackgroundTaskInfo } from '../protocol.js';
 
 const SLASH_COMMANDS = [
   '/help',
@@ -51,6 +52,20 @@ function commonPrefix(strings: string[]): string {
   return prefix;
 }
 
+function elapsed(startedAt: string): string {
+  const secs = Math.round((Date.now() - new Date(startedAt).getTime()) / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return `${mins}m${rem > 0 ? `${rem}s` : ''}`;
+}
+
+export interface ToolExecution {
+  name: string;
+  input: string;
+  summary: string;
+}
+
 interface InputBarProps {
   value: string;
   onChange: (value: string) => void;
@@ -60,13 +75,37 @@ interface InputBarProps {
   usage?: TokenUsage | undefined;
   runningTasks?: number | undefined;
   ctrlCHint?: boolean | undefined;
+  // Status content — lives inside the box
+  isThinking?: boolean | undefined;
+  thinkingText?: string | undefined;
+  activeTools?: ToolExecution[] | undefined;
+  toolOutput?: string | undefined;
+  streaming?: boolean | undefined;
+  tasks?: BackgroundTaskInfo[] | undefined;
+  notifications?: string[] | undefined;
 }
 
-export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage, runningTasks = 0, ctrlCHint = false }: InputBarProps): React.JSX.Element {
+export function InputBar({
+  value, onChange, onSubmit, isLoading, thinking, usage,
+  runningTasks = 0, ctrlCHint = false,
+  isThinking = false, thinkingText = '', activeTools = [],
+  toolOutput = '', streaming = false, tasks = [], notifications = [],
+}: InputBarProps): React.JSX.Element {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
   const borderColor = isLoading ? 'gray' : 'cyan';
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const innerWidth = Math.max(0, cols - 4); // space inside the box borders
+
+  const running = tasks.filter((t) => t.status === 'running');
+
+  // Tick every second to update task elapsed times
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (running.length === 0) return;
+    const timer = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, [running.length]);
 
   const handleSubmit = (input: string): void => {
     setSuggestions([]);
@@ -101,7 +140,7 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
     return prefix.length > currentValue.length ? prefix : null;
   }, []);
 
-  // Status parts
+  // Status parts for the top border
   const effortLetter = thinking && thinking !== 'off'
     ? ({ low: 'L', medium: 'M', high: 'H', max: 'X' } as Record<string, string>)[thinking] ?? '?'
     : null;
@@ -117,18 +156,125 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
   const costStr = cost > 0 ? (cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`) : '';
   const taskStr = runningTasks > 0 ? `${runningTasks} task${runningTasks > 1 ? 's' : ''}` : '';
 
-  // Measure status display width for top border fill
-  let statusLen = 2 + rText.length; // "r:" + "on"/"off"
-  if (effortLetter) statusLen += 2; // " H"
-  if (taskStr) statusLen += 3 + taskStr.length; // " | N tasks"
-  if (costStr) statusLen += 3 + costStr.length; // " | $X.XX"
+  let statusLen = 2 + rText.length;
+  if (effortLetter) statusLen += 2;
+  if (taskStr) statusLen += 3 + taskStr.length;
+  if (costStr) statusLen += 3 + costStr.length;
   if (contextUsed > 0) {
-    // " | " + bar(12) + " " + used + "/" + total + " (" + pct + "%)"
     statusLen += 3 + 12 + 1 + usedStr.length + 1 + totalStr.length + 2 + String(pct).length + 2;
   }
 
-  // Top: "┌" + ─fill + " " + status + " ┐" → 1 + fill + 1 + statusLen + 2 = cols
   const fill = Math.max(0, cols - 4 - statusLen);
+
+  // Build status lines that go inside the box
+  const statusLines: React.JSX.Element[] = [];
+
+  // Thinking
+  if (isThinking && thinkingText) {
+    const lines = thinkingText.split('\n').slice(-3);
+    statusLines.push(
+      <Box key="thinking" flexDirection="column">
+        <Box>
+          <Text color={borderColor}>│ </Text>
+          <Text color="gray" dimColor><Spinner type="dots" /> thinking</Text>
+          <Box flexGrow={1} />
+          <Text color={borderColor}> │</Text>
+        </Box>
+        {lines.map((line, i) => (
+          <Box key={`t-${i}`}>
+            <Text color={borderColor}>│ </Text>
+            <Text color="gray" dimColor>  {line.slice(0, innerWidth)}</Text>
+            <Box flexGrow={1} />
+            <Text color={borderColor}> │</Text>
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+
+  // Active tools
+  if (activeTools.length > 0) {
+    for (let i = 0; i < activeTools.length; i++) {
+      const tool = activeTools[i]!;
+      statusLines.push(
+        <Box key={`tool-${i}`}>
+          <Text color={borderColor}>│ </Text>
+          <Text color="cyan"><Spinner type="dots" /></Text>
+          <Text color="gray"> {tool.summary.slice(0, innerWidth - 2)}</Text>
+          <Box flexGrow={1} />
+          <Text color={borderColor}> │</Text>
+        </Box>
+      );
+    }
+  }
+
+  // Tool output
+  if (toolOutput && activeTools.length > 0) {
+    const lines = toolOutput.split('\n').slice(-4);
+    for (let i = 0; i < lines.length; i++) {
+      statusLines.push(
+        <Box key={`tout-${i}`}>
+          <Text color={borderColor}>│ </Text>
+          <Text color="gray" dimColor>  {(lines[i] ?? '').slice(0, innerWidth)}</Text>
+          <Box flexGrow={1} />
+          <Text color={borderColor}> │</Text>
+        </Box>
+      );
+    }
+  }
+
+  // Loading spinner (no streaming, no tools, no thinking)
+  if (isLoading && !streaming && activeTools.length === 0 && !isThinking) {
+    statusLines.push(
+      <Box key="loading">
+        <Text color={borderColor}>│ </Text>
+        <Text color="magenta"><Spinner type="dots" /></Text>
+        <Text color="gray"> thinking...</Text>
+        <Box flexGrow={1} />
+        <Text color={borderColor}> │</Text>
+      </Box>
+    );
+  }
+
+  // Thinking spinner (no text yet)
+  if (isLoading && isThinking && !thinkingText) {
+    statusLines.push(
+      <Box key="reasoning">
+        <Text color={borderColor}>│ </Text>
+        <Text color="magenta"><Spinner type="dots" /></Text>
+        <Text color="gray"> reasoning...</Text>
+        <Box flexGrow={1} />
+        <Text color={borderColor}> │</Text>
+      </Box>
+    );
+  }
+
+  // Running background tasks
+  for (const task of running) {
+    const desc = task.description.slice(0, innerWidth - 10);
+    statusLines.push(
+      <Box key={task.id}>
+        <Text color={borderColor}>│ </Text>
+        <Text color="cyan"><Spinner type="dots" /></Text>
+        <Text color="gray"> {desc} </Text>
+        <Text color="gray" dimColor>({elapsed(task.startedAt)})</Text>
+        <Box flexGrow={1} />
+        <Text color={borderColor}> │</Text>
+      </Box>
+    );
+  }
+
+  // Notifications
+  for (let i = 0; i < notifications.length; i++) {
+    statusLines.push(
+      <Box key={`note-${i}`}>
+        <Text color={borderColor}>│ </Text>
+        <Text color="yellow" dimColor>{notifications[i]!.slice(0, innerWidth)}</Text>
+        <Box flexGrow={1} />
+        <Text color={borderColor}> │</Text>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column">
@@ -139,6 +285,7 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
           </Text>
         </Box>
       )}
+      {/* Top border with status indicators */}
       <Box>
         <Text color={borderColor}>{'\u250c'}{'\u2500'.repeat(fill)}{' '}</Text>
         <Text color="gray">r:<Text color="white">{rText}</Text></Text>
@@ -164,6 +311,18 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
         )}
         <Text color={borderColor}>{' \u2510'}</Text>
       </Box>
+
+      {/* Status lines inside the box */}
+      {statusLines}
+
+      {/* Separator if there are status lines */}
+      {statusLines.length > 0 && (
+        <Box>
+          <Text color={borderColor}>├{'─'.repeat(Math.max(0, cols - 2))}┤</Text>
+        </Box>
+      )}
+
+      {/* Input line */}
       <Box>
         <Text color={borderColor}>{'\u2502 '}</Text>
         <Box flexGrow={1}>
