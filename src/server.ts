@@ -519,9 +519,8 @@ function handleCommand(cmd: string): boolean {
     addSystemMessage('Restarting server...');
     doAutoSave();
     saveLifetimeUsage(usage);
-    // Give the client a moment to receive the message, then exit.
-    // The supervisor will restart us.
-    setTimeout(() => process.exit(0), 200);
+    // Exit with code 100 — supervisor treats this as "restart requested"
+    setTimeout(() => process.exit(100), 200);
     return true;
   }
 

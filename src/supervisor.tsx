@@ -42,6 +42,13 @@ function startServer(): void {
       return;
     }
 
+    // Code 100 = /restart command — clean restart
+    if (code === 100) {
+      console.error('[supervisor] Restart requested — restarting server...');
+      setTimeout(startServer, 300);
+      return;
+    }
+
     // Unexpected crash — restart after delay
     if (signal !== 'SIGTERM' && signal !== 'SIGINT' && code !== 0) {
       console.error(`\n[supervisor] Server crashed (code=${code}, signal=${signal}). Restarting in 1s...`);
