@@ -15,6 +15,7 @@ const SLASH_COMMANDS = [
   '/effort high',
   '/effort max',
   '/image ',
+  '/usage',
   '/profiles',
   '/profile ',
   '/profile create ',
@@ -108,13 +109,9 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
   const bar = contextBar(contextUsed, contextWindow, 12);
   const usedStr = formatTokens(contextUsed);
   const totalStr = formatTokens(contextWindow);
-  const cost = usage?.cost ?? 0;
-  const costStr = cost > 0 ? `$${cost < 0.01 ? cost.toFixed(3) : cost.toFixed(2)}` : '';
-
   // Measure status display width for top border fill
   let statusLen = 2 + rText.length; // "r:" + "on"/"off"
   if (effortLetter) statusLen += 2; // " H"
-  if (costStr) statusLen += 3 + costStr.length; // " | $X.XX"
   if (contextUsed > 0) {
     // " | " + bar(12) + " " + used + "/" + total + " (" + pct + "%)"
     statusLen += 3 + 12 + 1 + usedStr.length + 1 + totalStr.length + 2 + String(pct).length + 2;
@@ -136,12 +133,6 @@ export function InputBar({ value, onChange, onSubmit, isLoading, thinking, usage
         <Text color={borderColor}>{'\u250c'}{'\u2500'.repeat(fill)}{' '}</Text>
         <Text color="gray">r:<Text color="white">{rText}</Text></Text>
         {effortLetter && <Text color="gray"> {effortLetter}</Text>}
-        {costStr && (
-          <>
-            <Text color="gray">{' | '}</Text>
-            <Text color="yellow">{costStr}</Text>
-          </>
-        )}
         {contextUsed > 0 && (
           <>
             <Text color="gray">{' | '}</Text>

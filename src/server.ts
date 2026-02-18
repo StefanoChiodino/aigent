@@ -9,14 +9,13 @@
  */
 
 import { createServer, type Server, type Socket } from 'node:net';
-import { existsSync, unlinkSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import { existsSync, unlinkSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
 import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType } from './provider.js';
 import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
-import { computeCost } from './pricing.js';
 import { loadMCP, type MCPManager } from './mcp.js';
 
 const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
@@ -121,6 +120,71 @@ let workspacePath: string;
 let isLoading = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
+
+// --- Persistent usage tracking ---
+
+interface LifetimeUsage {
+  totalInput: number;
+  totalOutput: number;
+  totalCacheRead: number;
+  totalCacheWrite: number;
+  sessions: number;
+  firstUsed: string;
+  lastUsed: string;
+}
+
+function getUsagePath(): string {
+  return join(workspacePath, 'usage.json');
+}
+
+function loadLifetimeUsage(): LifetimeUsage {
+  try {
+    const raw = readFileSync(getUsagePath(), 'utf-8');
+    return JSON.parse(raw) as LifetimeUsage;
+  } catch {
+    return {
+      totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheWrite: 0,
+      sessions: 0, firstUsed: new Date().toISOString(), lastUsed: new Date().toISOString(),
+    };
+  }
+}
+
+function saveLifetimeUsage(sessionUsage: TokenUsage): void {
+  const lifetime = loadLifetimeUsage();
+  lifetime.totalInput += sessionUsage.input;
+  lifetime.totalOutput += sessionUsage.output;
+  lifetime.totalCacheRead += sessionUsage.cacheRead;
+  lifetime.totalCacheWrite += sessionUsage.cacheWrite;
+  lifetime.sessions++;
+  lifetime.lastUsed = new Date().toISOString();
+  try {
+    writeFileSync(getUsagePath(), JSON.stringify(lifetime, null, 2) + '\n', 'utf-8');
+  } catch {
+    // Non-critical
+  }
+}
+
+function formatLifetimeUsage(): string {
+  const lt = loadLifetimeUsage();
+  const total = lt.totalInput + lt.totalOutput;
+  const fmt = (n: number): string => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+    return String(n);
+  };
+
+  const sessionTotal = usage.input + usage.output;
+  const lines = [
+    `This session:  ${fmt(sessionTotal)} tokens (${fmt(usage.input)} in, ${fmt(usage.output)} out)`,
+    `Lifetime:      ${fmt(total + sessionTotal)} tokens across ${lt.sessions + 1} session(s)`,
+    `  Input:       ${fmt(lt.totalInput + usage.input)}`,
+    `  Output:      ${fmt(lt.totalOutput + usage.output)}`,
+    `  Cache read:  ${fmt(lt.totalCacheRead + usage.cacheRead)}`,
+    `  Cache write: ${fmt(lt.totalCacheWrite + usage.cacheWrite)}`,
+    `First used:    ${lt.firstUsed.slice(0, 10)}`,
+  ];
+  return lines.join('\n');
+}
 
 // --- Helpers ---
 
@@ -335,7 +399,7 @@ function handleCommand(cmd: string): boolean {
           onToolStart: (name, toolInput, summary) => { if (!controller.signal.aborted) broadcast({ type: 'tool_start', name, input: toolInput, summary }); },
           onToolOutput: (content) => { if (!controller.signal.aborted) broadcast({ type: 'tool_output', content }); },
           onToolEnd: () => { if (!controller.signal.aborted) broadcast({ type: 'tool_end' }); },
-          onUsage: (u) => { usage = { ...u, cost: computeCost(model, u) }; broadcast({ type: 'usage', usage }); },
+          onUsage: (u) => { usage = u; broadcast({ type: 'usage', usage }); },
           onCompact: (summary) => { addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`); },
         });
 
@@ -385,6 +449,11 @@ function handleCommand(cmd: string): boolean {
     return true;
   }
 
+  if (trimmed === '/usage') {
+    addSystemMessage(formatLifetimeUsage());
+    return true;
+  }
+
   if (trimmed === '/help') {
     addSystemMessage(
       'Commands:\n' +
@@ -393,6 +462,7 @@ function handleCommand(cmd: string): boolean {
       '  /reasoning on|off   Toggle reasoning\n' +
       '  /effort <level>     Set effort (low/medium/high/max)\n' +
       '  /image <path> [msg] Send an image with optional message\n' +
+      '  /usage              Show token usage (session + lifetime)\n' +
       '  /profiles           List profiles\n' +
       '  /profile <name>     Switch profile\n' +
       '  /profile create <n> Create new profile\n' +
@@ -456,7 +526,7 @@ async function processMessage(content: string): Promise<void> {
         broadcast({ type: 'tool_end' });
       },
       onUsage: (u) => {
-        usage = { ...u, cost: computeCost(model, u) };
+        usage = u;
         broadcast({ type: 'usage', usage });
       },
       onCompact: (summary) => {
@@ -695,6 +765,7 @@ function writeEndOfSessionSummary(): void {
 // Graceful shutdown
 function shutdown(): void {
   writeEndOfSessionSummary();
+  saveLifetimeUsage(usage);
   doAutoSave();
   if (mcpManager) mcpManager.shutdown();
   server.close();
