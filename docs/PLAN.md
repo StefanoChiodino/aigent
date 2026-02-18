@@ -86,14 +86,45 @@ Docker container
 - [x] Agent uses Provider interface for all API calls
 - [x] Bidirectional OAT tool name mapping (internal ↔ Claude Code)
 
+### Streaming & Cost
+- [x] Streaming exec: spawn-based, output streamed to TUI via onToolOutput callback
+- [x] Cost tracking: src/pricing.ts with model pricing, displayed in status bar
+- [x] Persistent lifetime token tracking: workspace/usage.json, /usage command
+
+### MCP
+- [x] Full MCP client over stdio transport (JSON-RPC 2.0, Content-Length framing)
+- [x] MCPClient (single server) + MCPManager (multi-server orchestration)
+- [x] Tools prefixed mcp_<server>_<name> to avoid collisions
+- [x] Config via workspace/mcp.json, graceful shutdown
+
+### Background Tasks
+- [x] dispatch_task tool — background agents that don't block conversation
+- [x] TaskQueue (src/tasks.ts) with FIFO completion queue
+- [x] Dispatcher loop: completed results trigger agent turns when idle
+- [x] TaskList UI: running tasks shown with spinners + elapsed time
+- [x] /tasks command with running, awaiting review, and history views
+
+### Security
+- [x] src/safety.ts: sanitizedEnv(), validateWritePath(), validateFetchUrl(), checkCommandSafety()
+- [x] Env sanitization applied to exec, grep, glob, fetch, MCP servers
+- [x] Path validation: only /workspace, /app/src, /tmp writable
+- [x] SSRF protection: private IPs, localhost, metadata endpoints blocked
+- [x] Close stdin on all spawned processes (prevents sudo/passwd hangs)
+
 ### Infrastructure
 - [x] Docker hardening: cap_drop ALL, no-new-privileges, ulimits, tmpfs, resource limits
 - [x] Read-only app mount, writable src and workspace mounts
 - [x] Client command queue (reliable message delivery during reconnection)
+- [x] Proper cancel support: abort signal through agent → provider → API stream
 
 ---
 
 ## Next Up
+
+### Stabilize
+- [ ] End-to-end test in Docker (make dev) — many untested changes
+- [ ] Pre-restart typecheck: tsc --noEmit before server restart in file watcher
+- [ ] Test with OpenAI-compatible endpoint (e.g., Ollama)
 
 ### Computer Use
 - [ ] Research Anthropic computer-use API
@@ -107,8 +138,8 @@ Docker container
 - [ ] REST API
 
 ### Polish
-- [ ] Test with OpenAI-compatible endpoint
 - [ ] Better image UX (drag-and-drop paths, URL fetch)
+- [ ] Conversation search (/search <term> across past sessions)
 
 ---
 
