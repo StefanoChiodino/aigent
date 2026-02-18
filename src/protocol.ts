@@ -20,6 +20,7 @@ export type ClientCommand =
   | { type: 'message'; content: string }
   | { type: 'cancel' }
   | { type: 'command'; cmd: string }
+  | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
   | { type: 'ping' };
 
 // --- Server → Client ---
@@ -65,7 +66,20 @@ export type ServerEvent =
   | { type: 'error'; message: string }
   | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string }
   | { type: 'task_update'; task: BackgroundTaskInfo }
+  | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string }
   | { type: 'pong' };
+
+// --- Worker → Gatekeeper (capability/mount requests) ---
+
+export type WorkerRequest =
+  | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string }
+  | { type: 'capability_request'; id: string; capability: string; params: Record<string, unknown>; reason?: string };
+
+// --- Gatekeeper → Worker (responses to requests) ---
+
+export type GatekeeperResponse =
+  | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
+  | { type: 'capability_response'; id: string; ok: boolean; result?: unknown; message: string };
 
 // Socket directory — shared mount between host and container.
 // The worker creates its socket here; the gatekeeper connects from the host.

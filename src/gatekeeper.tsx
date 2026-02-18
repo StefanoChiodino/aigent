@@ -2,28 +2,36 @@
 /**
  * Gatekeeper — runs on the host, manages the Docker sandbox, runs the TUI.
  *
- * Architecture:
- *   1. Creates shared socket directory
- *   2. Starts the Docker container (worker) in detached mode
- *   3. Waits for the worker socket to appear
- *   4. Runs the TUI, connecting to the worker socket
- *   5. On exit, stops the container and cleans up
+ * Responsibilities:
+ *   - Container lifecycle (start, stop, restart with updated mounts)
+ *   - Mount management (add/remove folders, ro/rw, timed grants)
+ *   - Permission prompts (inline in TUI)
+ *   - OS bridge (clipboard, audio, etc. — future)
+ *   - LLM proxy (future — API keys out of sandbox)
  *
- * Usage:
- *   tsx src/gatekeeper.tsx [project-folder] [--rw] [--model <model>]
+ * The gatekeeper intercepts certain commands before they reach the worker:
+ *   /mount, /unmount, /mounts — handled locally
+ *   Everything else — forwarded to the worker
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, unlinkSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { resolve, basename, dirname } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_DIR = resolve(__dirname, '..');
-const CONTAINER_NAME = `aigent-worker-${process.pid}`;
 
-// --- Parse CLI args ---
+// --- Types ---
+
+interface Mount {
+  hostPath: string;        // Absolute path on host
+  containerPath: string;   // Path inside container (e.g., /project/myapp)
+  mode: 'ro' | 'rw';
+  expiresAt?: number;      // Timestamp for timed grants
+}
 
 interface GatekeeperArgs {
   projectFolder?: string;
@@ -31,6 +39,17 @@ interface GatekeeperArgs {
   model?: string;
   thinking?: string;
 }
+
+// --- State ---
+
+const mounts: Mount[] = [];
+let containerProcess: ChildProcess | null = null;
+let containerName = '';
+let gatekeeperArgs: GatekeeperArgs;
+let client: InstanceType<typeof import('./client.js').AgentClient> | null = null;
+let isRestarting = false;
+
+// --- CLI args ---
 
 function parseArgs(): GatekeeperArgs {
   const args = process.argv.slice(2);
@@ -58,6 +77,11 @@ Examples:
   aigent                           # Start with no project folder
   aigent ~/projects/myapp          # Mount project read-only
   aigent ~/projects/myapp --rw     # Mount project read-write
+
+Mount management (inside the TUI):
+  /mount <path> [ro|rw]   Mount a host folder into the sandbox
+  /unmount <path>          Remove a mount (sandbox restarts)
+  /mounts                  List active mounts
 `);
       process.exit(0);
     } else if (!arg.startsWith('-')) {
@@ -68,114 +92,407 @@ Examples:
   return result;
 }
 
-// --- Container management ---
+// --- Mount management ---
 
-function buildDockerRunArgs(args: GatekeeperArgs): string[] {
-  const dockerArgs: string[] = [
-    'compose', 'run', '--rm', '-T',
-    '--name', CONTAINER_NAME,
-  ];
-
-  // Socket directory — shared between host and container
-  dockerArgs.push('-v', `${SOCKET_DIR}:${SOCKET_DIR}`);
-
-  // Project folder mount
-  if (args.projectFolder) {
-    const mode = args.writeAccess ? 'rw' : 'ro';
-    dockerArgs.push('-v', `${resolve(args.projectFolder)}:/project:${mode}`);
+/** Resolve ~ and relative paths. */
+function resolveHostPath(input: string): string {
+  if (input.startsWith('~')) {
+    return resolve(homedir(), input.slice(2));
   }
-
-  // Environment overrides
-  if (args.model) {
-    dockerArgs.push('-e', `AIGENT_MODEL=${args.model}`);
-  }
-  if (args.thinking) {
-    dockerArgs.push('-e', `AIGENT_THINKING=${args.thinking}`);
-  }
-
-  dockerArgs.push('aigent');
-  return dockerArgs;
+  return resolve(input);
 }
 
-function startContainer(args: GatekeeperArgs): ChildProcess {
-  const dockerArgs = buildDockerRunArgs(args);
-  console.error(`[gatekeeper] Starting sandbox...`);
-  if (args.projectFolder) {
-    const mode = args.writeAccess ? 'rw' : 'ro';
-    console.error(`[gatekeeper] Project: ${args.projectFolder} (${mode})`);
+/** Generate a container mount path from a host path. */
+function toContainerPath(hostPath: string): string {
+  // /project/<folder-name> — simple and predictable
+  return `/project/${basename(hostPath)}`;
+}
+
+/** Paths that must never be mounted. */
+const FORBIDDEN_PATHS = ['/', '/etc', '/var', '/usr', '/bin', '/sbin', '/lib', '/boot', '/dev', '/proc', '/sys'];
+
+function isForbiddenPath(hostPath: string): boolean {
+  const normalized = resolve(hostPath);
+  return FORBIDDEN_PATHS.includes(normalized) || normalized === homedir();
+}
+
+function findMount(hostPath: string): Mount | undefined {
+  const normalized = resolve(hostPath);
+  return mounts.find((m) => m.hostPath === normalized);
+}
+
+function addMount(hostPath: string, mode: 'ro' | 'rw'): { ok: boolean; message: string } {
+  const normalized = resolve(hostPath);
+
+  if (isForbiddenPath(normalized)) {
+    return { ok: false, message: `Refusing to mount ${normalized} — sensitive path` };
   }
 
-  const container = spawn('docker', dockerArgs, {
+  if (!existsSync(normalized)) {
+    return { ok: false, message: `Path does not exist: ${normalized}` };
+  }
+
+  const existing = findMount(normalized);
+  if (existing) {
+    if (existing.mode === mode) {
+      return { ok: false, message: `Already mounted: ${normalized} (${mode})` };
+    }
+    // Upgrade/downgrade mode
+    existing.mode = mode;
+    return { ok: true, message: `Updated ${normalized} to ${mode}. Sandbox restarting...` };
+  }
+
+  mounts.push({
+    hostPath: normalized,
+    containerPath: toContainerPath(normalized),
+    mode,
+  });
+
+  return { ok: true, message: `Mounted ${normalized} (${mode}). Sandbox restarting...` };
+}
+
+function removeMount(hostPath: string): { ok: boolean; message: string } {
+  const normalized = resolve(hostPath);
+  const idx = mounts.findIndex((m) => m.hostPath === normalized);
+  if (idx === -1) {
+    return { ok: false, message: `Not mounted: ${normalized}` };
+  }
+  mounts.splice(idx, 1);
+  return { ok: true, message: `Unmounted ${normalized}. Sandbox restarting...` };
+}
+
+function listMounts(): string {
+  if (mounts.length === 0) return 'No active mounts.';
+  const lines = mounts.map((m) => {
+    const expiry = m.expiresAt ? ` (expires ${new Date(m.expiresAt).toLocaleTimeString()})` : '';
+    return `  ${m.hostPath} → ${m.containerPath} (${m.mode})${expiry}`;
+  });
+  return `Active mounts:\n${lines.join('\n')}`;
+}
+
+// --- Container lifecycle ---
+
+function buildDockerArgs(): string[] {
+  const args: string[] = [
+    'compose', 'run', '--rm', '-T',
+    '--name', containerName,
+  ];
+
+  // Socket directory
+  args.push('-v', `${SOCKET_DIR}:${SOCKET_DIR}`);
+
+  // Dynamic mounts
+  for (const mount of mounts) {
+    args.push('-v', `${mount.hostPath}:${mount.containerPath}:${mount.mode}`);
+  }
+
+  // Environment
+  if (gatekeeperArgs.model) {
+    args.push('-e', `AIGENT_MODEL=${gatekeeperArgs.model}`);
+  }
+  if (gatekeeperArgs.thinking) {
+    args.push('-e', `AIGENT_THINKING=${gatekeeperArgs.thinking}`);
+  }
+
+  args.push('aigent');
+  return args;
+}
+
+async function startContainer(): Promise<void> {
+  containerName = `aigent-worker-${Date.now()}`;
+
+  const dockerArgs = buildDockerArgs();
+  log('Starting sandbox...');
+  if (mounts.length > 0) {
+    for (const m of mounts) {
+      log(`  ${m.hostPath} (${m.mode})`);
+    }
+  }
+
+  containerProcess = spawn('docker', dockerArgs, {
     stdio: ['ignore', 'inherit', 'inherit'],
     cwd: REPO_DIR,
   });
 
-  container.on('error', (err) => {
-    console.error(`[gatekeeper] Failed to start container: ${err.message}`);
-    process.exit(1);
+  containerProcess.on('error', (err) => {
+    log(`Failed to start container: ${err.message}`);
+    if (!isRestarting) process.exit(1);
   });
 
-  return container;
+  containerProcess.on('exit', (code, signal) => {
+    containerProcess = null;
+    if (!isRestarting) {
+      log(`Sandbox exited (code=${code}, signal=${signal})`);
+      cleanupSocket();
+      process.exit(code ?? 1);
+    }
+  });
+
+  // Wait for socket
+  await waitForSocket();
+  log('Sandbox ready');
 }
 
-/** Wait for the worker socket to appear (with timeout). */
+async function restartContainer(): Promise<void> {
+  isRestarting = true;
+
+  // Tell client it's about to disconnect
+  if (client) {
+    // Client will auto-reconnect when the new container comes up
+  }
+
+  // Stop current container
+  if (containerProcess) {
+    try {
+      execSync(`docker rm -f ${containerName} 2>/dev/null`, { stdio: 'ignore' });
+    } catch {}
+    containerProcess = null;
+  }
+
+  // Clean socket
+  cleanupSocket();
+
+  // Small delay for clean shutdown
+  await new Promise<void>((r) => setTimeout(r, 500));
+
+  isRestarting = false;
+
+  // Start new container with updated mounts
+  await startContainer();
+}
+
 async function waitForSocket(timeoutMs = 30_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (existsSync(SOCKET_PATH)) return;
     await new Promise<void>((r) => setTimeout(r, 200));
   }
-  throw new Error(`Worker socket not found at ${SOCKET_PATH} after ${timeoutMs / 1000}s`);
+  throw new Error(`Worker socket not found after ${timeoutMs / 1000}s`);
 }
 
-// --- Cleanup ---
-
-function cleanup(): void {
-  // Stop container
-  try {
-    execSync(`docker rm -f ${CONTAINER_NAME} 2>/dev/null`, { stdio: 'ignore' });
-  } catch {}
-
-  // Clean up socket
+function cleanupSocket(): void {
   try {
     if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
   } catch {}
 }
 
-// --- Main ---
-
-const gatekeeperArgs = parseArgs();
-
-// Ensure socket directory exists and is clean
-mkdirSync(SOCKET_DIR, { recursive: true });
-if (existsSync(SOCKET_PATH)) {
-  try { unlinkSync(SOCKET_PATH); } catch {}
+function cleanupAll(): void {
+  if (containerProcess) {
+    try {
+      execSync(`docker rm -f ${containerName} 2>/dev/null`, { stdio: 'ignore' });
+    } catch {}
+  }
+  cleanupSocket();
 }
 
+// --- Command interception ---
+
+/** Commands the gatekeeper handles locally (not forwarded to worker). */
+const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny']);
+
+function isGatekeeperCommand(input: string): boolean {
+  const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
+  return cmd ? GATEKEEPER_COMMANDS.has(cmd) : false;
+}
+
+async function handleGatekeeperCommand(input: string): Promise<void> {
+  // Check for /grant and /deny first (dynamic commands)
+  if (await handleGrantDeny(input)) return;
+
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  switch (cmd) {
+    case '/mounts': {
+      injectSystemMessage(listMounts());
+      break;
+    }
+
+    case '/mount': {
+      const path = parts[1];
+      if (!path) {
+        injectSystemMessage('Usage: /mount <path> [ro|rw]\nExample: /mount ~/projects/myapp rw');
+        return;
+      }
+
+      const mode = (parts[2]?.toLowerCase() === 'rw') ? 'rw' as const : 'ro' as const;
+      const hostPath = resolveHostPath(path);
+      const result = addMount(hostPath, mode);
+      injectSystemMessage(result.message);
+
+      if (result.ok) {
+        await restartContainer();
+      }
+      break;
+    }
+
+    case '/unmount': {
+      const path = parts[1];
+      if (!path) {
+        injectSystemMessage('Usage: /unmount <path>\nExample: /unmount ~/projects/myapp');
+        return;
+      }
+
+      const hostPath = resolveHostPath(path);
+      const result = removeMount(hostPath);
+      injectSystemMessage(result.message);
+
+      if (result.ok) {
+        await restartContainer();
+      }
+      break;
+    }
+  }
+}
+
+/** Inject a system message into the TUI (shown to user, not sent to worker). */
+function injectSystemMessage(content: string): void {
+  // The client emits events that the TUI listens to.
+  // We can emit a 'system' event directly.
+  if (client) {
+    client.emit('system', content);
+  }
+}
+
+// --- Agent mount requests ---
+
+async function handleAgentMountRequest(
+  id: string,
+  path: string,
+  mode: 'ro' | 'rw',
+  reason?: string,
+): Promise<void> {
+  const hostPath = resolveHostPath(path);
+
+  // Show the request to the user
+  const reasonText = reason ? `\n  Reason: "${reason}"` : '';
+  injectSystemMessage(
+    `Agent requests access to: ${hostPath} (${mode})${reasonText}\n` +
+    `Reply: /grant ${id} [ro|rw] or /deny ${id}`
+  );
+
+  // Store pending request — resolved when user replies /grant or /deny
+  pendingAgentMountRequests.set(id, { hostPath, mode });
+}
+
+const pendingAgentMountRequests = new Map<string, { hostPath: string; mode: 'ro' | 'rw' }>();
+
+async function handleGrantDeny(input: string): Promise<boolean> {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  if (cmd === '/grant') {
+    const id = parts[1];
+    if (!id) return false;
+
+    const pending = pendingAgentMountRequests.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending mount request: ${id}`);
+      return true;
+    }
+
+    const mode = (parts[2]?.toLowerCase() === 'rw') ? 'rw' as const : pending.mode;
+    pendingAgentMountRequests.delete(id);
+
+    const result = addMount(pending.hostPath, mode);
+    const containerPath = toContainerPath(pending.hostPath);
+
+    // Send response to worker
+    client!.send({
+      type: 'mount_response',
+      id,
+      ok: result.ok,
+      containerPath: result.ok ? containerPath : undefined,
+      message: result.message,
+    });
+
+    injectSystemMessage(result.message);
+    if (result.ok) {
+      await restartContainer();
+    }
+    return true;
+  }
+
+  if (cmd === '/deny') {
+    const id = parts[1];
+    if (!id) return false;
+
+    const pending = pendingAgentMountRequests.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending mount request: ${id}`);
+      return true;
+    }
+
+    pendingAgentMountRequests.delete(id);
+
+    client!.send({
+      type: 'mount_response',
+      id,
+      ok: false,
+      message: 'Mount denied by user',
+    });
+
+    injectSystemMessage(`Denied mount request for ${pending.hostPath}`);
+    return true;
+  }
+
+  return false;
+}
+
+// --- Helpers ---
+
+function log(msg: string): void {
+  const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+  process.stderr.write(`[gatekeeper ${ts}] ${msg}\n`);
+}
+
+// --- Main ---
+
+gatekeeperArgs = parseArgs();
+
+// Set up initial mount from CLI
+if (gatekeeperArgs.projectFolder) {
+  const mode = gatekeeperArgs.writeAccess ? 'rw' as const : 'ro' as const;
+  mounts.push({
+    hostPath: resolve(gatekeeperArgs.projectFolder),
+    containerPath: toContainerPath(gatekeeperArgs.projectFolder),
+    mode,
+  });
+}
+
+// Ensure socket directory
+mkdirSync(SOCKET_DIR, { recursive: true });
+cleanupSocket();
+
 // Start container
-const containerProcess = startContainer(gatekeeperArgs);
-
-containerProcess.on('exit', (code, signal) => {
-  console.error(`[gatekeeper] Sandbox exited (code=${code}, signal=${signal})`);
-  cleanup();
-  process.exit(code ?? 1);
-});
-
-// Wait for socket
 try {
-  await waitForSocket();
+  await startContainer();
 } catch (err) {
-  console.error(`[gatekeeper] ${(err as Error).message}`);
-  cleanup();
+  log((err as Error).message);
+  cleanupAll();
   process.exit(1);
 }
 
-console.error('[gatekeeper] Sandbox ready');
+// Set up client
+const { AgentClient } = await import('./client.js');
+client = new AgentClient();
+
+// Intercept commands: wrap the client's sendMessage to catch gatekeeper commands
+const originalSendMessage = client.sendMessage.bind(client);
+client.sendMessage = (content: string) => {
+  if (isGatekeeperCommand(content)) {
+    void handleGatekeeperCommand(content);
+    return;
+  }
+  originalSendMessage(content);
+};
+
+// Handle mount requests from the worker (agent requests a folder)
+client.on('mount_request', (id: string, path: string, mode: 'ro' | 'rw', reason?: string) => {
+  void handleAgentMountRequest(id, path, mode, reason);
+});
 
 // Run TUI
-const { AgentClient } = await import('./client.js');
-const client = new AgentClient();
-
 const canUseTUI = Boolean(
   process.stdin.isTTY &&
   typeof process.stdin.setRawMode === 'function'
@@ -192,13 +509,11 @@ if (canUseTUI) {
 } else {
   const { startRepl } = await import('./repl.js');
   client.connect();
-
-  // startRepl doesn't return a promise we can await, so wait for container exit
   await new Promise<void>((r) => {
-    containerProcess.on('exit', r);
+    if (containerProcess) containerProcess.on('exit', r);
   });
 }
 
 // Shutdown
-cleanup();
+cleanupAll();
 process.exit(0);

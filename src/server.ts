@@ -123,6 +123,51 @@ let isProcessingTaskResult = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
 
+// --- Mount request handling ---
+
+const pendingMountRequests = new Map<string, {
+  resolve: (response: { ok: boolean; containerPath?: string; message: string }) => void;
+}>();
+let mountRequestCounter = 0;
+
+/**
+ * Send a mount request to the gatekeeper (via the socket) and wait for approval.
+ * Called by the request_mount tool.
+ */
+export function requestMount(
+  path: string,
+  mode: 'ro' | 'rw',
+  reason?: string,
+): Promise<{ ok: boolean; containerPath?: string; message: string }> {
+  const id = `mount_${++mountRequestCounter}`;
+
+  return new Promise((resolve) => {
+    // Timeout after 60s
+    const timer = setTimeout(() => {
+      pendingMountRequests.delete(id);
+      resolve({ ok: false, message: 'Mount request timed out (60s)' });
+    }, 60_000);
+
+    pendingMountRequests.set(id, {
+      resolve: (response) => {
+        clearTimeout(timer);
+        resolve(response);
+      },
+    });
+
+    // Send to gatekeeper via the socket
+    broadcast({ type: 'mount_request', id, path, mode, reason });
+  });
+}
+
+function resolveMountRequest(id: string, response: { ok: boolean; containerPath?: string; message: string }): void {
+  const pending = pendingMountRequests.get(id);
+  if (pending) {
+    pendingMountRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
 // --- Background task queue ---
 
 import { TaskQueue } from './tasks.js';
@@ -738,7 +783,14 @@ function handleCommand(cmd: string): boolean {
       '  /sessions           List saved sessions\n' +
       '  /load <id>          Load a saved session\n' +
       '  Esc                 Cancel generation / clear input\n' +
-      '  Ctrl+C              Cancel / clear input (x2 to exit)'
+      '  Ctrl+C              Cancel / clear input (x2 to exit)\n' +
+      '\n' +
+      'Gatekeeper (host-side):\n' +
+      '  /mount <path> [ro|rw]  Mount a host folder into the sandbox\n' +
+      '  /unmount <path>        Remove a mount (sandbox restarts)\n' +
+      '  /mounts                List active mounts\n' +
+      '  /grant <id> [ro|rw]    Approve a mount request from the agent\n' +
+      '  /deny <id>             Deny a mount request'
     );
     return true;
   }
@@ -840,6 +892,9 @@ function handleClient(socket: Socket): void {
             break;
           case 'command':
             handleCommand(cmd.cmd);
+            break;
+          case 'mount_response':
+            resolveMountRequest(cmd.id, cmd);
             break;
           case 'ping':
             send(socket, { type: 'pong' });

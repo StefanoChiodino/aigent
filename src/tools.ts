@@ -418,10 +418,36 @@ const hostTool: ToolDef = {
   },
 };
 
+const requestMountTool: ToolDef = {
+  name: 'request_mount',
+  description:
+    'Request access to a folder on the host filesystem. The user will be prompted to approve. ' +
+    'The sandbox will restart with the folder mounted. Use this when the user asks you to work ' +
+    'on a project or access files outside the current sandbox. Always explain why you need access.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      path: {
+        type: 'string',
+        description: 'Absolute path on the host (e.g., ~/projects/myapp or /home/user/data)',
+      },
+      mode: {
+        type: 'string',
+        description: 'Access mode: "ro" (read-only, default) or "rw" (read-write)',
+      },
+      reason: {
+        type: 'string',
+        description: 'Why you need access. Shown to the user in the approval prompt.',
+      },
+    },
+    required: ['path', 'reason'],
+  },
+};
+
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
-  hostTool,
+  hostTool, requestMountTool,
 ];
 
 /**
@@ -454,8 +480,9 @@ interface ScreenshotInput { region?: string }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
 interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number }
 interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
+interface RequestMountInput { path: string; mode?: string; reason: string }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -515,6 +542,10 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
     case 'host': {
       const { capability, reason } = input as HostInput;
       return reason ? `host: ${capability} (${reason.slice(0, 40)})` : `host: ${capability}`;
+    }
+    case 'request_mount': {
+      const { path, mode } = input as RequestMountInput;
+      return `mount: ${path} (${mode ?? 'ro'})`;
     }
     default:
       return name;
@@ -903,6 +934,18 @@ export async function executeTool(
         const e = err as { stderr?: string; message?: string };
         return `Error taking screenshot: ${e.stderr ?? e.message ?? 'unknown error'}`;
       }
+    }
+
+    case 'request_mount': {
+      const { path, mode = 'ro', reason } = input as RequestMountInput;
+      const { requestMount } = await import('./server.js');
+      const mountMode = mode === 'rw' ? 'rw' as const : 'ro' as const;
+      const res = await requestMount(path, mountMode, reason);
+
+      if (res.ok) {
+        return `Mount approved: ${path} (${mountMode}) → ${res.containerPath ?? 'pending restart'}\n${res.message}\nThe sandbox will restart. Your conversation will continue automatically.`;
+      }
+      return `Mount denied: ${res.message}`;
     }
 
     case 'host': {

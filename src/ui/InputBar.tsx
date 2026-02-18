@@ -10,6 +10,8 @@ const SLASH_COMMANDS = [
   '/image ', '/usage', '/tasks',
   '/profiles', '/profile ', '/profile create ',
   '/save', '/sessions', '/load ',
+  '/mount ', '/unmount ', '/mounts',
+  '/grant ', '/deny ',
 ];
 
 function formatTokens(n: number): string {

@@ -15,6 +15,7 @@ const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker containe
 - dispatch_task to run long tasks in the background (non-blocking — you keep chatting)
 - spawn_agent to run a sub-agent synchronously (blocks until complete)
 - host to access OS capabilities via the host daemon (clipboard, audio, screen, etc.)
+- request_mount to ask the user for access to a folder on their machine
 - MCP tools from connected servers (if configured via mcp.json)
 - Internet access via curl, wget, etc.
 
