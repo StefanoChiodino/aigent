@@ -16,6 +16,7 @@ import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, g
 import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType } from './provider.js';
 import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
+import { computeCost } from './pricing.js';
 import { loadMCP, type MCPManager } from './mcp.js';
 
 const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
@@ -399,7 +400,7 @@ function handleCommand(cmd: string): boolean {
           onToolStart: (name, toolInput, summary) => { if (!controller.signal.aborted) broadcast({ type: 'tool_start', name, input: toolInput, summary }); },
           onToolOutput: (content) => { if (!controller.signal.aborted) broadcast({ type: 'tool_output', content }); },
           onToolEnd: () => { if (!controller.signal.aborted) broadcast({ type: 'tool_end' }); },
-          onUsage: (u) => { usage = u; broadcast({ type: 'usage', usage }); },
+          onUsage: (u) => { usage = { ...u, cost: computeCost(model, u) }; broadcast({ type: 'usage', usage }); },
           onCompact: (summary) => { addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`); },
         });
 
@@ -526,7 +527,7 @@ async function processMessage(content: string): Promise<void> {
         broadcast({ type: 'tool_end' });
       },
       onUsage: (u) => {
-        usage = u;
+        usage = { ...u, cost: computeCost(model, u) };
         broadcast({ type: 'usage', usage });
       },
       onCompact: (summary) => {
