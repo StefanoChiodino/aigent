@@ -4,7 +4,7 @@
 
 # Start aigent (gatekeeper + sandbox)
 start:
-	tsx src/gatekeeper.tsx $(ARGS)
+	npx tsx src/gatekeeper.tsx $(ARGS)
 
 # --- Legacy: everything in Docker (backward compat) ---
 
