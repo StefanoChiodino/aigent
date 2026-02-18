@@ -488,7 +488,7 @@ function getState(): ServerState {
 
 function doAutoSave(): void {
   try {
-    autoSaveSession(workspacePath, agent.getMessages(), messages);
+    autoSaveSession(workspacePath, agent.getMessages(), messages, usage);
   } catch {
     // Non-critical
   }
@@ -885,11 +885,20 @@ function startServer(): Server {
 function restoreSession(): void {
   const saved = autoLoadSession(workspacePath);
   if (saved) {
-    agent.setMessages(saved.agentMessages as ProviderMessage[]);
+    const agentMessages = saved.agentMessages as ProviderMessage[];
+    // Inject session boundary so the AI focuses on new messages, not old ones
+    agentMessages.push(
+      { role: 'user', content: '[Session restored from auto-save. The conversation above is prior context. Wait for my next message — do not re-execute old tasks or continue previous work unless I explicitly ask.]' },
+      { role: 'assistant', content: 'Understood. I\'ll wait for your next message and focus only on what you ask.' },
+    );
+    agent.setMessages(agentMessages);
     messages = saved.uiMessages as DisplayMessage[];
-    // Recalculate usage from agent
-    usage = agent.totalUsage;
-    console.error(`[server] Restored session (${messages.length} messages)`);
+    // Restore saved usage so token counts are continuous across restarts
+    if (saved.usage) {
+      usage = saved.usage;
+      agent.setUsage(saved.usage);
+    }
+    console.error(`[server] Restored session (${messages.length} messages, ${usage.input + usage.output} tokens)`);
   }
 }
 
@@ -901,7 +910,34 @@ workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
 
 let mcpManager: MCPManager | null = null;
 
-// Initialize MCP and agent
+// --- Host daemon client ---
+
+import { initHostClient } from './host-client.js';
+import type { HostClient } from './host-client.js';
+
+let hostClient: HostClient | null = null;
+
+function buildHostSystemPrompt(): string {
+  if (!hostClient || !hostClient.isConnected()) return '';
+
+  const available = hostClient.getAvailableCapabilities();
+  const denied = hostClient.getDeniedCapabilities();
+
+  if (available.length === 0 && denied.length === 0) return '';
+
+  const lines = ['\n\n## Host Daemon'];
+  lines.push('The host daemon (aigent-host) is running. Use the `host` tool to access OS capabilities.');
+  if (available.length > 0) {
+    lines.push(`Available: ${available.join(', ')}`);
+  }
+  if (denied.length > 0) {
+    lines.push(`Denied: ${denied.join(', ')}`);
+  }
+  lines.push('Some capabilities may require user approval when first used.');
+  return lines.join('\n');
+}
+
+// Initialize MCP, host client, and agent
 async function initAgent(): Promise<void> {
   // Start MCP servers (non-blocking — failures are logged, not fatal)
   try {
@@ -915,11 +951,20 @@ async function initAgent(): Promise<void> {
     console.error(`[server] MCP init failed (non-fatal): ${e.message}`);
   }
 
+  // Connect to host daemon (non-blocking — agent works without it)
+  hostClient = initHostClient();
+  if (hostClient) {
+    console.error('[server] Host daemon connected');
+    // Wait briefly for capabilities event
+    await new Promise<void>((r) => setTimeout(r, 200));
+  }
+
   agent = new Agent({
     model,
     thinking: currentThinking,
     workspacePath,
     ...(mcpManager ? { mcpManager } : {}),
+    extraSystemPrompt: buildHostSystemPrompt(),
   });
 }
 

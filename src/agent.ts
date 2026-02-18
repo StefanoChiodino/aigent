@@ -14,6 +14,7 @@ const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker containe
 - screenshot to capture the virtual display (verify GUI state, browser content, etc.)
 - dispatch_task to run long tasks in the background (non-blocking — you keep chatting)
 - spawn_agent to run a sub-agent synchronously (blocks until complete)
+- host to access OS capabilities via the host daemon (clipboard, audio, screen, etc.)
 - MCP tools from connected servers (if configured via mcp.json)
 - Internet access via curl, wget, etc.
 
@@ -31,7 +32,9 @@ Architecture (backend/frontend split):
   /app/src/protocol.ts  — Shared types for client-server communication
   /app/src/auth.ts      — API key / OAT token handling
   /app/src/provider.ts  — Multi-provider abstraction (Anthropic + OpenAI)
-  /app/src/tools.ts     — Tool definitions and execution (11 tools)
+  /app/src/tools.ts     — Tool definitions and execution (12 tools)
+  /app/src/host-client.ts — Client for host daemon (clipboard, audio, screen)
+  /app/src/host/        — Host daemon (runs on host, not in Docker)
   /app/src/workspace.ts — Workspace file loading
   /app/src/supervisor.tsx — Process manager (server + TUI)
   /app/src/index.tsx    — TUI entry point
@@ -72,6 +75,8 @@ export interface AgentOptions {
   workspacePath?: string;
   thinking?: ThinkingLevel;
   mcpManager?: MCPManager;
+  /** Extra system prompt sections (e.g., host daemon capabilities). */
+  extraSystemPrompt?: string;
 }
 
 // Re-export TokenUsage from protocol (single source of truth)
@@ -102,6 +107,7 @@ export class Agent {
   private workspacePath: string;
   private _totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   private mcpManager: MCPManager | null;
+  private extraSystemPrompt: string;
   readonly providerType: string;
 
   constructor(options: AgentOptions = {}) {
@@ -113,6 +119,7 @@ export class Agent {
     this.maxTokens = options.maxTokens ?? 16384;
     this.thinking = options.thinking ?? (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
     this.mcpManager = options.mcpManager ?? null;
+    this.extraSystemPrompt = options.extraSystemPrompt ?? '';
 
     // Get built-in tool definitions
     const rawTools = getToolDefinitions(this.isOAuth);
@@ -136,7 +143,7 @@ export class Agent {
     // Load workspace context
     this.workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
     const workspaceContext = loadWorkspaceContext(this.workspacePath);
-    this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
+    this.systemPromptText = BASE_SYSTEM_PROMPT + this.extraSystemPrompt + workspaceContext;
   }
 
   async chat(userMessage: string | UserContent, callbacks?: ChatCallbacks): Promise<string> {
@@ -429,16 +436,23 @@ export class Agent {
 
   getMessages(): ProviderMessage[] { return [...this.messages]; }
   setMessages(messages: ProviderMessage[]): void { this.messages = [...messages]; }
+  setUsage(usage: TokenUsage): void { this._totalUsage = { ...usage }; }
   getToolDefs(): ProviderToolDef[] { return [...this.toolDefs]; }
   get usingOAuth(): boolean { return this.isOAuth; }
 
   reloadSystemPrompt(): void {
     const workspaceContext = loadWorkspaceContext(this.workspacePath);
-    this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
+    this.systemPromptText = BASE_SYSTEM_PROMPT + this.extraSystemPrompt + workspaceContext;
   }
 
   reloadWorkspace(workspacePath: string): void {
     const workspaceContext = loadWorkspaceContext(workspacePath);
-    this.systemPromptText = BASE_SYSTEM_PROMPT + workspaceContext;
+    this.systemPromptText = BASE_SYSTEM_PROMPT + this.extraSystemPrompt + workspaceContext;
+  }
+
+  /** Update extra system prompt (e.g., host daemon capabilities changed). */
+  setExtraSystemPrompt(extra: string): void {
+    this.extraSystemPrompt = extra;
+    this.reloadSystemPrompt();
   }
 }

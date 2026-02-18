@@ -121,6 +121,17 @@ Docker container
 
 ## Next Up
 
+### Host Daemon (docs/host-daemon.md)
+- [ ] Phase 1: Socket + permissions + clipboard (MVP)
+  - [ ] `aigent-host` CLI daemon (socket listener, permission store, prompt UX)
+  - [ ] Clipboard provider (platform-detected, read/write, text + image)
+  - [ ] `host-client.ts` in agent (socket client, request/response)
+  - [ ] `host` tool wired into tools.ts
+  - [ ] Docker compose conditional socket mount
+  - [ ] System prompt advertises available/denied capabilities
+- [ ] Phase 2: Screen + audio
+- [ ] Phase 3: notify, open, external fs, timed permissions, /permissions command
+
 ### Stabilize
 - [ ] End-to-end test in Docker (make dev) — many untested changes
 - [ ] Pre-restart typecheck: tsc --noEmit before server restart in file watcher

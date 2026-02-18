@@ -381,9 +381,47 @@ const screenshotTool: ToolDef = {
   },
 };
 
+const hostTool: ToolDef = {
+  name: 'host',
+  description:
+    'Call a host OS capability via the host daemon. The agent runs in a sandbox — this tool ' +
+    'bridges to the host for things like clipboard, audio, screenshots, and notifications. ' +
+    'The user controls permissions: requests may be denied or require user approval. ' +
+    'Only available when the host daemon (aigent-host) is running.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      capability: {
+        type: 'string',
+        description:
+          'The capability to invoke. Examples: clipboard.read, clipboard.write, ' +
+          'screen.capture, audio.play, notify, open',
+      },
+      params: {
+        type: 'object',
+        description:
+          'Parameters for the capability. Depends on the capability:\n' +
+          '  clipboard.read: { format?: "auto"|"text"|"image" }\n' +
+          '  clipboard.write: { text: string }\n' +
+          '  screen.capture: { region?: "WxH+X+Y" }\n' +
+          '  notify: { title: string, body?: string }\n' +
+          '  open: { target: string }',
+      },
+      reason: {
+        type: 'string',
+        description:
+          'Why you need this capability. Shown to the user when they are prompted for permission. ' +
+          'Be specific and honest — e.g. "User asked me to check their clipboard for the screenshot"',
+      },
+    },
+    required: ['capability'],
+  },
+};
+
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
+  hostTool,
 ];
 
 /**
@@ -415,8 +453,9 @@ interface PatchInput { path: string; edits: Array<{ old_text: string; new_text: 
 interface ScreenshotInput { region?: string }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
 interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number }
+interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -472,6 +511,10 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       const { task } = input as DispatchTaskInput;
       const short = task.length > 60 ? task.slice(0, 60) + '...' : task;
       return `dispatch: ${short}`;
+    }
+    case 'host': {
+      const { capability, reason } = input as HostInput;
+      return reason ? `host: ${capability} (${reason.slice(0, 40)})` : `host: ${capability}`;
     }
     default:
       return name;
@@ -860,6 +903,37 @@ export async function executeTool(
         const e = err as { stderr?: string; message?: string };
         return `Error taking screenshot: ${e.stderr ?? e.message ?? 'unknown error'}`;
       }
+    }
+
+    case 'host': {
+      const { capability, params = {}, reason } = input as HostInput;
+      const { getHostClient } = await import('./host-client.js');
+      const client = getHostClient();
+
+      if (!client || !client.isConnected()) {
+        return 'Host daemon not connected. The user needs to start it on the host with: aigent-host';
+      }
+
+      const res = await client.request(
+        capability as import('./host/protocol.js').CapabilityName,
+        params,
+        reason,
+      );
+
+      if (!res.ok) {
+        return `Host error (${res.error}): ${res.message}`;
+      }
+
+      // Handle image results — return as tool content blocks
+      const result = res.result as Record<string, unknown>;
+      if (result.type === 'image' && typeof result.data === 'string' && typeof result.mediaType === 'string') {
+        return [
+          { type: 'text', text: `Clipboard image (${result.mediaType})` },
+          { type: 'image', mediaType: result.mediaType, data: result.data },
+        ] satisfies ToolContentBlock[];
+      }
+
+      return JSON.stringify(result, null, 2);
     }
 
     default:

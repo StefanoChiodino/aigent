@@ -4,7 +4,8 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "aigent": "dist/index.js"
+    "aigent": "dist/index.js",
+    "aigent-host": "dist/host/daemon.js"
   },
   "scripts": {
     "build": "tsc",
