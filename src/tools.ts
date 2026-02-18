@@ -508,7 +508,7 @@ export async function executeTool(
         let stderr = '';
 
         const proc = spawn('sh', ['-c', command], {
-          stdio: ['pipe', 'pipe', 'pipe'],
+          stdio: ['ignore', 'pipe', 'pipe'],  // no stdin — prevents hangs on sudo, passwd, etc.
           env: sanitizedEnv(),
           ...(cwd ? { cwd: resolve(cwd) } : {}),
         });
@@ -634,7 +634,7 @@ export async function executeTool(
           encoding: 'utf-8',
           timeout: 10_000,
           maxBuffer: 1024 * 1024,
-          stdio: ['pipe', 'pipe', 'pipe'],
+          stdio: ['ignore', 'pipe', 'pipe'],
           env: sanitizedEnv(),
         });
         return output || '(no matches)';
@@ -669,7 +669,7 @@ export async function executeTool(
           encoding: 'utf-8',
           timeout: 35_000,
           maxBuffer: max_bytes + 10_000,
-          stdio: ['pipe', 'pipe', 'pipe'],
+          stdio: ['ignore', 'pipe', 'pipe'],
           env: sanitizedEnv(),
         });
 
@@ -772,7 +772,7 @@ export async function executeTool(
           encoding: 'utf-8',
           timeout: 10_000,
           maxBuffer: 1024 * 1024,
-          stdio: ['pipe', 'pipe', 'pipe'],
+          stdio: ['ignore', 'pipe', 'pipe'],
           env: sanitizedEnv(),
         });
 
@@ -845,6 +845,7 @@ export async function executeTool(
         execSync(['import', ...importArgs].map((a) => JSON.stringify(a)).join(' '), {
           encoding: 'utf-8',
           timeout: 10_000,
+          stdio: ['ignore', 'pipe', 'pipe'],
           env: { ...sanitizedEnv(), DISPLAY: display },
         });
 
