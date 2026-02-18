@@ -10,7 +10,7 @@ services:
       - AIGENT_THINKING
       - AIGENT_WORKSPACE=/workspace
     volumes:
-      - .:/app:ro                    # repo read-only
+      - .:/app:rw                    # repo read-write (self-modification)
       - node_modules:/app/node_modules  # persistent named volume (survives --rm)
       - ./workspace/config:/workspace/config:ro   # instruction files (read-only)
       - ./workspace:/workspace                    # memory, sessions, usage (read-write)
