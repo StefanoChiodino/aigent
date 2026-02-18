@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
-import { TaskList } from './TaskList.js';
+import { StatusBar } from './StatusBar.js';
 import type { AgentClient } from '../client.js';
 import type { ThinkingLevel } from '../agent.js';
 import type { DisplayMessage, ServerState, TokenUsage, BackgroundTaskInfo } from '../protocol.js';
@@ -19,6 +19,8 @@ export interface ToolExecution {
   input: string;
   summary: string;
 }
+
+export type { ToolExecution as ToolExecutionType };
 
 interface AppProps {
   client: AgentClient;
@@ -44,6 +46,7 @@ export function App({ client }: AppProps): React.JSX.Element {
   const [toolOutput, setToolOutput] = useState('');
   const [runningTasks, setRunningTasks] = useState(0);
   const [taskList, setTaskList] = useState<BackgroundTaskInfo[]>([]);
+  const [notifications, setNotifications] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const [currentThinking, setCurrentThinking] = useState<ThinkingLevel>('high');
@@ -57,11 +60,9 @@ export function App({ client }: AppProps): React.JSX.Element {
   // Wire up client events
   useEffect(() => {
     const onConnected = (state: ServerState) => {
-      // Clear screen on first connection to wipe startup artifacts
-      if (!hasEverConnected.current) {
-        hasEverConnected.current = true;
-        process.stdout.write('\x1B[2J\x1B[H');
-      }
+      // Clear screen on every (re)connection — wipe stale output
+      hasEverConnected.current = true;
+      process.stdout.write('\x1B[2J\x1B[H');
       setConnectionStatus('connected');
       setMessages(state.messages.map(toUIMessage));
       setUsage(state.usage);
@@ -94,11 +95,24 @@ export function App({ client }: AppProps): React.JSX.Element {
     };
 
     const onSystem = (content: string) => {
-      setMessages((prev) => [...prev, {
-        role: 'system' as const,
-        content,
-        timestamp: new Date(),
-      }]);
+      // Persistent system messages go to chat, transient ones to notifications
+      const isTransient = content.startsWith('Cancelled') ||
+        content.startsWith('Context compacted') ||
+        content.includes('background task');
+
+      if (isTransient) {
+        setNotifications((prev) => [...prev.slice(-2), content]); // keep last 3
+        // Auto-clear after 5 seconds
+        setTimeout(() => {
+          setNotifications((prev) => prev.filter((n) => n !== content));
+        }, 5000);
+      } else {
+        setMessages((prev) => [...prev, {
+          role: 'system' as const,
+          content,
+          timestamp: new Date(),
+        }]);
+      }
     };
 
     const onText = (content: string) => {
@@ -289,18 +303,22 @@ export function App({ client }: AppProps): React.JSX.Element {
       <ChatView
         messages={messages}
         streaming={streaming}
-        thinkingText={thinkingText}
-        isLoading={isLoading}
-        isThinking={isThinking}
-        activeTools={activeTools}
-        toolOutput={toolOutput}
       />
       {error && (
         <Box marginLeft={1}>
           <Text color="red">Error: {error}</Text>
         </Box>
       )}
-      <TaskList tasks={taskList} />
+      <StatusBar
+        isLoading={isLoading}
+        isThinking={isThinking}
+        thinkingText={thinkingText}
+        activeTools={activeTools}
+        toolOutput={toolOutput}
+        streaming={!!streaming}
+        tasks={taskList}
+        notifications={notifications}
+      />
       <InputBar
         value={inputValue}
         onChange={setInputValue}

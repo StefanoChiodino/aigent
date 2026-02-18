@@ -517,10 +517,8 @@ function handleCommand(cmd: string): boolean {
 
   if (trimmed === '/restart') {
     addSystemMessage('Restarting server...');
-    doAutoSave();
-    saveLifetimeUsage(usage);
-    // Exit with code 100 — supervisor treats this as "restart requested"
-    setTimeout(() => process.exit(100), 200);
+    // Brief delay so the client receives the message, then clean shutdown
+    setTimeout(requestRestart, 200);
     return true;
   }
 
@@ -981,6 +979,8 @@ function writeEndOfSessionSummary(): void {
 }
 
 // Graceful shutdown
+let restartRequested = false;
+
 function shutdown(): void {
   writeEndOfSessionSummary();
   saveLifetimeUsage(usage);
@@ -990,7 +990,12 @@ function shutdown(): void {
   if (existsSync(SOCKET_PATH)) {
     try { unlinkSync(SOCKET_PATH); } catch { /* ignore */ }
   }
-  process.exit(0);
+  process.exit(restartRequested ? 100 : 0);
+}
+
+function requestRestart(): void {
+  restartRequested = true;
+  shutdown();
 }
 
 process.on('SIGTERM', shutdown);
