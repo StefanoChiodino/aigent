@@ -48,6 +48,7 @@ export interface ServerState {
   model: string;
   isLoading: boolean;
   tasks: BackgroundTaskInfo[];
+  pendingResults: number;
 }
 
 export type ServerEvent =

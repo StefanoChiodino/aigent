@@ -122,34 +122,157 @@ let isLoading = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
 
-// --- Background tasks ---
+// --- Background task queue ---
 
-interface BackgroundTask {
-  id: string;
-  description: string;
-  status: 'running' | 'completed' | 'failed';
-  startedAt: string;
-  completedAt?: string;
-  result?: string;
+import { TaskQueue } from './tasks.js';
+
+const taskQueue = new TaskQueue({
+  onTaskUpdate: (task) => {
+    broadcast({ type: 'task_update', task });
+  },
+  onResultReady: () => {
+    // If the main agent is idle, kick off result processing
+    if (!isLoading && !processingQueue) {
+      void processTaskResults();
+    }
+  },
+});
+
+/**
+ * Process completed task results one at a time.
+ * Each result triggers a full agent turn so the main agent can reason about
+ * the findings and present them to the user.
+ *
+ * Results appear as system messages (not user messages), then the agent
+ * is asked to review and summarize.
+ */
+async function processTaskResults(): Promise<void> {
+  while (taskQueue.hasPendingResults()) {
+    const result = taskQueue.drainNext();
+    if (!result) break;
+
+    // Yield to user messages — they take priority
+    if (isLoading || messageQueue.length > 0) break;
+
+    const statusLabel = result.status === 'completed' ? 'completed' : 'FAILED';
+    const secs = ((new Date(result.completedAt).getTime() - new Date(result.startedAt).getTime()) / 1000).toFixed(1);
+
+    // Show the result as a system message so the user can see it
+    const resultText = [
+      `Background task ${statusLabel}: ${result.id}`,
+      `Task: ${result.description}`,
+      `Duration: ${secs}s`,
+      '',
+      result.result.length > 2000 ? result.result.slice(0, 2000) + '\n\n... [truncated — full result available]' : result.result,
+    ].join('\n');
+    addSystemMessage(resultText);
+
+    // Now trigger an agent turn to process the result.
+    // The agent sees it as a user message asking for review.
+    const reviewPrompt = [
+      `A background task just completed. Here are the results:`,
+      '',
+      `Task: ${result.description}`,
+      `Status: ${statusLabel}`,
+      `Duration: ${secs}s`,
+      '',
+      result.result,
+      '',
+      'Summarize the key findings and let me know if anything needs my attention.',
+    ].join('\n');
+
+    await processAgentTurn(reviewPrompt, /* isTaskResult */ true);
+
+    // Prune old tasks periodically
+    taskQueue.prune();
+  }
 }
 
-const backgroundTasks = new Map<string, BackgroundTask>();
-let taskCounter = 0;
+/**
+ * Run a single agent turn. Used by both user messages and task result processing.
+ * When isTaskResult is true, the triggering message is not displayed as a user message.
+ */
+async function processAgentTurn(content: string, isTaskResult = false): Promise<void> {
+  if (!isTaskResult) {
+    const userMsg: DisplayMessage = { role: 'user', content, timestamp: new Date().toISOString() };
+    messages.push(userMsg);
+    broadcast({ type: 'message', message: userMsg });
+  }
 
-function generateTaskId(): string {
-  return `task-${++taskCounter}-${Date.now().toString(36)}`;
-}
+  isLoading = true;
+  broadcast({ type: 'loading', isLoading: true });
 
-function getTaskInfos(): BackgroundTaskInfo[] {
-  return Array.from(backgroundTasks.values()).map(({ id, description, status, startedAt, completedAt }) => ({
-    id, description, status, startedAt,
-    ...(completedAt ? { completedAt } : {}),
-  }));
+  const controller = new AbortController();
+  abortController = controller;
+  const startTime = Date.now();
+
+  const userContent = isTaskResult ? content : parseImagesInMessage(content);
+
+  try {
+    const response = await agent.chat(userContent, {
+      signal: controller.signal,
+      onText: (text) => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'text', content: text });
+      },
+      onThinking: (text) => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'thinking', content: text });
+      },
+      onToolStart: (name, toolInput, summary) => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'tool_start', name, input: toolInput, summary });
+      },
+      onToolOutput: (toolContent) => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'tool_output', content: toolContent });
+      },
+      onToolEnd: () => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'tool_end' });
+      },
+      onUsage: (u) => {
+        usage = { ...u, cost: computeCost(model, u) };
+        broadcast({ type: 'usage', usage });
+      },
+      onCompact: (summary) => {
+        addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
+      },
+      onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; max_iterations?: number }),
+    });
+
+    if (!controller.signal.aborted) {
+      const elapsed = (Date.now() - startTime) / 1000;
+      broadcast({ type: 'text', content: '' });
+      const assistantMsg: DisplayMessage = {
+        role: 'assistant',
+        content: response,
+        timestamp: new Date().toISOString(),
+        elapsed,
+      };
+      messages.push(assistantMsg);
+      broadcast({ type: 'message', message: assistantMsg });
+      doAutoSave();
+    }
+  } catch (err: unknown) {
+    if (!controller.signal.aborted) {
+      const e = err as { status?: number; message?: string };
+      let errorMsg = e.message ?? 'Unknown error';
+      if (e.status === 401) errorMsg = 'Authentication failed. Check ANTHROPIC_API_KEY.';
+      if (e.status === 429) errorMsg = 'Rate limited. Wait a moment.';
+      broadcast({ type: 'error', message: errorMsg });
+    }
+  } finally {
+    abortController = null;
+    isLoading = false;
+    broadcast({ type: 'loading', isLoading: false });
+  }
 }
 
 /**
  * Dispatch a task to a background agent. Runs independently of the main
- * conversation. When complete, the result is injected as a system message.
+ * conversation. When complete, the result is queued for the main agent
+ * to review and present to the user.
  */
 function dispatchBackgroundTask(input: {
   task: string;
@@ -157,17 +280,7 @@ function dispatchBackgroundTask(input: {
   model?: string;
   max_iterations?: number;
 }): string {
-  const taskId = generateTaskId();
-  const description = input.task.length > 80 ? input.task.slice(0, 80) + '...' : input.task;
-
-  const task: BackgroundTask = {
-    id: taskId,
-    description,
-    status: 'running',
-    startedAt: new Date().toISOString(),
-  };
-  backgroundTasks.set(taskId, task);
-  broadcast({ type: 'task_update', task: { id: taskId, description, status: 'running', startedAt: task.startedAt } });
+  const taskId = taskQueue.register(input.task);
 
   // Fire and forget — run the sub-agent in the background
   void (async () => {
@@ -239,23 +352,11 @@ function dispatchBackgroundTask(input: {
       }
 
       if (!finalText) finalText = '[background agent hit iteration limit]';
-
-      // Task completed — inject result into main conversation
-      task.status = 'completed';
-      task.completedAt = new Date().toISOString();
-      task.result = finalText;
-
-      const summary = finalText.length > 500 ? finalText.slice(0, 500) + '...' : finalText;
-      addSystemMessage(`[Task ${taskId} completed: ${description}]\n\n${summary}`);
-      broadcast({ type: 'task_update', task: { id: taskId, description, status: 'completed', startedAt: task.startedAt, completedAt: task.completedAt } });
+      taskQueue.complete(taskId, finalText);
 
     } catch (err: unknown) {
       const e = err as { message?: string };
-      task.status = 'failed';
-      task.completedAt = new Date().toISOString();
-
-      addSystemMessage(`[Task ${taskId} failed: ${e.message ?? 'unknown error'}]`);
-      broadcast({ type: 'task_update', task: { id: taskId, description, status: 'failed', startedAt: task.startedAt, completedAt: task.completedAt } });
+      taskQueue.fail(taskId, e.message ?? 'unknown error');
     }
   })();
 
@@ -358,7 +459,8 @@ function getState(): ServerState {
     sessionId: currentSessionId,
     model,
     isLoading,
-    tasks: getTaskInfos(),
+    tasks: taskQueue.getInfos(),
+    pendingResults: taskQueue.pendingCount,
   };
 }
 
@@ -599,12 +701,13 @@ function handleCommand(cmd: string): boolean {
   }
 
   if (trimmed === '/tasks') {
-    const tasks = Array.from(backgroundTasks.values());
-    if (tasks.length === 0) {
+    const allTasks = taskQueue.getInfos();
+    if (allTasks.length === 0) {
       addSystemMessage('No background tasks.');
     } else {
-      const running = tasks.filter((t) => t.status === 'running');
-      const completed = tasks.filter((t) => t.status !== 'running');
+      const running = allTasks.filter((t) => t.status === 'running');
+      const completed = allTasks.filter((t) => t.status !== 'running');
+      const pending = taskQueue.pendingCount;
       const lines: string[] = [];
       if (running.length > 0) {
         lines.push(`Running (${running.length}):`);
@@ -613,8 +716,11 @@ function handleCommand(cmd: string): boolean {
           lines.push(`  ${t.id}: ${t.description} (${elapsed}s)`);
         }
       }
+      if (pending > 0) {
+        lines.push(`Awaiting review: ${pending} result${pending > 1 ? 's' : ''}`);
+      }
       if (completed.length > 0) {
-        lines.push(`Completed (${completed.length}):`);
+        lines.push(`History (${completed.length}):`);
         for (const t of completed.slice(-5)) {
           lines.push(`  ${t.id}: ${t.description} [${t.status}]`);
         }
@@ -660,80 +766,7 @@ const messageQueue: string[] = [];
 let processingQueue = false;
 
 async function processMessage(content: string): Promise<void> {
-  const userMsg: DisplayMessage = { role: 'user', content, timestamp: new Date().toISOString() };
-  messages.push(userMsg);
-  broadcast({ type: 'message', message: userMsg });
-
-  isLoading = true;
-  broadcast({ type: 'loading', isLoading: true });
-
-  const controller = new AbortController();
-  abortController = controller;
-  const startTime = Date.now();
-
-  // Parse for image file paths
-  const userContent = parseImagesInMessage(content);
-
-  try {
-    const response = await agent.chat(userContent, {
-      signal: controller.signal,
-      onText: (text) => {
-        if (controller.signal.aborted) return;
-        broadcast({ type: 'text', content: text });
-      },
-      onThinking: (text) => {
-        if (controller.signal.aborted) return;
-        broadcast({ type: 'thinking', content: text });
-      },
-      onToolStart: (name, toolInput, summary) => {
-        if (controller.signal.aborted) return;
-        broadcast({ type: 'tool_start', name, input: toolInput, summary });
-      },
-      onToolOutput: (content) => {
-        if (controller.signal.aborted) return;
-        broadcast({ type: 'tool_output', content });
-      },
-      onToolEnd: () => {
-        if (controller.signal.aborted) return;
-        broadcast({ type: 'tool_end' });
-      },
-      onUsage: (u) => {
-        usage = { ...u, cost: computeCost(model, u) };
-        broadcast({ type: 'usage', usage });
-      },
-      onCompact: (summary) => {
-        addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
-      },
-      onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; max_iterations?: number }),
-    });
-
-    if (!controller.signal.aborted) {
-      const elapsed = (Date.now() - startTime) / 1000;
-      // Clear streaming text
-      broadcast({ type: 'text', content: '' });
-      const assistantMsg: DisplayMessage = {
-        role: 'assistant',
-        content: response,
-        timestamp: new Date().toISOString(),
-        elapsed,
-      };
-      messages.push(assistantMsg);
-      broadcast({ type: 'message', message: assistantMsg });
-      doAutoSave();
-    }
-  } catch (err: unknown) {
-    if (!controller.signal.aborted) {
-      const e = err as { status?: number; message?: string };
-      let errorMsg = e.message ?? 'Unknown error';
-      if (e.status === 401) errorMsg = 'Authentication failed. Check ANTHROPIC_API_KEY.';
-      if (e.status === 429) errorMsg = 'Rate limited. Wait a moment.';
-      broadcast({ type: 'error', message: errorMsg });
-    }
-  } finally {
-    abortController = null;
-    isLoading = false;
-    broadcast({ type: 'loading', isLoading: false });
-  }
+  await processAgentTurn(content, false);
 }
 
 async function processQueue(): Promise<void> {
@@ -746,6 +779,11 @@ async function processQueue(): Promise<void> {
   }
 
   processingQueue = false;
+
+  // After user messages are drained, process any completed task results
+  if (taskQueue.hasPendingResults()) {
+    void processTaskResults();
+  }
 }
 
 function handleCancel(): void {

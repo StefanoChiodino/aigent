@@ -2,9 +2,10 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import { ChatView } from './ChatView.js';
 import { InputBar } from './InputBar.js';
+import { TaskList } from './TaskList.js';
 import type { AgentClient } from '../client.js';
 import type { ThinkingLevel } from '../agent.js';
-import type { DisplayMessage, ServerState, TokenUsage } from '../protocol.js';
+import type { DisplayMessage, ServerState, TokenUsage, BackgroundTaskInfo } from '../protocol.js';
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -42,12 +43,15 @@ export function App({ client }: AppProps): React.JSX.Element {
   const [activeTools, setActiveTools] = useState<ToolExecution[]>([]);
   const [toolOutput, setToolOutput] = useState('');
   const [runningTasks, setRunningTasks] = useState(0);
+  const [taskList, setTaskList] = useState<BackgroundTaskInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<TokenUsage>({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const [currentThinking, setCurrentThinking] = useState<ThinkingLevel>('high');
   const [inputValue, setInputValue] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
+  const [ctrlCHint, setCtrlCHint] = useState(false);
   const ctrlCPending = useRef(false);
+  const ctrlCTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasEverConnected = useRef(false);
 
   // Wire up client events
@@ -63,6 +67,7 @@ export function App({ client }: AppProps): React.JSX.Element {
       setUsage(state.usage);
       setCurrentThinking(state.thinking);
       setIsLoading(state.isLoading);
+      setTaskList(state.tasks ?? []);
       setRunningTasks(state.tasks?.filter((t) => t.status === 'running').length ?? 0);
       setError(null);
     };
@@ -121,7 +126,16 @@ export function App({ client }: AppProps): React.JSX.Element {
       setStreaming('');
     };
 
-    const onTaskUpdate = (task: { status: string }) => {
+    const onTaskUpdate = (task: BackgroundTaskInfo) => {
+      setTaskList((prev) => {
+        const idx = prev.findIndex((t) => t.id === task.id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = task;
+          return updated;
+        }
+        return [...prev, task];
+      });
       if (task.status === 'running') {
         setRunningTasks((prev) => prev + 1);
       } else {
@@ -208,25 +222,44 @@ export function App({ client }: AppProps): React.JSX.Element {
     }
 
     if (key.ctrl && _input === 'c') {
-      // Double-tap Ctrl+C to exit
+      // Second Ctrl+C within 2 seconds — exit
       if (ctrlCPending.current) {
         client.disconnect();
         exit();
         process.exit(0);
       }
-      // First Ctrl+C: cancel or clear
+
       if (isLoading) {
+        // Cancel running agent, arm exit on next quick Ctrl+C
         client.cancel();
+        ctrlCPending.current = true;
+        setCtrlCHint(true);
+        if (ctrlCTimer.current) clearTimeout(ctrlCTimer.current);
+        ctrlCTimer.current = setTimeout(() => {
+          ctrlCPending.current = false;
+          setCtrlCHint(false);
+        }, 2000);
       } else if (inputValue.length > 0) {
+        // Clear text — just like a normal terminal, no exit state
         setInputValue('');
+      } else {
+        // Empty input, not loading — show hint
+        ctrlCPending.current = true;
+        setCtrlCHint(true);
+        if (ctrlCTimer.current) clearTimeout(ctrlCTimer.current);
+        ctrlCTimer.current = setTimeout(() => {
+          ctrlCPending.current = false;
+          setCtrlCHint(false);
+        }, 2000);
       }
-      ctrlCPending.current = true;
-      setTimeout(() => {
-        ctrlCPending.current = false;
-      }, 2000);
       return;
     }
-    ctrlCPending.current = false;
+    // Any other key resets the Ctrl+C state
+    if (ctrlCPending.current) {
+      ctrlCPending.current = false;
+      setCtrlCHint(false);
+      if (ctrlCTimer.current) clearTimeout(ctrlCTimer.current);
+    }
   });
 
   const handleSubmit = useCallback((input: string) => {
@@ -267,6 +300,7 @@ export function App({ client }: AppProps): React.JSX.Element {
           <Text color="red">Error: {error}</Text>
         </Box>
       )}
+      <TaskList tasks={taskList} />
       <InputBar
         value={inputValue}
         onChange={setInputValue}
@@ -275,6 +309,7 @@ export function App({ client }: AppProps): React.JSX.Element {
         thinking={currentThinking}
         usage={usage}
         runningTasks={runningTasks}
+        ctrlCHint={ctrlCHint}
       />
     </Box>
   );
