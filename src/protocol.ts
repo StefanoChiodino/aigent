@@ -67,5 +67,7 @@ export type ServerEvent =
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'pong' };
 
-// Socket path
-export const SOCKET_PATH = '/tmp/aigent.sock';
+// Socket directory — shared mount between host and container.
+// The worker creates its socket here; the gatekeeper connects from the host.
+export const SOCKET_DIR = '/tmp/aigent';
+export const SOCKET_PATH = `${SOCKET_DIR}/worker.sock`;

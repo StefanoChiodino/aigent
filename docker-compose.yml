@@ -1,8 +1,7 @@
 services:
   aigent:
     build: .
-    stdin_open: true
-    tty: true
+    # No tty/stdin — the TUI runs on the host (gatekeeper)
     environment:
       - ANTHROPIC_API_KEY
       - OPENAI_API_KEY
@@ -39,6 +38,8 @@ services:
         soft: 4096
         hard: 4096
     # Tmpfs for /tmp (fast, size-limited, not persisted)
+    # The socket directory (/tmp/aigent) is bind-mounted by the gatekeeper
+    # at runtime via docker compose run -v — bind mounts overlay tmpfs.
     tmpfs:
       - /tmp:size=100M
 

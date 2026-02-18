@@ -1,32 +1,33 @@
-.PHONY: dev run rebuild clean host
+.PHONY: start dev run build rebuild clean
 
-# Auto-detect host daemon socket
-HOST_SOCK := /tmp/aigent-host.sock
-DOCKER_OPTS :=
-ifneq (,$(wildcard $(HOST_SOCK)))
-  DOCKER_OPTS += -v $(HOST_SOCK):$(HOST_SOCK)
-endif
+# --- Primary: gatekeeper on host, worker in Docker ---
 
-# Build image only if needed, then run
+# Start aigent (gatekeeper + sandbox)
+start:
+	tsx src/gatekeeper.tsx $(ARGS)
+
+# --- Legacy: everything in Docker (backward compat) ---
+
+# Build + run in Docker (old architecture)
 dev: build
-	docker compose run --rm -it $(DOCKER_OPTS) aigent
+	docker compose run --rm -it aigent
 
-# Run without building (fastest — use after first `make dev`)
+# Run without building
 run:
-	docker compose run --rm -it $(DOCKER_OPTS) aigent
+	docker compose run --rm -it aigent
 
-# Build the image (cached — fast if nothing changed)
+# --- Build ---
+
 build:
 	docker compose build aigent
 
-# Full rebuild from scratch
 rebuild:
 	docker compose build --no-cache aigent
 
-# Start the host daemon
-host:
-	tsx src/host/daemon.ts
+# --- Utilities ---
 
-# Clean build artifacts
+typecheck:
+	docker compose run --rm --no-deps aigent npx tsc --noEmit
+
 clean:
 	rm -rf dist/

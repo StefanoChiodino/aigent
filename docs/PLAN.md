@@ -6,26 +6,29 @@
 ## Architecture
 
 ```
-Docker container
-  └── supervisor.tsx (entrypoint, debounced file watcher)
-        ├── server.ts (child process — agent backend, Unix socket)
-        │     ├── agent.ts (conversation loop, streaming, retry, sub-agents)
-        │     ├── provider.ts (Anthropic + OpenAI abstraction, image support)
-        │     ├── tools.ts (11 tools: exec, read_file, write_file, edit_file, list_files, grep, glob, fetch, tree, patch, spawn_agent)
-        │     ├── auth.ts (API key / OAT token handling)
-        │     ├── workspace.ts (memory system)
-        │     ├── profiles.ts (multi-profile, sessions)
-        │     └── compact.ts (context compaction)
-        └── TUI (in-process — ink v6 + React 19)
-              ├── client.ts (socket connector, auto-reconnect, command queue)
-              ├── App.tsx, ChatView.tsx, InputBar.tsx, TextInput.tsx
-              └── Markdown.tsx (terminal markdown rendering)
+Host (gatekeeper.tsx)
+  ├── TUI (ink v6 + React 19)
+  │     ├── client.ts (socket connector, auto-reconnect, command queue)
+  │     ├── App.tsx, ChatView.tsx, InputBar.tsx, TextInput.tsx
+  │     └── Markdown.tsx (terminal markdown rendering)
+  ├── Container lifecycle (start/stop/restart Docker)
+  └── Permission engine (mounts, capabilities)
+        ↕ Unix socket (NDJSON over /tmp/aigent/worker.sock)
+Docker container (worker.ts → server.ts)
+  ├── agent.ts (conversation loop, streaming, retry, sub-agents)
+  ├── provider.ts (Anthropic + OpenAI abstraction, image support)
+  ├── tools.ts (12 tools: exec, read_file, write_file, edit_file, list_files, grep, glob, fetch, tree, patch, spawn_agent, host)
+  ├── auth.ts (API key / OAT token handling)
+  ├── workspace.ts (memory system)
+  ├── profiles.ts (multi-profile, sessions)
+  └── compact.ts (context compaction)
 ```
 
 - TypeScript strict mode, ESM, Node 22
-- Docker-only execution: `make dev` builds + runs
-- Backend/frontend split: server restarts on code change, TUI survives
-- Protocol: NDJSON over Unix socket (/tmp/aigent.sock)
+- Gatekeeper/sandbox split: TUI on host, agent in Docker
+- `make start` runs gatekeeper (new), `make dev` runs everything in Docker (legacy)
+- Protocol: NDJSON over Unix socket (/tmp/aigent/worker.sock)
+- See docs/architecture.md for full security design
 
 ---
 

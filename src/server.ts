@@ -10,7 +10,7 @@
 
 import { createServer, type Server, type Socket } from 'node:net';
 import { existsSync, unlinkSync, readFileSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
 import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType, ToolResult } from './provider.js';
@@ -863,6 +863,12 @@ function handleClient(socket: Socket): void {
 // --- Server startup ---
 
 function startServer(): Server {
+  // Ensure socket directory exists
+  const socketDir = dirname(SOCKET_PATH);
+  if (!existsSync(socketDir)) {
+    mkdirSync(socketDir, { recursive: true });
+  }
+
   // Clean up stale socket
   if (existsSync(SOCKET_PATH)) {
     try { unlinkSync(SOCKET_PATH); } catch { /* ignore */ }

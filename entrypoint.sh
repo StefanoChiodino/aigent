@@ -4,8 +4,6 @@ set -e
 cd /app
 
 # Ensure node_modules match package.json
-# The anonymous volume may have stale deps from a previous build
-# We hash package.json and compare to detect when deps need updating
 HASH_FILE="node_modules/.pkg-hash"
 CURRENT_HASH=$(md5sum package.json 2>/dev/null | cut -d' ' -f1)
 STORED_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "none")
@@ -26,5 +24,11 @@ if [ -z "$DISPLAY" ]; then
   sleep 0.3
 fi
 
-# Run the supervisor (manages server + TUI)
-exec tsx --tsconfig /app/tsconfig.json /app/src/supervisor.tsx
+# Detect mode:
+#   Interactive TTY (make dev/run) → supervisor (server + TUI, legacy)
+#   Non-interactive (make start)  → worker (server only, gatekeeper runs TUI on host)
+if [ -t 0 ] && [ -t 1 ]; then
+  exec tsx --tsconfig /app/tsconfig.json /app/src/supervisor.tsx
+else
+  exec tsx --tsconfig /app/tsconfig.json /app/src/worker.ts
+fi
