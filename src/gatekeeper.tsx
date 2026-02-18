@@ -18,6 +18,7 @@ import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 
