@@ -44,7 +44,7 @@
 
 System messages could be collapsed when coming out in a row. As in, should look distinct, but present in the same yellow box to avoid taking too much space
 
-BUG: after cancelling a task the blinking loading character doesn't go away from old tasks
+~~BUG: after cancelling a task the blinking loading character doesn't go away from old tasks~~ DONE
 model parameter for dispatch_task not being respected — all background agents report as Claude 3.5 Sonnet regardless of specified model — the model IS passed correctly to the API; Claude models just don't know their own version (training data limitation, not a code bug)
 
 How can I deal with the fact that not all models support reasoning and uh it seems to me that it allows me to turn it on for haiku which doesn't support reasoning, I believe.
