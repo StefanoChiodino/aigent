@@ -28,6 +28,7 @@
 ~~attachments~~
 
 
+BUG: when I ask to mount a folder and that works eventually all messages are deleted up to just before my request. This way we lose my request, but also the system notification that the change ever happened.
 
 ~~background tasks should be visible on the web UI sidebar (running/completed). Currently only visible as yellow completion messages in chat.~~ DONE — Tasks section in sidebar shows running (pulsing), completed (checkmark), failed (X) with descriptions
 
@@ -47,3 +48,5 @@ BUG: after cancelling a task the blinking loading character doesn't go away from
 model parameter for dispatch_task not being respected — all background agents report as Claude 3.5 Sonnet regardless of specified model — the model IS passed correctly to the API; Claude models just don't know their own version (training data limitation, not a code bug)
 
 How can I deal with the fact that not all models support reasoning and uh it seems to me that it allows me to turn it on for haiku which doesn't support reasoning, I believe.
+
+We could use a cheap ai to summarise the text from the AI response so that there isn't so much to listen to
