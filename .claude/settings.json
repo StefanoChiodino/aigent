@@ -3,7 +3,8 @@
     "allow": [
       "Read(//home/draga/repos/openclaw/**)",
       "Bash(npx esbuild:*)",
-      "Bash(make:*)"
+      "Bash(make:*)",
+      "Read(//home/draga/repos/orchids/scripts/engines/**)"
     ]
   }
 }

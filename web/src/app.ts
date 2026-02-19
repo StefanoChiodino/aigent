@@ -125,10 +125,29 @@ let mountsList: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]
 let capsList: Record<string, string> = {};
 let modelPickerOpen = false;
 
+// Permission request queue
+interface PermRequest {
+  type: 'mount' | 'config_write';
+  id: string;
+  title: string;
+  detail: string;
+  approveCmd: string;
+  denyCmd: string;
+}
+
+let permQueue: PermRequest[] = [];
+let permShowing = false;
+
 // Streaming state
 let streamActive = false;
 let streamText = '';
 let streamEl: HTMLElement | null = null;
+
+// TTS state
+let ttsAudio: HTMLAudioElement | null = null;
+let ttsSpeakingBtn: HTMLElement | null = null;
+let ttsAutoSpeak = localStorage.getItem('tts-auto-speak') === 'true';
+let ttsRatePct = Number(localStorage.getItem('tts-rate-pct') ?? '25'); // integer, e.g. 25 → "+25%"
 
 // WebSocket
 let ws: WebSocket | null = null;
@@ -155,6 +174,14 @@ const $input = $('input') as HTMLTextAreaElement;
 const $send = $('send') as HTMLButtonElement;
 const $cancel = $('cancel') as HTMLButtonElement;
 
+// Permission modal DOM refs
+const $permOverlay = $('perm-overlay');
+const $permIcon = $('perm-card-icon');
+const $permTitle = $('perm-card-title');
+const $permDetail = $('perm-card-detail');
+const $permApproveBtn = $('perm-approve-btn') as HTMLButtonElement;
+const $permDenyBtn = $('perm-deny-btn') as HTMLButtonElement;
+
 // Sidebar DOM refs
 const $sbModelBtn = $('sb-model-btn') as HTMLButtonElement;
 const $sbModelValue = $('sb-model-value');
@@ -169,6 +196,9 @@ const $sbMountsList = $('sb-mounts-list');
 const $sbCapsList = $('sb-caps-list');
 const $sbTasksSection = $('sb-tasks-section');
 const $sbTasksList = $('sb-tasks-list');
+const $sbTtsToggle = $('sb-tts-toggle') as HTMLButtonElement;
+const $sbTtsRate = $('sb-tts-rate') as HTMLInputElement;
+const $sbTtsRateLabel = $('sb-tts-rate-label');
 
 // Command palette state
 let paletteItems: CommandDef[] = [];
@@ -449,9 +479,11 @@ function handleEvent(event: ServerEvent): void {
         streamActive = false;
         streamText = '';
         streamEl = null;
+        if (ttsAutoSpeak) speakText(event.message.content);
       } else {
         messages.push(event.message);
         appendMessage(event.message);
+        if (ttsAutoSpeak && event.message.role === 'assistant') speakText(event.message.content);
       }
       isThinking = false;
       updateHeader();
@@ -513,9 +545,31 @@ function handleEvent(event: ServerEvent): void {
       updateSidebar();
       break;
 
-    case 'mount_request':
-    case 'config_write_request':
+    case 'mount_request': {
+      const detail = `Path: ${event.path}\nMode: ${event.mode}${event.reason ? `\nReason: ${event.reason}` : ''}`;
+      enqueuePermRequest({
+        type: 'mount',
+        id: event.id,
+        title: 'Mount Request',
+        detail,
+        approveCmd: `/grant ${event.id}`,
+        denyCmd: `/deny ${event.id}`,
+      });
       break;
+    }
+
+    case 'config_write_request': {
+      const detail = `File: ${event.file}\nReason: ${event.reason}`;
+      enqueuePermRequest({
+        type: 'config_write',
+        id: event.id,
+        title: 'Config Write Request',
+        detail,
+        approveCmd: `/approve ${event.id}`,
+        denyCmd: `/reject ${event.id}`,
+      });
+      break;
+    }
 
     case 'pong':
       break;
@@ -551,6 +605,113 @@ function renderAllMessages(): void {
   scrollToBottom();
 }
 
+// ── TTS (text-to-speech) ─────────────────────────────────────
+
+function stripMarkdownForTTS(text: string): string {
+  // Remove fenced code blocks entirely
+  text = text.replace(/```[\s\S]*?```/g, ' code block. ');
+  // Remove inline code — keep content
+  text = text.replace(/`([^`]+)`/g, '$1');
+  // Remove heading markers
+  text = text.replace(/^#+\s+/gm, '');
+  // Remove horizontal rules
+  text = text.replace(/^[-*_]{3,}$/gm, '');
+  // Remove bold+italic, bold, italic — keep the text
+  text = text.replace(/\*\*\*(.+?)\*\*\*/g, '$1');
+  text = text.replace(/\*\*(.+?)\*\*/g, '$1');
+  text = text.replace(/\*(.+?)\*/g, '$1');
+  text = text.replace(/___(.+?)___/g, '$1');
+  text = text.replace(/__(.+?)__/g, '$1');
+  text = text.replace(/_(.+?)_/g, '$1');
+  // Remove images
+  text = text.replace(/!\[.*?\]\([^)]+\)/g, '');
+  // Remove links — keep link text
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  // Collapse excessive blank lines
+  text = text.replace(/\n{3,}/g, '\n\n');
+  return text.trim();
+}
+
+function speakText(text: string, btn?: HTMLElement): void {
+  // Toggle off if clicking the same button while it's playing
+  if (btn && ttsSpeakingBtn === btn) {
+    ttsAudio?.pause();
+    ttsAudio = null;
+    btn.classList.remove('speaking');
+    btn.title = 'Speak';
+    ttsSpeakingBtn = null;
+    return;
+  }
+
+  // Stop any currently playing audio and reset the previous button's state
+  if (ttsAudio) {
+    ttsAudio.pause();
+    ttsAudio = null;
+  }
+  if (ttsSpeakingBtn) {
+    ttsSpeakingBtn.classList.remove('speaking');
+    ttsSpeakingBtn.title = 'Speak';
+    ttsSpeakingBtn = null;
+  }
+
+  ttsSpeakingBtn = btn ?? null;
+  if (btn) {
+    btn.classList.add('speaking');
+    btn.title = 'Stop';
+  }
+
+  const stripped = stripMarkdownForTTS(text);
+  const rateStr = ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`;
+  fetch(`/tts?rate=${encodeURIComponent(rateStr)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: stripped,
+  }).then(async (resp) => {
+    if (!resp.ok) throw new Error('TTS unavailable');
+    const blob = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const audio = new Audio(blobUrl);
+    ttsAudio = audio;
+    audio.onended = () => {
+      URL.revokeObjectURL(blobUrl);
+      ttsAudio = null;
+      if (ttsSpeakingBtn === btn) {
+        if (btn) { btn.classList.remove('speaking'); btn.title = 'Speak'; }
+        ttsSpeakingBtn = null;
+      }
+    };
+    void audio.play();
+  }).catch(() => {
+    if (ttsSpeakingBtn === btn) {
+      if (btn) { btn.classList.remove('speaking'); btn.title = 'Speak'; }
+      ttsSpeakingBtn = null;
+    }
+  });
+}
+
+function createTTSBtn(text: string): HTMLElement {
+  const btn = document.createElement('button');
+  btn.className = 'tts-btn';
+  btn.title = 'Speak';
+  // Speaker icon
+  btn.innerHTML = `<svg class="icon-speak" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg><svg class="icon-stop-tts hidden" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`;
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    // Swap icons before fetch so feedback is instant
+    const iconSpeak = btn.querySelector('.icon-speak') as SVGElement;
+    const iconStop = btn.querySelector('.icon-stop-tts') as SVGElement;
+    if (btn.classList.contains('speaking')) {
+      iconSpeak.classList.remove('hidden');
+      iconStop.classList.add('hidden');
+    } else {
+      iconSpeak.classList.add('hidden');
+      iconStop.classList.remove('hidden');
+    }
+    speakText(text, btn);
+  });
+  return btn;
+}
+
 function appendMessage(msg: DisplayMessage, animate = true): void {
   hideEmptyState();
 
@@ -566,6 +727,9 @@ function appendMessage(msg: DisplayMessage, animate = true): void {
     elapsed.className = 'elapsed';
     elapsed.textContent = `${msg.elapsed.toFixed(1)}s`;
     label.appendChild(elapsed);
+  }
+  if (msg.role === 'assistant') {
+    label.appendChild(createTTSBtn(msg.content));
   }
   el.appendChild(label);
 
@@ -642,14 +806,15 @@ function finalizeStreamEl(fullContent: string, elapsed?: number): void {
     content.innerHTML = renderMarkdown(fullContent);
   }
 
-  if (elapsed !== undefined) {
-    const label = streamEl.querySelector('.role-label');
-    if (label) {
+  const label = streamEl.querySelector('.role-label');
+  if (label) {
+    if (elapsed !== undefined) {
       const elapsedEl = document.createElement('span');
       elapsedEl.className = 'elapsed';
       elapsedEl.textContent = `${elapsed.toFixed(1)}s`;
       label.appendChild(elapsedEl);
     }
+    label.appendChild(createTTSBtn(fullContent));
   }
   scrollToBottom();
 }
@@ -839,8 +1004,19 @@ function updateSidebar(): void {
 
       const path = document.createElement('span');
       path.className = 'mount-path';
-      path.textContent = m.hostPath.split('/').pop() || m.hostPath;
       path.title = m.hostPath;
+      const parts = m.hostPath.replace(/\/$/, '').split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        const parent = document.createElement('span');
+        parent.className = 'mount-path-parent';
+        parent.textContent = parts[parts.length - 2] + '/';
+        const name = document.createElement('span');
+        name.textContent = parts[parts.length - 1];
+        path.appendChild(parent);
+        path.appendChild(name);
+      } else {
+        path.textContent = m.hostPath;
+      }
       item.appendChild(path);
 
       $sbMountsList.appendChild(item);
@@ -873,6 +1049,10 @@ function updateSidebar(): void {
       $sbCapsList.appendChild(item);
     }
   }
+
+  // TTS auto-speak toggle
+  $sbTtsToggle.textContent = ttsAutoSpeak ? 'ON' : 'OFF';
+  $sbTtsToggle.classList.toggle('on', ttsAutoSpeak);
 
   // Tasks
   $sbTasksSection.style.display = '';
@@ -916,7 +1096,11 @@ function updateErrorBar(): void {
 function updateInputState(): void {
   $send.classList.toggle('hidden', isLoading);
   $cancel.classList.toggle('hidden', !isLoading);
-  $input.placeholder = isLoading ? 'Agent is working\u2026' : 'Message aigent\u2026';
+  if (micRecording) {
+    $input.placeholder = 'Listening\u2026';
+  } else {
+    $input.placeholder = isLoading ? 'Agent is working\u2026' : 'Message aigent\u2026';
+  }
 }
 
 // ── Markdown rendering ───────────────────────────────────────
@@ -942,6 +1126,85 @@ function scrollToBottom(): void {
     $messages.scrollTop = $messages.scrollHeight;
   });
 }
+
+// ── Permission request modal ─────────────────────────────────
+
+function playPermissionSound(): void {
+  try {
+    const ctx = new AudioContext();
+    ([523.25, 659.25, 783.99] as number[]).forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const t = ctx.currentTime + i * 0.18;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.25, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+      osc.start(t);
+      osc.stop(t + 0.22);
+    });
+    setTimeout(() => void ctx.close(), 1200);
+  } catch {
+    // Audio unavailable
+  }
+}
+
+function sendPermNotification(req: PermRequest): void {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!document.hidden) return; // Tab is focused — modal is already visible
+  const n = new Notification('aigent: Permission Request', {
+    body: `${req.title}: ${req.detail.split('\n')[0]}`,
+    requireInteraction: true,
+  });
+  n.onclick = () => { window.focus(); n.close(); };
+}
+
+function showNextPermRequest(): void {
+  const req = permQueue[0];
+  if (!req) {
+    permShowing = false;
+    $permOverlay.classList.add('hidden');
+    return;
+  }
+  permShowing = true;
+  $permIcon.textContent = req.type === 'mount' ? '📂' : '✏️';
+  $permTitle.textContent = req.title;
+  $permDetail.textContent = req.detail.split('\n')[0] ?? req.detail;
+  $permDetail.title = req.detail; // full text on hover
+  $permOverlay.classList.remove('hidden');
+}
+
+function enqueuePermRequest(req: PermRequest): void {
+  permQueue.push(req);
+  if (!permShowing) showNextPermRequest();
+  playPermissionSound();
+  sendPermNotification(req);
+}
+
+function resolvePermRequest(approve: boolean): void {
+  const req = permQueue.shift();
+  if (!req) return;
+  wsSend({ type: 'message', content: approve ? req.approveCmd : req.denyCmd });
+  showNextPermRequest();
+}
+
+$permApproveBtn.addEventListener('click', () => resolvePermRequest(true));
+$permDenyBtn.addEventListener('click', () => resolvePermRequest(false));
+
+// Request browser notification permission on first user interaction
+let notifPermRequested = false;
+function requestNotifPermission(): void {
+  if (notifPermRequested) return;
+  notifPermRequested = true;
+  if ('Notification' in window && Notification.permission === 'default') {
+    void Notification.requestPermission();
+  }
+}
+document.addEventListener('click', requestNotifPermission, { once: true });
+document.addEventListener('keydown', requestNotifPermission, { once: true });
 
 // ── Command palette ──────────────────────────────────────────
 
@@ -1219,13 +1482,19 @@ let micSamples: Float32Array[] = [];
 let micSource: MediaStreamAudioSourceNode | null = null;
 let micProcessor: ScriptProcessorNode | null = null;
 let micChunkTimer: ReturnType<typeof setInterval> | null = null;
-let micPreviewEl: HTMLElement | null = null;
+let micSilenceTimer: ReturnType<typeof setInterval> | null = null;
 let micLastText = '';
 let micReqSeq = 0;          // increments on each outgoing request
 let micDisplayedSeq = 0;   // seq of the last response we actually showed
+let micBaseText = '';       // text in input before mic started
+let micLastSpeechTime = 0; // timestamp of last detected speech
 
-// Max samples to send per live chunk (8 s at 16 kHz keeps latency bounded)
-const MIC_WINDOW_SAMPLES = 16000 * 8;
+// Max samples to send per live chunk (12 s at 16 kHz — more context improves Whisper accuracy)
+const MIC_WINDOW_SAMPLES = 16000 * 12;
+// RMS amplitude threshold to consider audio as speech (vs. silence/noise)
+const MIC_SILENCE_THRESHOLD = 0.015;
+// How long (ms) of silence before auto-sending
+const MIC_SILENCE_MS = 2000;
 
 function encodeWav(samples: Float32Array[], sampleRate: number): ArrayBuffer {
   let totalLen = 0;
@@ -1305,7 +1574,9 @@ async function sendLiveChunk(): Promise<void> {
       if (text) {
         micLastText = text;
         micDisplayedSeq = seq;
-        if (micPreviewEl) micPreviewEl.textContent = text;
+        // Put live transcription directly in the textarea
+        $input.value = micBaseText ? micBaseText + ' ' + text : text;
+        autoGrow();
       }
     }
   } catch {
@@ -1332,26 +1603,38 @@ async function startMic(): Promise<void> {
     micLastText = '';
     micReqSeq = 0;
     micDisplayedSeq = 0;
+    micBaseText = $input.value.trim();
+    micLastSpeechTime = Date.now();
     micProcessor.onaudioprocess = (e) => {
-      micSamples.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      const data = e.inputBuffer.getChannelData(0);
+      micSamples.push(new Float32Array(data));
+      // Track speech amplitude for silence detection
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i]! * data[i]!;
+      if (Math.sqrt(sum / data.length) > MIC_SILENCE_THRESHOLD) {
+        micLastSpeechTime = Date.now();
+      }
     };
     micSource.connect(micProcessor);
     micProcessor.connect(micAudioCtx.destination);
 
-    // Live preview element shown above the input row
-    micPreviewEl = document.createElement('div');
-    micPreviewEl.className = 'stt-preview';
-    micPreviewEl.textContent = 'Listening\u2026';
-    const $inputRow = $('input-row');
-    $inputRow.parentNode!.insertBefore(micPreviewEl, $inputRow);
-
-    // Send first chunk after a short delay (let audio accumulate), then every 2 s.
+    // Send first chunk after a short delay (let audio accumulate), then every 1.2 s.
     // Requests run concurrently; the seq counter ensures only the latest wins.
     setTimeout(() => { void sendLiveChunk(); }, 800);
-    micChunkTimer = setInterval(() => { void sendLiveChunk(); }, 2000);
+    micChunkTimer = setInterval(() => { void sendLiveChunk(); }, 1200);
+
+    // Silence detection: when speech stops for MIC_SILENCE_MS, stop recording
+    // (text stays in textarea — user presses Enter to send)
+    micSilenceTimer = setInterval(() => {
+      if (!micRecording || !micLastText) return;
+      if (Date.now() - micLastSpeechTime >= MIC_SILENCE_MS) {
+        void stopMic();
+      }
+    }, 300);
 
     micRecording = true;
     micSetState('recording');
+    updateInputState();
   } catch {
     // Permission denied or no mic
   }
@@ -1361,8 +1644,9 @@ async function stopMic(): Promise<void> {
   if (!micRecording) return;
   micRecording = false;
 
-  // Stop live chunk timer
+  // Stop timers
   if (micChunkTimer !== null) { clearInterval(micChunkTimer); micChunkTimer = null; }
+  if (micSilenceTimer !== null) { clearInterval(micSilenceTimer); micSilenceTimer = null; }
 
   micSetState('transcribing');
 
@@ -1378,10 +1662,7 @@ async function stopMic(): Promise<void> {
   micStream = null;
   micAudioCtx = null;
 
-  // Remove live preview
-  if (micPreviewEl) { micPreviewEl.remove(); micPreviewEl = null; }
-
-  if (samples.length === 0) { micSetState('idle'); return; }
+  if (samples.length === 0) { micSetState('idle'); updateInputState(); return; }
 
   let finalText = micLastText;
   try {
@@ -1399,17 +1680,22 @@ async function stopMic(): Promise<void> {
   }
 
   if (finalText) {
-    const cur = $input.value;
-    $input.value = cur ? cur + ' ' + finalText : finalText;
+    $input.value = micBaseText ? micBaseText + ' ' + finalText : finalText;
     autoGrow();
     $input.focus();
+  } else {
+    // No transcript — restore whatever was in the box before
+    $input.value = micBaseText;
+    autoGrow();
   }
   micSetState('idle');
+  updateInputState();
 }
 
+
 $mic.addEventListener('click', () => {
-  if (micRecording) stopMic();
-  else startMic();
+  if (micRecording) void stopMic();
+  else void startMic();
 });
 
 // ── Ctrl key tracking for thinking-override visual feedback ──
@@ -1443,12 +1729,32 @@ function updateSendButton(ctrlHeld: boolean): void {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Control') updateSendButton(true);
+  // Alt+M — toggle microphone (continuous voice mode)
+  if (e.key === 'm' && e.altKey && !e.ctrlKey) {
+    e.preventDefault();
+    if (micRecording) void stopMic();
+    else void startMic();
+  }
 });
 document.addEventListener('keyup', (e) => {
   if (e.key === 'Control') updateSendButton(false);
 });
 // Reset if window loses focus while Ctrl is held
 window.addEventListener('blur', () => updateSendButton(false));
+
+// ── Sidebar TTS controls ─────────────────────────────────────
+
+$sbTtsToggle.addEventListener('click', () => {
+  ttsAutoSpeak = !ttsAutoSpeak;
+  localStorage.setItem('tts-auto-speak', String(ttsAutoSpeak));
+  updateSidebar();
+});
+
+$sbTtsRate.addEventListener('input', () => {
+  ttsRatePct = Number($sbTtsRate.value);
+  localStorage.setItem('tts-rate-pct', String(ttsRatePct));
+  $sbTtsRateLabel.textContent = ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`;
+});
 
 // ── Sidebar reasoning controls ───────────────────────────────
 
@@ -1467,6 +1773,10 @@ $sbEffortPills.addEventListener('click', (e) => {
 });
 
 // ── Initialize ───────────────────────────────────────────────
+
+// Restore persisted TTS slider state
+$sbTtsRate.value = String(ttsRatePct);
+$sbTtsRateLabel.textContent = ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`;
 
 updateHeader();
 updateSidebar();

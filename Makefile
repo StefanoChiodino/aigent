@@ -1,4 +1,4 @@
-.PHONY: dev serve web web-watch build rebuild typecheck clean stt stt-setup
+.PHONY: dev serve web web-watch build rebuild typecheck clean stt stt-setup tts tts-setup
 
 # --- Development ---
 
@@ -8,7 +8,7 @@ dev:
 	@mkdir -p web/dist
 	@echo "Starting dev server with hot reload..."
 	@echo "Web UI: http://localhost:$${AIGENT_WEB_PORT:-3141}"
-	@npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*' & \
+	@npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm '--watch=forever' '--external:/vendor/*' & \
 	npx tsx --watch=forever src/gatekeeper.tsx --headless $(ARGS); \
 	kill %1 2>/dev/null; wait
 
@@ -59,4 +59,23 @@ stt: $(STT_PYTHON)
 
 $(STT_PYTHON):
 	@echo "STT environment not set up. Run: make stt-setup"
+	@exit 1
+
+# --- TTS (edge-tts Microsoft neural text-to-speech sidecar) ---
+
+TTS_VENV   := tts/.venv
+TTS_PYTHON := $(TTS_VENV)/bin/python
+
+# Create the venv and install edge-tts (run once)
+tts-setup:
+	python3 -m venv $(TTS_VENV)
+	$(TTS_PYTHON) -m pip install --upgrade pip
+	$(TTS_PYTHON) -m pip install -r tts/requirements.txt
+
+# Start the TTS server (run make tts-setup first)
+tts: $(TTS_PYTHON)
+	$(TTS_PYTHON) tts/main.py $(ARGS)
+
+$(TTS_PYTHON):
+	@echo "TTS environment not set up. Run: make tts-setup"
 	@exit 1

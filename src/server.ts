@@ -30,7 +30,7 @@ const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 
 // Ordered most capable → fastest/cheapest.
 let AVAILABLE_MODELS = [
   'claude-opus-4-6-20250514',
-  'claude-sonnet-4-6-20251001',
+  'claude-sonnet-4-20250514',
   'claude-haiku-4-5-20251001',
 ];
 

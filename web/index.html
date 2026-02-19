@@ -54,6 +54,16 @@
             </div>
           </div>
           <div class="sidebar-section">
+            <div class="sidebar-label">Auto-speak</div>
+            <div class="sb-tts-controls">
+              <button id="sb-tts-toggle" class="sb-toggle" title="Auto-speak new responses">OFF</button>
+              <div class="sb-tts-speed">
+                <input id="sb-tts-rate" type="range" min="-25" max="75" step="5" value="25" title="Speech speed">
+                <span id="sb-tts-rate-label">+25%</span>
+              </div>
+            </div>
+          </div>
+          <div class="sidebar-section">
             <div class="sidebar-label">Context</div>
             <div id="sb-ctx-meter">
               <div id="sb-ctx-fill"></div>
@@ -113,12 +123,28 @@
             </button>
           </div>
           <div id="input-hint">
-            <kbd>Enter</kbd> send &middot; <kbd>Ctrl+Enter</kbd> <span id="hint-ctrl">think</span> &middot; <kbd>Shift+Enter</kbd> newline &middot; <kbd>Esc</kbd> cancel &middot; <kbd>/</kbd> commands
+            <kbd>Enter</kbd> send &middot; <kbd>Ctrl+Enter</kbd> <span id="hint-ctrl">think</span> &middot; <kbd>Shift+Enter</kbd> newline &middot; <kbd>Esc</kbd> cancel &middot; <kbd>/</kbd> commands &middot; <kbd>Alt+M</kbd> voice
           </div>
         </footer>
       </div>
     </div>
   </div>
+
+  <!-- Permission request modal -->
+  <div id="perm-overlay" class="hidden">
+    <div id="perm-card">
+      <div id="perm-card-header">
+        <span id="perm-card-icon"></span>
+        <div id="perm-card-title"></div>
+      </div>
+      <div id="perm-card-detail"></div>
+      <div id="perm-card-actions">
+        <button id="perm-deny-btn" class="perm-btn perm-deny">Deny</button>
+        <button id="perm-approve-btn" class="perm-btn perm-approve">Approve</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="/dist/app.js"></script>
 </body>
 </html>

@@ -246,8 +246,9 @@ def main() -> None:
                         help="NeMo model name or local .nemo path")
     parser.add_argument("--device", default="auto",
                         help="cuda | mps | cpu | auto (default: auto-detect)")
-    parser.add_argument("--idle-timeout", type=int, default=300,
-                        help="Unload model after N seconds idle (0 = never, default 300)")
+    parser.add_argument("--idle-timeout", type=int,
+                        default=int(os.environ.get("AIGENT_STT_IDLE_TIMEOUT", "0")),
+                        help="Unload model after N seconds idle (0 = never, default 0 / env: AIGENT_STT_IDLE_TIMEOUT)")
     parser.add_argument("--eager", action="store_true",
                         help="Load model at startup rather than on first request")
     args = parser.parse_args()

@@ -65,9 +65,41 @@ export async function startWebServer(
   // --- HTTP server ---
 
   const STT_URL = process.env['AIGENT_STT_URL'] ?? 'http://127.0.0.1:8765';
+  const TTS_URL = process.env['AIGENT_TTS_URL'] ?? 'http://127.0.0.1:8766';
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/';
+
+    // TTS proxy — forwards plain text to local edge-tts server, returns MP3 audio.
+    // Passes through ?rate= query param so the browser can set per-request speed.
+    if (req.method === 'POST' && (url === '/tts' || url.startsWith('/tts?'))) {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', async () => {
+        try {
+          const body = Buffer.concat(chunks);
+          // Forward query params (e.g. rate) to the Python server
+          const qs = url.includes('?') ? url.slice(url.indexOf('?')) : '';
+          const ttsRes = await fetch(`${TTS_URL}/synthesize${qs}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain', 'Content-Length': String(body.length) },
+            body,
+          });
+          if (ttsRes.ok) {
+            const audio = await ttsRes.arrayBuffer();
+            res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': String(audio.byteLength) });
+            res.end(Buffer.from(audio));
+          } else {
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'TTS service error' }));
+          }
+        } catch {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'TTS service unavailable' }));
+        }
+      });
+      return;
+    }
 
     // STT proxy — forwards WAV audio to local Parakeet server, returns transcript JSON.
     if (req.method === 'POST' && url === '/stt') {
