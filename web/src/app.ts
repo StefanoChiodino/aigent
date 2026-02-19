@@ -142,12 +142,19 @@ let permShowing = false;
 let streamActive = false;
 let streamText = '';
 let streamEl: HTMLElement | null = null;
+let streamTtsBtn: HTMLElement | null = null;
 
 // TTS state
 let ttsAudio: HTMLAudioElement | null = null;
 let ttsSpeakingBtn: HTMLElement | null = null;
+let ttsAbortCtrl: AbortController | null = null;
 let ttsAutoSpeak = localStorage.getItem('tts-auto-speak') === 'true';
 let ttsRatePct = Number(localStorage.getItem('tts-rate-pct') ?? '25'); // integer, e.g. 25 → "+25%"
+// Streaming TTS queue (for auto-speak during streaming)
+let ttsChunkQueue: Array<Promise<string>> = [];
+let ttsChunkPlaying = false;
+let ttsStreamLastLen = 0;
+let ttsStreamFetchCtrls: AbortController[] = [];
 
 // WebSocket
 let ws: WebSocket | null = null;
@@ -373,6 +380,7 @@ function connect(): void {
       isLoading = false;
       streamActive = false;
       streamEl = null;
+      streamTtsBtn = null;
     }
     updateHeader();
     updateInputState();
@@ -429,6 +437,7 @@ function handleEvent(event: ServerEvent): void {
       if (event.content) {
         streamText = event.content;
         updateStreamingDisplay();
+        ttsFlushStream();
       }
       break;
 
@@ -442,9 +451,11 @@ function handleEvent(event: ServerEvent): void {
     case 'tool_start':
       if (streamActive) {
         finalizeStreamingText();
+        ttsFlushStream(true);
       }
       showTool(event.name, event.summary);
       streamText = '';
+      ttsStreamLastLen = 0;
       break;
 
     case 'tool_output':
@@ -474,16 +485,24 @@ function handleEvent(event: ServerEvent): void {
 
     case 'message':
       if (event.message.role === 'assistant' && streamActive) {
+        // Flush any sentence fragment that didn't end with punctuation
+        if (ttsAutoSpeak) {
+          ttsEnqueueChunk(event.message.content.slice(ttsStreamLastLen));
+          ttsStreamLastLen = 0;
+        }
         finalizeStreamEl(event.message.content, event.message.elapsed);
         messages.push(event.message);
         streamActive = false;
         streamText = '';
         streamEl = null;
-        if (ttsAutoSpeak) speakText(event.message.content);
+        if (!ttsChunkPlaying) streamTtsBtn = null;
       } else {
         messages.push(event.message);
         appendMessage(event.message);
-        if (ttsAutoSpeak && event.message.role === 'assistant') speakText(event.message.content);
+        if (ttsAutoSpeak && event.message.role === 'assistant') {
+          const btn = $messages.querySelector<HTMLElement>('.message:last-child .tts-btn');
+          speakText(event.message.content, btn ?? undefined);
+        }
       }
       isThinking = false;
       updateHeader();
@@ -509,6 +528,7 @@ function handleEvent(event: ServerEvent): void {
     case 'loading':
       isLoading = event.isLoading;
       if (event.isLoading && !streamActive) {
+        ttsStopStream();
         streamActive = true;
         streamText = '';
         streamEl = createStreamingEl();
@@ -593,6 +613,7 @@ function renderAllMessages(): void {
     if (child.id !== 'empty-state') child.remove();
   }
   streamEl = null;
+  streamTtsBtn = null;
 
   if (messages.length === 0) {
     showEmptyState();
@@ -632,33 +653,49 @@ function stripMarkdownForTTS(text: string): string {
   return text.trim();
 }
 
+function ttsResetBtn(btn: HTMLElement): void {
+  btn.classList.remove('speaking');
+  btn.title = 'Speak';
+  (btn.querySelector('.icon-speak') as SVGElement | null)?.classList.remove('hidden');
+  (btn.querySelector('.icon-stop-tts') as SVGElement | null)?.classList.add('hidden');
+}
+
+function ttsActivateBtn(btn: HTMLElement): void {
+  btn.classList.add('speaking');
+  btn.title = 'Stop';
+  (btn.querySelector('.icon-speak') as SVGElement | null)?.classList.add('hidden');
+  (btn.querySelector('.icon-stop-tts') as SVGElement | null)?.classList.remove('hidden');
+}
+
 function speakText(text: string, btn?: HTMLElement): void {
-  // Toggle off if clicking the same button while it's playing
+  // Toggle off if clicking the same button while it's playing (or loading)
   if (btn && ttsSpeakingBtn === btn) {
+    ttsAbortCtrl?.abort();
+    ttsAbortCtrl = null;
     ttsAudio?.pause();
     ttsAudio = null;
-    btn.classList.remove('speaking');
-    btn.title = 'Speak';
+    ttsResetBtn(btn);
     ttsSpeakingBtn = null;
     return;
   }
 
-  // Stop any currently playing audio and reset the previous button's state
+  // Cancel any in-flight request and stop any currently playing audio (incl. stream TTS)
+  ttsStopStream();
+  ttsAbortCtrl?.abort();
+  ttsAbortCtrl = null;
   if (ttsAudio) {
     ttsAudio.pause();
     ttsAudio = null;
   }
   if (ttsSpeakingBtn) {
-    ttsSpeakingBtn.classList.remove('speaking');
-    ttsSpeakingBtn.title = 'Speak';
+    ttsResetBtn(ttsSpeakingBtn);
     ttsSpeakingBtn = null;
   }
 
   ttsSpeakingBtn = btn ?? null;
-  if (btn) {
-    btn.classList.add('speaking');
-    btn.title = 'Stop';
-  }
+  const ctrl = new AbortController();
+  ttsAbortCtrl = ctrl;
+  if (btn) ttsActivateBtn(btn);
 
   const stripped = stripMarkdownForTTS(text);
   const rateStr = ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`;
@@ -666,27 +703,119 @@ function speakText(text: string, btn?: HTMLElement): void {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body: stripped,
+    signal: ctrl.signal,
   }).then(async (resp) => {
     if (!resp.ok) throw new Error('TTS unavailable');
     const blob = await resp.blob();
     const blobUrl = URL.createObjectURL(blob);
+    // Discard if a newer request has taken over
+    if (ttsAbortCtrl !== ctrl) {
+      URL.revokeObjectURL(blobUrl);
+      return;
+    }
     const audio = new Audio(blobUrl);
     ttsAudio = audio;
     audio.onended = () => {
       URL.revokeObjectURL(blobUrl);
       ttsAudio = null;
+      if (ttsAbortCtrl === ctrl) ttsAbortCtrl = null;
       if (ttsSpeakingBtn === btn) {
-        if (btn) { btn.classList.remove('speaking'); btn.title = 'Speak'; }
+        if (btn) ttsResetBtn(btn);
         ttsSpeakingBtn = null;
       }
     };
     void audio.play();
-  }).catch(() => {
+  }).catch((err: unknown) => {
+    if (err instanceof Error && err.name === 'AbortError') return;
+    if (ttsAbortCtrl === ctrl) ttsAbortCtrl = null;
     if (ttsSpeakingBtn === btn) {
-      if (btn) { btn.classList.remove('speaking'); btn.title = 'Speak'; }
+      if (btn) ttsResetBtn(btn);
       ttsSpeakingBtn = null;
     }
   });
+}
+
+// ── Streaming TTS helpers ─────────────────────────────────────
+
+function ttsStopStream(): void {
+  for (const ctrl of ttsStreamFetchCtrls) ctrl.abort();
+  ttsStreamFetchCtrls = [];
+  ttsChunkQueue = [];
+  ttsChunkPlaying = false;
+  ttsStreamLastLen = 0;
+  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+  if (streamTtsBtn) { streamTtsBtn.remove(); streamTtsBtn = null; }
+}
+
+function ttsEnqueueChunk(text: string): void {
+  const stripped = stripMarkdownForTTS(text);
+  if (!stripped.trim()) return;
+  const ctrl = new AbortController();
+  ttsStreamFetchCtrls.push(ctrl);
+  const rateStr = ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`;
+  const p = fetch(`/tts?rate=${encodeURIComponent(rateStr)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: stripped,
+    signal: ctrl.signal,
+  }).then(async (r) => {
+    if (!r.ok) throw new Error('tts error');
+    return URL.createObjectURL(await r.blob());
+  });
+  ttsChunkQueue.push(p);
+  if (!ttsChunkPlaying) void ttsDrainQueue();
+}
+
+async function ttsDrainQueue(): Promise<void> {
+  ttsChunkPlaying = true;
+  if (streamTtsBtn) streamTtsBtn.classList.remove('hidden');
+  while (ttsChunkQueue.length > 0) {
+    const p = ttsChunkQueue.shift()!;
+    let blobUrl: string;
+    try {
+      blobUrl = await p;
+    } catch {
+      continue; // fetch aborted or failed
+    }
+    if (!ttsChunkPlaying) { URL.revokeObjectURL(blobUrl); break; }
+    await new Promise<void>((resolve) => {
+      const audio = new Audio(blobUrl);
+      ttsAudio = audio;
+      const cleanup = () => { URL.revokeObjectURL(blobUrl); ttsAudio = null; resolve(); };
+      audio.onended = cleanup;
+      audio.onerror = cleanup;
+      void audio.play().catch(cleanup);
+    });
+    if (!ttsChunkPlaying) break;
+  }
+  ttsChunkPlaying = false;
+  if (streamTtsBtn) { streamTtsBtn.remove(); streamTtsBtn = null; }
+}
+
+// Detect sentence boundaries in newly streamed text and enqueue each sentence.
+// Pass final=true at stream end to flush any remaining text without a boundary.
+function ttsFlushStream(final = false): void {
+  if (!ttsAutoSpeak) return;
+  const unspoken = streamText.slice(ttsStreamLastLen);
+  if (!unspoken) return;
+
+  if (final) {
+    ttsEnqueueChunk(unspoken);
+    ttsStreamLastLen = streamText.length;
+    return;
+  }
+
+  // Match sentence-ending punctuation followed by whitespace, or a blank line
+  const re = /[.!?]['"»]?\s+|\n\n/g;
+  let lastEnd = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(unspoken)) !== null) {
+    lastEnd = m.index + m[0].length;
+  }
+  if (lastEnd > 0) {
+    ttsEnqueueChunk(unspoken.slice(0, lastEnd));
+    ttsStreamLastLen += lastEnd;
+  }
 }
 
 function createTTSBtn(text: string): HTMLElement {
@@ -697,16 +826,6 @@ function createTTSBtn(text: string): HTMLElement {
   btn.innerHTML = `<svg class="icon-speak" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg><svg class="icon-stop-tts hidden" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`;
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    // Swap icons before fetch so feedback is instant
-    const iconSpeak = btn.querySelector('.icon-speak') as SVGElement;
-    const iconStop = btn.querySelector('.icon-stop-tts') as SVGElement;
-    if (btn.classList.contains('speaking')) {
-      iconSpeak.classList.remove('hidden');
-      iconStop.classList.add('hidden');
-    } else {
-      iconSpeak.classList.add('hidden');
-      iconStop.classList.remove('hidden');
-    }
     speakText(text, btn);
   });
   return btn;
@@ -770,6 +889,18 @@ function createStreamingEl(): HTMLElement {
   const label = document.createElement('div');
   label.className = 'role-label';
   label.textContent = 'agent';
+
+  const stopBtn = document.createElement('button');
+  stopBtn.className = 'tts-btn hidden speaking';
+  stopBtn.title = 'Stop speaking';
+  stopBtn.innerHTML = `<svg class="icon-speak hidden" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg><svg class="icon-stop-tts" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`;
+  stopBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    ttsStopStream();
+  });
+  streamTtsBtn = stopBtn;
+  label.appendChild(stopBtn);
+
   el.appendChild(label);
 
   const content = document.createElement('div');
@@ -808,6 +939,12 @@ function finalizeStreamEl(fullContent: string, elapsed?: number): void {
 
   const label = streamEl.querySelector('.role-label');
   if (label) {
+    // Remove the temporary streaming stop button only when TTS isn't playing.
+    // If TTS is still playing, keep it visible — ttsDrainQueue will remove it when done.
+    if (!ttsChunkPlaying) {
+      streamTtsBtn?.remove();
+      streamTtsBtn = null;
+    }
     if (elapsed !== undefined) {
       const elapsedEl = document.createElement('span');
       elapsedEl.className = 'elapsed';
@@ -1285,6 +1422,10 @@ function completePaletteSelection(): void {
 // ── Input handling ───────────────────────────────────────────
 
 function submitMessage(useThinkingOverride = false): void {
+  // Stop mic immediately without a final transcription pass — the text
+  // already in the textarea is what the user wants to send, and any
+  // in-flight STT responses must not write back after we clear the input.
+  if (micRecording) abortMic();
   const text = $input.value.trim();
   if (!text && pendingAttachments.length === 0) return;
   $input.value = '';
@@ -1487,14 +1628,9 @@ let micLastText = '';
 let micReqSeq = 0;          // increments on each outgoing request
 let micDisplayedSeq = 0;   // seq of the last response we actually showed
 let micBaseText = '';       // text in input before mic started
-let micLastSpeechTime = 0; // timestamp of last detected speech
 
 // Max samples to send per live chunk (12 s at 16 kHz — more context improves Whisper accuracy)
 const MIC_WINDOW_SAMPLES = 16000 * 12;
-// RMS amplitude threshold to consider audio as speech (vs. silence/noise)
-const MIC_SILENCE_THRESHOLD = 0.015;
-// How long (ms) of silence before auto-sending
-const MIC_SILENCE_MS = 2000;
 
 function encodeWav(samples: Float32Array[], sampleRate: number): ArrayBuffer {
   let totalLen = 0;
@@ -1604,16 +1740,9 @@ async function startMic(): Promise<void> {
     micReqSeq = 0;
     micDisplayedSeq = 0;
     micBaseText = $input.value.trim();
-    micLastSpeechTime = Date.now();
     micProcessor.onaudioprocess = (e) => {
       const data = e.inputBuffer.getChannelData(0);
       micSamples.push(new Float32Array(data));
-      // Track speech amplitude for silence detection
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) sum += data[i]! * data[i]!;
-      if (Math.sqrt(sum / data.length) > MIC_SILENCE_THRESHOLD) {
-        micLastSpeechTime = Date.now();
-      }
     };
     micSource.connect(micProcessor);
     micProcessor.connect(micAudioCtx.destination);
@@ -1622,15 +1751,6 @@ async function startMic(): Promise<void> {
     // Requests run concurrently; the seq counter ensures only the latest wins.
     setTimeout(() => { void sendLiveChunk(); }, 800);
     micChunkTimer = setInterval(() => { void sendLiveChunk(); }, 1200);
-
-    // Silence detection: when speech stops for MIC_SILENCE_MS, stop recording
-    // (text stays in textarea — user presses Enter to send)
-    micSilenceTimer = setInterval(() => {
-      if (!micRecording || !micLastText) return;
-      if (Date.now() - micLastSpeechTime >= MIC_SILENCE_MS) {
-        void stopMic();
-      }
-    }, 300);
 
     micRecording = true;
     micSetState('recording');
@@ -1692,6 +1812,26 @@ async function stopMic(): Promise<void> {
   updateInputState();
 }
 
+
+function abortMic(): void {
+  if (!micRecording) return;
+  micRecording = false;
+  if (micChunkTimer !== null) { clearInterval(micChunkTimer); micChunkTimer = null; }
+  if (micSilenceTimer !== null) { clearInterval(micSilenceTimer); micSilenceTimer = null; }
+  // Invalidate any in-flight STT responses so they don't write back to the textarea
+  micDisplayedSeq = micReqSeq;
+  micSource?.disconnect();
+  micProcessor?.disconnect();
+  micStream?.getTracks().forEach(t => t.stop());
+  void micAudioCtx?.close();
+  micSamples = [];
+  micSource = null;
+  micProcessor = null;
+  micStream = null;
+  micAudioCtx = null;
+  micSetState('idle');
+  updateInputState();
+}
 
 $mic.addEventListener('click', () => {
   if (micRecording) void stopMic();
