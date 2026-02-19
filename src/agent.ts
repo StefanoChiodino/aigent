@@ -159,7 +159,7 @@ export class Agent {
     // Load workspace context — split for prompt caching (base is stable/cached, workspace is dynamic)
     this.workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
     const workspaceContext = loadWorkspaceContext(this.workspacePath);
-    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext];
+    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext + `\n\nCurrent model: ${this.model}`];
   }
 
   async chat(userMessage: string | UserContent, callbacks?: ChatCallbacks): Promise<string> {
@@ -598,6 +598,12 @@ export class Agent {
   get thinkingLevel(): ThinkingLevel { return this.thinking; }
   set thinkingLevel(level: ThinkingLevel) { this.thinking = level; }
 
+  get currentModel(): string { return this.model; }
+  set currentModel(m: string) { this.model = m; }
+
+  /** Expose the underlying provider so callers can call optional methods like listModels(). */
+  get underlyingProvider(): Provider { return this.provider; }
+
   reset(): void {
     this.messages = [];
     this._totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -615,12 +621,12 @@ export class Agent {
 
   reloadSystemPrompt(): void {
     const workspaceContext = loadWorkspaceContext(this.workspacePath);
-    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext];
+    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext + `\n\nCurrent model: ${this.model}`];
   }
 
   reloadWorkspace(workspacePath: string): void {
     const workspaceContext = loadWorkspaceContext(workspacePath);
-    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext];
+    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext + `\n\nCurrent model: ${this.model}`];
   }
 
   /** Update extra system prompt (e.g., host daemon capabilities changed). */

@@ -29,9 +29,17 @@
       <aside id="sidebar">
         <div id="sidebar-spacer"></div>
         <div id="sidebar-panel">
-          <div class="sidebar-section">
+          <div class="sidebar-section" id="sb-tasks-section" style="display:none">
+            <div class="sidebar-label">Tasks</div>
+            <div id="sb-tasks-list" class="sidebar-value"></div>
+          </div>
+          <div class="sidebar-section sb-model-section">
             <div class="sidebar-label">Model</div>
-            <div class="sidebar-value" id="sb-model-value">--</div>
+            <button id="sb-model-btn" class="sb-model-btn" title="Switch model">
+              <span id="sb-model-value">--</span>
+              <svg class="sb-model-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div id="sb-model-picker" class="sb-model-picker hidden"></div>
           </div>
           <div class="sidebar-section">
             <div class="sidebar-label">Reasoning</div>

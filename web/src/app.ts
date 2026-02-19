@@ -41,6 +41,7 @@ interface ServerState {
   profile: string;
   sessionId: string;
   model: string;
+  availableModels: string[];
   isLoading: boolean;
   tasks: BackgroundTaskInfo[];
   pendingResults: number;
@@ -58,7 +59,7 @@ type ServerEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
-  | { type: 'state'; thinking?: string; profile?: string; sessionId?: string }
+  | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string }
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
@@ -81,6 +82,7 @@ const COMMANDS: CommandDef[] = [
   { name: '/restart',   desc: 'Restart server' },
   { name: '/reasoning', desc: 'Toggle reasoning',          argHint: 'on|off' },
   { name: '/effort',    desc: 'Set effort level',          argHint: 'low|medium|high|max' },
+  { name: '/model',     desc: 'Show or switch model',      argHint: '<name>' },
   { name: '/image',     desc: 'Send an image',             argHint: '<path> [msg]' },
   { name: '/usage',     desc: 'Token usage stats' },
   { name: '/tasks',     desc: 'Background tasks' },
@@ -118,8 +120,10 @@ let tasks: BackgroundTaskInfo[] = [];
 let connStatus: 'connecting' | 'connected' | 'reconnecting' = 'connecting';
 let errorMsg: string | null = null;
 let modelName = '';
+let availableModels: string[] = [];
 let mountsList: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] = [];
 let capsList: Record<string, string> = {};
+let modelPickerOpen = false;
 
 // Streaming state
 let streamActive = false;
@@ -152,7 +156,9 @@ const $send = $('send') as HTMLButtonElement;
 const $cancel = $('cancel') as HTMLButtonElement;
 
 // Sidebar DOM refs
+const $sbModelBtn = $('sb-model-btn') as HTMLButtonElement;
 const $sbModelValue = $('sb-model-value');
+const $sbModelPicker = $('sb-model-picker');
 const $sbReasoningToggle = $('sb-reasoning-toggle') as HTMLButtonElement;
 const $sbEffortPills = $('sb-effort-pills');
 const $sbCtxFill = $('sb-ctx-fill');
@@ -161,6 +167,8 @@ const $sbCtxTokens = $('sb-ctx-tokens');
 const $sbCostValue = $('sb-cost-value');
 const $sbMountsList = $('sb-mounts-list');
 const $sbCapsList = $('sb-caps-list');
+const $sbTasksSection = $('sb-tasks-section');
+const $sbTasksList = $('sb-tasks-list');
 
 // Command palette state
 let paletteItems: CommandDef[] = [];
@@ -378,6 +386,7 @@ function handleEvent(event: ServerEvent): void {
       streamActive = false;
       streamEl = null;
       modelName = event.state.model;
+      availableModels = event.state.availableModels ?? [];
       renderAllMessages();
       updateHeader();
       updateSidebar();
@@ -420,6 +429,16 @@ function handleEvent(event: ServerEvent): void {
       if (idx >= 0) tasks[idx] = event.task;
       else tasks.push(event.task);
       updateHeader();
+      updateSidebar();
+      // Auto-remove completed/failed tasks after 30s
+      if (event.task.status === 'completed' || event.task.status === 'failed') {
+        const taskId = event.task.id;
+        setTimeout(() => {
+          tasks = tasks.filter((t) => t.id !== taskId);
+          updateHeader();
+          updateSidebar();
+        }, 30_000);
+      }
       break;
     }
 
@@ -480,6 +499,9 @@ function handleEvent(event: ServerEvent): void {
         if (event.thinking !== 'off') lastEffortLevel = event.thinking;
         thinkingLevel = event.thinking;
         updateSendButton(false);
+      }
+      if (event.model) {
+        modelName = event.model;
       }
       updateHeader();
       updateSidebar();
@@ -700,9 +722,67 @@ function updateHeader(): void {
   }
 }
 
+// ── Model picker ─────────────────────────────────────────────
+
+/** Return a short display name for a model ID, e.g. "Opus 4.6". */
+function modelDisplayName(id: string): string {
+  // Match claude-{family}-{major}-{minor}(-{YYYYMMDD})? — e.g. claude-opus-4-6-20250514
+  const m = id.match(/^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/);
+  if (m) {
+    const family = m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1);
+    return `${family} ${m[2]}.${m[3]}`;
+  }
+  // Fallback: strip "claude-" prefix and date suffix
+  return id.replace(/^claude-/, '').replace(/-\d{8,}$/, '');
+}
+
+function renderModelPicker(): void {
+  $sbModelPicker.innerHTML = '';
+  for (const mid of availableModels) {
+    const item = document.createElement('button');
+    item.className = 'sb-model-option' + (mid === modelName ? ' active' : '');
+    item.textContent = modelDisplayName(mid);
+    item.title = mid;
+    item.addEventListener('click', () => {
+      if (mid !== modelName) {
+        wsSend({ type: 'message', content: `/model ${mid}` });
+      }
+      closeModelPicker();
+    });
+    $sbModelPicker.appendChild(item);
+  }
+}
+
+function openModelPicker(): void {
+  if (availableModels.length === 0) return;
+  modelPickerOpen = true;
+  renderModelPicker();
+  $sbModelPicker.classList.remove('hidden');
+  $sbModelBtn.classList.add('open');
+}
+
+function closeModelPicker(): void {
+  modelPickerOpen = false;
+  $sbModelPicker.classList.add('hidden');
+  $sbModelBtn.classList.remove('open');
+}
+
+$sbModelBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (modelPickerOpen) closeModelPicker();
+  else openModelPicker();
+});
+
+// Close picker when clicking outside
+document.addEventListener('click', (e) => {
+  if (modelPickerOpen && !$sbModelBtn.contains(e.target as Node) && !$sbModelPicker.contains(e.target as Node)) {
+    closeModelPicker();
+  }
+});
+
 function updateSidebar(): void {
   // Model
-  $sbModelValue.textContent = modelName || '--';
+  $sbModelValue.textContent = modelName ? modelDisplayName(modelName) : '--';
 
   // Reasoning toggle + effort pills
   const reasoningOn = thinkingLevel !== 'off';
@@ -791,6 +871,34 @@ function updateSidebar(): void {
       item.appendChild(name);
 
       $sbCapsList.appendChild(item);
+    }
+  }
+
+  // Tasks
+  $sbTasksSection.style.display = '';
+  $sbTasksList.innerHTML = '';
+  if (tasks.length === 0) {
+    $sbTasksList.textContent = 'none';
+  } else {
+    // Show most recent first
+    const sorted = [...tasks].reverse();
+    for (const t of sorted) {
+      const item = document.createElement('div');
+      item.className = 'task-item';
+
+      const status = document.createElement('span');
+      status.className = `task-status ${t.status}`;
+      status.textContent = t.status === 'running' ? '\u25B6' : t.status === 'completed' ? '\u2713' : '\u2717';
+      status.title = t.status;
+      item.appendChild(status);
+
+      const desc = document.createElement('span');
+      desc.className = 'task-desc';
+      desc.textContent = t.description;
+      desc.title = t.description;
+      item.appendChild(desc);
+
+      $sbTasksList.appendChild(item);
     }
   }
 }

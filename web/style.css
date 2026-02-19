@@ -558,6 +558,125 @@ html, body {
   color: var(--text-secondary);
 }
 
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.task-status {
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.task-status.running {
+  color: var(--accent);
+  animation: task-pulse 1.5s ease-in-out infinite;
+}
+
+.task-status.completed {
+  color: var(--success);
+}
+
+.task-status.failed {
+  color: var(--error);
+}
+
+@keyframes task-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.task-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ── Sidebar model picker ────────────────────────────────── */
+
+.sb-model-section {
+  position: relative;
+}
+
+.sb-model-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  width: 100%;
+  text-align: left;
+  margin-top: 4px;
+}
+
+.sb-model-btn:hover,
+.sb-model-btn.open {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.sb-model-chevron {
+  margin-left: auto;
+  opacity: 0.5;
+  flex-shrink: 0;
+  transition: transform var(--transition);
+}
+
+.sb-model-btn.open .sb-model-chevron {
+  transform: rotate(180deg);
+}
+
+.sb-model-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.sb-model-option {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.sb-model-option:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.sb-model-option.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 /* ── Sidebar reasoning controls ──────────────────────────── */
 
 .sb-reasoning-controls {
@@ -623,6 +742,85 @@ html, body {
 .sb-pills.disabled .sb-pill {
   opacity: 0.3;
   pointer-events: none;
+}
+
+/* ── Model picker ────────────────────────────────────────── */
+
+.sb-model-section {
+  position: relative;
+}
+
+.sb-model-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  cursor: pointer;
+  transition: all var(--transition);
+  text-align: left;
+}
+
+.sb-model-btn:hover,
+.sb-model-btn.open {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.sb-model-chevron {
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: transform var(--transition);
+}
+
+.sb-model-btn.open .sb-model-chevron {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+
+.sb-model-picker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.sb-model-option {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.sb-model-option:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.sb-model-option.active {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* Desktop: hide header cost/context (sidebar shows them) */

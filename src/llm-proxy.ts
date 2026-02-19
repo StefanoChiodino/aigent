@@ -14,7 +14,7 @@ import type {
   ProviderMessage,
   ProviderToolDef,
 } from './provider.js';
-import type { LLMRequest, LLMEvent } from './socket-provider.js';
+import type { LLMRequest, LLMSocketRequest, LLMEvent } from './socket-provider.js';
 import { LLM_PROXY_SOCKET } from './socket-provider.js';
 import { createLogger } from './logger.js';
 
@@ -54,9 +54,11 @@ export class LLMProxy {
         for (const line of lines) {
           if (!line.trim()) continue;
           try {
-            const req = JSON.parse(line) as LLMRequest;
+            const req = JSON.parse(line) as LLMSocketRequest;
             if (req.type === 'llm_request') {
               void this.handleRequest(socket, req);
+            } else if (req.type === 'list_models') {
+              void this.handleListModels(socket, req.id);
             }
           } catch {}
         }
@@ -130,6 +132,11 @@ export class LLMProxy {
         ...(e.code !== undefined ? { code: e.code } : {}),
       });
     }
+  }
+
+  private async handleListModels(socket: Socket, id: string): Promise<void> {
+    const models = this.provider.listModels ? await this.provider.listModels() : null;
+    writeLine(socket, { type: 'models_list', id, models });
   }
 
   /** Stop the proxy. */

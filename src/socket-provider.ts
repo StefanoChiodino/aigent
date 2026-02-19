@@ -12,6 +12,7 @@ import { connect, type Socket } from 'node:net';
 import { SOCKET_DIR } from './protocol.js';
 import type {
   Provider,
+  ModelInfo,
   ProviderMessage,
   ProviderToolDef,
   ProviderResponse,
@@ -40,11 +41,19 @@ export interface LLMRequest {
   };
 }
 
+export interface ListModelsRequest {
+  type: 'list_models';
+  id: string;
+}
+
+export type LLMSocketRequest = LLMRequest | ListModelsRequest;
+
 export type LLMEvent =
   | { type: 'llm_text'; id: string; content: string }
   | { type: 'llm_thinking'; id: string; content: string }
   | { type: 'llm_done'; id: string; response: ProviderResponse }
-  | { type: 'llm_error'; id: string; message: string; status?: number; code?: string };
+  | { type: 'llm_error'; id: string; message: string; status?: number; code?: string }
+  | { type: 'models_list'; id: string; models: ModelInfo[] | null };
 
 // --- SocketProvider (used by worker/agent) ---
 
@@ -57,6 +66,9 @@ export class SocketProvider implements Provider {
     resolve: (res: ProviderResponse) => void;
     reject: (err: Error & { status?: number; code?: string }) => void;
     callbacks?: StreamCallbacks;
+  }>();
+  private pendingModels = new Map<string, {
+    resolve: (models: ModelInfo[] | null) => void;
   }>();
 
   get isOAuthToken(): boolean {
@@ -92,11 +104,16 @@ export class SocketProvider implements Provider {
         log.warn('LLM proxy disconnected', { pendingRequests: this.pending.size });
         this.connected = false;
         this.socket = null;
-        // Reject all pending
+        // Reject all pending LLM requests
         for (const [, p] of this.pending) {
           p.reject(Object.assign(new Error('LLM proxy disconnected'), { code: 'ECONNRESET' }));
         }
         this.pending.clear();
+        // Resolve pending model list requests with null (graceful fallback)
+        for (const [, p] of this.pendingModels) {
+          p.resolve(null);
+        }
+        this.pendingModels.clear();
       });
 
       this.socket.on('error', () => {
@@ -132,6 +149,14 @@ export class SocketProvider implements Provider {
           ...(event.code !== undefined ? { code: event.code } : {}),
         });
         p.reject(err);
+        break;
+      }
+      case 'models_list': {
+        const pm = this.pendingModels.get(event.id);
+        if (pm) {
+          this.pendingModels.delete(event.id);
+          pm.resolve(event.models);
+        }
         break;
       }
     }
@@ -182,6 +207,16 @@ export class SocketProvider implements Provider {
         }, { once: true });
       }
 
+      this.socket!.write(JSON.stringify(req) + '\n');
+    });
+  }
+
+  async listModels(): Promise<ModelInfo[] | null> {
+    if (!this.connected || !this.socket) return null;
+    const id = `models_${++this.reqCounter}`;
+    const req: ListModelsRequest = { type: 'list_models', id };
+    return new Promise<ModelInfo[] | null>((resolve) => {
+      this.pendingModels.set(id, { resolve });
       this.socket!.write(JSON.stringify(req) + '\n');
     });
   }

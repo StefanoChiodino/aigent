@@ -26,6 +26,14 @@ const log = createLogger('server');
 
 const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
 
+// Default model list — used until the provider reports its own list.
+// Ordered most capable → fastest/cheapest.
+let AVAILABLE_MODELS = [
+  'claude-opus-4-6-20250514',
+  'claude-sonnet-4-6-20251001',
+  'claude-haiku-4-5-20251001',
+];
+
 // --- Image support ---
 
 const IMAGE_EXTENSIONS: Record<string, ImageMediaType> = {
@@ -648,6 +656,7 @@ function getState(): ServerState {
     profile: currentProfile,
     sessionId: currentSessionId,
     model,
+    availableModels: AVAILABLE_MODELS,
     isLoading,
     tasks: taskQueue.getInfos(),
     pendingResults: taskQueue.pendingCount,
@@ -659,7 +668,7 @@ function doAutoSave(): void {
     autoSaveSession(workspacePath, agent.getMessages(), messages, usage, {
       current: currentThinking,
       savedEffort: savedEffortLevel,
-    });
+    }, model);
   } catch {
     // Non-critical
   }
@@ -902,6 +911,28 @@ function handleCommand(cmd: string): boolean {
     return true;
   }
 
+  if (trimmed === '/model') {
+    const list = AVAILABLE_MODELS.map((m) => (m === model ? `> ${m}` : `  ${m}`)).join('\n');
+    addSystemMessage(`Current model: ${model}\nAvailable:\n${list}\nUsage: /model <name>`);
+    return true;
+  }
+
+  if (trimmed.startsWith('/model ')) {
+    const requested = trimmed.slice('/model '.length).trim();
+    if (!AVAILABLE_MODELS.includes(requested)) {
+      addSystemMessage(`Unknown model: ${requested}\nAvailable: ${AVAILABLE_MODELS.join(', ')}`);
+    } else if (requested === model) {
+      addSystemMessage(`Already using: ${model}`);
+    } else {
+      model = requested;
+      agent.currentModel = requested;
+      addSystemMessage(`Model switched to: ${model}`);
+      broadcast({ type: 'state', model });
+      doAutoSave();
+    }
+    return true;
+  }
+
   if (trimmed === '/help') {
     addSystemMessage(
       'Commands:\n' +
@@ -911,6 +942,7 @@ function handleCommand(cmd: string): boolean {
       '  /compact            Compact context (free up space)\n' +
       '  /reasoning on|off   Toggle reasoning\n' +
       '  /effort <level>     Set effort (low/medium/high/max)\n' +
+      '  /model [name]       Show or switch model\n' +
       '  /image <path> [msg] Send an image with optional message\n' +
       '  /usage              Show token usage (session + lifetime)\n' +
       '  /tasks              Show background tasks\n' +
@@ -1198,6 +1230,12 @@ function restoreSession(): void {
       }
       log.info('Thinking restored', { current: currentThinking, savedEffort: savedEffortLevel });
     }
+    // Restore model so it persists across restarts
+    if (saved.model && AVAILABLE_MODELS.includes(saved.model)) {
+      model = saved.model;
+      agent.currentModel = saved.model;
+      log.info('Model restored', { model });
+    }
     log.info('Session restored', { messages: messages.length, tokens: usage.input + usage.output });
   }
 }
@@ -1290,6 +1328,25 @@ async function initAgent(): Promise<void> {
     ...(proxyProvider ? { provider: proxyProvider } : {}),
     extraSystemPrompt: buildHostSystemPrompt(),
   });
+
+  // Fetch available models from the provider (non-blocking — falls back to defaults)
+  void (async () => {
+    try {
+      const provider = agentProvider ?? agent.underlyingProvider;
+      if (provider?.listModels) {
+        const models = await provider.listModels();
+        if (models && models.length > 0) {
+          // Keep only Claude models (filter out deprecated/internal entries),
+          // preserving the API's ordering which reflects release recency.
+          AVAILABLE_MODELS = models.map((m) => m.id).filter((id) => id.startsWith('claude-'));
+          log.info('Model list updated from API', { count: AVAILABLE_MODELS.length });
+        }
+      }
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      log.warn('Failed to fetch model list (using defaults)', { error: e.message });
+    }
+  })();
 }
 
 try {

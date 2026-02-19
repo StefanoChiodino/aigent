@@ -25,15 +25,17 @@
 
 ~~paste images/screenshots~~
 
-attachments
+~~attachments~~
 
-BUG: after cancelling a task the blinking loading character doesn't go away from old tasks
 
-background tasks should be visible on the web UI sidebar (running/completed). Currently only visible as yellow completion messages in chat.
+
+~~background tasks should be visible on the web UI sidebar (running/completed). Currently only visible as yellow completion messages in chat.~~ DONE — Tasks section in sidebar shows running (pulsing), completed (checkmark), failed (X) with descriptions
+
+~~implement model picker in the ui left bar. How can we handle models? E.g. for anthropic, can we query which are available? Same as reasoning, it should have a default but store the last used~~ DONE — sidebar picker with chevron button; list fetched from Anthropic API at startup (via listModels() on Provider), falls back to hardcoded defaults; last used persists via autosave
 
 on web, asking for permission should be a bit more obvious, maybe need an audio clue as well, maybe even a web notification
 
-implement local audio with nvidia parakeet
+implement local STT with nvidia parakeet
 
 implement local tts using microsoft TTS
 
@@ -42,3 +44,8 @@ When mounting, should I not specify what folder to mount into the guest? Maybe t
 ~~reasoning and effort should persist between reloads. The env vars should just be defaults~~ DONE — thinking level + savedEffortLevel now persisted in .autosave.json and restored on server restart
 
 System messages could be collapsed when coming out in a row. As in, should look distinct, but present in the same yellow box to avoid taking too much space
+
+BUG: after cancelling a task the blinking loading character doesn't go away from old tasks
+model parameter for dispatch_task not being respected — all background agents report as Claude 3.5 Sonnet regardless of specified model
+
+How can I deal with the fact that not all models support reasoning and uh it seems to me that it allows me to turn it on for haiku which doesn't support reasoning, I believe.

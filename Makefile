@@ -8,8 +8,9 @@ dev:
 	@mkdir -p web/dist
 	@echo "Starting dev server with hot reload..."
 	@echo "Web UI: http://localhost:$${AIGENT_WEB_PORT:-3141}"
-	@npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*' &
-	npx tsx --watch=forever src/gatekeeper.tsx --headless $(ARGS)
+	@npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*' & \
+	npx tsx --watch=forever src/gatekeeper.tsx --headless $(ARGS); \
+	kill %1 2>/dev/null; wait
 
 # Server only (no frontend rebuild)
 serve:

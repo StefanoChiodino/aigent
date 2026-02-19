@@ -48,6 +48,7 @@ export interface ServerState {
   profile: string;
   sessionId: string;
   model: string;
+  availableModels: string[];
   isLoading: boolean;
   tasks: BackgroundTaskInfo[];
   pendingResults: number;
@@ -65,7 +66,7 @@ export type ServerEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
-  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string }
+  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string }
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }

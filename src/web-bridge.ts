@@ -141,8 +141,10 @@ export async function startWebServer(
         send({ type: 'loading', isLoading });
       },
       error: (message: string) => send({ type: 'error', message }),
-      state: (partial: { thinking?: ThinkingLevel; profile?: string; sessionId?: string }) =>
-        send({ type: 'state', ...partial }),
+      state: (partial: { thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string }) => {
+        if (cachedState) cachedState = { ...cachedState, ...partial };
+        send({ type: 'state', ...partial });
+      },
       mount_request: (id: string, path: string, mode: 'ro' | 'rw', reason?: string) =>
         send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}) }),
       config_write_request: (id: string, file: string, content: string, reason: string) =>

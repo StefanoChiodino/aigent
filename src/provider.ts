@@ -68,6 +68,11 @@ export type UserContent = string | (TextContent | ImageContent | DocumentContent
 
 // --- Provider interface ---
 
+export interface ModelInfo {
+  id: string;
+  displayName: string;
+}
+
 export interface Provider {
   sendMessage(
     systemPrompt: string | string[],
@@ -81,6 +86,9 @@ export interface Provider {
     },
     callbacks?: StreamCallbacks,
   ): Promise<ProviderResponse>;
+
+  /** List available models. Optional — providers that don't support it return null. */
+  listModels?(): Promise<ModelInfo[] | null>;
 }
 
 export type ProviderMessage =
@@ -197,6 +205,18 @@ export class AnthropicProvider implements Provider {
         cacheWrite: rawUsage['cache_creation_input_tokens'] ?? 0,
       },
     };
+  }
+
+  async listModels(): Promise<ModelInfo[] | null> {
+    try {
+      const page = await this.client.models.list({ limit: 100 });
+      return page.data.map((m) => ({
+        id: m.id,
+        displayName: (m as unknown as { display_name?: string }).display_name ?? m.id,
+      }));
+    } catch {
+      return null;
+    }
   }
 
   private convertMessages(messages: ProviderMessage[]): Anthropic.MessageParam[] {
