@@ -64,8 +64,33 @@ export async function startWebServer(
 
   // --- HTTP server ---
 
+  const STT_URL = process.env['AIGENT_STT_URL'] ?? 'http://127.0.0.1:8765';
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/';
+
+    // STT proxy — forwards WAV audio to local Parakeet server, returns transcript JSON.
+    if (req.method === 'POST' && url === '/stt') {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', async () => {
+        try {
+          const body = Buffer.concat(chunks);
+          const sttRes = await fetch(`${STT_URL}/transcribe`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'audio/wav', 'Content-Length': String(body.length) },
+            body,
+          });
+          const text = await sttRes.text();
+          res.writeHead(sttRes.ok ? 200 : 502, { 'Content-Type': 'application/json' });
+          res.end(text);
+        } catch {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'STT service unavailable' }));
+        }
+      });
+      return;
+    }
 
     // Vendor: serve marked ESM from node_modules
     if (url === '/vendor/marked.js') {

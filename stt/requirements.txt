@@ -1,0 +1,6 @@
+# Parakeet STT dependencies
+# Install: pip install -r stt/requirements.txt
+# Then run: python stt/main.py
+nemo_toolkit[asr]
+torch
+torchaudio

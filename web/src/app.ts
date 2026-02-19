@@ -1205,6 +1205,130 @@ $cancel.addEventListener('click', () => {
   wsSend({ type: 'cancel' });
 });
 
+// ── Microphone / STT ─────────────────────────────────────────
+
+const $mic = $('mic') as HTMLButtonElement;
+const $micIconMic = $mic.querySelector('.icon-mic') as SVGElement;
+const $micIconStop = $mic.querySelector('.icon-stop') as SVGElement;
+const $micIconSpinner = $mic.querySelector('.icon-spinner') as SVGElement;
+
+let micRecording = false;
+let micAudioCtx: AudioContext | null = null;
+let micStream: MediaStream | null = null;
+let micSamples: Float32Array[] = [];
+let micSource: MediaStreamAudioSourceNode | null = null;
+let micProcessor: ScriptProcessorNode | null = null;
+
+function encodeWav(samples: Float32Array[], sampleRate: number): ArrayBuffer {
+  let totalLen = 0;
+  for (const s of samples) totalLen += s.length;
+  const pcm = new Float32Array(totalLen);
+  let offset = 0;
+  for (const s of samples) { pcm.set(s, offset); offset += s.length; }
+
+  // Float32 → Int16
+  const pcm16 = new Int16Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) {
+    const s = Math.max(-1, Math.min(1, pcm[i]!));
+    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+
+  const dataLen = pcm16.byteLength;
+  const buf = new ArrayBuffer(44 + dataLen);
+  const view = new DataView(buf);
+  const str = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+
+  str(0, 'RIFF');
+  view.setUint32(4, 36 + dataLen, true);
+  str(8, 'WAVE');
+  str(12, 'fmt ');
+  view.setUint32(16, 16, true);          // subchunk1 size
+  view.setUint16(20, 1, true);           // PCM format
+  view.setUint16(22, 1, true);           // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true);           // block align
+  view.setUint16(34, 16, true);          // bits per sample
+  str(36, 'data');
+  view.setUint32(40, dataLen, true);
+  new Int16Array(buf, 44).set(pcm16);
+  return buf;
+}
+
+function micSetState(state: 'idle' | 'recording' | 'transcribing'): void {
+  $micIconMic.classList.toggle('hidden', state !== 'idle');
+  $micIconStop.classList.toggle('hidden', state !== 'recording');
+  $micIconSpinner.classList.toggle('hidden', state !== 'transcribing');
+  $mic.classList.toggle('recording', state === 'recording');
+  $mic.classList.toggle('transcribing', state === 'transcribing');
+}
+
+async function startMic(): Promise<void> {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+    micAudioCtx = new AudioContext({ sampleRate: 16000 });
+    micSource = micAudioCtx.createMediaStreamSource(micStream);
+    // ScriptProcessor is deprecated but works everywhere cross-browser; bufferSize must be power of 2
+    micProcessor = micAudioCtx.createScriptProcessor(4096, 1, 1);
+    micSamples = [];
+    micProcessor.onaudioprocess = (e) => {
+      micSamples.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    };
+    micSource.connect(micProcessor);
+    micProcessor.connect(micAudioCtx.destination);
+    micRecording = true;
+    micSetState('recording');
+  } catch {
+    // Permission denied or no mic
+  }
+}
+
+async function stopMic(): Promise<void> {
+  if (!micRecording) return;
+  micRecording = false;
+  micSetState('transcribing');
+
+  micSource?.disconnect();
+  micProcessor?.disconnect();
+  micStream?.getTracks().forEach(t => t.stop());
+  await micAudioCtx?.close();
+
+  const samples = micSamples;
+  micSamples = [];
+  micSource = null;
+  micProcessor = null;
+  micStream = null;
+  micAudioCtx = null;
+
+  if (samples.length === 0) { micSetState('idle'); return; }
+
+  const wav = encodeWav(samples, 16000);
+  try {
+    const resp = await fetch('/stt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/wav' },
+      body: wav,
+    });
+    if (resp.ok) {
+      const { text } = await resp.json() as { text?: string };
+      if (text) {
+        const cur = $input.value;
+        $input.value = cur ? cur + ' ' + text : text;
+        autoGrow();
+        $input.focus();
+      }
+    }
+  } catch {
+    // STT service not running
+  }
+  micSetState('idle');
+}
+
+$mic.addEventListener('click', () => {
+  if (micRecording) stopMic();
+  else startMic();
+});
+
 // ── Ctrl key tracking for thinking-override visual feedback ──
 
 const $iconArrow = $send.querySelector('.icon-arrow') as SVGElement;

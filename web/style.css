@@ -1000,6 +1000,52 @@ html, body {
   background: var(--bg-hover);
 }
 
+#mic {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color var(--transition), background var(--transition);
+  padding: 0;
+}
+
+#mic:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+#mic.recording {
+  color: var(--error);
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+#mic.transcribing {
+  color: var(--accent);
+  cursor: default;
+}
+
+#mic .icon-spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+#mic .hidden { display: none; }
+
+@keyframes mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ── Attachment preview strip ────────────────────────────── */
 
 #attachment-preview {

@@ -1,4 +1,4 @@
-.PHONY: dev serve web web-watch build rebuild typecheck clean
+.PHONY: dev serve web web-watch build rebuild typecheck clean stt stt-setup
 
 # --- Development ---
 
@@ -41,3 +41,22 @@ typecheck:
 
 clean:
 	rm -rf dist/ web/dist/
+
+# --- STT (Parakeet speech-to-text sidecar) ---
+
+STT_VENV   := stt/.venv
+STT_PYTHON := $(STT_VENV)/bin/python
+
+# Create the venv and install Parakeet dependencies (run once)
+stt-setup:
+	python3 -m venv $(STT_VENV)
+	$(STT_PYTHON) -m pip install --upgrade pip
+	$(STT_PYTHON) -m pip install -r stt/requirements.txt
+
+# Start the STT server (run make stt-setup first)
+stt: $(STT_PYTHON)
+	$(STT_PYTHON) stt/main.py $(ARGS)
+
+$(STT_PYTHON):
+	@echo "STT environment not set up. Run: make stt-setup"
+	@exit 1
