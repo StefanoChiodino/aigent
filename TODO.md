@@ -42,11 +42,25 @@
 
 ~~reasoning and effort should persist between reloads. The env vars should just be defaults~~ DONE — thinking level + savedEffortLevel now persisted in .autosave.json and restored on server restart
 
-System messages could be collapsed when coming out in a row. As in, should look distinct, but present in the same yellow box to avoid taking too much space
+~~System messages could be collapsed when coming out in a row. As in, should look distinct, but present in the same yellow box to avoid taking too much space~~ DONE — consecutive system messages now append into the same box with a thin separator line
 
 ~~BUG: after cancelling a task the blinking loading character doesn't go away from old tasks~~ DONE
 model parameter for dispatch_task not being respected — all background agents report as Claude 3.5 Sonnet regardless of specified model — the model IS passed correctly to the API; Claude models just don't know their own version (training data limitation, not a code bug)
 
+~~the mount permission should probably just be temporary for most actions. rarely this could be semi-permanent, but in most cases it should last an amount of time asked for by the AI itself based on what it is doing~~ DONE — agent specifies `durationMinutes` in request_mount; gatekeeper sets `expiresAt`; 30s expiry check auto-unmounts and restarts; sidebar shows countdown; permission modal shows requested duration
+
+~~AIs should be able to switch model.~~ DONE — added `switch_model` tool; agent can self-upgrade (e.g. Haiku → Opus for complex tasks) or downgrade mid-conversation. Tool description guides when to use it; server broadcasts model change to UI.
+
 How can I deal with the fact that not all models support reasoning and uh it seems to me that it allows me to turn it on for haiku which doesn't support reasoning, I believe.
 
-We could use a cheap ai to summarise the text from the AI response so that there isn't so much to listen to
+We could use a cheap ai to summarise the text from the AI response so that there isn't so much to listen to. should be optional tho
+
+store messages in the browser storage so that they don't disappear on reload
+
+~~change the keybinding to start recording to something much easier than alt+M~~ DONE — Alt+M global, `` ` `` or M when input unfocused; hints shown in bar
+
+~~screen capture via browser `getDisplayMedia()` — grab a frame from any window/tab/monitor and send it as image context to the AI. No plugin needed. Natural prerequisite for real computer-use. Button in UI to snapshot current screen → attaches as image to next message.~~ DONE — monitor icon button in input row; click triggers `getDisplayMedia`, grabs one frame via canvas, stops stream, adds PNG to pending attachments.
+
+browser extension — allow the agent to read/write page DOM, manage tabs, fill forms, navigate pages. Bigger lift than screen capture but enables agentic browser automation without computer-use overhead.
+
+browser accessibility / a11y tree — expose structured page content (labels, roles, interactive elements) to the agent via the Accessibility Object Model or Chrome DevTools Protocol. Cheaper than screenshots for understanding page structure.

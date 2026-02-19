@@ -3,7 +3,7 @@
 # --- Development ---
 
 # Run gatekeeper + web frontend watcher
-dev:
+dev-ts:
 	@mkdir -p web/dist
 	@npx concurrently \
 		--names "gate,web" \
@@ -13,7 +13,7 @@ dev:
 		"npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*'"
 
 # Run everything: gatekeeper + web watcher + TTS + STT
-dev-full:
+dev:
 	@mkdir -p web/dist
 	@npx concurrently \
 		--names "gate,web,tts,stt" \

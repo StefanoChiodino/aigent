@@ -516,6 +516,10 @@ const requestMountTool: ToolDef = {
         type: 'string',
         description: 'Why you need access. Shown to the user in the approval prompt.',
       },
+      durationMinutes: {
+        type: 'number',
+        description: 'How many minutes you need access. Estimate based on the task. Default is 30. The mount will be automatically removed after this time.',
+      },
     },
     required: ['path', 'reason'],
   },
@@ -547,10 +551,39 @@ const requestConfigWriteTool: ToolDef = {
   },
 };
 
+const switchModelTool: ToolDef = {
+  name: 'switch_model',
+  description:
+    'Switch to a different AI model mid-conversation. Use this proactively when:\n' +
+    '- The current task is more complex than expected (upgrade to a more capable model)\n' +
+    '- The task has become routine/simple after initial planning (downgrade to save cost)\n' +
+    '- You are struggling and a stronger model may succeed\n\n' +
+    'Common models (fastest/cheapest → most capable):\n' +
+    '- claude-haiku-4-5-20251001 — fastest, cheapest; good for simple lookups and formatting\n' +
+    '- claude-sonnet-4-20250514 — balanced; good for most tasks\n' +
+    '- claude-opus-4-6-20250514 — most capable; best for complex reasoning, debugging, architecture\n\n' +
+    'Note: only claude-opus-4-6-20250514 supports extended thinking/reasoning.\n' +
+    'The switch takes effect immediately for subsequent API calls.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      model: {
+        type: 'string',
+        description: 'Exact model ID to switch to (e.g. claude-opus-4-6-20250514)',
+      },
+      reason: {
+        type: 'string',
+        description: 'Why you are switching models. Shown to the user.',
+      },
+    },
+    required: ['model'],
+  },
+};
+
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
-  hostTool, requestMountTool, requestConfigWriteTool,
+  hostTool, requestMountTool, requestConfigWriteTool, switchModelTool,
 ];
 
 /**
@@ -583,10 +616,11 @@ interface ScreenshotInput { region?: string }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
 interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number }
 interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
-interface RequestMountInput { path: string; mode?: string; reason: string }
+interface RequestMountInput { path: string; mode?: string; reason: string; durationMinutes?: number }
 interface RequestConfigWriteInput { file: string; content: string; reason: string }
+interface SwitchModelInput { model: string; reason?: string }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput | SwitchModelInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -656,6 +690,10 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
     case 'request_config_write': {
       const { file } = input as RequestConfigWriteInput;
       return `config write: ${file}`;
+    }
+    case 'switch_model': {
+      const { model: m, reason } = input as SwitchModelInput;
+      return reason ? `switch model → ${m} (${reason.slice(0, 40)})` : `switch model → ${m}`;
     }
     default:
       return name;
@@ -1087,10 +1125,10 @@ export async function executeTool(
     }
 
     case 'request_mount': {
-      const { path, mode = 'ro', reason } = input as RequestMountInput;
+      const { path, mode = 'ro', reason, durationMinutes } = input as RequestMountInput;
       const { requestMount } = await import('./server.js');
       const mountMode = mode === 'rw' ? 'rw' as const : 'ro' as const;
-      const res = await requestMount(path, mountMode, reason);
+      const res = await requestMount(path, mountMode, reason, durationMinutes);
 
       if (res.ok) {
         return `Mount approved: ${path} (${mountMode}) → ${res.containerPath ?? 'pending restart'}\n${res.message}\nThe sandbox will restart. Your conversation will continue automatically.`;

@@ -18,6 +18,7 @@ const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker containe
 - screenshot to capture the virtual display (verify GUI state, browser content, etc.)
 - dispatch_task to run long tasks in the background (non-blocking — you keep chatting)
 - spawn_agent to run a sub-agent synchronously (blocks until complete)
+- switch_model to change your active model mid-conversation (upgrade for complex tasks, downgrade for simple ones)
 - host to access OS capabilities via the host daemon (clipboard, audio, screen, etc.)
 - request_mount to ask the user for access to a folder on their machine
 - MCP tools from connected servers (if configured via mcp.json)
@@ -99,6 +100,7 @@ export interface ChatCallbacks {
   onUsage?: (usage: TokenUsage) => void;
   onCompact?: (summary: string) => void;
   onDispatchTask?: (input: Record<string, unknown>) => string; // returns task ID
+  onModelSwitch?: (model: string, reason?: string) => void;
   signal?: AbortSignal;
 }
 
@@ -251,7 +253,16 @@ export class Agent {
 
           const toolStart = performance.now();
           let result: string | ToolContentBlock[];
-          if (toolName === 'dispatch_task' && callbacks?.onDispatchTask) {
+          if (toolName === 'switch_model') {
+            const { model: newModel, reason } = tc.input as { model: string; reason?: string };
+            const oldModel = this.model;
+            this.model = newModel;
+            this.reloadSystemPrompt();
+            callbacks?.onModelSwitch?.(newModel, reason);
+            result = reason
+              ? `Model switched from ${oldModel} to ${newModel}. Reason: ${reason}`
+              : `Model switched from ${oldModel} to ${newModel}.`;
+          } else if (toolName === 'dispatch_task' && callbacks?.onDispatchTask) {
             const taskId = callbacks.onDispatchTask(tc.input as Record<string, unknown>);
             result = `Task dispatched: ${taskId}. The background agent is working on it. You'll be notified when it completes. Continue chatting normally.`;
           } else if (toolName === 'spawn_agent') {

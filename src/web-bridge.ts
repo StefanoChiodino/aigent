@@ -202,11 +202,11 @@ export async function startWebServer(
         if (cachedState) cachedState = { ...cachedState, ...partial };
         send({ type: 'state', ...partial });
       },
-      mount_request: (id: string, path: string, mode: 'ro' | 'rw', reason?: string) =>
-        send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}) }),
+      mount_request: (id: string, path: string, mode: 'ro' | 'rw', reason?: string, durationMinutes?: number) =>
+        send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}), ...(durationMinutes !== undefined ? { durationMinutes } : {}) }),
       config_write_request: (id: string, file: string, content: string, reason: string) =>
         send({ type: 'config_write_request', id, file, content, reason }),
-      host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[], capabilities?: Record<string, string>) =>
+      host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, string>) =>
         send({ type: 'host_state', mounts, ...(capabilities ? { capabilities } : {}) }),
     };
 

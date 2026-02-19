@@ -35,6 +35,7 @@ interface Mount {
   containerPath: string;   // Path inside container (e.g., /project/myapp)
   mode: 'ro' | 'rw';
   expiresAt?: number;      // Timestamp for timed grants
+  durationMinutes?: number; // Granted duration (for UI progress bar)
   implicit?: boolean;      // true for docker-compose.yml built-in mounts (not passed as -v)
 }
 
@@ -179,7 +180,7 @@ function findMount(hostPath: string): Mount | undefined {
   return mounts.find((m) => m.hostPath === normalized);
 }
 
-function addMount(hostPath: string, mode: 'ro' | 'rw'): { ok: boolean; message: string } {
+function addMount(hostPath: string, mode: 'ro' | 'rw', expiresAt?: number, durationMinutes?: number): { ok: boolean; message: string } {
   const normalized = resolve(hostPath);
 
   if (isForbiddenPath(normalized)) {
@@ -200,6 +201,7 @@ function addMount(hostPath: string, mode: 'ro' | 'rw'): { ok: boolean; message: 
     }
     // Upgrade/downgrade mode
     existing.mode = mode;
+    if (expiresAt !== undefined) existing.expiresAt = expiresAt;
     return { ok: true, message: `Updated ${normalized} to ${mode}.` };
   }
 
@@ -207,6 +209,8 @@ function addMount(hostPath: string, mode: 'ro' | 'rw'): { ok: boolean; message: 
     hostPath: normalized,
     containerPath: toContainerPath(normalized),
     mode,
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+    ...(durationMinutes !== undefined ? { durationMinutes } : {}),
   });
 
   return { ok: true, message: `Mounted ${normalized} (${mode}).` };
@@ -272,6 +276,8 @@ function emitHostState(): void {
       hostPath: m.hostPath,
       containerPath: m.containerPath,
       mode: m.mode,
+      ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
+      ...(m.durationMinutes !== undefined ? { durationMinutes: m.durationMinutes } : {}),
     })),
     readCapabilities(),
   );
@@ -508,22 +514,24 @@ async function handleAgentMountRequest(
   path: string,
   mode: 'ro' | 'rw',
   reason?: string,
+  durationMinutes?: number,
 ): Promise<void> {
   // The agent sends container paths (e.g., /app/src). Try to reverse-map first.
   const hostPath = resolveContainerToHost(path) ?? resolveHostPath(path);
 
   // Show the request to the user
   const reasonText = reason ? `\n  Reason: "${reason}"` : '';
+  const durationText = durationMinutes ? `\n  Duration: ${durationMinutes} min` : '';
   injectSystemMessage(
-    `Agent requests access to: ${hostPath} (${mode})${reasonText}\n` +
+    `Agent requests access to: ${hostPath} (${mode})${reasonText}${durationText}\n` +
     `Reply: /grant or /deny`
   );
 
   // Store pending request — resolved when user replies /grant or /deny
-  pendingAgentMountRequests.set(id, { hostPath, mode });
+  pendingAgentMountRequests.set(id, { hostPath, mode, ...(durationMinutes !== undefined ? { durationMinutes } : {}) });
 }
 
-const pendingAgentMountRequests = new Map<string, { hostPath: string; mode: 'ro' | 'rw' }>();
+const pendingAgentMountRequests = new Map<string, { hostPath: string; mode: 'ro' | 'rw'; durationMinutes?: number }>();
 
 async function handleGrantDeny(input: string): Promise<boolean> {
   const parts = input.trim().split(/\s+/);
@@ -551,7 +559,10 @@ async function handleGrantDeny(input: string): Promise<boolean> {
     const mode = (parts[2]?.toLowerCase() === 'rw') ? 'rw' as const : pending.mode;
     pendingAgentMountRequests.delete(id);
 
-    const result = addMount(pending.hostPath, mode);
+    const expiresAt = pending.durationMinutes
+      ? Date.now() + pending.durationMinutes * 60_000
+      : undefined;
+    const result = addMount(pending.hostPath, mode, expiresAt, pending.durationMinutes);
     const containerPath = toContainerPath(pending.hostPath);
 
     // Send response to worker
@@ -563,12 +574,15 @@ async function handleGrantDeny(input: string): Promise<boolean> {
       message: result.message,
     });
 
-    log.info('Mount granted', { id, path: pending.hostPath, mode });
+    log.info('Mount granted', { id, path: pending.hostPath, mode, durationMinutes: pending.durationMinutes });
     injectSystemMessage(result.message);
     if (result.ok) {
       injectSystemMessage('Sandbox restarting with new mount...');
       await restartContainer();
-      injectSystemMessage(`Sandbox ready. ${pending.hostPath} is now mounted at ${containerPath} (${mode}).`);
+      const expiryText = pending.durationMinutes
+        ? ` (auto-expires in ${pending.durationMinutes} min)`
+        : '';
+      injectSystemMessage(`Sandbox ready. ${pending.hostPath} is now mounted at ${containerPath} (${mode})${expiryText}.`);
     }
     return true;
   }
@@ -911,14 +925,35 @@ client.sendMessage = (content: string) => {
 };
 
 // Handle mount requests from the worker (agent requests a folder)
-client.on('mount_request', (id: string, path: string, mode: 'ro' | 'rw', reason?: string) => {
-  void handleAgentMountRequest(id, path, mode, reason);
+client.on('mount_request', (id: string, path: string, mode: 'ro' | 'rw', reason?: string, durationMinutes?: number) => {
+  void handleAgentMountRequest(id, path, mode, reason, durationMinutes);
 });
 
 // Handle config write requests from the worker
 client.on('config_write_request', (id: string, file: string, content: string, reason: string) => {
   handleConfigWriteRequest(id, file, content, reason);
 });
+
+// Expiry timer — check every 30s for mounts that have timed out
+let expiryRestartInProgress = false;
+setInterval(() => {
+  const now = Date.now();
+  const expired = mounts.filter((m) => !m.implicit && m.expiresAt !== undefined && m.expiresAt <= now);
+  if (expired.length === 0 || expiryRestartInProgress) return;
+
+  expiryRestartInProgress = true;
+  for (const m of expired) {
+    removeMount(m.hostPath);
+    injectSystemMessage(`Mount expired and removed: ${m.hostPath}`);
+  }
+  injectSystemMessage('Sandbox restarting to apply expired mount removal...');
+  restartContainer()
+    .then(() => {
+      injectSystemMessage('Sandbox ready.');
+      emitHostState();
+    })
+    .finally(() => { expiryRestartInProgress = false; });
+}, 30_000);
 
 // Run UI
 if (gatekeeperArgs.headless) {

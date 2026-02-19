@@ -254,6 +254,11 @@ html, body {
   font-size: 13px;
 }
 
+.system-separator {
+  border-top: 1px solid var(--system-border);
+  margin: 5px 0;
+}
+
 .message .role-label {
   display: flex;
   align-items: center;
@@ -507,9 +512,14 @@ html, body {
 
 .mount-item {
   display: flex;
+  flex-direction: column;
+  padding: 3px 0;
+}
+
+.mount-item-row {
+  display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 0;
 }
 
 .mount-mode {
@@ -542,6 +552,33 @@ html, body {
 
 .mount-path-parent {
   color: var(--text-dim);
+}
+
+.mount-expiry-badge {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--warning);
+  background: rgba(224, 160, 64, 0.12);
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.mount-timer-bar {
+  height: 3px;
+  background: var(--bg-raised);
+  border-radius: 2px;
+  margin-top: 3px;
+  overflow: hidden;
+}
+
+.mount-timer-fill {
+  height: 100%;
+  background: var(--warning);
+  border-radius: 2px;
+  transition: width 1s linear;
 }
 
 .cap-item {
@@ -1122,6 +1159,36 @@ html, body {
 
 #mic .hidden { display: none; }
 
+#screen-cap {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color var(--transition), background var(--transition);
+  padding: 0;
+}
+
+#screen-cap:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+#screen-cap.active {
+  color: var(--accent);
+  background: rgba(124, 108, 240, 0.15);
+}
+
+#screen-cap.active:hover {
+  background: rgba(124, 108, 240, 0.25);
+}
+
 @keyframes mic-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
@@ -1400,14 +1467,42 @@ html, body {
   letter-spacing: 0.3px;
 }
 
+#perm-card-body {
+  margin-bottom: 9px;
+}
+
 #perm-card-detail {
   font-size: 11.5px;
   color: var(--text-secondary);
-  margin-bottom: 9px;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#perm-card-detail > div {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#perm-card-detail > div:not(:first-child) {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+#perm-card-duration {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warning);
+  background: rgba(224, 160, 64, 0.12);
+  border: 1px solid rgba(224, 160, 64, 0.25);
+  padding: 3px 7px;
+  border-radius: 4px;
 }
 
 #perm-card-actions {

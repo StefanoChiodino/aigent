@@ -121,7 +121,7 @@ let connStatus: 'connecting' | 'connected' | 'reconnecting' = 'connecting';
 let errorMsg: string | null = null;
 let modelName = '';
 let availableModels: string[] = [];
-let mountsList: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] = [];
+let mountsList: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[] = [];
 let capsList: Record<string, string> = {};
 let modelPickerOpen = false;
 
@@ -133,6 +133,7 @@ interface PermRequest {
   detail: string;
   approveCmd: string;
   denyCmd: string;
+  durationMinutes?: number;
 }
 
 let permQueue: PermRequest[] = [];
@@ -186,6 +187,7 @@ const $permOverlay = $('perm-overlay');
 const $permIcon = $('perm-card-icon');
 const $permTitle = $('perm-card-title');
 const $permDetail = $('perm-card-detail');
+const $permDuration = $('perm-card-duration');
 const $permApproveBtn = $('perm-approve-btn') as HTMLButtonElement;
 const $permDenyBtn = $('perm-deny-btn') as HTMLButtonElement;
 
@@ -566,14 +568,15 @@ function handleEvent(event: ServerEvent): void {
       break;
 
     case 'mount_request': {
-      const detail = `Path: ${event.path}\nMode: ${event.mode}${event.reason ? `\nReason: ${event.reason}` : ''}`;
+      const detail = `${event.path}${event.reason ? `\n${event.reason}` : ''}`;
       enqueuePermRequest({
         type: 'mount',
         id: event.id,
-        title: 'Mount Request',
+        title: `Mount Request (${event.mode})`,
         detail,
         approveCmd: `/grant ${event.id}`,
         denyCmd: `/deny ${event.id}`,
+        ...(event.durationMinutes !== undefined ? { durationMinutes: event.durationMinutes } : {}),
       });
       break;
     }
@@ -747,6 +750,13 @@ function ttsStopStream(): void {
   if (streamTtsBtn) { streamTtsBtn.remove(); streamTtsBtn = null; }
 }
 
+function ttsStopAll(): void {
+  ttsStopStream();
+  ttsAbortCtrl?.abort();
+  ttsAbortCtrl = null;
+  if (ttsSpeakingBtn) { ttsResetBtn(ttsSpeakingBtn); ttsSpeakingBtn = null; }
+}
+
 function ttsEnqueueChunk(text: string): void {
   const stripped = stripMarkdownForTTS(text);
   if (!stripped.trim()) return;
@@ -833,6 +843,24 @@ function createTTSBtn(text: string): HTMLElement {
 
 function appendMessage(msg: DisplayMessage, animate = true): void {
   hideEmptyState();
+
+  // Group consecutive system messages into one box
+  if (msg.role === 'system') {
+    const lastChild = $messages.lastElementChild;
+    if (lastChild?.classList.contains('message') && lastChild.classList.contains('system')) {
+      const existingContent = lastChild.querySelector('.message-content');
+      if (existingContent) {
+        const sep = document.createElement('div');
+        sep.className = 'system-separator';
+        existingContent.appendChild(sep);
+        const line = document.createElement('div');
+        line.textContent = msg.content;
+        existingContent.appendChild(line);
+        scrollToBottom();
+        return;
+      }
+    }
+  }
 
   const el = document.createElement('div');
   el.className = `message ${msg.role}`;
@@ -1126,39 +1154,7 @@ function updateSidebar(): void {
     : '$0.00';
 
   // Mounts
-  if (mountsList.length === 0) {
-    $sbMountsList.textContent = 'none';
-  } else {
-    $sbMountsList.innerHTML = '';
-    for (const m of mountsList) {
-      const item = document.createElement('div');
-      item.className = 'mount-item';
-
-      const mode = document.createElement('span');
-      mode.className = `mount-mode ${m.mode}`;
-      mode.textContent = m.mode;
-      item.appendChild(mode);
-
-      const path = document.createElement('span');
-      path.className = 'mount-path';
-      path.title = m.hostPath;
-      const parts = m.hostPath.replace(/\/$/, '').split('/').filter(Boolean);
-      if (parts.length >= 2) {
-        const parent = document.createElement('span');
-        parent.className = 'mount-path-parent';
-        parent.textContent = parts[parts.length - 2] + '/';
-        const name = document.createElement('span');
-        name.textContent = parts[parts.length - 1];
-        path.appendChild(parent);
-        path.appendChild(name);
-      } else {
-        path.textContent = m.hostPath;
-      }
-      item.appendChild(path);
-
-      $sbMountsList.appendChild(item);
-    }
-  }
+  renderMounts();
 
   // Capabilities
   const capEntries = Object.entries(capsList);
@@ -1264,6 +1260,110 @@ function scrollToBottom(): void {
   });
 }
 
+// ── Mount timer helpers ───────────────────────────────────────
+
+function fmtRemaining(ms: number): string {
+  if (ms <= 0) return 'expired';
+  const secs = Math.round(ms / 1000);
+  if (secs <= 60) return `${secs} sec`;
+  const mins = ms / 60_000;
+  const rounded = Math.round(mins * 2) / 2; // 0.5 min precision
+  return `${rounded} min`;
+}
+
+function renderMounts(): void {
+  if (mountsList.length === 0) {
+    $sbMountsList.textContent = 'none';
+    return;
+  }
+  $sbMountsList.innerHTML = '';
+  for (const m of mountsList) {
+    const item = document.createElement('div');
+    item.className = 'mount-item';
+
+    const row = document.createElement('div');
+    row.className = 'mount-item-row';
+
+    const mode = document.createElement('span');
+    mode.className = `mount-mode ${m.mode}`;
+    mode.textContent = m.mode;
+    row.appendChild(mode);
+
+    const path = document.createElement('span');
+    path.className = 'mount-path';
+    path.title = m.hostPath;
+    const parts = m.hostPath.replace(/\/$/, '').split('/').filter(Boolean);
+    if (parts.length >= 2) {
+      const parent = document.createElement('span');
+      parent.className = 'mount-path-parent';
+      parent.textContent = parts[parts.length - 2] + '/';
+      const name = document.createElement('span');
+      name.textContent = parts[parts.length - 1]!;
+      path.appendChild(parent);
+      path.appendChild(name);
+    } else {
+      path.textContent = m.hostPath;
+    }
+    row.appendChild(path);
+
+    if (m.expiresAt) {
+      const remaining = m.expiresAt - Date.now();
+      const badge = document.createElement('span');
+      badge.className = 'mount-expiry-badge';
+      badge.textContent = fmtRemaining(remaining);
+      badge.title = `Expires at ${new Date(m.expiresAt).toLocaleTimeString()}`;
+      row.appendChild(badge);
+    }
+
+    item.appendChild(row);
+
+    if (m.expiresAt && m.durationMinutes) {
+      const totalMs = m.durationMinutes * 60_000;
+      const remaining = Math.max(0, m.expiresAt - Date.now());
+      const pct = Math.max(0, Math.min(100, (remaining / totalMs) * 100));
+
+      const bar = document.createElement('div');
+      bar.className = 'mount-timer-bar';
+      bar.setAttribute('data-expires-at', String(m.expiresAt));
+      bar.setAttribute('data-duration-ms', String(totalMs));
+
+      const fill = document.createElement('div');
+      fill.className = 'mount-timer-fill';
+      fill.style.width = `${pct}%`;
+      bar.appendChild(fill);
+      item.appendChild(bar);
+    }
+
+    $sbMountsList.appendChild(item);
+  }
+}
+
+// Refresh expiry countdowns every 5 seconds without a full sidebar re-render
+setInterval(() => {
+  const now = Date.now();
+  const badges = $sbMountsList.querySelectorAll<HTMLElement>('.mount-expiry-badge');
+  const bars = $sbMountsList.querySelectorAll<HTMLElement>('.mount-timer-bar');
+
+  badges.forEach((badge) => {
+    const item = badge.closest('.mount-item');
+    const bar = item?.querySelector<HTMLElement>('.mount-timer-bar');
+    const expiresAt = bar ? Number(bar.getAttribute('data-expires-at')) : 0;
+    if (!expiresAt) return;
+    const remaining = expiresAt - now;
+    badge.textContent = fmtRemaining(remaining);
+  });
+
+  bars.forEach((bar) => {
+    const expiresAt = Number(bar.getAttribute('data-expires-at'));
+    const totalMs = Number(bar.getAttribute('data-duration-ms'));
+    if (!expiresAt || !totalMs) return;
+    const remaining = Math.max(0, expiresAt - now);
+    const pct = Math.max(0, Math.min(100, (remaining / totalMs) * 100));
+    const fill = bar.querySelector<HTMLElement>('.mount-timer-fill');
+    if (fill) fill.style.width = `${pct}%`;
+  });
+}, 5_000);
+
 // ── Permission request modal ─────────────────────────────────
 
 function playPermissionSound(): void {
@@ -1309,8 +1409,24 @@ function showNextPermRequest(): void {
   permShowing = true;
   $permIcon.textContent = req.type === 'mount' ? '📂' : '✏️';
   $permTitle.textContent = req.title;
-  $permDetail.textContent = req.detail.split('\n')[0] ?? req.detail;
-  $permDetail.title = req.detail; // full text on hover
+
+  // Show each line of detail as its own row
+  const lines = req.detail.split('\n').filter(Boolean);
+  $permDetail.innerHTML = '';
+  for (const line of lines) {
+    const row = document.createElement('div');
+    row.textContent = line;
+    $permDetail.appendChild(row);
+  }
+
+  // Duration badge — shown when agent specifies how long it needs access
+  if (req.durationMinutes) {
+    $permDuration.textContent = `⏱ ${req.durationMinutes} min (auto-expires)`;
+    $permDuration.classList.remove('hidden');
+  } else {
+    $permDuration.classList.add('hidden');
+  }
+
   $permOverlay.classList.remove('hidden');
 }
 
@@ -1426,6 +1542,7 @@ function submitMessage(useThinkingOverride = false): void {
   // already in the textarea is what the user wants to send, and any
   // in-flight STT responses must not write back after we clear the input.
   if (micRecording) abortMic();
+  grabScreenFrame();
   const text = $input.value.trim();
   if (!text && pendingAttachments.length === 0) return;
   $input.value = '';
@@ -1605,6 +1722,71 @@ $fileInput.addEventListener('change', () => {
   $fileInput.value = ''; // reset so same file can be re-selected
 });
 
+// ── Screen capture ────────────────────────────────────────────
+
+const $screenCap = $('screen-cap') as HTMLButtonElement;
+
+let screenStream: MediaStream | null = null;
+let screenVideo: HTMLVideoElement | null = null;
+let screenCapActive = false;
+
+function grabScreenFrame(): void {
+  if (!screenCapActive || !screenVideo || screenVideo.readyState < 2) return;
+  if (pendingAttachments.length >= MAX_ATTACHMENTS) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = screenVideo.videoWidth;
+  canvas.height = screenVideo.videoHeight;
+  canvas.getContext('2d')!.drawImage(screenVideo, 0, 0);
+  const dataUrl = canvas.toDataURL('image/png');
+  const base64 = dataUrl.split(',')[1];
+  pendingAttachments.push({
+    id: `att_${++attachmentIdCounter}`,
+    name: 'screenshot.png',
+    mediaType: 'image/png',
+    data: base64,
+    dataUrl,
+    size: Math.round(base64.length * 0.75),
+  });
+}
+
+function setScreenCapState(active: boolean): void {
+  screenCapActive = active;
+  $screenCap.classList.toggle('active', active);
+  $screenCap.title = active ? 'Stop screen capture' : 'Capture screen';
+}
+
+async function toggleScreenCap(): Promise<void> {
+  if (screenCapActive) {
+    if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
+    if (screenVideo) { screenVideo.srcObject = null; screenVideo = null; }
+    setScreenCapState(false);
+    return;
+  }
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    screenVideo = document.createElement('video');
+    screenVideo.srcObject = screenStream;
+    screenVideo.muted = true;
+    await new Promise<void>(resolve => { screenVideo!.onloadedmetadata = () => resolve(); });
+    await screenVideo.play();
+    // Handle user clicking "Stop sharing" in the browser's native UI
+    screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+      screenStream = null;
+      screenVideo = null;
+      setScreenCapState(false);
+    });
+    setScreenCapState(true);
+  } catch (err) {
+    const name = (err as Error).name;
+    if (name !== 'NotAllowedError' && name !== 'AbortError') {
+      errorMsg = 'Screen capture failed';
+      updateErrorBar();
+    }
+  }
+}
+
+$screenCap.addEventListener('click', () => void toggleScreenCap());
+
 $cancel.addEventListener('click', () => {
   wsSend({ type: 'cancel' });
 });
@@ -1729,6 +1911,7 @@ function micSetState(state: 'idle' | 'recording' | 'transcribing'): void {
 }
 
 async function startMic(): Promise<void> {
+  ttsStopAll();
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
     micAudioCtx = new AudioContext({ sampleRate: 16000 });
@@ -1869,8 +2052,11 @@ function updateSendButton(ctrlHeld: boolean): void {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Control') updateSendButton(true);
-  // Alt+M — toggle microphone (continuous voice mode)
-  if (e.key === 'm' && e.altKey && !e.ctrlKey) {
+  // Mic toggle: Alt+M (global) or ` / M when input not focused
+  const inputFocused = document.activeElement === $input;
+  const micLocal = !inputFocused && (e.key === '`' || e.key === 'm' || e.key === 'M');
+  const micGlobal = e.key === 'm' && e.altKey && !e.ctrlKey;
+  if (micLocal || micGlobal) {
     e.preventDefault();
     if (micRecording) void stopMic();
     else void startMic();

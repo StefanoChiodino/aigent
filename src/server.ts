@@ -169,6 +169,7 @@ export function requestMount(
   path: string,
   mode: 'ro' | 'rw',
   reason?: string,
+  durationMinutes?: number,
 ): Promise<{ ok: boolean; containerPath?: string; message: string }> {
   const id = `mount_${++mountRequestCounter}`;
 
@@ -187,7 +188,11 @@ export function requestMount(
     });
 
     // Send to gatekeeper via the socket
-    broadcast({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}) });
+    broadcast({
+      type: 'mount_request', id, path, mode,
+      ...(reason !== undefined ? { reason } : {}),
+      ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+    });
   });
 }
 
@@ -367,6 +372,13 @@ async function processAgentTurn(
         addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
       },
       onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; max_iterations?: number }),
+      onModelSwitch: (newModel, reason) => {
+        model = newModel;
+        agent.currentModel = newModel;
+        addSystemMessage(reason ? `Model switched to ${newModel}: ${reason}` : `Model switched to ${newModel}`);
+        broadcast({ type: 'state', model: newModel });
+        doAutoSave();
+      },
     });
 
     if (!controller.signal.aborted) {
