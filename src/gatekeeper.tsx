@@ -364,7 +364,11 @@ async function restartContainer(): Promise<void> {
     containerProcess.removeAllListeners('exit');
     containerProcess.removeAllListeners('error');
     try {
-      execSync(`docker rm -f ${containerName} 2>/dev/null`, { stdio: 'ignore' });
+      // Graceful shutdown: SIGTERM lets the worker run shutdown() → doAutoSave()
+      // so conversation history (including any in-flight mount request turn) is preserved.
+      // docker stop waits up to 15s before SIGKILL.
+      execSync(`docker stop --time 15 ${containerName} 2>/dev/null`, { stdio: 'ignore' });
+      execSync(`docker rm ${containerName} 2>/dev/null`, { stdio: 'ignore' });
     } catch {}
     containerProcess = null;
   }
@@ -460,8 +464,9 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
       injectSystemMessage(result.message);
 
       if (result.ok) {
-        injectSystemMessage('Sandbox restarting...');
+        injectSystemMessage('Sandbox restarting with new mount...');
         await restartContainer();
+        injectSystemMessage(`Sandbox ready. ${hostPath} is now mounted at ${toContainerPath(hostPath)} (${mode}).`);
       }
       break;
     }
@@ -478,8 +483,9 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
       injectSystemMessage(result.message);
 
       if (result.ok) {
-        injectSystemMessage('Sandbox restarting...');
+        injectSystemMessage('Sandbox restarting without the removed mount...');
         await restartContainer();
+        injectSystemMessage(`Sandbox ready. ${hostPath} has been unmounted.`);
       }
       break;
     }
@@ -560,8 +566,9 @@ async function handleGrantDeny(input: string): Promise<boolean> {
     log.info('Mount granted', { id, path: pending.hostPath, mode });
     injectSystemMessage(result.message);
     if (result.ok) {
-      injectSystemMessage('Sandbox restarting...');
+      injectSystemMessage('Sandbox restarting with new mount...');
       await restartContainer();
+      injectSystemMessage(`Sandbox ready. ${pending.hostPath} is now mounted at ${containerPath} (${mode}).`);
     }
     return true;
   }

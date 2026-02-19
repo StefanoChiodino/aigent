@@ -28,7 +28,7 @@
 ~~attachments~~
 
 
-BUG: when I ask to mount a folder and that works eventually all messages are deleted up to just before my request. This way we lose my request, but also the system notification that the change ever happened.
+~~BUG: when I ask to mount a folder and that works eventually all messages are deleted up to just before my request. This way we lose my request, but also the system notification that the change ever happened.~~ DONE — switched from `docker rm -f` (SIGKILL) to `docker stop --time 15` (SIGTERM) so the worker's shutdown() handler runs doAutoSave() before dying; added post-restart system message confirming what was mounted
 
 ~~background tasks should be visible on the web UI sidebar (running/completed). Currently only visible as yellow completion messages in chat.~~ DONE — Tasks section in sidebar shows running (pulsing), completed (checkmark), failed (X) with descriptions
 
