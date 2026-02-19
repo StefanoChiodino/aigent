@@ -44,6 +44,9 @@ interface GatekeeperArgs {
   model?: string;
   thinking?: string;
   headless: boolean;
+  provider?: string;
+  baseURL?: string;
+  apiKey?: string;
 }
 
 // --- State ---
@@ -76,22 +79,35 @@ function parseArgs(): GatekeeperArgs {
       result.thinking = args[++i]!;
     } else if (arg === '--headless') {
       result.headless = true;
+    } else if (arg === '--provider' && args[i + 1]) {
+      result.provider = args[++i]!;
+    } else if (arg === '--base-url' && args[i + 1]) {
+      result.baseURL = args[++i]!;
+    } else if (arg === '--api-key' && args[i + 1]) {
+      result.apiKey = args[++i]!;
     } else if (arg === '--help' || arg === '-h') {
       console.log(`aigent — AI agent with sandboxed execution
 
 Usage: aigent [project-folder] [options]
 
 Options:
-  --rw              Mount project folder read-write (default: read-only)
-  --model <model>   Model to use (default: claude-opus-4-6-20250514)
-  --thinking <level> Thinking level: off, low, medium, high, max
-  --headless        Web UI only, no terminal interface
+  --rw                   Mount project folder read-write (default: read-only)
+  --model <model>        Model to use (default: claude-opus-4-6-20250514)
+  --thinking <level>     Thinking level: off, low, medium, high, max
+  --headless             Web UI only, no terminal interface
+  --provider <type>      LLM provider: anthropic (default) or openai
+  --base-url <url>       Base URL for OpenAI-compatible endpoint
+  --api-key <key>        API key / token for the LLM provider
 
 Examples:
-  aigent                           # Start with no project folder
-  aigent ~/projects/myapp          # Mount project read-only
-  aigent ~/projects/myapp --rw     # Mount project read-write
-  aigent --headless                # Web UI only at localhost:3141
+  aigent                                         # Anthropic (from env or ~/.config/aigent/provider.json)
+  aigent ~/projects/myapp                        # Mount project read-only
+  aigent ~/projects/myapp --rw                   # Mount project read-write
+  aigent --headless                              # Web UI only at localhost:3141
+  aigent --provider openai --base-url http://localhost:11434/v1 --api-key x  # Ollama
+
+Persistent config (~/.config/aigent/provider.json):
+  { "provider": "openai", "baseURL": "http://localhost:11434/v1", "apiKey": "your-token" }
 
 Mount management (inside the TUI):
   /mount <path> [ro|rw]   Mount a host folder into the sandbox
@@ -789,6 +805,11 @@ function stopHostDaemon(): void {
 // --- LLM Proxy ---
 
 async function startLLMProxy(): Promise<void> {
+  // CLI flags take highest priority — apply them to env before detection
+  if (gatekeeperArgs.provider) process.env['AIGENT_PROVIDER'] = gatekeeperArgs.provider;
+  if (gatekeeperArgs.baseURL)  process.env['AIGENT_BASE_URL'] = gatekeeperArgs.baseURL;
+  if (gatekeeperArgs.apiKey)   process.env['AIGENT_API_KEY']  = gatekeeperArgs.apiKey;
+
   const { createProvider, detectProvider } = await import('./provider.js');
   const providerType = detectProvider();
   const provider = createProvider(providerType);

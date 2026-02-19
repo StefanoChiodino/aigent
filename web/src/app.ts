@@ -1218,6 +1218,14 @@ let micStream: MediaStream | null = null;
 let micSamples: Float32Array[] = [];
 let micSource: MediaStreamAudioSourceNode | null = null;
 let micProcessor: ScriptProcessorNode | null = null;
+let micChunkTimer: ReturnType<typeof setInterval> | null = null;
+let micPreviewEl: HTMLElement | null = null;
+let micLastText = '';
+let micReqSeq = 0;          // increments on each outgoing request
+let micDisplayedSeq = 0;   // seq of the last response we actually showed
+
+// Max samples to send per live chunk (8 s at 16 kHz keeps latency bounded)
+const MIC_WINDOW_SAMPLES = 16000 * 8;
 
 function encodeWav(samples: Float32Array[], sampleRate: number): ArrayBuffer {
   let totalLen = 0;
@@ -1255,6 +1263,56 @@ function encodeWav(samples: Float32Array[], sampleRate: number): ArrayBuffer {
   return buf;
 }
 
+async function sendLiveChunk(): Promise<void> {
+  if (micSamples.length === 0) return;
+
+  // Snapshot the sequence number for this request so a stale slow response
+  // doesn't overwrite a newer one.
+  const seq = ++micReqSeq;
+
+  // Build a sliding window over the last MIC_WINDOW_SAMPLES samples
+  let totalLen = 0;
+  for (const s of micSamples) totalLen += s.length;
+
+  let window: Float32Array[];
+  if (totalLen <= MIC_WINDOW_SAMPLES) {
+    window = micSamples;
+  } else {
+    window = [];
+    let remaining = MIC_WINDOW_SAMPLES;
+    for (let i = micSamples.length - 1; i >= 0 && remaining > 0; i--) {
+      const chunk = micSamples[i]!;
+      if (chunk.length <= remaining) {
+        window.unshift(chunk);
+        remaining -= chunk.length;
+      } else {
+        window.unshift(chunk.slice(chunk.length - remaining));
+        remaining = 0;
+      }
+    }
+  }
+
+  try {
+    const resp = await fetch('/stt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/wav' },
+      body: encodeWav(window, 16000),
+    });
+    // Accept any response newer than the last one we displayed — don't
+    // require it to be the absolute latest in flight.
+    if (resp.ok && seq > micDisplayedSeq) {
+      const { text } = await resp.json() as { text?: string };
+      if (text) {
+        micLastText = text;
+        micDisplayedSeq = seq;
+        if (micPreviewEl) micPreviewEl.textContent = text;
+      }
+    }
+  } catch {
+    // STT not reachable yet — silently wait
+  }
+}
+
 function micSetState(state: 'idle' | 'recording' | 'transcribing'): void {
   $micIconMic.classList.toggle('hidden', state !== 'idle');
   $micIconStop.classList.toggle('hidden', state !== 'recording');
@@ -1271,11 +1329,27 @@ async function startMic(): Promise<void> {
     // ScriptProcessor is deprecated but works everywhere cross-browser; bufferSize must be power of 2
     micProcessor = micAudioCtx.createScriptProcessor(4096, 1, 1);
     micSamples = [];
+    micLastText = '';
+    micReqSeq = 0;
+    micDisplayedSeq = 0;
     micProcessor.onaudioprocess = (e) => {
       micSamples.push(new Float32Array(e.inputBuffer.getChannelData(0)));
     };
     micSource.connect(micProcessor);
     micProcessor.connect(micAudioCtx.destination);
+
+    // Live preview element shown above the input row
+    micPreviewEl = document.createElement('div');
+    micPreviewEl.className = 'stt-preview';
+    micPreviewEl.textContent = 'Listening\u2026';
+    const $inputRow = $('input-row');
+    $inputRow.parentNode!.insertBefore(micPreviewEl, $inputRow);
+
+    // Send first chunk after a short delay (let audio accumulate), then every 2 s.
+    // Requests run concurrently; the seq counter ensures only the latest wins.
+    setTimeout(() => { void sendLiveChunk(); }, 800);
+    micChunkTimer = setInterval(() => { void sendLiveChunk(); }, 2000);
+
     micRecording = true;
     micSetState('recording');
   } catch {
@@ -1286,6 +1360,10 @@ async function startMic(): Promise<void> {
 async function stopMic(): Promise<void> {
   if (!micRecording) return;
   micRecording = false;
+
+  // Stop live chunk timer
+  if (micChunkTimer !== null) { clearInterval(micChunkTimer); micChunkTimer = null; }
+
   micSetState('transcribing');
 
   micSource?.disconnect();
@@ -1300,26 +1378,31 @@ async function stopMic(): Promise<void> {
   micStream = null;
   micAudioCtx = null;
 
+  // Remove live preview
+  if (micPreviewEl) { micPreviewEl.remove(); micPreviewEl = null; }
+
   if (samples.length === 0) { micSetState('idle'); return; }
 
-  const wav = encodeWav(samples, 16000);
+  let finalText = micLastText;
   try {
     const resp = await fetch('/stt', {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
-      body: wav,
+      body: encodeWav(samples, 16000),
     });
     if (resp.ok) {
       const { text } = await resp.json() as { text?: string };
-      if (text) {
-        const cur = $input.value;
-        $input.value = cur ? cur + ' ' + text : text;
-        autoGrow();
-        $input.focus();
-      }
+      if (text) finalText = text;
     }
   } catch {
-    // STT service not running
+    // STT service not running — use last live chunk result
+  }
+
+  if (finalText) {
+    const cur = $input.value;
+    $input.value = cur ? cur + ' ' + finalText : finalText;
+    autoGrow();
+    $input.focus();
   }
   micSetState('idle');
 }

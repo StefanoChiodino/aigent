@@ -2,6 +2,9 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type { TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages/messages.js';
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions.js';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { createClient, buildSystemPrompt } from './auth.js';
 import type { ThinkingLevel, TokenUsage } from './agent.js';
 
@@ -467,16 +470,33 @@ export class OpenAIProvider implements Provider {
 
 export type ProviderType = 'anthropic' | 'openai';
 
+interface ProviderConfig {
+  provider?: ProviderType;
+  baseURL?: string;
+  apiKey?: string;
+}
+
+/** Read persistent provider config from ~/.config/aigent/provider.json (if it exists). */
+export function loadProviderConfig(): ProviderConfig {
+  const configPath = join(homedir(), '.config', 'aigent', 'provider.json');
+  try {
+    return JSON.parse(readFileSync(configPath, 'utf-8')) as ProviderConfig;
+  } catch {
+    return {};
+  }
+}
+
 export function createProvider(type: ProviderType): Provider {
+  const fileConfig = loadProviderConfig();
   if (type === 'openai') {
-    const apiKey = process.env['OPENAI_API_KEY'] ?? process.env['AIGENT_API_KEY'] ?? '';
-    const baseURL = process.env['AIGENT_BASE_URL'];
+    const apiKey = process.env['OPENAI_API_KEY'] ?? process.env['AIGENT_API_KEY'] ?? fileConfig.apiKey ?? '';
+    const baseURL = process.env['AIGENT_BASE_URL'] ?? fileConfig.baseURL;
     return new OpenAIProvider(apiKey, baseURL);
   }
 
   const apiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
   if (!apiKey) {
-    throw new Error('No API key. Set ANTHROPIC_API_KEY.');
+    throw new Error('No API key. Set ANTHROPIC_API_KEY or configure ~/.config/aigent/provider.json');
   }
   return new AnthropicProvider(apiKey);
 }
@@ -486,8 +506,14 @@ export function detectProvider(): ProviderType {
   if (explicit === 'openai') return 'openai';
   if (explicit === 'anthropic') return 'anthropic';
 
-  // Auto-detect from available keys
+  // Auto-detect from environment
   if (process.env['AIGENT_BASE_URL']) return 'openai';
   if (process.env['OPENAI_API_KEY'] && !process.env['ANTHROPIC_API_KEY']) return 'openai';
+
+  // Fall back to config file
+  const fileConfig = loadProviderConfig();
+  if (fileConfig.provider) return fileConfig.provider;
+  if (fileConfig.baseURL) return 'openai';
+
   return 'anthropic';
 }

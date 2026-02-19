@@ -906,19 +906,10 @@ html, body {
 }
 
 #input {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: none;
 }
 
-#input::-webkit-scrollbar { width: 6px; }
-#input::-webkit-scrollbar-track { background: transparent; }
-#input::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 3px;
-}
-#input::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-}
+#input::-webkit-scrollbar { display: none; }
 
 #input::placeholder {
   color: var(--text-dim);
@@ -1040,6 +1031,23 @@ html, body {
 @keyframes mic-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+.stt-preview {
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  font-style: italic;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid var(--border);
+  min-height: 30px;
+  animation: stt-fade-in 0.15s ease;
+}
+
+@keyframes stt-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes spin {

@@ -756,7 +756,7 @@ export class AnsiTUI {
     // Error and reconnecting status as chips (was in the removed activity row)
     if (this.err) {
       const e = this.err.length > 30 ? this.err.slice(0, 29) + '\u2026' : this.err;
-      parts.push(chalk.red(e));
+      parts.push(chalk.yellow(e));
     } else if (this.connStatus === 'reconnecting' && this.everConnected) {
       parts.push(chalk.yellow('reconnecting\u2026'));
     }

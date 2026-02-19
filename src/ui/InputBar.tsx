@@ -131,7 +131,7 @@ export function InputBar({
   let middleContent: React.JSX.Element;
   if (error) {
     const errText = error.length > innerWidth ? error.slice(0, innerWidth - 1) + '…' : error;
-    middleContent = <Text color="red">{errText}</Text>;
+    middleContent = <Text color="yellow">{errText}</Text>;
   } else if (streaming) {
     // Show last line of streaming text, truncated to fit
     const lines = streaming.split('\n');
