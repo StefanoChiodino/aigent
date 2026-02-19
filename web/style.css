@@ -622,6 +622,10 @@ html, body {
   color: var(--error);
 }
 
+.task-status.cancelled {
+  color: var(--text-secondary);
+}
+
 @keyframes task-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }

@@ -472,7 +472,7 @@ function handleEvent(event: ServerEvent): void {
       updateHeader();
       updateSidebar();
       // Auto-remove completed/failed tasks after 30s
-      if (event.task.status === 'completed' || event.task.status === 'failed') {
+      if (event.task.status === 'completed' || event.task.status === 'failed' || event.task.status === 'cancelled') {
         const taskId = event.task.id;
         setTimeout(() => {
           tasks = tasks.filter((t) => t.id !== taskId);
@@ -1205,7 +1205,7 @@ function updateSidebar(): void {
 
       const status = document.createElement('span');
       status.className = `task-status ${t.status}`;
-      status.textContent = t.status === 'running' ? '\u25B6' : t.status === 'completed' ? '\u2713' : '\u2717';
+      status.textContent = t.status === 'running' ? '\u25B6' : t.status === 'completed' ? '\u2713' : t.status === 'cancelled' ? '\u2014' : '\u2717';
       status.title = t.status;
       item.appendChild(status);
 

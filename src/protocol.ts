@@ -36,7 +36,7 @@ export interface DisplayMessage {
 export interface BackgroundTaskInfo {
   id: string;
   description: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
   startedAt: string;
   completedAt?: string;
 }

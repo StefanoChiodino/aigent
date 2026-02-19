@@ -35,7 +35,7 @@ export interface TaskQueueOptions {
 interface InternalTask {
   id: string;
   description: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
   startedAt: string;
   completedAt?: string;
   result?: string;
@@ -134,6 +134,25 @@ export class TaskQueue {
     this.opts.onResultReady?.();
   }
 
+  /** Cancel all running tasks (e.g. on user cancel). Discards their pending results. */
+  cancelAll(): void {
+    for (const task of this.tasks.values()) {
+      if (task.status !== 'running') continue;
+      task.status = 'cancelled';
+      task.completedAt = new Date().toISOString();
+      log.info('Task cancelled', { id: task.id });
+      this.opts.onTaskUpdate?.({
+        id: task.id,
+        description: task.description,
+        status: 'cancelled',
+        startedAt: task.startedAt,
+        completedAt: task.completedAt,
+      });
+    }
+    // Discard results that were queued by now-cancelled tasks
+    this.completionQueue.length = 0;
+  }
+
   /** Pop the next completed result for the main agent to process. Returns null if empty. */
   drainNext(): TaskResult | null {
     return this.completionQueue.shift() ?? null;
@@ -173,7 +192,7 @@ export class TaskQueue {
       .map(({ id, description, status, startedAt }) => ({ id, description, status, startedAt }));
   }
 
-  /** Clean up old completed/failed tasks (keep last N). */
+  /** Clean up old completed/failed/cancelled tasks (keep last N). */
   prune(keepLast = 20): void {
     const all = Array.from(this.tasks.entries());
     const done = all.filter(([, t]) => t.status !== 'running');

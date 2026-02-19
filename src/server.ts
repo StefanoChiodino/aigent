@@ -1026,6 +1026,7 @@ function handleCancel(): void {
     }
     isProcessingTaskResult = false;
 
+    taskQueue.cancelAll();
     broadcast({ type: 'text', content: '' });
     broadcast({ type: 'loading', isLoading: false });
     addSystemMessage('Cancelled.');
