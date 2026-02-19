@@ -48,29 +48,33 @@ export function createClient(apiKey: string): { client: Anthropic; isOAuth: bool
 /**
  * Build system prompt with cache control for prompt caching.
  * OAT tokens additionally require the Claude Code identity prefix.
- * Always returns an array with cache_control so the system prompt is cached.
+ *
+ * Accepts a string (legacy) or string[] (split caching):
+ * - string[0] = stable base instructions → cache_control: ephemeral (cache hit across turns)
+ * - string[1+] = dynamic sections (workspace context) → no cache_control (re-tokenized each turn)
+ * This saves ~$0.50-1.00/session by keeping the big static block cached.
  */
-export function buildSystemPrompt(basePrompt: string, isOAuth: boolean): Anthropic.TextBlockParam[] {
-  if (!isOAuth) {
-    return [
-      {
-        type: 'text' as const,
-        text: basePrompt,
-        cache_control: { type: 'ephemeral' as const },
-      },
-    ];
-  }
+export function buildSystemPrompt(prompt: string | string[], isOAuth: boolean): Anthropic.TextBlockParam[] {
+  const parts = Array.isArray(prompt) ? prompt : [prompt];
+  const blocks: Anthropic.TextBlockParam[] = [];
 
-  return [
-    {
+  if (isOAuth) {
+    blocks.push({
       type: 'text' as const,
       text: 'You are Claude Code, Anthropic\'s official CLI for Claude.',
       cache_control: { type: 'ephemeral' as const },
-    },
-    {
+    });
+  }
+
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i]) continue;
+    blocks.push({
       type: 'text' as const,
-      text: basePrompt,
-      cache_control: { type: 'ephemeral' as const },
-    },
-  ];
+      text: parts[i]!,
+      // Cache the stable base (first block); leave dynamic sections uncached
+      ...(i === 0 ? { cache_control: { type: 'ephemeral' as const } } : {}),
+    });
+  }
+
+  return blocks;
 }

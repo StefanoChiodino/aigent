@@ -181,6 +181,7 @@ export function autoSaveSession(
   agentMessages: unknown[],
   uiMessages: unknown[],
   usage?: { input: number; output: number; cacheRead: number; cacheWrite: number },
+  thinking?: { current: string; savedEffort: string },
 ): void {
   const autoSavePath = join(workspacePath, '.autosave.json');
   const data = {
@@ -188,6 +189,7 @@ export function autoSaveSession(
     agentMessages,
     uiMessages,
     ...(usage ? { usage } : {}),
+    ...(thinking ? { thinking } : {}),
   };
   try {
     writeFileSync(autoSavePath, JSON.stringify(data, null, 2));
@@ -201,7 +203,7 @@ export function autoSaveSession(
  */
 export function autoLoadSession(
   workspacePath: string,
-): { agentMessages: unknown[]; uiMessages: unknown[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number } } | null {
+): { agentMessages: unknown[]; uiMessages: unknown[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number }; thinking?: { current: string; savedEffort: string } } | null {
   const autoSavePath = join(workspacePath, '.autosave.json');
   if (!existsSync(autoSavePath)) return null;
 
@@ -212,12 +214,18 @@ export function autoLoadSession(
       agentMessages: unknown[];
       uiMessages: unknown[];
       usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+      thinking?: { current: string; savedEffort: string };
     };
     // Only restore if saved within the last hour
     const savedAt = new Date(data.savedAt).getTime();
     const age = Date.now() - savedAt;
     if (age > 24 * 60 * 60 * 1000) return null;
-    return { agentMessages: data.agentMessages, uiMessages: data.uiMessages, ...(data.usage ? { usage: data.usage } : {}) };
+    return {
+      agentMessages: data.agentMessages,
+      uiMessages: data.uiMessages,
+      ...(data.usage ? { usage: data.usage } : {}),
+      ...(data.thinking ? { thinking: data.thinking } : {}),
+    };
   } catch {
     return null;
   }

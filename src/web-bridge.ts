@@ -169,7 +169,19 @@ export async function startWebServer(
         const cmd = JSON.parse(data.toString());
         switch (cmd.type) {
           case 'message':
-            client.sendMessage(cmd.content, cmd.thinkingOverride);
+            if ((cmd.images && cmd.images.length > 0) || (cmd.attachments && cmd.attachments.length > 0)) {
+              // Attachments present — send full command directly (slash commands never have attachments)
+              client.send({
+                type: 'message',
+                content: cmd.content,
+                ...(cmd.images ? { images: cmd.images } : {}),
+                ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
+                ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
+              });
+            } else {
+              // Text only — use sendMessage so gatekeeper intercepts slash commands
+              client.sendMessage(cmd.content, cmd.thinkingOverride);
+            }
             break;
           case 'cancel':
             client.cancel();

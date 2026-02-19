@@ -8,7 +8,7 @@
  *   - Linux/Wayland: wl-paste / wl-copy
  */
 
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,12 +17,33 @@ import type { CapabilityName, CapabilityProvider, CapabilityResult } from '../pr
 
 type ClipboardBackend = 'wsl' | 'macos' | 'xclip' | 'wayland';
 
+/** Full path to powershell.exe for WSL interop. */
+let powershellPath = 'powershell.exe';
+
 function which(cmd: string): boolean {
   try {
     execSync(`which ${cmd}`, { stdio: 'ignore' });
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Resolve the full path to powershell.exe (needed for reliable WSL interop). */
+function findPowershell(): string | null {
+  // Try well-known Windows paths first
+  const candidates = [
+    '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+    '/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe',
+  ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  // Fall back to which
+  try {
+    return execSync('which powershell.exe', { encoding: 'utf-8', timeout: 3000 }).trim();
+  } catch {
+    return null;
   }
 }
 
@@ -35,8 +56,31 @@ function isWSL(): boolean {
   }
 }
 
+/** Test that powershell.exe actually works (binfmt_misc/WSL interop is functional). */
+function testPowershell(psPath: string): boolean {
+  try {
+    const result = execSync(`"${psPath}" -NoProfile -Command "echo ok"`, {
+      encoding: 'utf-8',
+      timeout: 8000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return result.includes('ok');
+  } catch {
+    return false;
+  }
+}
+
 function detectBackend(): ClipboardBackend | null {
-  if (isWSL() && which('powershell.exe')) return 'wsl';
+  if (isWSL()) {
+    const ps = findPowershell();
+    if (ps && testPowershell(ps)) {
+      powershellPath = ps;
+      return 'wsl';
+    }
+    // WSL but powershell broken — fall through to xclip/wayland
+    // Log this for debugging
+    process.stderr.write(`[clipboard] WSL detected but powershell not functional (path: ${ps})\n`);
+  }
   if (process.platform === 'darwin') return 'macos';
   if (process.env.WAYLAND_DISPLAY && which('wl-paste')) return 'wayland';
   if (process.env.DISPLAY && which('xclip')) return 'xclip';
@@ -48,9 +92,9 @@ function detectBackend(): ClipboardBackend | null {
 function readText(backend: ClipboardBackend): string {
   switch (backend) {
     case 'wsl':
-      return execFileSync('powershell.exe', ['-NoProfile', '-Command', 'Get-Clipboard'], {
+      return execSync(`"${powershellPath}" -NoProfile -Command "Get-Clipboard"`, {
         encoding: 'utf-8',
-        timeout: 5000,
+        timeout: 10000,
       }).replace(/\r\n/g, '\n').trimEnd();
 
     case 'macos':
@@ -71,13 +115,10 @@ function readImage(backend: ClipboardBackend): { mediaType: string; data: string
     switch (backend) {
       case 'wsl': {
         // PowerShell: save clipboard image to file
-        const ps = `
-          $img = Get-Clipboard -Format Image
-          if ($img) { $img.Save('${tmp.replace(/\//g, '\\')}', [System.Drawing.Imaging.ImageFormat]::Png) }
-          else { exit 1 }
-        `.trim();
+        const winTmp = tmp.replace(/\//g, '\\');
+        const ps = `$img = Get-Clipboard -Format Image; if ($img) { $img.Save('${winTmp}', [System.Drawing.Imaging.ImageFormat]::Png) } else { exit 1 }`;
         try {
-          execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: 10000 });
+          execSync(`"${powershellPath}" -NoProfile -Command "${ps.replace(/"/g, '\\"')}"`, { timeout: 15000 });
         } catch {
           return null;
         }
@@ -130,11 +171,11 @@ function readImage(backend: ClipboardBackend): { mediaType: string; data: string
 
 function writeText(backend: ClipboardBackend, text: string): void {
   switch (backend) {
-    case 'wsl':
-      execFileSync('powershell.exe', ['-NoProfile', '-Command', `Set-Clipboard -Value '${text.replace(/'/g, "''")}'`], {
-        timeout: 5000,
-      });
+    case 'wsl': {
+      // Pipe text to clip.exe — simpler and more reliable than Set-Clipboard
+      execSync('clip.exe', { input: text, timeout: 5000 });
       break;
+    }
 
     case 'macos':
       execSync('pbcopy', { input: text, timeout: 5000 });

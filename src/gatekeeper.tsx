@@ -35,6 +35,7 @@ interface Mount {
   containerPath: string;   // Path inside container (e.g., /project/myapp)
   mode: 'ro' | 'rw';
   expiresAt?: number;      // Timestamp for timed grants
+  implicit?: boolean;      // true for docker-compose.yml built-in mounts (not passed as -v)
 }
 
 interface GatekeeperArgs {
@@ -47,7 +48,12 @@ interface GatekeeperArgs {
 
 // --- State ---
 
-const mounts: Mount[] = [];
+const mounts: Mount[] = [
+  // Implicit mounts from docker-compose.yml — shown in UI but not passed as -v flags.
+  { hostPath: resolve(REPO_DIR), containerPath: '/app', mode: 'rw', implicit: true },
+  { hostPath: resolve(REPO_DIR, 'workspace'), containerPath: '/workspace', mode: 'rw', implicit: true },
+  { hostPath: resolve(REPO_DIR, 'workspace', 'config'), containerPath: '/workspace/config', mode: 'ro', implicit: true },
+];
 let containerProcess: ChildProcess | null = null;
 let containerName = '';
 let gatekeeperArgs: GatekeeperArgs;
@@ -170,6 +176,9 @@ function addMount(hostPath: string, mode: 'ro' | 'rw'): { ok: boolean; message: 
 
   const existing = findMount(normalized);
   if (existing) {
+    if (existing.implicit) {
+      return { ok: false, message: `Already a built-in mount: ${normalized} (${existing.mode})` };
+    }
     if (existing.mode === mode) {
       return { ok: false, message: `Already mounted: ${normalized} (${mode})` };
     }
@@ -193,6 +202,9 @@ function removeMount(hostPath: string): { ok: boolean; message: string } {
   if (idx === -1) {
     return { ok: false, message: `Not mounted: ${normalized}` };
   }
+  if (mounts[idx]!.implicit) {
+    return { ok: false, message: `Cannot unmount built-in mount: ${normalized}` };
+  }
   mounts.splice(idx, 1);
   return { ok: true, message: `Unmounted ${normalized}.` };
 }
@@ -200,8 +212,9 @@ function removeMount(hostPath: string): { ok: boolean; message: string } {
 function listMounts(): string {
   if (mounts.length === 0) return 'No active mounts.';
   const lines = mounts.map((m) => {
+    const tag = m.implicit ? ' [built-in]' : '';
     const expiry = m.expiresAt ? ` (expires ${new Date(m.expiresAt).toLocaleTimeString()})` : '';
-    return `  ${m.hostPath} → ${m.containerPath} (${m.mode})${expiry}`;
+    return `  ${m.hostPath} → ${m.containerPath} (${m.mode})${tag}${expiry}`;
   });
   return `Active mounts:\n${lines.join('\n')}`;
 }
@@ -259,8 +272,9 @@ function buildDockerArgs(): string[] {
   // Socket directory
   args.push('-v', `${SOCKET_DIR}:${SOCKET_DIR}`);
 
-  // Dynamic mounts
+  // Dynamic mounts (skip implicit ones — those come from docker-compose.yml)
   for (const mount of mounts) {
+    if (mount.implicit) continue;
     args.push('-v', `${mount.hostPath}:${mount.containerPath}:${mount.mode}`);
   }
 
@@ -287,8 +301,9 @@ async function startContainer(): Promise<void> {
 
   const dockerArgs = buildDockerArgs();
   log.info('Starting sandbox...');
-  if (mounts.length > 0) {
-    for (const m of mounts) {
+  const userMounts = mounts.filter((m) => !m.implicit);
+  if (userMounts.length > 0) {
+    for (const m of userMounts) {
       log.info('Mount', { path: m.hostPath, mode: m.mode });
     }
   }

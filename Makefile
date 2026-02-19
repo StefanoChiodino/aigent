@@ -9,11 +9,11 @@ dev:
 	@echo "Starting dev server with hot reload..."
 	@echo "Web UI: http://localhost:$${AIGENT_WEB_PORT:-3141}"
 	@npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*' &
-	npx tsx --watch src/gatekeeper.tsx --headless $(ARGS)
+	npx tsx --watch=forever src/gatekeeper.tsx --headless $(ARGS)
 
 # Server only (no frontend rebuild)
 serve:
-	npx tsx --watch src/gatekeeper.tsx --headless $(ARGS)
+	npx tsx --watch=forever src/gatekeeper.tsx --headless $(ARGS)
 
 # --- Web UI ---
 

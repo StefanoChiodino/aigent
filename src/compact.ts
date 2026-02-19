@@ -5,16 +5,7 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('compact');
 
-const COMPACT_PROMPT = `Summarize the conversation so far into a concise but thorough summary. Include:
-- The user's goals and what they asked for
-- Key decisions made
-- What work was done (files created/modified, commands run, tool results)
-- Current state and any pending tasks
-- Important context that would be needed to continue the conversation
-
-Be factual and specific. Include file paths, command names, and technical details.
-Do NOT include pleasantries or meta-commentary about the summary itself.
-Write as a compact reference document, not a narrative.`;
+const COMPACT_PROMPT = `Summarize this conversation as a compact reference. Include: user goals, decisions made, files changed, commands run, current state, pending tasks. Be specific (file paths, commands, technical details). No narrative or meta-commentary.`;
 
 /**
  * Persist a compaction summary to the daily memory file.
@@ -59,26 +50,27 @@ function messagesToSummaryInput(messages: ProviderMessage[]): ProviderMessage[] 
     if (msg.role === 'user') {
       result.push({ role: 'user', content: msg.content });
     } else if (msg.role === 'assistant') {
-      // Include tool call info in the assistant text so the summary knows what happened
+      // Include tool call info — strip bulky fields (content, file data, base64)
       let text = msg.content;
       if (msg.toolCalls && msg.toolCalls.length > 0) {
         const toolSummaries = msg.toolCalls.map((tc) => {
-          const inputStr = JSON.stringify(tc.input);
-          const truncInput = inputStr.length > 200 ? inputStr.slice(0, 200) + '…' : inputStr;
-          return `[Tool: ${tc.name}(${truncInput})]`;
+          const stripped = Object.fromEntries(
+            Object.entries(tc.input).filter(([k]) => !['content', 'file_content', 'data', 'base64'].includes(k)),
+          );
+          const inputStr = JSON.stringify(stripped);
+          const truncInput = inputStr.length > 150 ? inputStr.slice(0, 150) + '…' : inputStr;
+          return `[${tc.name}: ${truncInput}]`;
         });
         text = text + '\n' + toolSummaries.join('\n');
       }
       result.push({ role: 'assistant', content: text });
     } else if (msg.role === 'tool_result') {
-      // Include abbreviated tool results as a user message
-      // (API requires alternating user/assistant, and tool results are context)
+      // Abbreviated tool results — strip images, truncate text aggressively
       const parts = msg.results.map((r) => {
         let textContent: string;
         if (typeof r.content === 'string') {
           textContent = r.content;
         } else {
-          // Extract text from mixed content, note images
           const textParts = r.content
             .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
             .map((b) => b.text);
@@ -86,10 +78,10 @@ function messagesToSummaryInput(messages: ProviderMessage[]): ProviderMessage[] 
           textContent = textParts.join('\n');
           if (imageCount > 0) textContent += ` [+${imageCount} image(s)]`;
         }
-        const truncated = textContent.length > 500
-          ? textContent.slice(0, 500) + `… [${textContent.length} bytes total]`
+        const truncated = textContent.length > 300
+          ? textContent.slice(0, 300) + `… [${textContent.length}B]`
           : textContent;
-        return `[Tool result]: ${truncated}`;
+        return `[result]: ${truncated}`;
       });
       result.push({ role: 'user', content: parts.join('\n') });
     }

@@ -28,10 +28,28 @@ const MEMORY_FILES = [
 /** Days of full daily logs to include in the system prompt */
 const RECENT_DAYS = 3;
 
+/** File content cache — keyed by path, stores content + mtime to avoid re-reading unchanged files. */
+const fileCache = new Map<string, { mtime: number; content: string }>();
+
 function readIfExists(path: string): string | null {
   try {
     if (!existsSync(path)) return null;
     return readFileSync(path, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/** Read a file only if its mtime changed since last read. Returns cached content otherwise. */
+function readCached(path: string): string | null {
+  try {
+    if (!existsSync(path)) return null;
+    const mtime = statSync(path).mtimeMs;
+    const cached = fileCache.get(path);
+    if (cached && cached.mtime === mtime) return cached.content;
+    const content = readFileSync(path, 'utf-8');
+    fileCache.set(path, { mtime, content });
+    return content;
   } catch {
     return null;
   }
@@ -83,21 +101,21 @@ export function loadWorkspaceContext(workspacePath: string): string {
     mkdirSync(memoryDir, { recursive: true });
   }
 
-  // Load config files (read-only instruction files)
+  // Load config files (read-only instruction files) — cached by mtime
   // Look in config/ first, fall back to workspace root for backward compat
   const configDir = join(workspacePath, 'config');
   for (const file of CONFIG_FILES) {
     const content =
-      readIfExists(join(configDir, file.name)) ??
-      readIfExists(join(workspacePath, file.name));
+      readCached(join(configDir, file.name)) ??
+      readCached(join(workspacePath, file.name));
     if (content?.trim()) {
       sections.push(`## ${file.label} (config/${file.name}) [read-only]\n\n${content.trim()}`);
     }
   }
 
-  // Load memory files (freely writable)
+  // Load memory files (freely writable) — cached by mtime
   for (const file of MEMORY_FILES) {
-    const content = readIfExists(join(workspacePath, file.name));
+    const content = readCached(join(workspacePath, file.name));
     if (content?.trim()) {
       sections.push(`## ${file.label} (${file.name})\n\n${content.trim()}`);
     }
@@ -120,16 +138,18 @@ export function loadWorkspaceContext(workspacePath: string): string {
     }
   }
 
-  // Older files: just an index so the agent knows they exist
+  // Older files: compact index (last 30 days only, truncated previews)
   if (olderFiles.length > 0) {
-    const index = olderFiles.map((f) => {
-      const content = readIfExists(f.path);
+    const cappedFiles = olderFiles.slice(0, 30); // newest first, cap at 30 days
+    const index = cappedFiles.map((f) => {
+      const content = readCached(f.path);
       const firstLine = content?.split('\n').find((l) => l.trim() && !l.startsWith('#'))?.trim() ?? '';
-      const preview = firstLine.slice(0, 80);
+      const preview = firstLine.slice(0, 50);
       return `- ${f.date} (${Math.round(f.size / 1024)}KB)${preview ? `: ${preview}` : ''}`;
     });
+    const extra = olderFiles.length > 30 ? `\n(${olderFiles.length - 30} older files omitted)` : '';
     sections.push(
-      `## Older Memory Files\n\nThese daily logs exist but aren't loaded. Use read_file to access them if needed.\nPath: ${memoryDir}/YYYY-MM-DD.md\n\n${index.join('\n')}`
+      `## Older Memory Files\n\nUse read_file to access. Path: ${memoryDir}/YYYY-MM-DD.md\n\n${index.join('\n')}${extra}`
     );
   }
 

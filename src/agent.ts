@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderResponse, type ProviderToolDef, type AnthropicProvider, type UserContent, type ToolContentBlock, type ToolResult } from './provider.js';
 import { getToolDefinitions, executeTool, summarizeToolCall, fromClaudeCodeName } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
@@ -108,12 +109,15 @@ export class Agent {
   private maxTokens: number;
   private isOAuth: boolean;
   private toolDefs: ProviderToolDef[];
-  private systemPromptText: string;
+  /** Split system prompt: [0] = stable base (cached), [1] = dynamic workspace (uncached) */
+  private systemPromptParts: string[];
   private thinking: ThinkingLevel;
   private workspacePath: string;
   private _totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   private mcpManager: MCPManager | null;
   private extraSystemPrompt: string;
+  /** Track image hashes to deduplicate identical screenshots/images in tool results. */
+  private seenImageHashes = new Set<string>();
   readonly providerType: string;
 
   constructor(options: AgentOptions = {}) {
@@ -152,10 +156,10 @@ export class Agent {
       }
     }
 
-    // Load workspace context
+    // Load workspace context — split for prompt caching (base is stable/cached, workspace is dynamic)
     this.workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
     const workspaceContext = loadWorkspaceContext(this.workspacePath);
-    this.systemPromptText = BASE_SYSTEM_PROMPT + this.extraSystemPrompt + workspaceContext;
+    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext];
   }
 
   async chat(userMessage: string | UserContent, callbacks?: ChatCallbacks): Promise<string> {
@@ -165,16 +169,30 @@ export class Agent {
     const content: UserContent = typeof userMessage === 'string' ? userMessage : userMessage;
     this.messages.push({ role: 'user', content });
 
+    // Thinking heuristic: auto-lower effort on trivial first messages
+    const effectiveThinking = this.getEffectiveThinking(content);
+    const savedThinking = this.thinking;
+    if (effectiveThinking !== this.thinking) {
+      this.thinking = effectiveThinking;
+      log.info('Thinking auto-lowered', { from: savedThinking, to: effectiveThinking });
+    }
+
     let iterations = 0;
     const maxIterations = 25;
 
     while (iterations < maxIterations) {
       // Check abort before each iteration
       if (signal?.aborted) {
+        this.thinking = savedThinking;
         this.cleanupAfterAbort();
         throw new DOMException('Aborted', 'AbortError');
       }
       iterations++;
+
+      // Restore full thinking after the first iteration (tool use needs full reasoning)
+      if (iterations === 2 && this.thinking !== savedThinking) {
+        this.thinking = savedThinking;
+      }
 
       // Mid-loop compaction: check context before sending to avoid blowing the window
       if (iterations > 1 && this._totalUsage.contextTokens) {
@@ -205,7 +223,8 @@ export class Agent {
       });
 
       // No tool calls — return text
-      if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
+      if (response.toolCalls.length === 0) {
+        this.thinking = savedThinking; // restore thinking level
         // Auto-compact check after final response
         const contextUsed = response.usage.input + response.usage.cacheRead + response.usage.cacheWrite;
         if (contextUsed > this.getContextWindow() * 0.7 && this.messages.length > 8) {
@@ -214,40 +233,70 @@ export class Agent {
         return response.text;
       }
 
-      // Execute tools
+      // Execute tools — wrapped in try/catch to ensure tool_results are always
+      // pushed when the assistant message contains tool_use blocks, even on
+      // abort or error. Without this, orphaned tool_use blocks corrupt the
+      // message history and cause 400 errors on the next API call.
       const results: ToolResult[] = [];
-      for (const tc of response.toolCalls) {
-        const inputStr = JSON.stringify(tc.input);
-        const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '\u2026' : inputStr;
-        const toolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
-        const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
-        callbacks?.onToolStart?.(tc.name, truncatedInput, summary);
+      try {
+        for (const tc of response.toolCalls) {
+          // Check abort before each tool
+          if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-        const toolStart = performance.now();
-        let result: string | ToolContentBlock[];
-        if (toolName === 'dispatch_task' && callbacks?.onDispatchTask) {
-          const taskId = callbacks.onDispatchTask(tc.input as Record<string, unknown>);
-          result = `Task dispatched: ${taskId}. The background agent is working on it. You'll be notified when it completes. Continue chatting normally.`;
-        } else if (toolName === 'spawn_agent') {
-          result = await this.executeSpawnAgent(tc.input as Record<string, unknown>);
-        } else if (this.mcpManager?.isMCPTool(toolName)) {
-          result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
-        } else {
-          result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput);
-        }
-        const toolMs = (performance.now() - toolStart).toFixed(0);
-        log.info('Tool executed', { tool: toolName, ms: toolMs });
+          const inputStr = JSON.stringify(tc.input);
+          const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '\u2026' : inputStr;
+          const toolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
+          const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
+          callbacks?.onToolStart?.(tc.name, truncatedInput, summary);
 
-        // Truncate string results; image results pass through
-        if (typeof result === 'string') {
-          const maxLen = 50_000;
-          const truncated = result.length > maxLen
-            ? result.slice(0, maxLen) + `\n\n... [truncated, ${result.length} bytes total]`
-            : result;
-          results.push({ id: tc.id, content: truncated });
-        } else {
-          results.push({ id: tc.id, content: result });
+          const toolStart = performance.now();
+          let result: string | ToolContentBlock[];
+          if (toolName === 'dispatch_task' && callbacks?.onDispatchTask) {
+            const taskId = callbacks.onDispatchTask(tc.input as Record<string, unknown>);
+            result = `Task dispatched: ${taskId}. The background agent is working on it. You'll be notified when it completes. Continue chatting normally.`;
+          } else if (toolName === 'spawn_agent') {
+            result = await this.executeSpawnAgent(tc.input as Record<string, unknown>);
+          } else if (this.mcpManager?.isMCPTool(toolName)) {
+            result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
+          } else {
+            result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput);
+          }
+          const toolMs = (performance.now() - toolStart).toFixed(0);
+          log.info('Tool executed', { tool: toolName, ms: toolMs });
+
+          // Truncate string results based on remaining context budget; deduplicate images
+          if (typeof result === 'string') {
+            const maxLen = this.getToolOutputMaxChars(result.length);
+            const truncated = result.length > maxLen
+              ? result.slice(0, maxLen) + `\n\n... [truncated, ${result.length} bytes total]`
+              : result;
+            results.push({ id: tc.id, content: truncated });
+          } else {
+            results.push({ id: tc.id, content: this.deduplicateImages(result) });
+          }
         }
+      } catch (toolErr: unknown) {
+        // Fill in error results for any tools that didn't execute, so the
+        // message history stays valid (every tool_use needs a tool_result).
+        const executedIds = new Set(results.map((r) => r.id));
+        for (const tc of response.toolCalls) {
+          if (!executedIds.has(tc.id)) {
+            const e = toolErr as { message?: string; name?: string };
+            const errMsg = e.name === 'AbortError' ? 'Aborted by user' : (e.message ?? 'Tool execution failed');
+            results.push({ id: tc.id, content: errMsg });
+          }
+        }
+        // Push tool results before re-throwing so history stays consistent
+        this.messages.push({ role: 'tool_result', results });
+        callbacks?.onToolEnd?.();
+        // Re-throw aborts so the caller can handle cancellation
+        if ((toolErr as { name?: string }).name === 'AbortError' || signal?.aborted) {
+          this.thinking = savedThinking;
+          throw toolErr;
+        }
+        // For non-abort errors, continue the loop so the model sees the error
+        log.warn('Tool execution error (continuing)', { error: (toolErr as { message?: string }).message });
+        continue;
       }
 
       callbacks?.onToolEnd?.();
@@ -255,17 +304,38 @@ export class Agent {
     }
 
     // Hit iteration limit — compact before returning to salvage context
+    this.thinking = savedThinking; // restore thinking level
     await this.compact(callbacks);
     return '[agent hit maximum tool-use iterations]';
   }
 
+  /**
+   * Sanitize message history before sending to the API.
+   * Fixes orphaned tool_use blocks (assistant with toolCalls but no following tool_result)
+   * which cause 400 errors from the Anthropic API.
+   */
+  private sanitizeMessages(): void {
+    for (let i = 0; i < this.messages.length; i++) {
+      const msg = this.messages[i]!;
+      if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+        const next = this.messages[i + 1];
+        if (!next || next.role !== 'tool_result') {
+          // Orphaned tool_use — strip the tool calls so the API doesn't reject
+          log.warn('Sanitize: stripping orphaned tool_use from assistant message', { index: i, toolCount: msg.toolCalls.length });
+          msg.toolCalls = undefined;
+        }
+      }
+    }
+  }
+
   private async sendWithRetry(callbacks?: ChatCallbacks): Promise<ProviderResponse> {
+    this.sanitizeMessages();
     const maxRetries = 3;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         const signal = callbacks?.signal;
         return await this.provider.sendMessage(
-          this.systemPromptText,
+          this.systemPromptParts,
           this.messages,
           this.toolDefs,
           { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking, ...(signal ? { signal } : {}) },
@@ -344,7 +414,7 @@ export class Agent {
           toolCalls: response.toolCalls.length > 0 ? response.toolCalls : undefined,
         });
 
-        if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
+        if (response.toolCalls.length === 0) {
           finalText = response.text;
           break;
         }
@@ -354,8 +424,10 @@ export class Agent {
         for (const tc of response.toolCalls) {
           const result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
           if (typeof result === 'string') {
-            const truncated = result.length > 50_000
-              ? result.slice(0, 50_000) + '\n\n... [truncated]'
+            // Sub-agents start with a fresh context — use parent's budget method
+            const maxLen = this.getToolOutputMaxChars(result.length);
+            const truncated = result.length > maxLen
+              ? result.slice(0, maxLen) + `\n\n... [truncated, ${result.length} bytes total]`
               : result;
             results.push({ id: tc.id, content: truncated });
           } else {
@@ -397,6 +469,84 @@ export class Agent {
 
   private getContextWindow(): number {
     return 200_000;
+  }
+
+  /**
+   * Thinking heuristic: auto-lower thinking effort on trivial messages.
+   * Trivial = short text, no images, no complex context in recent history.
+   * Returns the effective thinking level (may be lower than this.thinking).
+   */
+  private getEffectiveThinking(content: UserContent): ThinkingLevel {
+    // Don't lower if already low/off
+    if (this.thinking === 'off' || this.thinking === 'low') return this.thinking;
+
+    const text = typeof content === 'string' ? content : content
+      .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+      .map((p) => p.text)
+      .join(' ');
+
+    // Has images → needs full thinking
+    if (typeof content !== 'string' && content.some((p) => p.type === 'image')) return this.thinking;
+
+    const wordCount = text.split(/\s+/).length;
+
+    // Short messages with no complex keywords → lower thinking
+    if (wordCount <= 10) {
+      const complexKeywords = /\b(debug|refactor|architect|design|implement|optimize|analyze|explain why|compare|trade.?off)\b/i;
+      if (!complexKeywords.test(text)) {
+        return 'low';
+      }
+    }
+
+    // Medium messages → step down one level
+    if (wordCount <= 30) {
+      const levels: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
+      const idx = levels.indexOf(this.thinking);
+      return idx > 1 ? levels[idx - 1]! : this.thinking;
+    }
+
+    return this.thinking;
+  }
+
+  /**
+   * Deduplicate images in tool results. If an image's hash was already seen,
+   * replace it with a text placeholder to avoid re-sending identical data.
+   */
+  private deduplicateImages(blocks: ToolContentBlock[]): ToolContentBlock[] {
+    return blocks.map((block) => {
+      if (block.type !== 'image') return block;
+      const hash = createHash('sha256').update(block.data.slice(0, 2048)).digest('hex').slice(0, 16);
+      if (this.seenImageHashes.has(hash)) {
+        log.info('Image deduplicated', { hash });
+        return { type: 'text', text: '[identical screenshot omitted — same as previously sent]' };
+      }
+      this.seenImageHashes.add(hash);
+      return block;
+    });
+  }
+
+  /**
+   * Dynamic tool output truncation based on remaining context budget.
+   * Returns the max char length for a tool result string.
+   * - available = contextWindow - currentUsage - responseBuffer (in tokens)
+   * - If result > available/2, truncate to available/3
+   * - Floor at 10K chars so truncated output is still useful
+   */
+  private getToolOutputMaxChars(resultLength: number): number {
+    const contextWindow = this.getContextWindow();
+    const currentUsage = this._totalUsage.contextTokens ?? 0;
+    const responseBuffer = this.maxTokens;
+    const availableTokens = Math.max(0, contextWindow - currentUsage - responseBuffer);
+
+    // ~4 chars per token as rough estimate
+    const availableChars = availableTokens * 4;
+    const threshold = Math.floor(availableChars / 2);
+
+    // Result fits comfortably — no truncation needed
+    if (resultLength <= threshold) return resultLength;
+
+    // Truncate to 1/3 of available budget, floor at 10K chars
+    return Math.max(10_000, Math.floor(availableChars / 3));
   }
 
   /**
@@ -451,6 +601,7 @@ export class Agent {
   reset(): void {
     this.messages = [];
     this._totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    this.seenImageHashes.clear();
   }
 
   get conversationLength(): number { return this.messages.length; }
@@ -464,12 +615,12 @@ export class Agent {
 
   reloadSystemPrompt(): void {
     const workspaceContext = loadWorkspaceContext(this.workspacePath);
-    this.systemPromptText = BASE_SYSTEM_PROMPT + this.extraSystemPrompt + workspaceContext;
+    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext];
   }
 
   reloadWorkspace(workspacePath: string): void {
     const workspaceContext = loadWorkspaceContext(workspacePath);
-    this.systemPromptText = BASE_SYSTEM_PROMPT + this.extraSystemPrompt + workspaceContext;
+    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext];
   }
 
   /** Update extra system prompt (e.g., host daemon capabilities changed). */

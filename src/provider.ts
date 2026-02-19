@@ -54,14 +54,23 @@ export interface TextContent {
   text: string;
 }
 
-/** User message content — plain string or mixed text+images. */
-export type UserContent = string | (TextContent | ImageContent)[];
+export type DocumentMediaType = 'application/pdf';
+
+export interface DocumentContent {
+  type: 'document';
+  mediaType: DocumentMediaType;
+  data: string; // base64
+  title?: string;
+}
+
+/** User message content — plain string or mixed text+images+documents. */
+export type UserContent = string | (TextContent | ImageContent | DocumentContent)[];
 
 // --- Provider interface ---
 
 export interface Provider {
   sendMessage(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     messages: ProviderMessage[],
     tools: ProviderToolDef[],
     options: {
@@ -96,7 +105,7 @@ export class AnthropicProvider implements Provider {
   }
 
   async sendMessage(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     messages: ProviderMessage[],
     tools: ProviderToolDef[],
     options: { model: string; maxTokens: number; thinking: ThinkingLevel; signal?: AbortSignal },
@@ -197,10 +206,21 @@ export class AnthropicProvider implements Provider {
         if (typeof msg.content === 'string') {
           result.push({ role: 'user', content: msg.content });
         } else {
-          // Mixed content (text + images)
+          // Mixed content (text + images + documents)
           const blocks: Anthropic.ContentBlockParam[] = msg.content.map((part) => {
             if (part.type === 'text') {
               return { type: 'text' as const, text: part.text };
+            }
+            if (part.type === 'document') {
+              return {
+                type: 'document' as const,
+                source: {
+                  type: 'base64' as const,
+                  media_type: part.mediaType,
+                  data: part.data,
+                },
+                ...(part.title ? { title: part.title } : {}),
+              };
             }
             return {
               type: 'image' as const,
@@ -271,13 +291,14 @@ export class OpenAIProvider implements Provider {
   }
 
   async sendMessage(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     messages: ProviderMessage[],
     tools: ProviderToolDef[],
     options: { model: string; maxTokens: number; thinking: ThinkingLevel; signal?: AbortSignal },
     callbacks?: StreamCallbacks,
   ): Promise<ProviderResponse> {
-    const openaiMessages = this.convertMessages(systemPrompt, messages);
+    const promptStr = Array.isArray(systemPrompt) ? systemPrompt.join('\n\n') : systemPrompt;
+    const openaiMessages = this.convertMessages(promptStr, messages);
     const openaiTools: ChatCompletionTool[] = tools.map((t) => ({
       type: 'function' as const,
       function: {
@@ -366,10 +387,13 @@ export class OpenAIProvider implements Provider {
         if (typeof msg.content === 'string') {
           result.push({ role: 'user', content: msg.content });
         } else {
-          // Mixed content (text + images) for OpenAI vision
+          // Mixed content (text + images + documents) for OpenAI vision
           const parts = msg.content.map((part) => {
             if (part.type === 'text') {
               return { type: 'text' as const, text: part.text };
+            }
+            if (part.type === 'document') {
+              return { type: 'text' as const, text: `[PDF document: ${part.title ?? 'untitled'}] (PDF content not supported by this provider)` };
             }
             return {
               type: 'image_url' as const,

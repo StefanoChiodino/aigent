@@ -217,7 +217,9 @@ const spawnAgentTool: ToolDef = {
     'with full tool access (exec, read, write, edit, grep, list_files) and runs until the task is ' +
     'complete or it hits the iteration limit. Use this for: complex tasks you want to delegate, ' +
     'parallel research, reviewing code while you work on something else, or any task that benefits ' +
-    'from a fresh context. The sub-agent shares your workspace and filesystem.',
+    'from a fresh context. The sub-agent shares your workspace and filesystem.\n\n' +
+    'COST TIP: For simple read-only tasks (searching, reading, summarizing), use model "claude-haiku-4-5-20251001" ' +
+    'to save tokens. Only use the default (Opus) for tasks requiring complex reasoning or multi-step edits.',
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -231,7 +233,7 @@ const spawnAgentTool: ToolDef = {
       },
       model: {
         type: 'string',
-        description: 'Model to use (default: same as parent). Use a smaller model for simple tasks.',
+        description: 'Model to use (default: same as parent). Use "claude-haiku-4-5-20251001" for simple read-only tasks to save cost.',
       },
       max_iterations: {
         type: 'number',
@@ -251,7 +253,8 @@ const dispatchTaskTool: ToolDef = {
     'When the background task completes, its result will be injected back into the conversation. ' +
     'Prefer this over spawn_agent for long-running work so the user can keep chatting.\n\n' +
     'By default, background agents are READ-ONLY (no file writes, no network). ' +
-    'Grant additional capabilities via the capabilities parameter when needed.',
+    'Grant additional capabilities via the capabilities parameter when needed.\n\n' +
+    'COST TIP: Background tasks are often read-only research — use model "claude-haiku-4-5-20251001" to save tokens.',
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -265,7 +268,7 @@ const dispatchTaskTool: ToolDef = {
       },
       model: {
         type: 'string',
-        description: 'Model to use (default: same as parent). Use a smaller model for simple tasks.',
+        description: 'Model to use (default: same as parent). Use "claude-haiku-4-5-20251001" for simple read-only tasks to save cost.',
       },
       max_iterations: {
         type: 'number',

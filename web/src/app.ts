@@ -166,6 +166,148 @@ const $sbCapsList = $('sb-caps-list');
 let paletteItems: CommandDef[] = [];
 let paletteSelected = 0;
 
+// ── Pending attachments (images + files) ─────────────────────
+
+interface PendingAttachment {
+  id: string;
+  name: string;
+  mediaType: string;
+  data: string;       // base64 (no data: prefix)
+  dataUrl?: string;   // for image preview display (only images)
+  size: number;       // original file size in bytes
+}
+
+let pendingAttachments: PendingAttachment[] = [];
+let attachmentIdCounter = 0;
+
+// Map from display text to image dataUrls for rendering in chat bubbles
+const messageImageUrls = new Map<string, string[]>();
+
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_ATTACHMENTS = 10;
+
+function isAllowedType(mime: string): boolean {
+  return IMAGE_TYPES.includes(mime)
+    || mime === 'application/pdf'
+    || mime.startsWith('text/')
+    || ['application/json', 'application/javascript', 'application/typescript',
+        'application/xml', 'application/yaml', 'application/x-yaml',
+        'application/toml', 'application/x-sh'].includes(mime);
+}
+
+function guessMimeFromExtension(name: string): string | null {
+  const ext = name.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    md: 'text/markdown', txt: 'text/plain', json: 'application/json',
+    js: 'text/javascript', mjs: 'text/javascript', ts: 'text/typescript',
+    tsx: 'text/typescript', jsx: 'text/javascript',
+    py: 'text/plain', yaml: 'application/yaml', yml: 'application/yaml',
+    toml: 'application/toml', csv: 'text/csv', xml: 'application/xml',
+    html: 'text/html', css: 'text/css', sh: 'application/x-sh',
+    bash: 'application/x-sh', rs: 'text/plain', go: 'text/plain',
+    java: 'text/plain', c: 'text/plain', cpp: 'text/plain', h: 'text/plain',
+    rb: 'text/plain', php: 'text/plain', swift: 'text/plain',
+    kt: 'text/plain', scala: 'text/plain', sql: 'text/plain',
+    graphql: 'text/plain', proto: 'text/plain', r: 'text/plain',
+    pdf: 'application/pdf', svg: 'text/xml', log: 'text/plain',
+    env: 'text/plain', cfg: 'text/plain', ini: 'text/plain',
+    conf: 'text/plain', dockerfile: 'text/plain', makefile: 'text/plain',
+  };
+  return map[ext ?? ''] ?? null;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function addFile(file: File): void {
+  if (pendingAttachments.length >= MAX_ATTACHMENTS) return;
+  if (file.size > MAX_FILE_SIZE) return;
+
+  let mime = file.type;
+  if (!mime || mime === 'application/octet-stream') {
+    mime = guessMimeFromExtension(file.name) ?? mime;
+  }
+  if (!isAllowedType(mime)) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result as string;
+    const base64 = dataUrl.split(',')[1];
+    if (!base64) return;
+
+    const isImage = IMAGE_TYPES.includes(mime);
+    pendingAttachments.push({
+      id: `att_${++attachmentIdCounter}`,
+      name: file.name,
+      mediaType: mime,
+      data: base64,
+      dataUrl: isImage ? dataUrl : undefined,
+      size: file.size,
+    });
+    renderAttachmentPreview();
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderAttachmentPreview(): void {
+  let $preview = document.getElementById('attachment-preview');
+  if (pendingAttachments.length === 0) {
+    if ($preview) $preview.remove();
+    return;
+  }
+  if (!$preview) {
+    $preview = document.createElement('div');
+    $preview.id = 'attachment-preview';
+    const $inputRow = $('input-row');
+    $inputRow.parentNode!.insertBefore($preview, $inputRow);
+  }
+  $preview.innerHTML = '';
+  for (const att of pendingAttachments) {
+    const thumb = document.createElement('div');
+    if (att.dataUrl) {
+      // Image thumbnail
+      thumb.className = 'attachment-thumb image-thumb';
+      const imgEl = document.createElement('img');
+      imgEl.src = att.dataUrl;
+      thumb.appendChild(imgEl);
+    } else {
+      // File badge
+      thumb.className = 'attachment-thumb file-badge';
+      const icon = document.createElement('span');
+      icon.className = 'file-icon';
+      icon.textContent = att.mediaType === 'application/pdf' ? '\uD83D\uDCC4' : '\uD83D\uDCCB';
+      thumb.appendChild(icon);
+      const info = document.createElement('div');
+      info.className = 'file-info';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'file-name';
+      nameEl.textContent = att.name.length > 24 ? att.name.slice(0, 21) + '...' : att.name;
+      nameEl.title = att.name;
+      info.appendChild(nameEl);
+      const sizeEl = document.createElement('span');
+      sizeEl.className = 'file-size';
+      sizeEl.textContent = formatFileSize(att.size);
+      info.appendChild(sizeEl);
+      thumb.appendChild(info);
+    }
+    // Remove button
+    const btn = document.createElement('button');
+    btn.className = 'attachment-remove';
+    btn.textContent = '\u00d7';
+    btn.title = 'Remove';
+    btn.addEventListener('click', () => {
+      pendingAttachments = pendingAttachments.filter(a => a.id !== att.id);
+      renderAttachmentPreview();
+    });
+    thumb.appendChild(btn);
+    $preview.appendChild(thumb);
+  }
+}
+
 // ── WebSocket connection ─────────────────────────────────────
 
 function connect(): void {
@@ -413,6 +555,21 @@ function appendMessage(msg: DisplayMessage, animate = true): void {
     content.innerHTML = renderMarkdown(msg.content);
   }
   el.appendChild(content);
+
+  // Render image thumbnails if this user message had attached images
+  const imgUrls = messageImageUrls.get(msg.content);
+  if (imgUrls && msg.role === 'user') {
+    const strip = document.createElement('div');
+    strip.className = 'message-images';
+    for (const url of imgUrls) {
+      const img = document.createElement('img');
+      img.src = url;
+      img.className = 'message-image-thumb';
+      strip.appendChild(img);
+    }
+    el.appendChild(strip);
+    messageImageUrls.delete(msg.content);
+  }
 
   $messages.appendChild(el);
   scrollToBottom();
@@ -758,13 +915,34 @@ function completePaletteSelection(): void {
 
 function submitMessage(useThinkingOverride = false): void {
   const text = $input.value.trim();
-  if (!text) return;
+  if (!text && pendingAttachments.length === 0) return;
   $input.value = '';
   paletteItems = [];
   paletteSelected = 0;
   $palette.classList.add('hidden');
   autoGrow();
   const msg: Record<string, unknown> = { type: 'message', content: text };
+  if (pendingAttachments.length > 0) {
+    msg.attachments = pendingAttachments.map(a => ({ name: a.name, mediaType: a.mediaType, data: a.data }));
+
+    // Build display label
+    const images = pendingAttachments.filter(a => IMAGE_TYPES.includes(a.mediaType));
+    const files = pendingAttachments.filter(a => !IMAGE_TYPES.includes(a.mediaType));
+    const labels: string[] = [];
+    if (images.length) labels.push(`${images.length} image${images.length > 1 ? 's' : ''}`);
+    if (files.length) labels.push(`${files.length} file${files.length > 1 ? 's' : ''}`);
+    const label = `[${labels.join(', ')}]`;
+    const displayText = text ? `${label} ${text}` : label;
+
+    // Stash image dataUrls for rendering in the chat bubble
+    const imgUrls = pendingAttachments.filter(a => a.dataUrl).map(a => a.dataUrl!);
+    if (imgUrls.length > 0) {
+      messageImageUrls.set(displayText, imgUrls);
+    }
+
+    pendingAttachments = [];
+    renderAttachmentPreview();
+  }
   if (useThinkingOverride) {
     // Flip: if thinking is on, override to off; if off, override to high
     msg.thinkingOverride = thinkingLevel === 'off' ? 'high' : 'off';
@@ -855,7 +1033,65 @@ $input.addEventListener('input', () => {
   updatePalette();
 });
 
+// ── Paste & drag-drop image handling ────────────────────────
+
+$input.addEventListener('paste', (e: ClipboardEvent) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.kind !== 'file') continue;
+    const file = item.getAsFile();
+    if (!file) continue;
+    let mime = file.type;
+    if (!mime) mime = guessMimeFromExtension(file.name) ?? '';
+    if (isAllowedType(mime)) {
+      e.preventDefault();
+      addFile(file);
+    }
+  }
+});
+
+const $inputArea = $('input-area');
+
+$inputArea.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  $inputArea.classList.add('drag-over');
+});
+
+$inputArea.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  $inputArea.classList.remove('drag-over');
+});
+
+$inputArea.addEventListener('drop', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  $inputArea.classList.remove('drag-over');
+  const files = e.dataTransfer?.files;
+  if (!files) return;
+  for (const file of files) {
+    addFile(file);
+  }
+});
+
 $send.addEventListener('click', () => submitMessage());
+
+// ── Attach button ────────────────────────────────────────────
+
+const $attach = $('attach') as HTMLButtonElement;
+const $fileInput = $('file-input') as HTMLInputElement;
+
+$attach.addEventListener('click', () => $fileInput.click());
+
+$fileInput.addEventListener('change', () => {
+  const files = $fileInput.files;
+  if (!files) return;
+  for (const file of files) {
+    addFile(file);
+  }
+  $fileInput.value = ''; // reset so same file can be re-selected
+});
 
 $cancel.addEventListener('click', () => {
   wsSend({ type: 'cancel' });

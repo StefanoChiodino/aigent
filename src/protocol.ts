@@ -17,7 +17,7 @@ export interface TokenUsage {
 // --- Client → Server ---
 
 export type ClientCommand =
-  | { type: 'message'; content: string; thinkingOverride?: ThinkingLevel }
+  | { type: 'message'; content: string; images?: { mediaType: string; data: string }[]; attachments?: { name: string; mediaType: string; data: string }[]; thinkingOverride?: ThinkingLevel }
   | { type: 'cancel' }
   | { type: 'command'; cmd: string }
   | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }

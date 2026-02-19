@@ -104,10 +104,16 @@ export class LLMProxy {
       );
 
       const ms = (performance.now() - start).toFixed(0);
+      const totalInput = response.usage.cacheRead + response.usage.input;
+      const cacheHitRate = totalInput > 0
+        ? ((response.usage.cacheRead / totalInput) * 100).toFixed(1)
+        : '0.0';
       log.info('LLM response', {
         id, ms, stopReason: response.stopReason,
         inputTokens: response.usage.input, outputTokens: response.usage.output,
-        cacheRead: response.usage.cacheRead, toolCalls: response.toolCalls.length,
+        cacheRead: response.usage.cacheRead, cacheWrite: response.usage.cacheWrite,
+        cacheHitRate: `${cacheHitRate}%`,
+        toolCalls: response.toolCalls.length,
       });
 
       writeLine(socket, { type: 'llm_done', id, response });

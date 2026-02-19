@@ -13,7 +13,7 @@ import { existsSync, unlinkSync, readFileSync, writeFileSync, appendFileSync, mk
 import { resolve, join, dirname } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
-import type { ProviderMessage, UserContent, TextContent, ImageContent, ImageMediaType, ToolResult } from './provider.js';
+import type { ProviderMessage, UserContent, TextContent, ImageContent, DocumentContent, ImageMediaType, ToolResult } from './provider.js';
 import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
 import { computeCost } from './pricing.js';
@@ -54,6 +54,22 @@ function readImageBase64(filePath: string): { data: string; mediaType: ImageMedi
     return null;
   }
 }
+
+// --- Attachment support ---
+
+const IMAGE_TYPES_SET = new Set<string>(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+const TEXT_MIME_TYPES = new Set([
+  'application/json', 'application/javascript', 'application/typescript',
+  'application/xml', 'application/yaml', 'application/x-yaml',
+  'application/toml', 'application/x-sh',
+]);
+
+function isTextMime(mime: string): boolean {
+  return mime.startsWith('text/') || TEXT_MIME_TYPES.has(mime);
+}
+
+const MAX_TEXT_FILE_SIZE = 500_000; // ~500KB decoded text limit
 
 /**
  * Parse a user message for image file paths.
@@ -502,7 +518,7 @@ function dispatchBackgroundTask(input: {
           toolCalls: response.toolCalls.length > 0 ? response.toolCalls : undefined,
         });
 
-        if (response.toolCalls.length === 0 || response.stopReason === 'end_turn') {
+        if (response.toolCalls.length === 0) {
           finalText = response.text;
           break;
         }
@@ -640,7 +656,10 @@ function getState(): ServerState {
 
 function doAutoSave(): void {
   try {
-    autoSaveSession(workspacePath, agent.getMessages(), messages, usage);
+    autoSaveSession(workspacePath, agent.getMessages(), messages, usage, {
+      current: currentThinking,
+      savedEffort: savedEffortLevel,
+    });
   } catch {
     // Non-critical
   }
@@ -687,6 +706,7 @@ function handleCommand(cmd: string): boolean {
     }
     addSystemMessage(`Reasoning: on (${currentThinking})`);
     broadcast({ type: 'state', thinking: currentThinking });
+    doAutoSave();
     return true;
   }
 
@@ -698,6 +718,7 @@ function handleCommand(cmd: string): boolean {
     currentThinking = 'off';
     addSystemMessage('Reasoning: off');
     broadcast({ type: 'state', thinking: currentThinking });
+    doAutoSave();
     return true;
   }
 
@@ -715,6 +736,7 @@ function handleCommand(cmd: string): boolean {
       currentThinking = level;
       addSystemMessage(`Effort: ${level}`);
       broadcast({ type: 'state', thinking: currentThinking });
+      doAutoSave();
     } else {
       addSystemMessage(`Invalid effort. Options: ${effortLevels.join(', ')}`);
     }
@@ -921,7 +943,7 @@ function handleCommand(cmd: string): boolean {
 
 // --- Message processing ---
 
-interface QueuedMessage { content: string; thinkingOverride?: ThinkingLevel | undefined }
+interface QueuedMessage { content: string | UserContent; displayText?: string; thinkingOverride?: ThinkingLevel | undefined }
 const messageQueue: QueuedMessage[] = [];
 let processingQueue = false;
 
@@ -932,7 +954,7 @@ async function processMessage(msg: QueuedMessage): Promise<void> {
     agent.thinkingLevel = msg.thinkingOverride;
   }
   try {
-    await processAgentTurn(msg.content);
+    await processAgentTurn(msg.content, msg.displayText ? { displayText: msg.displayText } : {});
   } finally {
     // Restore previous thinking level after one-shot override
     if (savedThinking !== undefined) {
@@ -999,14 +1021,69 @@ function handleClient(socket: Socket): void {
         switch (cmd.type) {
           case 'message': {
             const trimmed = cmd.content.trim();
-            if (!trimmed) break;
-            if (handleCommand(trimmed)) break;
-            const queued: QueuedMessage = { content: trimmed, thinkingOverride: cmd.thinkingOverride };
+            const hasImages = cmd.images && cmd.images.length > 0;
+            const hasAttachments = cmd.attachments && cmd.attachments.length > 0;
+            if (!trimmed && !hasImages && !hasAttachments) break;
+            if (trimmed && !hasImages && !hasAttachments && handleCommand(trimmed)) break;
+
+            // Build content: if images/attachments present, create UserContent array
+            let content: string | UserContent = trimmed;
+            let displayText: string | undefined;
+            if (hasImages || hasAttachments) {
+              const parts: (TextContent | ImageContent | DocumentContent)[] = [];
+
+              // Legacy image field (backward compat)
+              if (hasImages) {
+                for (const img of cmd.images!) {
+                  parts.push({ type: 'image', mediaType: img.mediaType as ImageMediaType, data: img.data });
+                }
+              }
+
+              // New attachments field
+              if (hasAttachments) {
+                for (const att of cmd.attachments!) {
+                  if (IMAGE_TYPES_SET.has(att.mediaType)) {
+                    parts.push({ type: 'image', mediaType: att.mediaType as ImageMediaType, data: att.data });
+                  } else if (att.mediaType === 'application/pdf') {
+                    parts.push({ type: 'document', mediaType: 'application/pdf', data: att.data, title: att.name });
+                  } else if (isTextMime(att.mediaType)) {
+                    const decoded = Buffer.from(att.data, 'base64').toString('utf-8');
+                    const truncated = decoded.length > MAX_TEXT_FILE_SIZE
+                      ? decoded.slice(0, MAX_TEXT_FILE_SIZE) + '\n\n... [truncated]'
+                      : decoded;
+                    parts.push({ type: 'text', text: `--- File: ${att.name} ---\n${truncated}\n--- End of ${att.name} ---` });
+                  } else {
+                    parts.push({ type: 'text', text: `[Unsupported file: ${att.name} (${att.mediaType})]` });
+                  }
+                }
+              }
+
+              parts.push({ type: 'text', text: trimmed || 'Review these attachments.' });
+              content = parts;
+
+              // Build display text label
+              const imgCount = parts.filter(p => p.type === 'image').length;
+              const docCount = parts.filter(p => p.type === 'document').length;
+              const fileCount = parts.filter(p => p.type === 'text' && p.text.startsWith('--- File:')).length;
+              const labels: string[] = [];
+              if (imgCount) labels.push(`${imgCount} image${imgCount > 1 ? 's' : ''}`);
+              if (docCount) labels.push(`${docCount} PDF${docCount > 1 ? 's' : ''}`);
+              if (fileCount) labels.push(`${fileCount} file${fileCount > 1 ? 's' : ''}`);
+              displayText = labels.length > 0
+                ? (trimmed ? `[${labels.join(', ')}] ${trimmed}` : `[${labels.join(', ')}]`)
+                : undefined;
+            }
+
+            const queued: QueuedMessage = {
+              content,
+              ...(displayText ? { displayText } : {}),
+              ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
+            };
             if (isLoading) {
               messageQueue.push(queued);
               const queuedMsg: DisplayMessage = {
                 role: 'user',
-                content: `[queued] ${trimmed}`,
+                content: `[queued] ${displayText ?? trimmed}`,
                 timestamp: new Date().toISOString(),
               };
               messages.push(queuedMsg);
@@ -1075,6 +1152,21 @@ function restoreSession(): void {
   if (saved) {
     const agentMessages = saved.agentMessages as ProviderMessage[];
 
+    // Fix orphaned tool_use blocks — assistant messages with toolCalls but no
+    // following tool_result. This can happen if the previous session was
+    // interrupted during tool execution. Strip the toolCalls to prevent
+    // 400 errors from the API.
+    for (let i = 0; i < agentMessages.length; i++) {
+      const msg = agentMessages[i]!;
+      if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+        const next = agentMessages[i + 1];
+        if (!next || next.role !== 'tool_result') {
+          log.warn('Session restore: stripping orphaned tool_use', { index: i });
+          msg.toolCalls = undefined;
+        }
+      }
+    }
+
     // If the conversation ends mid-tool-loop (last message is a tool_result),
     // the model will try to continue the previous work instead of handling new
     // user input. Cap it with a synthetic assistant message so the model knows
@@ -1092,6 +1184,19 @@ function restoreSession(): void {
     if (saved.usage) {
       usage = saved.usage;
       agent.setUsage(saved.usage);
+    }
+    // Restore thinking level so it persists across restarts (env var is just the default)
+    if (saved.thinking) {
+      const level = saved.thinking.current as ThinkingLevel;
+      const effort = saved.thinking.savedEffort as ThinkingLevel;
+      if (VALID_THINKING_LEVELS.includes(level)) {
+        currentThinking = level;
+        agent.thinkingLevel = level;
+      }
+      if (VALID_THINKING_LEVELS.includes(effort)) {
+        savedEffortLevel = effort;
+      }
+      log.info('Thinking restored', { current: currentThinking, savedEffort: savedEffortLevel });
     }
     log.info('Session restored', { messages: messages.length, tokens: usage.input + usage.output });
   }

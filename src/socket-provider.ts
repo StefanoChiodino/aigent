@@ -30,7 +30,7 @@ export const LLM_PROXY_SOCKET = `${SOCKET_DIR}/llm-proxy.sock`;
 export interface LLMRequest {
   type: 'llm_request';
   id: string;
-  system: string;
+  system: string | string[];
   messages: ProviderMessage[];
   tools: ProviderToolDef[];
   options: {
@@ -138,7 +138,7 @@ export class SocketProvider implements Provider {
   }
 
   async sendMessage(
-    systemPrompt: string,
+    systemPrompt: string | string[],
     messages: ProviderMessage[],
     tools: ProviderToolDef[],
     options: {

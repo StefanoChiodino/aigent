@@ -54,7 +54,7 @@ Docker container (worker.ts → server.ts)
 
 ## Development Rules
 
-1. **Check TODO.md and docs/PLAN.md before starting work.** They track what's done and what's next. Don't build something that already exists. Don't start something that isn't prioritized unless the user asks.
+1. **Check TODO.md before starting work.** They track what's done and what's next. Don't build something that already exists. Don't start something that isn't prioritized unless the user asks.
 2. **Update TODO.md when you finish something.** Check off completed items. Add new items you discover. This is how continuity works across sessions.
 3. **Update docs/PLAN.md for architectural changes.** If you add a feature, move it from "Next Up" to "Done". If you discover something new that needs doing, add it.
 4. **No `console.log` while TUI is active** — it breaks Ink rendering. Log to `/tmp/aigent-server.log`.

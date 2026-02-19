@@ -1,40 +1,44 @@
 ~~BUG: reasoning and thinking level should shift to the left hand instead of the top bar~~ DONE
 
-BUG: we have some mounts by default, but I can't ever see any on the left hand side. I can see new ones tho!
-
-When mounting, should I not specify what folder to mount into the guest? Maybe that's just not useful and we can keep it being a 1:1?
-
+~~BUG: we have some mounts by default, but I can't ever see any on the left hand side. I can see new ones tho!~~ DONE — implicit docker-compose.yml mounts now included in sidebar
 
 ## Token Optimization / Cost Savings
 
 ### High impact
-- [ ] Split system prompt caching — workspace context reloads every turn via reloadSystemPrompt(), busting the cache on the stable base prompt. Split into [cached base instructions] + [cached tools] + [uncached workspace context] so the big static block stays cached ($0.50-1.00/session saved)
-- [ ] Dynamic tool output truncation — currently hard-coded 50KB cap (agent.ts:243). Scale truncation to remaining context budget instead (available = 200K - current_usage - response_buffer; if result > available/2, truncate to available/3) ($1-3/session saved)
-- [ ] Sub-agent model routing — route simple read-only background tasks (spawn_agent/dispatch_task) to Haiku instead of Opus. Opt-in, not default ($2-5/background task saved)
-- [ ] Per-message thinking override (Ctrl+Enter = boost) — send with high/max thinking for one message only, default stays at current level. Avoids /effort round-trips. Needs: web UI keydown handler, protocol field { type: 'message', content, thinkingOverride? }, server-side one-shot override in agent.ts
+- [x] Split system prompt caching — split into [cached base instructions] + [uncached workspace context] so the stable block stays cached. Provider interface now accepts string[], buildSystemPrompt puts cache_control only on first block
+- [x] Dynamic tool output truncation — scales to remaining context budget (available = contextWindow - currentUsage - responseBuffer; if result > available/2, truncate to available/3; floor at 10K chars)
+- [x] Sub-agent model routing — spawn_agent/dispatch_task tool descriptions now guide the agent to use Haiku for simple read-only tasks. Model parameter already supported
+- [x] Per-message thinking override (Ctrl+Enter = boost) — send with high/max thinking for one message only, default stays at current level. Avoids /effort round-trips. Needs: web UI keydown handler, protocol field { type: 'message', content, thinkingOverride? }, server-side one-shot override in agent.ts
 
 ### Medium impact
-- [ ] Cache hit monitoring — log cache hit rates in llm-proxy.ts (cacheRead / (cacheRead + input)) to verify caching is actually working. Free observability
-- [ ] Thinking heuristics — auto-lower thinking effort on trivial messages (short, no complex tool context). Could save $0.20-2.00/session on over-thinking
-- [ ] Workspace config file caching — AGENTS.md, SOUL.md, USER.md rarely change. Add cache_control ephemeral on config sections, only reload if mtime changed ($0.30-0.75/session)
+- [x] Cache hit monitoring — llm-proxy.ts now logs cacheHitRate% (cacheRead / (cacheRead + input)) on every response
+- [x] Thinking heuristics — auto-lowers thinking on trivial messages (≤10 words, no complex keywords → low; ≤30 words → one level down). Restores after first iteration
+- [x] Workspace config file caching — readCached() in workspace.ts checks mtime before re-reading. Config and memory files skip disk reads when unchanged
 
 ### Low impact / quick wins
-- [ ] Workspace memory index compression — truncate older file previews to 50 chars, cap to last 30 days, drop preview text (agent can fetch if needed)
-- [ ] Compaction prompt optimization — current compact.ts prompt is verbose (~7 lines). Tighten to save ~100 tokens per compaction
-- [ ] Image deduplication — track image hashes, skip re-sending identical screenshots
-- [ ] Tool metadata stripping during compaction — strip non-essential fields from tool inputs/results before abbreviation
+- [x] Workspace memory index compression — older file previews truncated to 50 chars, capped to last 30 days, omits excess
+- [x] Compaction prompt optimization — compact.ts prompt tightened from 7 verbose lines to 1 concise line (~100 tokens saved per compaction)
+- [x] Image deduplication — tracks SHA-256 hashes of image data, replaces duplicates with text placeholder
+- [x] Tool metadata stripping during compaction — strips bulky fields (content, file_content, data, base64) from tool inputs, tighter truncation (150 chars input, 300 chars results)
 
 ### Others
 
-paste images/screenshots
-
+~~paste images/screenshots~~
 
 attachments
 
 BUG: after cancelling a task the blinking loading character doesn't go away from old tasks
+
+background tasks should be visible on the web UI sidebar (running/completed). Currently only visible as yellow completion messages in chat.
 
 on web, asking for permission should be a bit more obvious, maybe need an audio clue as well, maybe even a web notification
 
 implement local audio with nvidia parakeet
 
 implement local tts using microsoft TTS
+
+When mounting, should I not specify what folder to mount into the guest? Maybe that's just not useful and we can keep it being a 1:1?
+
+~~reasoning and effort should persist between reloads. The env vars should just be defaults~~ DONE — thinking level + savedEffortLevel now persisted in .autosave.json and restored on server restart
+
+System messages could be collapsed when coming out in a row. As in, should look distinct, but present in the same yellow box to avoid taking too much space
