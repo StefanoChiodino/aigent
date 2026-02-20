@@ -1542,7 +1542,6 @@ function submitMessage(useThinkingOverride = false): void {
   // already in the textarea is what the user wants to send, and any
   // in-flight STT responses must not write back after we clear the input.
   if (micRecording) abortMic();
-  grabScreenFrame();
   const text = $input.value.trim();
   if (!text && pendingAttachments.length === 0) return;
   $input.value = '';
@@ -1628,6 +1627,13 @@ $input.addEventListener('keydown', (e) => {
       submitMessage();
       return;
     }
+  }
+
+  // While dictating, Enter stops mic and sends once transcription is done
+  if (micRecording && e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    void stopMic().then(() => submitMessage());
+    return;
   }
 
   // Ctrl+Enter = send with thinking override (flip current level)
@@ -1728,54 +1734,56 @@ const $screenCap = $('screen-cap') as HTMLButtonElement;
 
 let screenStream: MediaStream | null = null;
 let screenVideo: HTMLVideoElement | null = null;
-let screenCapActive = false;
-
-function grabScreenFrame(): void {
-  if (!screenCapActive || !screenVideo || screenVideo.readyState < 2) return;
-  if (pendingAttachments.length >= MAX_ATTACHMENTS) return;
-  const canvas = document.createElement('canvas');
-  canvas.width = screenVideo.videoWidth;
-  canvas.height = screenVideo.videoHeight;
-  canvas.getContext('2d')!.drawImage(screenVideo, 0, 0);
-  const dataUrl = canvas.toDataURL('image/png');
-  const base64 = dataUrl.split(',')[1];
-  pendingAttachments.push({
-    id: `att_${++attachmentIdCounter}`,
-    name: 'screenshot.png',
-    mediaType: 'image/png',
-    data: base64,
-    dataUrl,
-    size: Math.round(base64.length * 0.75),
-  });
-}
 
 function setScreenCapState(active: boolean): void {
-  screenCapActive = active;
   $screenCap.classList.toggle('active', active);
-  $screenCap.title = active ? 'Stop screen capture' : 'Capture screen';
+  $screenCap.title = active ? 'Take screenshot' : 'Share screen & take screenshot';
 }
 
-async function toggleScreenCap(): Promise<void> {
-  if (screenCapActive) {
-    if (screenStream) { screenStream.getTracks().forEach(t => t.stop()); screenStream = null; }
-    if (screenVideo) { screenVideo.srcObject = null; screenVideo = null; }
-    setScreenCapState(false);
-    return;
-  }
+// Every click = take one screenshot.
+// First click starts the stream (picker shows once); subsequent clicks are instant.
+async function takeScreenshot(): Promise<void> {
+  if (pendingAttachments.length >= MAX_ATTACHMENTS) return;
   try {
-    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-    screenVideo = document.createElement('video');
-    screenVideo.srcObject = screenStream;
-    screenVideo.muted = true;
-    await new Promise<void>(resolve => { screenVideo!.onloadedmetadata = () => resolve(); });
-    await screenVideo.play();
-    // Handle user clicking "Stop sharing" in the browser's native UI
-    screenStream.getVideoTracks()[0].addEventListener('ended', () => {
-      screenStream = null;
-      screenVideo = null;
-      setScreenCapState(false);
+    // Start stream if not already running
+    if (!screenStream || !screenVideo) {
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      screenVideo = document.createElement('video');
+      screenVideo.srcObject = screenStream;
+      screenVideo.muted = true;
+      await new Promise<void>(resolve => { screenVideo!.onloadedmetadata = () => resolve(); });
+      await screenVideo.play();
+      // Wait for the first real frame — avoids black captures on slow displays
+      await new Promise<void>(resolve => {
+        if (screenVideo!.readyState >= 3) resolve();
+        else screenVideo!.oncanplay = () => resolve();
+      });
+      // Handle browser's native "Stop sharing" bar
+      screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+        screenStream = null;
+        screenVideo = null;
+        setScreenCapState(false);
+      });
+      setScreenCapState(true);
+    }
+    // Capture current frame
+    const v = screenVideo;
+    if (v.videoWidth === 0 || v.videoHeight === 0) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = v.videoWidth;
+    canvas.height = v.videoHeight;
+    canvas.getContext('2d')!.drawImage(v, 0, 0);
+    const dataUrl = canvas.toDataURL('image/png');
+    const base64 = dataUrl.split(',')[1];
+    pendingAttachments.push({
+      id: `att_${++attachmentIdCounter}`,
+      name: 'screenshot.png',
+      mediaType: 'image/png',
+      data: base64,
+      dataUrl,
+      size: Math.round(base64.length * 0.75),
     });
-    setScreenCapState(true);
+    renderAttachmentPreview();
   } catch (err) {
     const name = (err as Error).name;
     if (name !== 'NotAllowedError' && name !== 'AbortError') {
@@ -1785,7 +1793,7 @@ async function toggleScreenCap(): Promise<void> {
   }
 }
 
-$screenCap.addEventListener('click', () => void toggleScreenCap());
+$screenCap.addEventListener('click', () => void takeScreenshot());
 
 $cancel.addEventListener('click', () => {
   wsSend({ type: 'cancel' });
@@ -1938,6 +1946,7 @@ async function startMic(): Promise<void> {
     micRecording = true;
     micSetState('recording');
     updateInputState();
+    $input.focus();
   } catch {
     // Permission denied or no mic
   }
@@ -2019,6 +2028,7 @@ function abortMic(): void {
 $mic.addEventListener('click', () => {
   if (micRecording) void stopMic();
   else void startMic();
+  $input.focus();
 });
 
 // ── Ctrl key tracking for thinking-override visual feedback ──
@@ -2052,10 +2062,10 @@ function updateSendButton(ctrlHeld: boolean): void {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Control') updateSendButton(true);
-  // Mic toggle: Alt+M (global) or ` / M when input not focused
+  // Mic toggle: Alt+M / Ctrl+` (global) or ` / M when input not focused
   const inputFocused = document.activeElement === $input;
   const micLocal = !inputFocused && (e.key === '`' || e.key === 'm' || e.key === 'M');
-  const micGlobal = e.key === 'm' && e.altKey && !e.ctrlKey;
+  const micGlobal = (e.key === 'm' && e.altKey && !e.ctrlKey) || (e.key === '`' && e.ctrlKey);
   if (micLocal || micGlobal) {
     e.preventDefault();
     if (micRecording) void stopMic();

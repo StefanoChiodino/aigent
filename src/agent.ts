@@ -196,15 +196,31 @@ export class Agent {
         this.thinking = savedThinking;
       }
 
-      // Mid-loop compaction: check context before sending to avoid blowing the window
-      if (iterations > 1 && this._totalUsage.contextTokens) {
+      // Mid-loop compaction: check context before sending to avoid blowing the window.
+      // Runs on every iteration (including the first) so that a restored session
+      // with known-large context compacts proactively rather than hitting 413.
+      // Fresh sessions have contextTokens=0 so the inner check never fires.
+      if (this._totalUsage.contextTokens) {
         const contextUsed = this._totalUsage.contextTokens;
         if (contextUsed > this.getContextWindow() * 0.6 && this.messages.length > 8) {
           await this.compact(callbacks);
         }
       }
 
-      const response = await this.sendWithRetry(callbacks);
+      // If the request is too large, compact first and retry once
+      let response: ProviderResponse;
+      try {
+        response = await this.sendWithRetry(callbacks);
+      } catch (err: unknown) {
+        const e = err as { status?: number };
+        if (e.status === 413) {
+          log.warn('Request too large (413) — compacting conversation and retrying');
+          await this.compact(callbacks);
+          response = await this.sendWithRetry(callbacks);
+        } else {
+          throw err;
+        }
+      }
 
       // Track usage — accumulate all fields for billing/cost accuracy.
       this._totalUsage.input += response.usage.input;

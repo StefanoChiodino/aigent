@@ -61,6 +61,8 @@ store messages in the browser storage so that they don't disappear on reload
 
 ~~screen capture via browser `getDisplayMedia()` — grab a frame from any window/tab/monitor and send it as image context to the AI. No plugin needed. Natural prerequisite for real computer-use. Button in UI to snapshot current screen → attaches as image to next message.~~ DONE — monitor icon button in input row; click triggers `getDisplayMedia`, grabs one frame via canvas, stops stream, adds PNG to pending attachments.
 
+add a little x next to the mounts to remove them 
+
 browser extension — allow the agent to read/write page DOM, manage tabs, fill forms, navigate pages. Bigger lift than screen capture but enables agentic browser automation without computer-use overhead.
 
 browser accessibility / a11y tree — expose structured page content (labels, roles, interactive elements) to the agent via the Accessibility Object Model or Chrome DevTools Protocol. Cheaper than screenshots for understanding page structure.
