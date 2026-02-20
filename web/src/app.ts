@@ -29,15 +29,20 @@ interface DisplayMessage {
 interface BackgroundTaskInfo {
   id: string;
   description: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
   startedAt: string;
   completedAt?: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cost?: number;
 }
 
 interface ServerState {
   messages: DisplayMessage[];
   usage: TokenUsage;
   thinking: string;
+  concise: boolean;
   profile: string;
   sessionId: string;
   model: string;
@@ -59,10 +64,11 @@ type ServerEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
-  | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string }
+  | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string; concise?: boolean; availableModels?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
+  | { type: 'screenshot_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
   | { type: 'pong' };
 
@@ -82,6 +88,7 @@ const COMMANDS: CommandDef[] = [
   { name: '/restart',   desc: 'Restart server' },
   { name: '/reasoning', desc: 'Toggle reasoning',          argHint: 'on|off' },
   { name: '/effort',    desc: 'Set effort level',          argHint: 'low|medium|high|max' },
+  { name: '/concise',   desc: 'Concise/voice mode',        argHint: 'on|off' },
   { name: '/model',     desc: 'Show or switch model',      argHint: '<name>' },
   { name: '/image',     desc: 'Send an image',             argHint: '<path> [msg]' },
   { name: '/usage',     desc: 'Token usage stats' },
@@ -114,11 +121,13 @@ let messages: DisplayMessage[] = [];
 let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 let thinkingLevel = 'high';
 let lastEffortLevel = 'high'; // remembered when toggling off/on
+let conciseMode = false;
 let isLoading = false;
 let isThinking = false;
 let tasks: BackgroundTaskInfo[] = [];
 let connStatus: 'connecting' | 'connected' | 'reconnecting' = 'connecting';
 let errorMsg: string | null = null;
+let turnStartCtx = 0; // contextTokens at start of current turn, for delta display
 let modelName = '';
 let availableModels: string[] = [];
 let mountsList: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[] = [];
@@ -145,6 +154,12 @@ let streamText = '';
 let streamEl: HTMLElement | null = null;
 let streamTtsBtn: HTMLElement | null = null;
 
+// Inline trace state (thinking + tool blocks embedded in message)
+let streamThinkingText = '';
+let streamThinkingEl: HTMLElement | null = null;
+let currentToolEl: HTMLElement | null = null;
+let currentToolOutput = '';
+
 // TTS state
 let ttsAudio: HTMLAudioElement | null = null;
 let ttsSpeakingBtn: HTMLElement | null = null;
@@ -156,6 +171,8 @@ let ttsChunkQueue: Array<Promise<string>> = [];
 let ttsChunkPlaying = false;
 let ttsStreamLastLen = 0;
 let ttsStreamFetchCtrls: AbortController[] = [];
+// In concise mode: tracks whether we've already spoken the <speak> block for the current message
+let speakBlockSpoken = false;
 
 // WebSocket
 let ws: WebSocket | null = null;
@@ -208,6 +225,7 @@ const $sbTasksList = $('sb-tasks-list');
 const $sbTtsToggle = $('sb-tts-toggle') as HTMLButtonElement;
 const $sbTtsRate = $('sb-tts-rate') as HTMLInputElement;
 const $sbTtsRateLabel = $('sb-tts-rate-label');
+const $sbConciseToggle = $('sb-concise-toggle') as HTMLButtonElement;
 
 // Command palette state
 let paletteItems: CommandDef[] = [];
@@ -383,6 +401,10 @@ function connect(): void {
       streamActive = false;
       streamEl = null;
       streamTtsBtn = null;
+      streamThinkingText = '';
+      streamThinkingEl = null;
+      currentToolEl = null;
+      currentToolOutput = '';
     }
     updateHeader();
     updateInputState();
@@ -420,6 +442,7 @@ function handleEvent(event: ServerEvent): void {
       usage = event.state.usage;
       thinkingLevel = event.state.thinking;
       if (thinkingLevel !== 'off') lastEffortLevel = thinkingLevel;
+      conciseMode = event.state.concise ?? false;
       isLoading = event.state.isLoading;
       tasks = event.state.tasks ?? [];
       errorMsg = null;
@@ -435,6 +458,7 @@ function handleEvent(event: ServerEvent): void {
       break;
 
     case 'text':
+      if (isThinking) finalizeThinkingBlock();
       isThinking = false;
       if (event.content) {
         streamText = event.content;
@@ -445,26 +469,40 @@ function handleEvent(event: ServerEvent): void {
 
     case 'thinking':
       if (!isThinking && streamActive && streamEl) {
-        appendThinkingIndicator();
+        appendThinkingToStream();
       }
       isThinking = true;
+      streamThinkingText += event.content;
+      if (streamThinkingEl) {
+        const thinkBody = streamThinkingEl.querySelector<HTMLElement>('.thinking-body');
+        if (thinkBody) thinkBody.textContent = streamThinkingText;
+      }
       break;
 
     case 'tool_start':
+      if (isThinking) { finalizeThinkingBlock(); isThinking = false; }
       if (streamActive) {
         finalizeStreamingText();
         ttsFlushStream(true);
       }
       showTool(event.name, event.summary);
+      if (streamEl) appendToolToStream(event.name, event.summary, event.input);
       streamText = '';
       ttsStreamLastLen = 0;
+      currentToolOutput = '';
       break;
 
     case 'tool_output':
+      currentToolOutput += event.content;
       break;
 
     case 'tool_end':
       hideTool();
+      if (currentToolEl) {
+        finalizeToolBlock(currentToolEl, currentToolOutput);
+        currentToolEl = null;
+        currentToolOutput = '';
+      }
       break;
 
     case 'task_update': {
@@ -487,10 +525,23 @@ function handleEvent(event: ServerEvent): void {
 
     case 'message':
       if (event.message.role === 'assistant' && streamActive) {
-        // Flush any sentence fragment that didn't end with punctuation
+        // Finalize any in-progress traces
+        if (isThinking) finalizeThinkingBlock();
+        if (currentToolEl) { finalizeToolBlock(currentToolEl, currentToolOutput); currentToolEl = null; currentToolOutput = ''; }
         if (ttsAutoSpeak) {
-          ttsEnqueueChunk(event.message.content.slice(ttsStreamLastLen));
-          ttsStreamLastLen = 0;
+          if (speakBlockSpoken) {
+            // Already spoken the <speak> block during streaming — nothing more to do
+          } else {
+            const speakContent = extractSpeakContent(event.message.content);
+            if (speakContent) {
+              // <speak> block arrived but wasn't detected mid-stream (e.g. very fast response)
+              speakText(speakContent);
+            } else {
+              // Normal mode: flush any remaining unspoken sentence fragment
+              ttsEnqueueChunk(event.message.content.slice(ttsStreamLastLen));
+              ttsStreamLastLen = 0;
+            }
+          }
         }
         finalizeStreamEl(event.message.content, event.message.elapsed);
         messages.push(event.message);
@@ -502,8 +553,9 @@ function handleEvent(event: ServerEvent): void {
         messages.push(event.message);
         appendMessage(event.message);
         if (ttsAutoSpeak && event.message.role === 'assistant') {
+          const speakContent = extractSpeakContent(event.message.content);
           const btn = $messages.querySelector<HTMLElement>('.message:last-child .tts-btn');
-          speakText(event.message.content, btn ?? undefined);
+          speakText(speakContent ?? event.message.content, btn ?? undefined);
         }
       }
       isThinking = false;
@@ -533,6 +585,12 @@ function handleEvent(event: ServerEvent): void {
         ttsStopStream();
         streamActive = true;
         streamText = '';
+        streamThinkingText = '';
+        streamThinkingEl = null;
+        currentToolEl = null;
+        currentToolOutput = '';
+        speakBlockSpoken = false;
+        turnStartCtx = usage.contextTokens ?? 0;
         streamEl = createStreamingEl();
       }
       if (!event.isLoading) {
@@ -556,6 +614,13 @@ function handleEvent(event: ServerEvent): void {
       }
       if (event.model) {
         modelName = event.model;
+      }
+      if (event.concise !== undefined) {
+        conciseMode = event.concise;
+      }
+      if (event.availableModels) {
+        availableModels = event.availableModels;
+        renderModelPicker();
       }
       updateHeader();
       updateSidebar();
@@ -591,6 +656,21 @@ function handleEvent(event: ServerEvent): void {
         approveCmd: `/approve ${event.id}`,
         denyCmd: `/reject ${event.id}`,
       });
+      break;
+    }
+
+    case 'screenshot_request': {
+      const { id } = event;
+      if (!screenStream || !screenVideo || screenVideo.videoWidth === 0 || screenVideo.videoHeight === 0) {
+        wsSend({ type: 'screenshot_response', id, ok: false, message: 'Screen sharing not active. Click the monitor icon in the input bar to start sharing.' });
+        break;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = screenVideo.videoWidth;
+      canvas.height = screenVideo.videoHeight;
+      canvas.getContext('2d')!.drawImage(screenVideo, 0, 0);
+      const base64 = canvas.toDataURL('image/png').split(',')[1];
+      wsSend({ type: 'screenshot_response', id, ok: true, data: base64, mediaType: 'image/png', message: 'Screenshot captured' });
       break;
     }
 
@@ -654,6 +734,17 @@ function stripMarkdownForTTS(text: string): string {
   // Collapse excessive blank lines
   text = text.replace(/\n{3,}/g, '\n\n');
   return text.trim();
+}
+
+/** Extract content inside <speak>...</speak>, or null if absent. */
+function extractSpeakContent(text: string): string | null {
+  const m = text.match(/<speak>([\s\S]*?)<\/speak>/);
+  return m ? m[1].trim() : null;
+}
+
+/** Remove <speak>...</speak> block from text (for display). */
+function stripSpeakTag(text: string): string {
+  return text.replace(/<speak>[\s\S]*?<\/speak>/g, '').trimEnd();
 }
 
 function ttsResetBtn(btn: HTMLElement): void {
@@ -748,6 +839,7 @@ function ttsStopStream(): void {
   ttsStreamLastLen = 0;
   if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
   if (streamTtsBtn) { streamTtsBtn.remove(); streamTtsBtn = null; }
+  updateInputState();
 }
 
 function ttsStopAll(): void {
@@ -778,6 +870,7 @@ function ttsEnqueueChunk(text: string): void {
 
 async function ttsDrainQueue(): Promise<void> {
   ttsChunkPlaying = true;
+  updateInputState();
   if (streamTtsBtn) streamTtsBtn.classList.remove('hidden');
   while (ttsChunkQueue.length > 0) {
     const p = ttsChunkQueue.shift()!;
@@ -799,6 +892,7 @@ async function ttsDrainQueue(): Promise<void> {
     if (!ttsChunkPlaying) break;
   }
   ttsChunkPlaying = false;
+  updateInputState();
   if (streamTtsBtn) { streamTtsBtn.remove(); streamTtsBtn = null; }
 }
 
@@ -806,6 +900,18 @@ async function ttsDrainQueue(): Promise<void> {
 // Pass final=true at stream end to flush any remaining text without a boundary.
 function ttsFlushStream(final = false): void {
   if (!ttsAutoSpeak) return;
+  // In concise mode, speak the <speak> block as soon as it's complete in the stream, then stop.
+  // The <speak> block is output first, so this fires early while the rest of the response loads.
+  if (conciseMode) {
+    if (!speakBlockSpoken) {
+      const speakContent = extractSpeakContent(streamText);
+      if (speakContent) {
+        speakBlockSpoken = true;
+        speakText(speakContent);
+      }
+    }
+    return;
+  }
   const unspoken = streamText.slice(ttsStreamLastLen);
   if (!unspoken) return;
 
@@ -876,7 +982,7 @@ function appendMessage(msg: DisplayMessage, animate = true): void {
     label.appendChild(elapsed);
   }
   if (msg.role === 'assistant') {
-    label.appendChild(createTTSBtn(msg.content));
+    label.appendChild(createTTSBtn(extractSpeakContent(msg.content) ?? msg.content));
   }
   el.appendChild(label);
 
@@ -885,7 +991,7 @@ function appendMessage(msg: DisplayMessage, animate = true): void {
   if (msg.role === 'system') {
     content.textContent = msg.content;
   } else {
-    content.innerHTML = renderMarkdown(msg.content);
+    content.innerHTML = renderMarkdown(stripSpeakTag(msg.content));
   }
   el.appendChild(content);
 
@@ -931,6 +1037,13 @@ function createStreamingEl(): HTMLElement {
 
   el.appendChild(label);
 
+  const traces = document.createElement('div');
+  traces.className = 'message-traces';
+  const tracesInner = document.createElement('div');
+  tracesInner.className = 'traces-inner';
+  traces.appendChild(tracesInner);
+  el.appendChild(traces);
+
   const content = document.createElement('div');
   content.className = 'message-content';
   el.appendChild(content);
@@ -944,7 +1057,7 @@ function updateStreamingDisplay(): void {
   if (!streamEl) return;
   const content = streamEl.querySelector('.message-content');
   if (!content) return;
-  content.textContent = streamText;
+  content.textContent = stripSpeakTag(streamText);
   scrollToBottom();
 }
 
@@ -952,7 +1065,7 @@ function finalizeStreamingText(): void {
   if (!streamEl || !streamText) return;
   const content = streamEl.querySelector('.message-content');
   if (content) {
-    content.innerHTML = renderMarkdown(streamText);
+    content.innerHTML = renderMarkdown(stripSpeakTag(streamText));
   }
 }
 
@@ -962,11 +1075,42 @@ function finalizeStreamEl(fullContent: string, elapsed?: number): void {
 
   const content = streamEl.querySelector('.message-content');
   if (content) {
-    content.innerHTML = renderMarkdown(fullContent);
+    content.innerHTML = renderMarkdown(stripSpeakTag(fullContent));
   }
 
-  const label = streamEl.querySelector('.role-label');
-  if (label) {
+  // Collapse traces: add summary toggle if there are any trace blocks
+  const traces = streamEl.querySelector<HTMLElement>('.message-traces');
+  const inner = traces?.querySelector<HTMLElement>('.traces-inner');
+  if (traces && inner && inner.children.length > 0) {
+    const toolBlocks = inner.querySelectorAll('.tool-block').length;
+    const taskBlocks = inner.querySelectorAll('.task-block').length;
+    const hasThinking = inner.querySelector('.thinking-block') !== null;
+    const parts: string[] = [];
+    if (hasThinking) parts.push('💭 reasoned');
+    if (toolBlocks > 0) parts.push(`🛠️ ${toolBlocks} tool${toolBlocks > 1 ? 's' : ''}`);
+    if (taskBlocks > 0) parts.push(`🤖 ${taskBlocks} task${taskBlocks > 1 ? 's' : ''}`);
+    // Context delta: how much did context grow this turn?
+    const endCtx = usage.contextTokens ?? 0;
+    if (endCtx > 0 && turnStartCtx >= 0) {
+      const delta = endCtx - turnStartCtx;
+      const sign = delta >= 0 ? '+' : '';
+      const deltaK = Math.abs(delta) >= 1000 ? `${sign}${(delta / 1000).toFixed(1)}k` : `${sign}${delta}`;
+      parts.push(`${deltaK} ctx`);
+    }
+    const summaryLabel = parts.join(' · ');
+
+    const summary = document.createElement('button');
+    summary.className = 'traces-summary';
+    summary.innerHTML = `<span class="traces-summary-label">${summaryLabel}</span><span class="traces-summary-chevron">▸</span>`;
+    summary.addEventListener('click', () => {
+      traces.classList.toggle('expanded');
+    });
+    traces.insertBefore(summary, inner);
+    traces.classList.add('collapsible');
+  }
+
+  const labelEl = streamEl.querySelector('.role-label');
+  if (labelEl) {
     // Remove the temporary streaming stop button only when TTS isn't playing.
     // If TTS is still playing, keep it visible — ttsDrainQueue will remove it when done.
     if (!ttsChunkPlaying) {
@@ -977,22 +1121,149 @@ function finalizeStreamEl(fullContent: string, elapsed?: number): void {
       const elapsedEl = document.createElement('span');
       elapsedEl.className = 'elapsed';
       elapsedEl.textContent = `${elapsed.toFixed(1)}s`;
-      label.appendChild(elapsedEl);
+      labelEl.appendChild(elapsedEl);
     }
-    label.appendChild(createTTSBtn(fullContent));
+    labelEl.appendChild(createTTSBtn(fullContent));
   }
   scrollToBottom();
 }
 
-function appendThinkingIndicator(): void {
+function appendThinkingToStream(): void {
   if (!streamEl) return;
-  const content = streamEl.querySelector('.message-content');
-  if (!content) return;
-  const indicator = document.createElement('div');
-  indicator.className = 'thinking-indicator';
-  indicator.innerHTML = '<div class="thinking-dots"><span></span><span></span><span></span></div> reasoning';
-  content.appendChild(indicator);
+  const traces = streamEl.querySelector<HTMLElement>('.message-traces');
+  if (!traces) return;
+  const inner = traces.querySelector<HTMLElement>('.traces-inner') ?? traces;
+  const block = document.createElement('div');
+  block.className = 'thinking-block running';
+  const toggle = document.createElement('button');
+  toggle.className = 'thinking-toggle';
+  toggle.innerHTML = '<span class="thinking-anim"><span></span><span></span><span></span></span>Reasoning…';
+  const body = document.createElement('div');
+  body.className = 'thinking-body hidden';
+  toggle.addEventListener('click', () => {
+    body.classList.toggle('hidden');
+    block.classList.toggle('expanded');
+  });
+  block.appendChild(toggle);
+  block.appendChild(body);
+  inner.appendChild(block);
+  streamThinkingEl = block;
   scrollToBottom();
+}
+
+function finalizeThinkingBlock(): void {
+  if (!streamThinkingEl) return;
+  streamThinkingEl.classList.remove('running');
+  streamThinkingEl.classList.add('done');
+  const toggle = streamThinkingEl.querySelector<HTMLElement>('.thinking-toggle');
+  if (toggle) {
+    toggle.innerHTML = '💭 Reasoned <span class="trace-expand-hint">▸</span>';
+  }
+  streamThinkingEl = null;
+  streamThinkingText = '';
+}
+
+function toolIcon(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes('read') || n.includes('view') || n.includes('cat')) return '📄';
+  if (n.includes('write') || n.includes('create') || n.includes('save')) return '✏️';
+  if (n.includes('edit') || n.includes('patch') || n.includes('replace')) return '🔧';
+  if (n.includes('exec') || n.includes('run') || n.includes('bash') || n.includes('shell')) return '⚡';
+  if (n.includes('search') || n.includes('grep') || n.includes('find') || n.includes('glob')) return '🔍';
+  if (n.includes('fetch') || n.includes('http') || n.includes('web') || n.includes('url')) return '🌐';
+  if (n.includes('list') || n.includes('ls') || n.includes('dir')) return '📂';
+  if (n.includes('delete') || n.includes('remove') || n.includes('rm')) return '🗑️';
+  if (n.includes('move') || n.includes('rename') || n.includes('mv')) return '📦';
+  if (n.includes('git')) return '🔀';
+  if (n.includes('agent') || n.includes('task') || n.includes('spawn')) return '🤖';
+  if (n.includes('think') || n.includes('reason')) return '💭';
+  return '🛠️';
+}
+
+function prettyToolName(name: string): string {
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function appendToolToStream(name: string, summary: string, inputStr: string): void {
+  if (!streamEl) return;
+  const traces = streamEl.querySelector<HTMLElement>('.message-traces');
+  if (!traces) return;
+
+  // During streaming append to .traces-inner if it exists, otherwise directly to traces
+  const inner = traces.querySelector<HTMLElement>('.traces-inner') ?? traces;
+
+  const isTask = name === 'dispatch_task';
+  const block = document.createElement('div');
+  block.className = isTask ? 'task-block running' : 'tool-block running';
+
+  const header = document.createElement('button');
+  header.className = 'tool-header';
+
+  const iconEl = document.createElement('span');
+  iconEl.className = 'tool-icon';
+  iconEl.textContent = toolIcon(name);
+
+  const statusIcon = document.createElement('span');
+  statusIcon.className = 'tool-status-icon';
+  statusIcon.innerHTML = '<span class="tool-mini-spinner"></span>';
+
+  const nameEl = document.createElement('span');
+  nameEl.className = 'tool-name';
+  nameEl.textContent = prettyToolName(name);
+
+  header.appendChild(iconEl);
+  header.appendChild(statusIcon);
+  header.appendChild(nameEl);
+
+  if (summary && summary !== name) {
+    const summaryEl = document.createElement('span');
+    summaryEl.className = 'tool-summary';
+    summaryEl.textContent = summary;
+    header.appendChild(summaryEl);
+  }
+
+  const expandHint = document.createElement('span');
+  expandHint.className = 'trace-expand-hint';
+  expandHint.textContent = '▸';
+  header.appendChild(expandHint);
+
+  const body = document.createElement('div');
+  body.className = 'tool-body hidden';
+
+  if (inputStr) {
+    const inputPre = document.createElement('pre');
+    inputPre.className = 'tool-input';
+    try { inputPre.textContent = JSON.stringify(JSON.parse(inputStr), null, 2); }
+    catch { inputPre.textContent = inputStr; }
+    body.appendChild(inputPre);
+  }
+
+  header.addEventListener('click', () => {
+    body.classList.toggle('hidden');
+    block.classList.toggle('expanded');
+  });
+
+  block.appendChild(header);
+  block.appendChild(body);
+  inner.appendChild(block);
+  currentToolEl = block;
+  scrollToBottom();
+}
+
+function finalizeToolBlock(block: HTMLElement, output: string): void {
+  block.classList.remove('running');
+  block.classList.add('done');
+  const statusIcon = block.querySelector('.tool-status-icon');
+  if (statusIcon) statusIcon.innerHTML = '<span class="tool-checkmark">\u2713</span>';
+  if (output.trim()) {
+    const body = block.querySelector<HTMLElement>('.tool-body');
+    if (body) {
+      const outputPre = document.createElement('pre');
+      outputPre.className = 'tool-output';
+      outputPre.textContent = output.length > 2000 ? output.slice(0, 2000) + '\n\u2026 (truncated)' : output;
+      body.appendChild(outputPre);
+    }
+  }
 }
 
 function showTool(name: string, summary: string): void {
@@ -1187,6 +1458,10 @@ function updateSidebar(): void {
   $sbTtsToggle.textContent = ttsAutoSpeak ? 'ON' : 'OFF';
   $sbTtsToggle.classList.toggle('on', ttsAutoSpeak);
 
+  // Concise mode toggle
+  $sbConciseToggle.textContent = conciseMode ? 'ON' : 'OFF';
+  $sbConciseToggle.classList.toggle('on', conciseMode);
+
   // Tasks
   $sbTasksSection.style.display = '';
   $sbTasksList.innerHTML = '';
@@ -1211,6 +1486,25 @@ function updateSidebar(): void {
       desc.title = t.description;
       item.appendChild(desc);
 
+      // Per-task usage: model + tokens + cost (shown after completion)
+      if (t.model || t.inputTokens !== undefined || t.cost !== undefined) {
+        const meta = document.createElement('div');
+        meta.className = 'task-meta';
+
+        const parts: string[] = [];
+        if (t.model) parts.push(modelDisplayName(t.model));
+        if (t.inputTokens !== undefined || t.outputTokens !== undefined) {
+          const tok = ((t.inputTokens ?? 0) + (t.outputTokens ?? 0)).toLocaleString();
+          parts.push(`${tok} tok`);
+        }
+        if (t.cost !== undefined && t.cost > 0) {
+          parts.push(t.cost < 0.01 ? `$${t.cost.toFixed(3)}` : `$${t.cost.toFixed(2)}`);
+        }
+
+        meta.textContent = parts.join(' · ');
+        item.appendChild(meta);
+      }
+
       $sbTasksList.appendChild(item);
     }
   }
@@ -1227,8 +1521,9 @@ function updateErrorBar(): void {
 }
 
 function updateInputState(): void {
-  $send.classList.toggle('hidden', isLoading);
-  $cancel.classList.toggle('hidden', !isLoading);
+  const showCancel = isLoading || ttsChunkPlaying;
+  $send.classList.toggle('hidden', showCancel);
+  $cancel.classList.toggle('hidden', !showCancel);
   if (micRecording) {
     $input.placeholder = 'Listening\u2026';
   } else {
@@ -1366,6 +1661,30 @@ setInterval(() => {
 
 // ── Permission request modal ─────────────────────────────────
 
+function playMicSound(type: 'start' | 'stop'): void {
+  try {
+    const ctx = new AudioContext();
+    const freqs = type === 'start' ? [880, 1320] : [1320, 880];
+    freqs.forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const t = ctx.currentTime + i * 0.1;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.15, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      osc.start(t);
+      osc.stop(t + 0.12);
+    });
+    setTimeout(() => void ctx.close(), 500);
+  } catch {
+    // Audio unavailable
+  }
+}
+
 function playPermissionSound(): void {
   try {
     const ctx = new AudioContext();
@@ -1404,9 +1723,13 @@ function showNextPermRequest(): void {
   if (!req) {
     permShowing = false;
     $permOverlay.classList.add('hidden');
+    // Restore tool bar if there's an active tool
+    if ($toolLabel.textContent) $toolBar.classList.remove('hidden');
     return;
   }
   permShowing = true;
+  // Hide tool bar — the perm overlay shows what's pending
+  $toolBar.classList.add('hidden');
   $permIcon.textContent = req.type === 'mount' ? '📂' : '✏️';
   $permTitle.textContent = req.title;
 
@@ -1576,6 +1899,8 @@ function submitMessage(useThinkingOverride = false): void {
     msg.thinkingOverride = thinkingLevel === 'off' ? 'high' : 'off';
   }
   wsSend(msg);
+  // Sticky voice mode: restart mic silently after submit (no sound, seamless loop)
+  if (micSticky) setTimeout(() => { void startMic(true); }, 100);
 }
 
 function autoGrow(): void {
@@ -1796,17 +2121,25 @@ async function takeScreenshot(): Promise<void> {
 $screenCap.addEventListener('click', () => void takeScreenshot());
 
 $cancel.addEventListener('click', () => {
-  wsSend({ type: 'cancel' });
+  ttsStopAll();
+  if (isLoading) wsSend({ type: 'cancel' });
 });
 
 // ── Microphone / STT ─────────────────────────────────────────
+
+function micLog(...args: unknown[]): void {
+  console.log(...args);
+  void fetch('/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level: 'log', args }) }).catch(() => {});
+}
 
 const $mic = $('mic') as HTMLButtonElement;
 const $micIconMic = $mic.querySelector('.icon-mic') as SVGElement;
 const $micIconStop = $mic.querySelector('.icon-stop') as SVGElement;
 const $micIconSpinner = $mic.querySelector('.icon-spinner') as SVGElement;
+const $micSticky = $('mic-sticky') as HTMLButtonElement;
 
 let micRecording = false;
+let micSticky = localStorage.getItem('mic-sticky') === 'true';
 let micAudioCtx: AudioContext | null = null;
 let micStream: MediaStream | null = null;
 let micSamples: Float32Array[] = [];
@@ -1818,9 +2151,14 @@ let micLastText = '';
 let micReqSeq = 0;          // increments on each outgoing request
 let micDisplayedSeq = 0;   // seq of the last response we actually showed
 let micBaseText = '';       // text in input before mic started
+let vadLoudFrames = 0;      // consecutive loud frames counter for VAD hysteresis
+let vadSpeaking = false;    // true while voice is detected (for mic pulse visual)
+let micLastSpeechTime = 0;  // timestamp of last detected speech (for silence detection)
+let micLiveAbortCtrls: AbortController[] = []; // abort controllers for in-flight live STT requests
 
 // Max samples to send per live chunk (12 s at 16 kHz — more context improves Whisper accuracy)
 const MIC_WINDOW_SAMPLES = 16000 * 12;
+const MIC_SILENCE_THRESHOLD = 0.015; // RMS level for VAD pulse (speech vs silence)
 
 function encodeWav(samples: Float32Array[], sampleRate: number): ArrayBuffer {
   let totalLen = 0;
@@ -1861,9 +2199,8 @@ function encodeWav(samples: Float32Array[], sampleRate: number): ArrayBuffer {
 async function sendLiveChunk(): Promise<void> {
   if (micSamples.length === 0) return;
 
-  // Snapshot the sequence number for this request so a stale slow response
-  // doesn't overwrite a newer one.
   const seq = ++micReqSeq;
+  micLog('[mic] sendLiveChunk seq=', seq, 'samples=', micSamples.length);
 
   // Build a sliding window over the last MIC_WINDOW_SAMPLES samples
   let totalLen = 0;
@@ -1887,16 +2224,23 @@ async function sendLiveChunk(): Promise<void> {
     }
   }
 
+  const ctrl = new AbortController();
+  // Timeout live chunks at 5 s — if STT is slower than that, skip rather than
+  // pile up concurrent slow requests that resolve after recording ends.
+  const liveTimeout = setTimeout(() => ctrl.abort(), 5000);
+  micLiveAbortCtrls.push(ctrl);
   try {
     const resp = await fetch('/stt', {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
       body: encodeWav(window, 16000),
+      signal: ctrl.signal,
     });
     // Accept any response newer than the last one we displayed — don't
     // require it to be the absolute latest in flight.
     if (resp.ok && seq > micDisplayedSeq) {
       const { text } = await resp.json() as { text?: string };
+      micLog('[mic] chunk seq=', seq, 'text=', text, 'recording=', micRecording);
       if (text) {
         micLastText = text;
         micDisplayedSeq = seq;
@@ -1904,9 +2248,15 @@ async function sendLiveChunk(): Promise<void> {
         $input.value = micBaseText ? micBaseText + ' ' + text : text;
         autoGrow();
       }
+    } else {
+      micLog('[mic] chunk seq=', seq, 'skipped: resp.ok=', resp.ok, 'displayedSeq=', micDisplayedSeq);
     }
-  } catch {
-    // STT not reachable yet — silently wait
+  } catch (err) {
+    micLog('[mic] chunk seq=', seq, 'error:', err);
+  } finally {
+    clearTimeout(liveTimeout);
+    const idx = micLiveAbortCtrls.indexOf(ctrl);
+    if (idx !== -1) micLiveAbortCtrls.splice(idx, 1);
   }
 }
 
@@ -1918,7 +2268,14 @@ function micSetState(state: 'idle' | 'recording' | 'transcribing'): void {
   $mic.classList.toggle('transcribing', state === 'transcribing');
 }
 
-async function startMic(): Promise<void> {
+function setMicSticky(on: boolean): void {
+  micSticky = on;
+  localStorage.setItem('mic-sticky', String(on));
+  $micSticky.classList.toggle('active', on);
+}
+
+async function startMic(silent = false): Promise<void> {
+  micLog('[mic] startMic called, silent=', silent, 'sticky=', micSticky, 'recording=', micRecording);
   ttsStopAll();
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
@@ -1931,12 +2288,42 @@ async function startMic(): Promise<void> {
     micReqSeq = 0;
     micDisplayedSeq = 0;
     micBaseText = $input.value.trim();
+    micLiveAbortCtrls = [];
     micProcessor.onaudioprocess = (e) => {
       const data = e.inputBuffer.getChannelData(0);
       micSamples.push(new Float32Array(data));
+
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i]! * data[i]!;
+      const rms = Math.sqrt(sum / data.length);
+
+      // Speech tracking (lower threshold) — for silence detection and VAD pulse.
+      if (rms > MIC_SILENCE_THRESHOLD) {
+        if (!vadSpeaking) micLog('[mic] speech detected rms=', rms.toFixed(4));
+        micLastSpeechTime = Date.now();
+        // Visual pulse: require a few consecutive loud frames to avoid flicker.
+        vadLoudFrames++;
+        if (vadLoudFrames >= 2 && !vadSpeaking) {
+          vadSpeaking = true;
+          $mic.classList.add('vad-active');
+        }
+      } else {
+        vadLoudFrames = 0;
+        if (vadSpeaking) {
+          vadSpeaking = false;
+          $mic.classList.remove('vad-active');
+        }
+      }
+
+      // Barge-in: stop TTS when clear speech detected (higher threshold, more hysteresis).
+      if ((ttsChunkPlaying || ttsAudio) && rms > 0.05) {
+        ttsStopAll();
+      }
     };
     micSource.connect(micProcessor);
     micProcessor.connect(micAudioCtx.destination);
+
+    micLastSpeechTime = Date.now();
 
     // Send first chunk after a short delay (let audio accumulate), then every 1.2 s.
     // Requests run concurrently; the seq counter ensures only the latest wins.
@@ -1947,18 +2334,33 @@ async function startMic(): Promise<void> {
     micSetState('recording');
     updateInputState();
     $input.focus();
-  } catch {
-    // Permission denied or no mic
+    if (!silent) playMicSound('start');
+  } catch (err) {
+    const name = (err as Error).name;
+    if (name === 'NotAllowedError') {
+      errorMsg = 'Microphone access denied — please allow it in your browser settings.';
+    } else {
+      errorMsg = 'Microphone unavailable.';
+    }
+    updateErrorBar();
+    if (micSticky) setMicSticky(false);
   }
 }
 
-async function stopMic(): Promise<void> {
+async function stopMic(silent = false): Promise<void> {
+  micLog('[mic] stopMic called, silent=', silent, 'sticky=', micSticky, 'lastText=', micLastText);
   if (!micRecording) return;
   micRecording = false;
+  vadSpeaking = false;
+  vadLoudFrames = 0;
+  $mic.classList.remove('vad-active');
+  if (!silent) playMicSound('stop');
 
-  // Stop timers
+  // Stop timers and abort all in-flight live STT requests
   if (micChunkTimer !== null) { clearInterval(micChunkTimer); micChunkTimer = null; }
   if (micSilenceTimer !== null) { clearInterval(micSilenceTimer); micSilenceTimer = null; }
+  for (const c of micLiveAbortCtrls) c.abort();
+  micLiveAbortCtrls = [];
 
   micSetState('transcribing');
 
@@ -1978,17 +2380,21 @@ async function stopMic(): Promise<void> {
 
   let finalText = micLastText;
   try {
+    const sttAbort = new AbortController();
+    const sttTimeout = setTimeout(() => sttAbort.abort(), 8000);
     const resp = await fetch('/stt', {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
       body: encodeWav(samples, 16000),
+      signal: sttAbort.signal,
     });
+    clearTimeout(sttTimeout);
     if (resp.ok) {
       const { text } = await resp.json() as { text?: string };
       if (text) finalText = text;
     }
   } catch {
-    // STT service not running — use last live chunk result
+    // STT service not running or timed out — use last live chunk result
   }
 
   if (finalText) {
@@ -2000,6 +2406,7 @@ async function stopMic(): Promise<void> {
     $input.value = micBaseText;
     autoGrow();
   }
+  micLog('[mic] stopMic done, finalText=', finalText, 'sticky=', micSticky);
   micSetState('idle');
   updateInputState();
 }
@@ -2008,9 +2415,14 @@ async function stopMic(): Promise<void> {
 function abortMic(): void {
   if (!micRecording) return;
   micRecording = false;
+  vadSpeaking = false;
+  vadLoudFrames = 0;
+  $mic.classList.remove('vad-active');
   if (micChunkTimer !== null) { clearInterval(micChunkTimer); micChunkTimer = null; }
   if (micSilenceTimer !== null) { clearInterval(micSilenceTimer); micSilenceTimer = null; }
-  // Invalidate any in-flight STT responses so they don't write back to the textarea
+  // Abort and invalidate any in-flight live STT requests
+  for (const c of micLiveAbortCtrls) c.abort();
+  micLiveAbortCtrls = [];
   micDisplayedSeq = micReqSeq;
   micSource?.disconnect();
   micProcessor?.disconnect();
@@ -2026,8 +2438,16 @@ function abortMic(): void {
 }
 
 $mic.addEventListener('click', () => {
-  if (micRecording) void stopMic();
+  if (micRecording) { setMicSticky(false); void stopMic(); }
   else void startMic();
+  $input.focus();
+});
+
+$micSticky.addEventListener('click', () => {
+  const wasSticky = micSticky;
+  setMicSticky(!micSticky);
+  if (micSticky && !micRecording) void startMic();       // turned on → start
+  else if (wasSticky && !micSticky && micRecording) void stopMic(); // turned off → stop
   $input.focus();
 });
 
@@ -2062,13 +2482,28 @@ function updateSendButton(ctrlHeld: boolean): void {
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Control') updateSendButton(true);
-  // Mic toggle: Alt+M / Ctrl+` (global) or ` / M when input not focused
-  const inputFocused = document.activeElement === $input;
-  const micLocal = !inputFocused && (e.key === '`' || e.key === 'm' || e.key === 'M');
-  const micGlobal = (e.key === 'm' && e.altKey && !e.ctrlKey) || (e.key === '`' && e.ctrlKey);
-  if (micLocal || micGlobal) {
+  // Ctrl+Shift+` = toggle always-on mic (sticky) mode
+  // Use e.code to handle Shift changing the reported key (` → ~)
+  if (e.code === 'Backquote' && e.ctrlKey && e.shiftKey) {
     e.preventDefault();
-    if (micRecording) void stopMic();
+    const wasSticky = micSticky;
+    setMicSticky(!micSticky);
+    if (micSticky && !micRecording) void startMic();
+    else if (wasSticky && !micSticky && micRecording) void stopMic();
+    return;
+  }
+  // Ctrl+` = toggle mic (global)
+  if (e.code === 'Backquote' && e.ctrlKey && !e.shiftKey) {
+    e.preventDefault();
+    if (micRecording) { setMicSticky(false); void stopMic(); }
+    else void startMic();
+    return;
+  }
+  // ` or M when input not focused = mic toggle (local shortcut)
+  const inputFocused = document.activeElement === $input;
+  if (!inputFocused && (e.code === 'Backquote' || e.key === 'm' || e.key === 'M')) {
+    e.preventDefault();
+    if (micRecording) { setMicSticky(false); void stopMic(); }
     else void startMic();
   }
 });
@@ -2092,6 +2527,13 @@ $sbTtsRate.addEventListener('input', () => {
   $sbTtsRateLabel.textContent = ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`;
 });
 
+// ── Sidebar concise toggle ────────────────────────────────────
+
+$sbConciseToggle.addEventListener('click', () => {
+  const cmd = conciseMode ? '/concise off' : '/concise on';
+  wsSend({ type: 'message', content: cmd });
+});
+
 // ── Sidebar reasoning controls ───────────────────────────────
 
 $sbReasoningToggle.addEventListener('click', () => {
@@ -2113,6 +2555,12 @@ $sbEffortPills.addEventListener('click', (e) => {
 // Restore persisted TTS slider state
 $sbTtsRate.value = String(ttsRatePct);
 $sbTtsRateLabel.textContent = ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`;
+
+// Restore sticky mic visual + start mic if it was active
+if (micSticky) {
+  $micSticky.classList.add('active');
+  void startMic();
+}
 
 updateHeader();
 updateSidebar();

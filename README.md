@@ -1,191 +1,213 @@
-# aigent 🤖
+# aigent
 
-**A self-modifying AI agent platform for AI researchers and developers.**
+**A self-modifying AI agent platform built for developers and AI researchers.**
 
-Built for developers working on AI agent architectures. The agent can modify its own source code, implement new capabilities, and evolve its behavior through direct code changes — making it ideal for researching self-improving AI systems.
+The agent runs in a Docker sandbox, can read and edit its own source code, and talks to you through a browser-based UI. API keys never enter the sandbox. All host access is permission-gated.
 
-## Core Principles
+---
 
-### 🔐 **Security-First Architecture**
-- **Docker sandboxing** — agent isolated from host system
-- **Explicit permission model** — all host access requires approval
-- **Capability-based security** — granular control over clipboard, filesystem, network
-- **API key isolation** — credentials never enter the sandbox
-- **Mount-based filesystem access** — controlled folder sharing with ro/rw permissions
+## What it does
 
-### 🧠 **Self-Authoring Agent**
-- **Source code access** — agent can read and modify its own implementation
-- **Hot-reload development** — changes take effect immediately
-- **Persistent memory system** — maintains knowledge across sessions
-- **Tool evolution** — agent can implement new capabilities
-- **Architecture awareness** — understands its own design patterns
+- Streams responses from Claude (Anthropic) or GPT (OpenAI)
+- Executes shell commands, reads/writes files, searches code, fetches URLs
+- Modifies its own source — changes hot-reload, conversation survives restarts
+- Maintains persistent memory across sessions
+- Spawns background sub-agents for long tasks without blocking your conversation
+- Speaks responses aloud (local TTS) and listens via microphone (local STT)
 
-### 🌐 **Advanced Interface Layer**
-- **Dual UI** — terminal and web interfaces
-- **Real-time collaboration** — multiple clients, shared state
-- **Background task execution** — non-blocking long-running operations
-- **Host OS integration** — clipboard, screenshots, audio (permission-controlled)
-- **Attachment support** — images, files, structured data
-- **Voice interface** — speech-to-text input, text-to-speech output (planned)
+---
 
 ## Architecture
 
 ```
-Host Environment (Linux/WSL/macOS)
-├── Gatekeeper Process
-│   ├── Permission broker (mount requests, config changes)
-│   ├── Container lifecycle management
-│   └── TUI/Web UI coordination
-├── Host Daemon
-│   ├── OS capability providers (clipboard, screen, audio)
-│   ├── Permission store with user prompts
-│   └── Secure capability execution
-├── LLM Proxy
-│   ├── API key/token management
-│   ├── Provider abstraction (Anthropic, OpenAI)
-│   └── Request caching and optimization
+Host
+├── Gatekeeper (gatekeeper.tsx)
+│   ├── Web UI  ←→  Browser
+│   ├── Container lifecycle
+│   ├── LLM proxy  (API keys never enter sandbox)
+│   └── Permission broker  (mounts, capabilities)
+│         ↕  NDJSON / Unix socket
 └── Docker Sandbox
-    ├── Agent Server (conversation engine)
-    ├── File watcher (auto-restart on source changes)
-    ├── Tool execution layer (12+ capabilities)
-    └── Memory management (workspace persistence)
+    ├── agent.ts       — conversation loop, streaming, retry
+    ├── provider.ts    — Anthropic + OpenAI abstraction
+    ├── tools.ts       — 14 tools
+    ├── tasks.ts       — background task queue
+    ├── workspace.ts   — memory system
+    └── compact.ts     — context compaction
 ```
 
-## For AI Researchers
-
-This platform enables research into:
-
-- **Self-modifying code architectures** — watch agents improve their own implementations
-- **Tool evolution** — study how agents develop new capabilities
-- **Memory and continuity** — persistent agent personalities and knowledge
-- **Security boundaries** — controlled environment for capability research
-- **Human-AI collaboration** — permission models and trust mechanisms
-
-### Research Features
-- **Conversation logging** — all interactions automatically archived
-- **Code diff tracking** — agent changes are version-controlled
-- **Performance metrics** — token usage, cache hits, execution timing
-- **Multi-model support** — test different reasoning approaches
-- **Background processing** — parallel task execution and coordination
-
-## Quick Start
-
-**Prerequisites:** Docker, Node.js 22+, Anthropic API access
-
-```bash
-# Clone and configure
-git clone <repo> && cd aigent
-echo 'ANTHROPIC_API_KEY=sk-ant-...' > .env
-
-# Launch with development mount
-npm run start ~/my-research-project --rw
-
-# Or headless mode for web-only interface
-npm run headless
-```
-
-The agent immediately has access to:
-- Its own source code (`/app/src/`)
-- Your project files (`/project/my-research-project/`)
-- Persistent workspace (`/workspace/`)
-
-## Development Workflow
-
-### Agent Self-Modification
-```
-You: Add support for executing Rust code
-Agent: [reads tool definitions, implements RustTool class, updates tool registry, tests with hello world, commits changes]
-```
-
-### Research Iteration
-```
-You: Implement a new memory compression algorithm
-Agent: [analyzes current memory system, designs new approach, implements in compact.ts, benchmarks performance, documents findings]
-```
-
-### Capability Evolution  
-```
-You: Add screenshot analysis capabilities
-Agent: [integrates with host daemon, implements image processing, adds UI controls, tests with examples]
-```
-
-## Advanced Features
-
-### Permission System
-- **Mount requests** — agent can request access to new folders
-- **Capability grants** — clipboard, screen, network access with user approval
-- **Time-limited permissions** — temporary access that expires
-- **Audit logging** — all permission decisions recorded
-
-![Permission System Example](permission_button.png)
-
-*Example: Agent requesting permission to mount a new folder - user sees clear approval dialog*
-
-### Memory Architecture
-- **Short-term** — conversation context with intelligent compaction
-- **Long-term** — curated knowledge in `/workspace/MEMORY.md`
-- **Session logs** — daily archives for pattern analysis
-- **Personality persistence** — agent traits survive restarts
-
-### Tool System
-Extensible capability framework:
-- **File operations** — read, write, edit, search, diff
-- **Shell execution** — full bash access with timeout control
-- **Network access** — HTTP requests with response processing
-- **Host integration** — clipboard, screenshots, notifications
-- **Agent spawning** — background task delegation
-- **Self-modification** — source code editing with hot-reload
-
-## Configuration
-
-### Environment Variables
-```bash
-ANTHROPIC_API_KEY=sk-ant-...           # API access
-AIGENT_MODEL=claude-opus-4-6          # Default model
-AIGENT_THINKING=medium                 # Reasoning depth
-AIGENT_DEBUG=1                         # Verbose logging
-```
-
-### Workspace Structure
-```
-workspace/
-├── config/           # Read-only agent configuration
-│   ├── SOUL.md      # Personality and values  
-│   ├── USER.md      # Information about you
-│   └── AGENTS.md    # Operating instructions
-├── MEMORY.md        # Curated long-term knowledge
-├── TOOLS.md         # Tool usage notes
-└── memory/          # Session archives
-    └── YYYY-MM-DD.md
-```
-
-### Security Configuration
-```
-~/.config/aigent/permissions.json    # Host capability permissions
-```
-
-## API Integration
-
-Supports multiple providers:
-- **Anthropic** — Claude models with system prompt caching
-- **OpenAI** — GPT models (experimental)
-- **Claude Code tokens** — subscription-based access
-
-Authentication auto-detected from API key format.
-
-## Contributing
-
-The agent is designed to evolve itself. Major contributions typically happen through:
-
-1. **Agent-driven development** — ask the agent to implement features
-2. **Architecture discussions** — explore new capability designs  
-3. **Security research** — test sandbox boundaries and permission models
-4. **Performance optimization** — improve reasoning efficiency
-
-## License
-
-MIT License — designed for research and development use.
+**Security model:** Docker with `cap_drop ALL`, `no-new-privileges`, read-only app mount. The gatekeeper is the only process with credentials. The sandbox is disposable.
 
 ---
 
-**Note:** This is research software. The agent can modify its own code and request system access. Run only in controlled environments with appropriate security precautions.
+## Quick start
+
+**Requirements:** Docker, Node.js 22+, Anthropic API key (or OAT subscription token)
+
+```bash
+git clone <repo> && cd aigent
+cp .env.example .env        # add your ANTHROPIC_API_KEY
+make start                  # launches gatekeeper + sandbox + web UI
+```
+
+Open `http://localhost:3141` in your browser.
+
+---
+
+## Web UI features
+
+### Voice
+
+- **Push-to-talk** — `Ctrl+\`` or the mic button; transcription streams into the input box in real time
+- **Always-on mode** — `Ctrl+Shift+\`` keeps the microphone open continuously; silence detection auto-submits
+- **Text-to-speech** — speaker button on each assistant message; auto-speak toggle in the sidebar
+- **Concise mode** — a cheap model summarises long responses before they're spoken, keeping TTS output brief
+
+### Input
+
+- `Enter` to send, `Shift+Enter` for newline
+- `Ctrl+Enter` — one-shot thinking boost (sends with max reasoning, then reverts)
+- `/` to open the slash-command menu
+- Paste or attach images; screen-capture button grabs any window via `getDisplayMedia`
+
+### Reasoning & effort
+
+Toggles in the left sidebar:
+
+| Toggle | What it does |
+|--------|-------------|
+| Reasoning on/off | Enable/disable extended thinking |
+| Effort level (min → max) | Budget tokens allocated to thinking |
+
+Settings persist across reloads. The agent applies thinking heuristics automatically — short messages get lower effort to save tokens.
+
+### Model picker
+
+Choose any Claude model from the sidebar. The list is fetched live from the Anthropic API and falls back to a hardcoded default. Selection persists across restarts.
+
+The agent can also switch its own model mid-conversation via the `switch_model` tool — upgrading for complex tasks, downgrading for cheap ones.
+
+### Background tasks
+
+Dispatched via the `dispatch_task` tool. Shown in the sidebar with:
+
+- Live spinner + elapsed time while running
+- Context usage (tokens) and model used for each task
+- Checkmark / ✗ on completion or failure
+
+Background tasks can use cheaper models (e.g. Haiku for read-only work) to keep costs down.
+
+### Tool visibility
+
+Tool calls are shown inline in the chat — name, input summary, and output excerpt. Collapsed by default; expand to see the full result.
+
+Context usage is shown in the status bar: current tokens / context window, with a colour-coded bar.
+
+### Mounts
+
+The agent can request access to folders on your machine via the `request_mount` tool. You see a permission modal (with an audio cue and browser notification if the tab is backgrounded), approve or deny, and the agent gets a time-limited mount that auto-expires.
+
+Active mounts are shown in the sidebar with a countdown. Click ✕ to revoke early.
+
+---
+
+## Memory system
+
+```
+/workspace/
+├── AGENTS.md        — operating instructions
+├── SOUL.md          — personality and values
+├── USER.md          — info about you
+├── MEMORY.md        — curated long-term knowledge
+├── TOOLS.md         — tool notes
+└── memory/
+    └── YYYY-MM-DD.md  — daily session logs
+```
+
+- **Context compaction** at 70% usage — conversation is summarised in place; cost-optimised prompt
+- **Cache-aware** — stable system prompt blocks are cached; workspace files skip disk reads when unchanged
+- **Memory distillation** — on session end or `/reset`, the agent rewrites `MEMORY.md` from the day's logs
+
+---
+
+## Tools (19)
+
+| Tool | Description |
+|------|-------------|
+| `exec` | Shell command with timeout and optional cwd |
+| `read_file` | File read with line-range support (offset + limit) |
+| `write_file` | Write a file, creating parent directories as needed |
+| `edit_file` | Surgical exact-string replacement in a file |
+| `patch` | Multiple find-replace edits in one call |
+| `list_files` | Directory listing |
+| `grep` | Regex search with file/line results |
+| `glob` | Recursive file-pattern matching (skips node_modules etc.) |
+| `tree` | Directory tree, gitignore-aware |
+| `fetch` | HTTP requests (all methods, optional HTML→text stripping) |
+| `screenshot` | Capture the sandbox virtual display (Xvfb) as PNG |
+| `request_screenshot` | Capture the user's live browser screen (requires screen-share active) |
+| `dispatch_task` | Spawn a background agent — returns immediately, result injected later |
+| `spawn_agent` | Spawn a sub-agent synchronously — blocks until done |
+| `switch_model` | Change active model mid-conversation (upgrade or downgrade) |
+| `host` | Call host OS capabilities: clipboard, audio, notifications, open |
+| `request_mount` | Ask the user to grant access to a host folder (time-limited) |
+| `request_config_write` | Propose edits to config files (SOUL.md, AGENTS.md, etc.) — user sees diff |
+| `search_memory` | Keyword search across past session logs (zero LLM cost) |
+
+---
+
+## Configuration
+
+### Environment variables
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...      # or use OAT token
+AIGENT_MODEL=claude-opus-4-6      # default model
+AIGENT_THINKING=medium            # off | low | medium | high | max
+AIGENT_WEB_PORT=3141              # web UI port
+AIGENT_DEBUG=1                    # verbose logging
+```
+
+### TTS / STT setup
+
+```bash
+make tts-setup   # install edge-tts (Microsoft TTS, no API key needed)
+make tts         # start the TTS server
+
+# STT uses NVIDIA Parakeet via local Python service
+cd stt && pip install -r requirements.txt && python main.py
+```
+
+---
+
+## Self-modification
+
+The agent's source is mounted at `/app/src/` inside the container. Edits persist on the host filesystem. The file watcher runs `tsc --noEmit` before restarting — bad code doesn't take down the server. Conversation state is auto-saved and restored on restart.
+
+```
+You:   Add a tool that runs Python snippets and returns stdout
+Agent: [reads tools.ts, implements PythonTool, adds to registry, runs tsc, commits]
+```
+
+---
+
+## Multi-provider support
+
+- **Anthropic** — Claude models, extended thinking, prompt caching, OAT tokens
+- **OpenAI** — GPT models (streaming, tool calls, images)
+
+Provider is auto-detected from the API key format. Switch with `AIGENT_PROVIDER=openai`.
+
+---
+
+## Contributing
+
+The most productive way to contribute is to run the agent and ask it to implement something. It can read the codebase, write code, run tests, and commit — treating itself as the development environment.
+
+For security issues, open a private issue rather than a public PR.
+
+---
+
+## License
+
+MIT

@@ -32,6 +32,13 @@ export interface TaskQueueOptions {
   onResultReady?: () => void;
 }
 
+interface TaskUsageMeta {
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cost?: number;
+}
+
 interface InternalTask {
   id: string;
   description: string;
@@ -39,6 +46,10 @@ interface InternalTask {
   startedAt: string;
   completedAt?: string;
   result?: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cost?: number;
 }
 
 export class TaskQueue {
@@ -72,15 +83,19 @@ export class TaskQueue {
   }
 
   /** Mark a task as completed and queue its result. */
-  complete(id: string, result: string): void {
+  complete(id: string, result: string, meta?: TaskUsageMeta): void {
     const task = this.tasks.get(id);
     if (!task) return;
 
     task.status = 'completed';
     task.completedAt = new Date().toISOString();
     task.result = result;
+    if (meta?.model !== undefined) task.model = meta.model;
+    if (meta?.inputTokens !== undefined) task.inputTokens = meta.inputTokens;
+    if (meta?.outputTokens !== undefined) task.outputTokens = meta.outputTokens;
+    if (meta?.cost !== undefined) task.cost = meta.cost;
     const durationMs = new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime();
-    log.info('Task completed', { id, durationMs });
+    log.info('Task completed', { id, durationMs, model: task.model, cost: task.cost });
 
     this.completionQueue.push({
       id: task.id,
@@ -97,6 +112,10 @@ export class TaskQueue {
       status: 'completed',
       startedAt: task.startedAt,
       completedAt: task.completedAt,
+      ...(task.model !== undefined ? { model: task.model } : {}),
+      ...(task.inputTokens !== undefined ? { inputTokens: task.inputTokens } : {}),
+      ...(task.outputTokens !== undefined ? { outputTokens: task.outputTokens } : {}),
+      ...(task.cost !== undefined ? { cost: task.cost } : {}),
     });
 
     // Signal that a result is ready for the main agent
@@ -104,13 +123,14 @@ export class TaskQueue {
   }
 
   /** Mark a task as failed and queue the error. */
-  fail(id: string, error: string): void {
+  fail(id: string, error: string, meta?: TaskUsageMeta): void {
     const task = this.tasks.get(id);
     if (!task) return;
 
     task.status = 'failed';
     task.completedAt = new Date().toISOString();
     task.result = error;
+    if (meta?.model !== undefined) task.model = meta.model;
     const durationMs = new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime();
     log.error('Task failed', { id, error, durationMs });
 
@@ -129,6 +149,7 @@ export class TaskQueue {
       status: 'failed',
       startedAt: task.startedAt,
       completedAt: task.completedAt,
+      ...(task.model !== undefined ? { model: task.model } : {}),
     });
 
     this.opts.onResultReady?.();
@@ -179,9 +200,13 @@ export class TaskQueue {
 
   /** Get info for all tasks (for UI / /tasks command). */
   getInfos(): BackgroundTaskInfo[] {
-    return Array.from(this.tasks.values()).map(({ id, description, status, startedAt, completedAt }) => ({
+    return Array.from(this.tasks.values()).map(({ id, description, status, startedAt, completedAt, model, inputTokens, outputTokens, cost }) => ({
       id, description, status, startedAt,
       ...(completedAt ? { completedAt } : {}),
+      ...(model ? { model } : {}),
+      ...(inputTokens !== undefined ? { inputTokens } : {}),
+      ...(outputTokens !== undefined ? { outputTokens } : {}),
+      ...(cost !== undefined ? { cost } : {}),
     }));
   }
 

@@ -24,6 +24,7 @@ import argparse
 import gc
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -170,6 +171,24 @@ def get_model() -> _ASRModel:
         return _model
 
 
+# ── Transcript post-processing ────────────────────────────────
+
+# Standalone filler words to strip (whole-word, case-insensitive).
+_FILLER_RE = re.compile(
+    r'\b(um+|uh+|hmm+|hm+|mm-hmm|mhm+|mm+|ah+|er|erm|oh+)\b[,.]?',
+    re.IGNORECASE,
+)
+
+def _clean(text: str) -> str:
+    """Strip filler words and tidy up whitespace/punctuation."""
+    text = _FILLER_RE.sub(' ', text)
+    # Collapse runs of spaces and strip leading/trailing whitespace.
+    text = re.sub(r'  +', ' ', text).strip()
+    # Remove a leading comma or period left behind after stripping.
+    text = re.sub(r'^[,.\s]+', '', text)
+    return text
+
+
 # ── HTTP handler ──────────────────────────────────────────────
 
 class Handler(BaseHTTPRequestHandler):
@@ -216,6 +235,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 text = str(r)
 
+            text = _clean(text)
             print(f"[{elapsed:.2f}s] {text!r}", flush=True)
             self._json(200, {"text": text})
         except Exception as e:

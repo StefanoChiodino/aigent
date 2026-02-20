@@ -1,38 +1,37 @@
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Provider, ProviderMessage } from './provider.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('compact');
 
-const COMPACT_PROMPT = `Summarize this conversation as a compact reference. Include: user goals, decisions made, files changed, commands run, current state, pending tasks. Be specific (file paths, commands, technical details). No narrative or meta-commentary.`;
+/**
+ * Prompt for mid-conversation compaction.
+ * Goal: stay task-focused, keep the agent on track. NOT long-term memory.
+ */
+const COMPACT_PROMPT = `Summarize this conversation as a compact reference for continuing the current task. Include: user goals, decisions made, files changed, commands run, current state, pending tasks. Be specific (file paths, commands, technical details). No narrative or meta-commentary.`;
 
 /**
- * Persist a compaction summary to the daily memory file.
- * This ensures context survives conversation resets.
+ * Prompt for end-of-session/reset memory distillation.
+ * Goal: extract what's worth keeping permanently across sessions.
  */
-function persistSummary(workspacePath: string, summary: string): void {
-  try {
-    const memoryDir = join(workspacePath, 'memory');
-    if (!existsSync(memoryDir)) {
-      mkdirSync(memoryDir, { recursive: true });
-    }
+const DISTILL_PROMPT = `You are reviewing a conversation to extract what's worth keeping in long-term memory.
 
-    const today = new Date().toISOString().slice(0, 10);
-    const memoryFile = join(memoryDir, `${today}.md`);
-    const timestamp = new Date().toISOString().slice(11, 19);
+Review the conversation and the existing MEMORY.md content below. Output an updated MEMORY.md that:
+- Preserves all existing content that is still accurate
+- Adds new facts, decisions, lessons, or architectural knowledge from this conversation
+- Updates or corrects any stale information
+- Removes noise (failed experiments, temporary workarounds, trivial chit-chat)
+- Keeps it concise — this file is loaded into every session's system prompt
 
-    const entry = `\n\n## Compaction Summary (${timestamp})\n\n${summary}\n`;
+Only include things that would be useful to know at the start of a future session:
+- Key architectural decisions or changes made
+- Important file paths, patterns, or conventions discovered
+- Bugs found and fixed (with root cause)
+- User preferences or communication style notes
+- Unresolved TODOs or next steps worth remembering
 
-    if (!existsSync(memoryFile)) {
-      appendFileSync(memoryFile, `# ${today}\n${entry}`);
-    } else {
-      appendFileSync(memoryFile, entry);
-    }
-  } catch {
-    // Non-critical — don't break compaction over a file write failure
-  }
-}
+Output ONLY the updated MEMORY.md content. No preamble, no commentary.`;
 
 /**
  * Convert messages to a summarizable format.
@@ -108,20 +107,20 @@ function findCleanSplitPoint(messages: ProviderMessage[], targetSplit: number): 
 
 /**
  * Compact a conversation by summarizing old messages and keeping recent ones.
+ * This is a MID-TASK operation — goal is to stay on track, not to persist memory.
  *
  * Strategy:
  * 1. Keep the last `keepRecent` user turns (a turn = user + assistant + tool exchanges)
- * 2. Send the older messages (including tool results) to the provider for summarization
- * 3. Replace old messages with a summary exchange + recent messages
- * 4. Persist the summary to the daily memory file
+ * 2. Summarize older messages so the agent retains context about what was done
+ * 3. Replace old messages with summary + recent messages
  *
- * Works with any provider — no Anthropic-specific types.
+ * Does NOT write to MEMORY.md — that's for reset/session-end (distillToMemory).
  */
 export async function compactConversation(
   provider: Provider,
   model: string,
   messages: ProviderMessage[],
-  workspacePath?: string,
+  _workspacePath?: string,
   keepRecentTurns: number = 4,
 ): Promise<{ messages: ProviderMessage[]; summary: string }> {
   // Count user turns (not counting tool_results as turns)
@@ -168,11 +167,6 @@ export async function compactConversation(
 
   const summary = response.text;
 
-  // Persist summary to daily memory file
-  if (workspacePath) {
-    persistSummary(workspacePath, summary);
-  }
-
   // Build compacted messages: summary as first exchange + recent messages
   const compacted: ProviderMessage[] = [
     {
@@ -188,4 +182,65 @@ export async function compactConversation(
 
   log.info('Compaction complete', { messagesBefore: messages.length, messagesAfter: compacted.length, summaryLength: summary.length });
   return { messages: compacted, summary };
+}
+
+/**
+ * Distill a conversation into MEMORY.md.
+ * Called on reset or session-end — NOT during mid-task compaction.
+ *
+ * Reads existing MEMORY.md, asks the model what's worth keeping from this
+ * conversation, and writes back an updated MEMORY.md. Also appends a minimal
+ * timestamp entry to the daily log for audit trail.
+ *
+ * Best-effort — errors are swallowed so they never block reset/shutdown.
+ */
+export async function distillToMemory(
+  provider: Provider,
+  model: string,
+  messages: ProviderMessage[],
+  workspacePath: string,
+): Promise<void> {
+  if (messages.length < 4) return;
+
+  try {
+    const memoryPath = join(workspacePath, 'MEMORY.md');
+    const existingMemory = existsSync(memoryPath)
+      ? readFileSync(memoryPath, 'utf-8')
+      : '(empty — no memory yet)';
+
+    const summaryMessages = messagesToSummaryInput(messages);
+
+    // Include existing MEMORY.md so the model can merge intelligently
+    summaryMessages.push({
+      role: 'user',
+      content: `${DISTILL_PROMPT}\n\n---\nExisting MEMORY.md:\n\n${existingMemory}`,
+    });
+
+    log.info('Distilling to MEMORY.md', { messages: messages.length });
+
+    const response = await provider.sendMessage(
+      'You are a careful memory curator. You update long-term memory files accurately and concisely.',
+      summaryMessages,
+      [],
+      { model, maxTokens: 4096, thinking: 'off' },
+    );
+
+    const updatedMemory = response.text.trim();
+    if (!updatedMemory) return;
+
+    writeFileSync(memoryPath, updatedMemory + '\n');
+    log.info('MEMORY.md updated', { bytes: updatedMemory.length });
+
+    // Minimal audit entry in daily log
+    const memoryDir = join(workspacePath, 'memory');
+    if (!existsSync(memoryDir)) mkdirSync(memoryDir, { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    const time = new Date().toISOString().slice(11, 19);
+    appendFileSync(
+      join(memoryDir, `${today}.md`),
+      `\n## Memory distilled (${time})\n\n(MEMORY.md updated — ${messages.length} messages processed)\n`,
+    );
+  } catch (err: unknown) {
+    log.warn('distillToMemory failed (non-critical)', { error: (err as { message?: string }).message });
+  }
 }

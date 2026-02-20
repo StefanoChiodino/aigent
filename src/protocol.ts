@@ -22,6 +22,7 @@ export type ClientCommand =
   | { type: 'command'; cmd: string }
   | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
   | { type: 'config_write_response'; id: string; ok: boolean; message: string }
+  | { type: 'screenshot_response'; id: string; ok: boolean; data?: string; mediaType?: string; message: string }
   | { type: 'ping' };
 
 // --- Server → Client ---
@@ -39,12 +40,17 @@ export interface BackgroundTaskInfo {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   startedAt: string;
   completedAt?: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cost?: number;
 }
 
 export interface ServerState {
   messages: DisplayMessage[];
   usage: TokenUsage;
   thinking: ThinkingLevel;
+  concise: boolean;
   profile: string;
   sessionId: string;
   model: string;
@@ -66,10 +72,11 @@ export type ServerEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
-  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string }
+  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string; concise?: boolean; availableModels?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
+  | { type: 'screenshot_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
   | { type: 'pong' };
 

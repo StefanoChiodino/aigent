@@ -4,7 +4,9 @@
       "Read(//home/draga/repos/openclaw/**)",
       "Bash(npx esbuild:*)",
       "Bash(make:*)",
-      "Read(//home/draga/repos/orchids/scripts/engines/**)"
+      "Read(//home/draga/repos/orchids/scripts/engines/**)",
+      "Bash(npm run build:web:*)",
+      "Bash(npm run:*)"
     ]
   }
 }

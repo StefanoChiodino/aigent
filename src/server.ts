@@ -17,6 +17,7 @@ import type { ProviderMessage, UserContent, TextContent, ImageContent, DocumentC
 import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
 import { computeCost } from './pricing.js';
+import { distillToMemory } from './compact.js';
 import { loadMCP, type MCPManager } from './mcp.js';
 import { createLogger } from './logger.js';
 import { execReadonlyTool, fetchReadonlyTool } from './tools.js';
@@ -145,6 +146,7 @@ let messages: DisplayMessage[] = [];
 let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 let currentThinking: ThinkingLevel;
 let savedEffortLevel: ThinkingLevel = 'high';
+let currentConcise = false;
 let currentProfile = 'default';
 let currentSessionId = generateSessionId();
 let model: string;
@@ -200,6 +202,45 @@ function resolveMountRequest(id: string, response: { ok: boolean; containerPath?
   const pending = pendingMountRequests.get(id);
   if (pending) {
     pendingMountRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
+// --- Browser screenshot request handling ---
+
+const pendingScreenshotRequests = new Map<string, {
+  resolve: (response: { ok: boolean; data?: string; mediaType?: string; message: string }) => void;
+}>();
+let screenshotRequestCounter = 0;
+
+/**
+ * Ask the browser to capture a frame from its active screen share.
+ * Called by the request_screenshot tool.
+ */
+export function requestBrowserScreenshot(): Promise<{ ok: boolean; data?: string; mediaType?: string; message: string }> {
+  const id = `sc_${++screenshotRequestCounter}`;
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingScreenshotRequests.delete(id);
+      resolve({ ok: false, message: 'Screenshot request timed out (30s)' });
+    }, 30_000);
+
+    pendingScreenshotRequests.set(id, {
+      resolve: (response) => {
+        clearTimeout(timer);
+        resolve(response);
+      },
+    });
+
+    broadcast({ type: 'screenshot_request', id });
+  });
+}
+
+function resolveScreenshotRequest(id: string, response: { ok: boolean; data?: string; mediaType?: string; message: string }): void {
+  const pending = pendingScreenshotRequests.get(id);
+  if (pending) {
+    pendingScreenshotRequests.delete(id);
     pending.resolve(response);
   }
 }
@@ -425,7 +466,7 @@ function buildBackgroundToolSet(allTools: ProviderToolDef[], capabilities: Set<s
   const blocked = new Set([
     'spawn_agent', 'dispatch_task',
     'request_mount', 'request_config_write',
-    'host', 'screenshot',
+    'host', 'screenshot', 'request_screenshot',
   ]);
 
   // Without fs_write: block write tools, swap exec → exec_readonly
@@ -518,6 +559,8 @@ function dispatchBackgroundTask(input: {
 
       let iterations = 0;
       let finalText = '';
+      let taskInputTokens = 0;
+      let taskOutputTokens = 0;
 
       while (iterations < maxIter) {
         iterations++;
@@ -529,6 +572,9 @@ function dispatchBackgroundTask(input: {
           subToolDefs,
           { model: taskModel, maxTokens: 16384, thinking: agent.thinkingLevel },
         );
+
+        taskInputTokens += response.usage.input + response.usage.cacheRead + response.usage.cacheWrite;
+        taskOutputTokens += response.usage.output;
 
         log.debug('Dispatch response', { taskId, stopReason: response.stopReason, toolCalls: response.toolCalls.length });
 
@@ -561,12 +607,24 @@ function dispatchBackgroundTask(input: {
       }
 
       if (!finalText) finalText = '[background agent hit iteration limit]';
-      taskQueue.complete(taskId, finalText);
+
+      // Compute cost for this task and roll it into the global session usage
+      const taskUsageRaw = { input: taskInputTokens, output: taskOutputTokens, cacheRead: 0, cacheWrite: 0 };
+      const taskCost = computeCost(taskModel, taskUsageRaw);
+      usage = {
+        ...usage,
+        input: usage.input + taskInputTokens,
+        output: usage.output + taskOutputTokens,
+        cost: (usage.cost ?? 0) + taskCost,
+      };
+      broadcast({ type: 'usage', usage });
+
+      taskQueue.complete(taskId, finalText, { model: taskModel, inputTokens: taskInputTokens, outputTokens: taskOutputTokens, cost: taskCost });
 
     } catch (err: unknown) {
       const e = err as { message?: string; stack?: string };
       log.error('Dispatch error', { taskId, error: e.message });
-      taskQueue.fail(taskId, e.message ?? 'unknown error');
+      taskQueue.fail(taskId, e.message ?? 'unknown error', { model: input.model ?? model });
     }
   })();
 
@@ -665,6 +723,7 @@ function getState(): ServerState {
     messages,
     usage,
     thinking: currentThinking,
+    concise: currentConcise,
     profile: currentProfile,
     sessionId: currentSessionId,
     model,
@@ -680,7 +739,7 @@ function doAutoSave(): void {
     autoSaveSession(workspacePath, agent.getMessages(), messages, usage, {
       current: currentThinking,
       savedEffort: savedEffortLevel,
-    }, model);
+    }, model, currentConcise);
   } catch {
     // Non-critical
   }
@@ -692,6 +751,14 @@ function handleCommand(cmd: string): boolean {
   const trimmed = cmd.trim();
 
   if (trimmed === '/reset') {
+    // Distill to memory before wiping — best effort, non-blocking
+    const messagesToDistill = agent.getMessages();
+    if (messagesToDistill.length >= 4) {
+      addSystemMessage('Distilling session to memory...');
+      void distillToMemory(agent.underlyingProvider, agent.currentModel, messagesToDistill, workspacePath)
+        .then(() => addSystemMessage('Memory updated.'))
+        .catch(() => {}); // already logged inside distillToMemory
+    }
     agent.reset();
     messages = [];
     usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -761,6 +828,27 @@ function handleCommand(cmd: string): boolean {
     } else {
       addSystemMessage(`Invalid effort. Options: ${effortLevels.join(', ')}`);
     }
+    return true;
+  }
+
+  if (trimmed === '/concise') {
+    addSystemMessage(`Concise mode: ${currentConcise ? 'on' : 'off'}\nUsage: /concise on | /concise off`);
+    return true;
+  }
+
+  if (trimmed === '/concise on') {
+    currentConcise = true;
+    agent.setExtraSystemPrompt(buildExtraSystemPrompt());
+    addSystemMessage('Concise mode: on');
+    broadcast({ type: 'state', concise: true });
+    return true;
+  }
+
+  if (trimmed === '/concise off') {
+    currentConcise = false;
+    agent.setExtraSystemPrompt(buildExtraSystemPrompt());
+    addSystemMessage('Concise mode: off');
+    broadcast({ type: 'state', concise: false });
     return true;
   }
 
@@ -954,6 +1042,7 @@ function handleCommand(cmd: string): boolean {
       '  /compact            Compact context (free up space)\n' +
       '  /reasoning on|off   Toggle reasoning\n' +
       '  /effort <level>     Set effort (low/medium/high/max)\n' +
+      '  /concise on|off     Concise/voice mode (short plain-text replies)\n' +
       '  /model [name]       Show or switch model\n' +
       '  /image <path> [msg] Send an image with optional message\n' +
       '  /usage              Show token usage (session + lifetime)\n' +
@@ -1151,6 +1240,14 @@ function handleClient(socket: Socket): void {
           case 'config_write_response':
             resolveConfigWriteRequest(cmd.id, cmd);
             break;
+          case 'screenshot_response':
+            resolveScreenshotRequest(cmd.id, {
+              ok: cmd.ok,
+              ...(cmd.data !== undefined ? { data: cmd.data } : {}),
+              ...(cmd.mediaType !== undefined ? { mediaType: cmd.mediaType } : {}),
+              message: cmd.message,
+            });
+            break;
           case 'ping':
             send(socket, { type: 'pong' });
             break;
@@ -1249,6 +1346,12 @@ function restoreSession(): void {
       agent.currentModel = saved.model;
       log.info('Model restored', { model });
     }
+    // Restore concise mode so it persists across restarts
+    if (saved.concise !== undefined) {
+      currentConcise = saved.concise;
+      agent.setExtraSystemPrompt(buildExtraSystemPrompt());
+      log.info('Concise mode restored', { concise: currentConcise });
+    }
     log.info('Session restored', { messages: messages.length, tokens: usage.input + usage.output });
   }
 }
@@ -1286,6 +1389,14 @@ function buildHostSystemPrompt(): string {
   }
   lines.push('Some capabilities may require user approval when first used.');
   return lines.join('\n');
+}
+
+function buildExtraSystemPrompt(): string {
+  let extra = buildHostSystemPrompt();
+  if (currentConcise) {
+    extra += '\n\n## Response Style (Voice Mode)\n\nStart every response with a spoken summary on its own line, before anything else:\n\n<speak>One or two sentence plain English summary for text-to-speech. No markdown, no lists.</speak>\n\nThen give your full response with markdown as normal. The <speak> block is read aloud immediately while the rest loads. Keep it brief and conversational.';
+  }
+  return extra;
 }
 
 // Initialize MCP, host client, and agent
@@ -1339,7 +1450,7 @@ async function initAgent(): Promise<void> {
     workspacePath,
     ...(mcpManager ? { mcpManager } : {}),
     ...(proxyProvider ? { provider: proxyProvider } : {}),
-    extraSystemPrompt: buildHostSystemPrompt(),
+    extraSystemPrompt: buildExtraSystemPrompt(),
   });
 
   // Fetch available models from the provider (non-blocking — falls back to defaults)
@@ -1349,10 +1460,9 @@ async function initAgent(): Promise<void> {
       if (provider?.listModels) {
         const models = await provider.listModels();
         if (models && models.length > 0) {
-          // Keep only Claude models (filter out deprecated/internal entries),
-          // preserving the API's ordering which reflects release recency.
-          AVAILABLE_MODELS = models.map((m) => m.id).filter((id) => id.startsWith('claude-'));
+          AVAILABLE_MODELS = models.map((m) => m.id);
           log.info('Model list updated from API', { count: AVAILABLE_MODELS.length });
+          broadcast({ type: 'state', availableModels: AVAILABLE_MODELS });
         }
       }
     } catch (err: unknown) {
@@ -1419,10 +1529,11 @@ function writeEndOfSessionSummary(): void {
 
 // Graceful shutdown
 let restartRequested = false;
+let isShuttingDown = false;
 
-function shutdown(): void {
-  writeEndOfSessionSummary();
-  saveLifetimeUsage(usage);
+async function shutdown(): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
 
   // If the agent was mid-tool-loop, cancel before saving to avoid
   // autosaving a conversation that ends with tool_result (which would
@@ -1432,6 +1543,24 @@ function shutdown(): void {
     abortController = null;
     isLoading = false;
   }
+
+  // Distill conversation to MEMORY.md — give it up to 30s before forcing exit
+  const agentMessages = agent?.getMessages() ?? [];
+  if (agentMessages.length >= 4 && agent) {
+    try {
+      await Promise.race([
+        distillToMemory(agent.underlyingProvider, agent.currentModel, agentMessages, workspacePath),
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 30_000)),
+      ]);
+    } catch {
+      // Non-critical — write a minimal fallback entry
+      writeEndOfSessionSummary();
+    }
+  } else {
+    writeEndOfSessionSummary();
+  }
+
+  saveLifetimeUsage(usage);
   doAutoSave();
   if (mcpManager) mcpManager.shutdown();
   server.close();
@@ -1443,11 +1572,11 @@ function shutdown(): void {
 
 function requestRestart(): void {
   restartRequested = true;
-  shutdown();
+  void shutdown();
 }
 
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+process.on('SIGTERM', () => { void shutdown(); });
+process.on('SIGINT', () => { void shutdown(); });
 
 // Keep alive
 setInterval(() => {}, 60_000);

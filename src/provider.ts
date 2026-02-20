@@ -331,11 +331,18 @@ export class OpenAIProvider implements Provider {
       },
     }));
 
+    const noTools = process.env['AIGENT_NO_TOOLS'] === '1' || process.env['AIGENT_NO_TOOLS'] === 'true';
+    const allowlist = process.env['AIGENT_TOOLS_ALLOWLIST']?.split(',').map((s) => s.trim()).filter(Boolean);
+    const filteredTools = noTools
+      ? []
+      : allowlist
+        ? openaiTools.filter((t) => t.type === 'function' && allowlist.includes(t.function.name))
+        : openaiTools;
     const stream = await this.client.chat.completions.create({
       model: options.model,
       max_tokens: options.maxTokens,
       messages: openaiMessages,
-      ...(openaiTools.length > 0 ? { tools: openaiTools } : {}),
+      ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
       stream: true,
     });
 
@@ -463,6 +470,15 @@ export class OpenAIProvider implements Provider {
     }
 
     return result;
+  }
+
+  async listModels(): Promise<ModelInfo[] | null> {
+    try {
+      const response = await this.client.models.list();
+      return response.data.map((m) => ({ id: m.id, displayName: m.id }));
+    } catch {
+      return null;
+    }
   }
 }
 

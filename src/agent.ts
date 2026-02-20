@@ -202,7 +202,7 @@ export class Agent {
       // Fresh sessions have contextTokens=0 so the inner check never fires.
       if (this._totalUsage.contextTokens) {
         const contextUsed = this._totalUsage.contextTokens;
-        if (contextUsed > this.getContextWindow() * 0.6 && this.messages.length > 8) {
+        if (contextUsed > this.getContextWindow() * 0.85 && this.messages.length > 8) {
           await this.compact(callbacks);
         }
       }
@@ -245,7 +245,7 @@ export class Agent {
         this.thinking = savedThinking; // restore thinking level
         // Auto-compact check after final response
         const contextUsed = response.usage.input + response.usage.cacheRead + response.usage.cacheWrite;
-        if (contextUsed > this.getContextWindow() * 0.7 && this.messages.length > 8) {
+        if (contextUsed > this.getContextWindow() * 0.9 && this.messages.length > 8) {
           await this.compact(callbacks);
         }
         return response.text;

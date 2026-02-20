@@ -183,6 +183,7 @@ export function autoSaveSession(
   usage?: { input: number; output: number; cacheRead: number; cacheWrite: number },
   thinking?: { current: string; savedEffort: string },
   model?: string,
+  concise?: boolean,
 ): void {
   const autoSavePath = join(workspacePath, '.autosave.json');
   const data = {
@@ -192,6 +193,7 @@ export function autoSaveSession(
     ...(usage ? { usage } : {}),
     ...(thinking ? { thinking } : {}),
     ...(model ? { model } : {}),
+    ...(concise !== undefined ? { concise } : {}),
   };
   try {
     writeFileSync(autoSavePath, JSON.stringify(data, null, 2));
@@ -205,7 +207,7 @@ export function autoSaveSession(
  */
 export function autoLoadSession(
   workspacePath: string,
-): { agentMessages: unknown[]; uiMessages: unknown[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number }; thinking?: { current: string; savedEffort: string }; model?: string } | null {
+): { agentMessages: unknown[]; uiMessages: unknown[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number }; thinking?: { current: string; savedEffort: string }; model?: string; concise?: boolean } | null {
   const autoSavePath = join(workspacePath, '.autosave.json');
   if (!existsSync(autoSavePath)) return null;
 
@@ -218,6 +220,7 @@ export function autoLoadSession(
       usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
       thinking?: { current: string; savedEffort: string };
       model?: string;
+      concise?: boolean;
     };
     // Only restore if saved within the last hour
     const savedAt = new Date(data.savedAt).getTime();
@@ -229,6 +232,7 @@ export function autoLoadSession(
       ...(data.usage ? { usage: data.usage } : {}),
       ...(data.thinking ? { thinking: data.thinking } : {}),
       ...(data.model ? { model: data.model } : {}),
+      ...(data.concise !== undefined ? { concise: data.concise } : {}),
     };
   } catch {
     return null;

@@ -551,6 +551,22 @@ const requestConfigWriteTool: ToolDef = {
   },
 };
 
+const requestScreenshotTool: ToolDef = {
+  name: 'request_screenshot',
+  description:
+    'Capture a screenshot from the user\'s shared browser screen. ' +
+    'Only works when the user has screen sharing active (the monitor icon in the input bar). ' +
+    'Returns a live PNG image of what is on their screen right now. ' +
+    'Use this when you need to see the user\'s current state, verify they completed a step, ' +
+    'or understand what they are looking at. ' +
+    'If screen sharing is not active, tell the user to click the monitor icon first.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {},
+    required: [],
+  },
+};
+
 const switchModelTool: ToolDef = {
   name: 'switch_model',
   description:
@@ -580,10 +596,33 @@ const switchModelTool: ToolDef = {
   },
 };
 
+const searchMemoryTool: ToolDef = {
+  name: 'search_memory',
+  description:
+    'Search past session logs for a keyword or phrase. Scans daily memory files in ' +
+    'workspace/memory/ and returns matching sections with dates. Use this to recall ' +
+    'what was decided, built, or discussed in previous sessions. Zero LLM cost — pure text search.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Keyword or phrase to search for (case-insensitive)',
+      },
+      days: {
+        type: 'number',
+        description: 'How many days back to search (default: 30)',
+      },
+    },
+    required: ['query'],
+  },
+};
+
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
-  hostTool, requestMountTool, requestConfigWriteTool, switchModelTool,
+  hostTool, requestMountTool, requestConfigWriteTool, requestScreenshotTool, switchModelTool,
+  searchMemoryTool,
 ];
 
 /**
@@ -690,6 +729,12 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
     case 'request_config_write': {
       const { file } = input as RequestConfigWriteInput;
       return `config write: ${file}`;
+    }
+    case 'request_screenshot':
+      return 'screenshot from browser';
+    case 'search_memory': {
+      const { query } = input as { query: string };
+      return `search memory: "${query}"`;
     }
     case 'switch_model': {
       const { model: m, reason } = input as SwitchModelInput;
@@ -1165,6 +1210,97 @@ export async function executeTool(
       }
 
       return JSON.stringify(result, null, 2);
+    }
+
+    case 'request_screenshot': {
+      const { requestBrowserScreenshot } = await import('./server.js');
+      const res = await requestBrowserScreenshot();
+      if (!res.ok || !res.data) {
+        return res.message || 'Screen sharing not active. Ask the user to click the monitor icon in the input bar to start sharing their screen.';
+      }
+      return [
+        { type: 'image', mediaType: (res.mediaType ?? 'image/png') as ImageMediaType, data: res.data },
+      ] satisfies ToolContentBlock[];
+    }
+
+    case 'search_memory': {
+      const { query, days } = input as { query: string; days?: number };
+      const searchDays = Math.min(days ?? 30, 365);
+      const workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
+      const memoryDir = `${workspacePath}/memory`;
+
+      // Collect log files within the date range
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - searchDays);
+
+      let files: string[];
+      try {
+        const { readdirSync } = await import('node:fs');
+        files = readdirSync(memoryDir)
+          .filter((f) => /^\d{4}-\d{2}-\d{2}.*\.md$/.test(f))
+          .filter((f) => {
+            const dateStr = f.slice(0, 10);
+            return new Date(dateStr) >= cutoff;
+          })
+          .sort()
+          .reverse()
+          .map((f) => `${memoryDir}/${f}`);
+      } catch {
+        return 'No memory logs found.';
+      }
+
+      if (files.length === 0) {
+        return `No memory logs found in the last ${searchDays} days.`;
+      }
+
+      // Grep each file for the query, collect matching sections
+      const { readFileSync } = await import('node:fs');
+      const queryLower = query.toLowerCase();
+      const results: string[] = [];
+      const MAX_RESULTS = 20;
+      const CONTEXT_LINES = 3;
+
+      for (const filePath of files) {
+        if (results.length >= MAX_RESULTS) break;
+        let content: string;
+        try {
+          content = readFileSync(filePath, 'utf-8');
+        } catch {
+          continue;
+        }
+        const lines = content.split('\n');
+        const date = filePath.split('/').pop()?.replace('.md', '') ?? '';
+        const matchedLineNums = new Set<number>();
+
+        // Find matching lines
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i]!.toLowerCase().includes(queryLower)) {
+            for (let c = Math.max(0, i - CONTEXT_LINES); c <= Math.min(lines.length - 1, i + CONTEXT_LINES); c++) {
+              matchedLineNums.add(c);
+            }
+          }
+        }
+
+        if (matchedLineNums.size === 0) continue;
+
+        // Group contiguous line ranges into excerpts
+        const sorted = [...matchedLineNums].sort((a, b) => a - b);
+        let excerpt = `[${date}]\n`;
+        let prev = -2;
+        for (const lineNum of sorted) {
+          if (lineNum > prev + 1) excerpt += '...\n';
+          excerpt += lines[lineNum] + '\n';
+          prev = lineNum;
+        }
+        results.push(excerpt.trim());
+        if (results.length >= MAX_RESULTS) break;
+      }
+
+      if (results.length === 0) {
+        return `No matches for "${query}" in the last ${searchDays} days of memory logs.`;
+      }
+
+      return `Found ${results.length} match(es) for "${query}":\n\n${results.join('\n\n---\n\n')}`;
     }
 
     default:

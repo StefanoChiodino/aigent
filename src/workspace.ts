@@ -85,15 +85,17 @@ function listDailyMemoryFiles(memoryDir: string): { date: string; path: string; 
 
 /**
  * Load all workspace files and compose them into a system prompt section.
- * Returns the workspace context string to be appended to the base system prompt.
  *
- * Memory loading strategy:
- * - Last N days of daily logs: included in full
- * - Older logs: listed as an index (date + first line) so the agent knows they exist
- *   and can read them with tools if needed
+ * By default, daily session logs are NOT included in the prompt — only an index
+ * listing what files exist. The agent can read them on demand via read_file.
+ * Set AIGENT_FULL_LOGS=1 to restore the old behaviour of including recent logs in full.
+ *
+ * Set AIGENT_SLIM_PROMPT=1 to also skip MEMORY.md (useful for small context windows).
  */
 export function loadWorkspaceContext(workspacePath: string): string {
   const sections: string[] = [];
+  const slimPrompt = process.env['AIGENT_SLIM_PROMPT'] === '1' || process.env['AIGENT_SLIM_PROMPT'] === 'true';
+  const fullLogs = process.env['AIGENT_FULL_LOGS'] === '1' || process.env['AIGENT_FULL_LOGS'] === 'true';
 
   // Ensure memory directory exists
   const memoryDir = join(workspacePath, 'memory');
@@ -113,47 +115,62 @@ export function loadWorkspaceContext(workspacePath: string): string {
     }
   }
 
-  // Load memory files (freely writable) — cached by mtime
-  for (const file of MEMORY_FILES) {
-    const content = readCached(join(workspacePath, file.name));
-    if (content?.trim()) {
-      sections.push(`## ${file.label} (${file.name})\n\n${content.trim()}`);
+  // Load memory files (freely writable) — skip in slim mode
+  if (!slimPrompt) {
+    for (const file of MEMORY_FILES) {
+      const content = readCached(join(workspacePath, file.name));
+      if (content?.trim()) {
+        sections.push(`## ${file.label} (${file.name})\n\n${content.trim()}`);
+      }
     }
   }
 
-  // Load daily memory files
-  const recentDates = new Set(getRecentDates(RECENT_DAYS));
+  // Daily memory files
   const allFiles = listDailyMemoryFiles(memoryDir);
 
-  // Recent files: include full content
-  const recentFiles = allFiles.filter((f) => recentDates.has(f.date));
-  const olderFiles = allFiles.filter((f) => !recentDates.has(f.date));
+  if (fullLogs) {
+    // Full mode: include recent logs in full (original behaviour)
+    const recentDates = new Set(getRecentDates(RECENT_DAYS));
+    const recentFiles = allFiles.filter((f) => recentDates.has(f.date));
+    const olderFiles = allFiles.filter((f) => !recentDates.has(f.date));
 
-  for (const file of recentFiles.reverse()) { // oldest first for chronological order
-    const content = readIfExists(file.path);
-    if (content?.trim()) {
-      const isToday = file.date === getRecentDates(1)[0];
-      const label = isToday ? `Today's Log (${file.date})` : `Recent Log (${file.date})`;
-      sections.push(`## ${label}\n\n${content.trim()}`);
+    for (const file of recentFiles.reverse()) {
+      const content = readIfExists(file.path);
+      if (content?.trim()) {
+        const isToday = file.date === getRecentDates(1)[0];
+        const label = isToday ? `Today's Log (${file.date})` : `Recent Log (${file.date})`;
+        sections.push(`## ${label}\n\n${content.trim()}`);
+      }
+    }
+
+    if (olderFiles.length > 0) {
+      const cappedFiles = olderFiles.slice(0, 30);
+      const index = cappedFiles.map((f) => {
+        const content = readCached(f.path);
+        const firstLine = content?.split('\n').find((l) => l.trim() && !l.startsWith('#'))?.trim() ?? '';
+        const preview = firstLine.slice(0, 50);
+        return `- ${f.date} (${Math.round(f.size / 1024)}KB)${preview ? `: ${preview}` : ''}`;
+      });
+      const extra = olderFiles.length > 30 ? `\n(${olderFiles.length - 30} older files omitted)` : '';
+      sections.push(
+        `## Older Memory Files\n\nUse read_file to access. Path: ${memoryDir}/YYYY-MM-DD.md\n\n${index.join('\n')}${extra}`
+      );
+    }
+  } else {
+    // Default: index only — agent reads files on demand
+    if (allFiles.length > 0) {
+      const cappedFiles = allFiles.slice(0, 30);
+      const index = cappedFiles.map((f) => {
+        return `- ${f.date} (${Math.round(f.size / 1024)}KB): ${memoryDir}/${f.date}.md`;
+      });
+      const extra = allFiles.length > 30 ? `\n(${allFiles.length - 30} older files omitted)` : '';
+      sections.push(
+        `## Session Logs\n\nUse read_file to access any log. Path pattern: ${memoryDir}/YYYY-MM-DD.md\n\n${index.join('\n')}${extra}`
+      );
     }
   }
 
-  // Older files: compact index (last 30 days only, truncated previews)
-  if (olderFiles.length > 0) {
-    const cappedFiles = olderFiles.slice(0, 30); // newest first, cap at 30 days
-    const index = cappedFiles.map((f) => {
-      const content = readCached(f.path);
-      const firstLine = content?.split('\n').find((l) => l.trim() && !l.startsWith('#'))?.trim() ?? '';
-      const preview = firstLine.slice(0, 50);
-      return `- ${f.date} (${Math.round(f.size / 1024)}KB)${preview ? `: ${preview}` : ''}`;
-    });
-    const extra = olderFiles.length > 30 ? `\n(${olderFiles.length - 30} older files omitted)` : '';
-    sections.push(
-      `## Older Memory Files\n\nUse read_file to access. Path: ${memoryDir}/YYYY-MM-DD.md\n\n${index.join('\n')}${extra}`
-    );
-  }
-
-  log.debug('Workspace context loaded', { sections: sections.length, recentDays: recentFiles.length, olderFiles: olderFiles.length });
+  log.debug('Workspace context loaded', { sections: sections.length, slimPrompt, fullLogs, totalFiles: allFiles.length });
 
   if (sections.length === 0) {
     return '';

@@ -161,6 +161,15 @@ Docker container (worker.ts → server.ts)
 - [ ] Screenshot capture tool
 - [ ] Mouse/keyboard action tools
 
+### Memory System (see docs/memory-architecture.md for full design)
+- [x] MEMORY.md as curated short-term memory in system prompt
+- [x] Daily logs as archive — index only in prompt, full content on demand
+- [x] distillToMemory() on reset and session shutdown — model rewrites MEMORY.md
+- [x] Mid-task compaction stays task-focused, does not touch MEMORY.md
+- [x] search_memory tool — keyword grep across daily logs, zero LLM cost
+- [ ] Haiku-filtered retrieval — when keyword results are noisy, Haiku filters to relevant chunks (~$0.005/query)
+- [ ] RAG with local embeddings — if/when logs span 6+ months and keyword search gets noisy
+
 ### Polish
 - [ ] Better image UX (drag-and-drop paths, URL fetch)
 - [ ] Conversation search (/search <term> across past sessions)

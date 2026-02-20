@@ -55,11 +55,17 @@ How can I deal with the fact that not all models support reasoning and uh it see
 
 We could use a cheap ai to summarise the text from the AI response so that there isn't so much to listen to. should be optional tho
 
-store messages in the browser storage so that they don't disappear on reload
+
+
+store messages in the browser storage so that they don't disappear on reload. should also probably make sure to make this comprehensive and include all the various toggle and options that are changeable on the fly on the lelf panel
+
+would be nice to implement a config with various items we have so far hardcoded. JSON backing would be nice, and then a big modal that overlays the whole page (or something similar?) to fiddle with all the settings. I wonder if there is a framework that allows us to display all variables with nice UI automatically. E.g. set specific types and ranges to have sliders, text, textareas, etc.
 
 ~~change the keybinding to start recording to something much easier than alt+M~~ DONE — Alt+M global, `` ` `` or M when input unfocused; hints shown in bar
 
 ~~screen capture via browser `getDisplayMedia()` — grab a frame from any window/tab/monitor and send it as image context to the AI. No plugin needed. Natural prerequisite for real computer-use. Button in UI to snapshot current screen → attaches as image to next message.~~ DONE — monitor icon button in input row; click triggers `getDisplayMedia`, grabs one frame via canvas, stops stream, adds PNG to pending attachments.
+
+the UI should be more honest about displaying reasoning and tool usage. Not too cluttered, but more honest
 
 add a little x next to the mounts to remove them 
 

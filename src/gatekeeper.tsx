@@ -513,19 +513,11 @@ async function handleAgentMountRequest(
   id: string,
   path: string,
   mode: 'ro' | 'rw',
-  reason?: string,
+  _reason?: string,
   durationMinutes?: number,
 ): Promise<void> {
   // The agent sends container paths (e.g., /app/src). Try to reverse-map first.
   const hostPath = resolveContainerToHost(path) ?? resolveHostPath(path);
-
-  // Show the request to the user
-  const reasonText = reason ? `\n  Reason: "${reason}"` : '';
-  const durationText = durationMinutes ? `\n  Duration: ${durationMinutes} min` : '';
-  injectSystemMessage(
-    `Agent requests access to: ${hostPath} (${mode})${reasonText}${durationText}\n` +
-    `Reply: /grant or /deny`
-  );
 
   // Store pending request — resolved when user replies /grant or /deny
   pendingAgentMountRequests.set(id, { hostPath, mode, ...(durationMinutes !== undefined ? { durationMinutes } : {}) });

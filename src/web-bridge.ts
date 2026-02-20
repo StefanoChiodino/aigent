@@ -101,6 +101,21 @@ export async function startWebServer(
       return;
     }
 
+    // Browser log relay — browser POSTs JSON {level, args} here, we print to server stdout.
+    if (req.method === 'POST' && url === '/log') {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', () => {
+        try {
+          const { level = 'log', args = [] } = JSON.parse(Buffer.concat(chunks).toString()) as { level?: string; args?: unknown[] };
+          const line = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+          process.stdout.write(`[browser:${level}] ${line}\n`);
+        } catch { /* ignore */ }
+        res.writeHead(204); res.end();
+      });
+      return;
+    }
+
     // STT proxy — forwards WAV audio to local Parakeet server, returns transcript JSON.
     if (req.method === 'POST' && url === '/stt') {
       const chunks: Buffer[] = [];
@@ -206,6 +221,8 @@ export async function startWebServer(
         send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}), ...(durationMinutes !== undefined ? { durationMinutes } : {}) }),
       config_write_request: (id: string, file: string, content: string, reason: string) =>
         send({ type: 'config_write_request', id, file, content, reason }),
+      screenshot_request: (id: string) =>
+        send({ type: 'screenshot_request', id }),
       host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, string>) =>
         send({ type: 'host_state', mounts, ...(capabilities ? { capabilities } : {}) }),
     };
@@ -252,6 +269,9 @@ export async function startWebServer(
             client.send(cmd);
             break;
           case 'config_write_response':
+            client.send(cmd);
+            break;
+          case 'screenshot_response':
             client.send(cmd);
             break;
           case 'ping':
