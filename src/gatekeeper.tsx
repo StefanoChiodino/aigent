@@ -16,7 +16,7 @@
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createWriteStream } from 'node:fs';
-import { resolve, basename, dirname, join } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
@@ -32,7 +32,7 @@ const REPO_DIR = resolve(__dirname, '..');
 
 interface Mount {
   hostPath: string;        // Absolute path on host
-  containerPath: string;   // Path inside container (e.g., /project/myapp)
+  containerPath: string;   // Path inside container (mirrors host path exactly)
   mode: 'ro' | 'rw';
   expiresAt?: number;      // Timestamp for timed grants
   durationMinutes?: number; // Granted duration (for UI progress bar)
@@ -136,15 +136,15 @@ function resolveHostPath(input: string): string {
 
 /** Generate a container mount path from a host path. */
 function toContainerPath(hostPath: string): string {
-  // /project/<folder-name> — simple and predictable
-  return `/project/${basename(hostPath)}`;
+  // Mirror the host path exactly so the agent never has to guess or translate.
+  return hostPath;
 }
 
 /** Reverse-map a container path to a host path.
- *  The agent sees paths like /app/src or /project/myapp inside the container.
- *  This maps them back to the corresponding host paths using known mounts. */
+ *  Container paths mirror host paths, so this is mostly a passthrough with
+ *  prefix matching for the implicit /app and /workspace mounts. */
 function resolveContainerToHost(containerPath: string): string | null {
-  // Check dynamic mounts first (e.g., /project/myapp → host path)
+  // Check dynamic mounts first (container path mirrors host path)
   for (const m of mounts) {
     if (containerPath === m.containerPath || containerPath.startsWith(m.containerPath + '/')) {
       const relative = containerPath.slice(m.containerPath.length);
@@ -436,11 +436,60 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch']);
+const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/set-env']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
   return cmd ? GATEKEEPER_COMMANDS.has(cmd) : false;
+}
+
+/**
+ * Update or insert env vars in the .env file.
+ * Empty-string values remove the key. Boolean false for toggle keys → removes key.
+ */
+function writeEnvVars(updates: Record<string, boolean | number | string>): void {
+  const envPath = resolve(REPO_DIR, '.env');
+  let content = existsSync(envPath) ? readFileSync(envPath, 'utf-8') : '';
+  const lines = content.split('\n');
+
+  for (const [key, rawValue] of Object.entries(updates)) {
+    // Determine the string value to write
+    let value: string | null;
+    if (typeof rawValue === 'boolean') {
+      value = rawValue ? '1' : null; // false → remove the line
+    } else {
+      const s = String(rawValue).trim();
+      value = s === '' ? null : s; // empty string → remove
+    }
+
+    // Apply immediately to running process
+    if (value !== null) {
+      process.env[key] = value;
+    } else {
+      delete process.env[key];
+    }
+
+    // Find existing line (active or commented)
+    const activeIdx = lines.findIndex((l) => l.startsWith(`${key}=`));
+    const commentedIdx = lines.findIndex((l) => /^#+\s*/.test(l) && l.includes(`${key}=`));
+
+    if (value === null) {
+      // Remove active line if present
+      if (activeIdx !== -1) lines.splice(activeIdx, 1);
+    } else {
+      const newLine = `${key}=${value}`;
+      if (activeIdx !== -1) {
+        lines[activeIdx] = newLine;
+      } else if (commentedIdx !== -1) {
+        // Replace commented line with active one
+        lines[commentedIdx] = newLine;
+      } else {
+        lines.push(newLine);
+      }
+    }
+  }
+
+  writeFileSync(envPath, lines.join('\n'), 'utf-8');
 }
 
 async function handleGatekeeperCommand(input: string): Promise<void> {
@@ -493,6 +542,25 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
         injectSystemMessage('Sandbox restarting without the removed mount...');
         await restartContainer();
         injectSystemMessage(`Sandbox ready. ${hostPath} has been unmounted.`);
+      }
+      break;
+    }
+
+    case '/set-env': {
+      const jsonStr = input.slice('/set-env'.length).trim();
+      let updates: Record<string, boolean | number | string>;
+      try {
+        updates = JSON.parse(jsonStr) as Record<string, boolean | number | string>;
+      } catch {
+        injectSystemMessage('Settings: failed to parse update payload.');
+        break;
+      }
+      try {
+        writeEnvVars(updates);
+        const keys = Object.keys(updates).join(', ');
+        injectSystemMessage(`Settings saved to .env: ${keys}\nRestart the gatekeeper for changes to take effect.`);
+      } catch (err) {
+        injectSystemMessage(`Settings: failed to write .env — ${(err as Error).message}`);
       }
       break;
     }

@@ -66,7 +66,7 @@ export function sanitizedEnv(): Record<string, string | undefined> {
  *
  * In the gatekeeper architecture, /app is read-only by default.
  * Additional writable directories are added dynamically when the user
- * mounts folders via /mount (these appear under /project/).
+ * mounts folders via /mount (these mirror the host path inside the container).
  * The Docker mounts are the real security boundary — this is defense in depth.
  */
 const WRITABLE_ROOTS = [

@@ -118,6 +118,296 @@ marked.setOptions({
   gfm: true,
 });
 
+// ── Settings ─────────────────────────────────────────────────
+
+type SettingType = 'toggle' | 'slider' | 'number' | 'text' | 'select' | 'password';
+
+interface SettingDef {
+  key: string;        // env var name (e.g. 'AIGENT_MODEL') or client key
+  label: string;
+  desc?: string;
+  group: string;
+  type: SettingType;
+  default: boolean | number | string;
+  // slider / number
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  // select
+  options?: { value: string; label: string }[];
+  // 'server' = stored in .env on host, requires restart to take effect
+  // 'client' = stored in localStorage, takes effect immediately
+  scope: 'server' | 'client';
+  restartRequired?: boolean; // only meaningful for scope='server'
+  placeholder?: string;
+}
+
+const SETTINGS_SCHEMA: SettingDef[] = [
+  // ── Provider ─────────────────────────────────────────────
+  {
+    key: 'AIGENT_PROVIDER',
+    label: 'Provider',
+    desc: 'LLM provider. Auto-detected from available API keys if omitted.',
+    group: 'Provider',
+    type: 'select',
+    default: '',
+    options: [
+      { value: '', label: 'Auto-detect' },
+      { value: 'anthropic', label: 'Anthropic' },
+      { value: 'openai', label: 'OpenAI / compatible' },
+    ],
+    scope: 'client',
+  },
+  {
+    key: 'ANTHROPIC_API_KEY',
+    label: 'Anthropic API key',
+    desc: 'sk-ant-... — stored in .env, never in settings.json.',
+    group: 'Provider',
+    type: 'password',
+    default: '',
+    placeholder: 'sk-ant-...',
+    scope: 'server',
+  },
+  {
+    key: 'AIGENT_BASE_URL',
+    label: 'OpenAI base URL',
+    desc: 'Base URL for OpenAI-compatible endpoint (e.g. http://127.0.0.1:1234/v1).',
+    group: 'Provider',
+    type: 'text',
+    default: '',
+    placeholder: 'http://127.0.0.1:1234/v1',
+    scope: 'client',
+  },
+  {
+    key: 'OPENAI_API_KEY',
+    label: 'OpenAI API key',
+    desc: 'Used when provider is OpenAI. Stored in .env, never in settings.json.',
+    group: 'Provider',
+    type: 'password',
+    default: '',
+    placeholder: 'sk-... or not-needed',
+    scope: 'server',
+  },
+  // ── Model ────────────────────────────────────────────────
+  {
+    key: 'AIGENT_MODEL',
+    label: 'Default model',
+    desc: 'Model used at startup. Can be changed live from the sidebar.',
+    group: 'Model',
+    type: 'text',
+    default: 'claude-opus-4-6',
+    placeholder: 'claude-opus-4-6',
+    scope: 'client',
+  },
+  // ── Tools ────────────────────────────────────────────────
+  {
+    key: 'AIGENT_NO_TOOLS',
+    label: 'Disable all tools',
+    desc: 'Send no tool definitions to the model. Useful for local models without function-calling support.',
+    group: 'Tools',
+    type: 'toggle',
+    default: false,
+    scope: 'client',
+  },
+  {
+    key: 'AIGENT_TOOLS_ALLOWLIST',
+    label: 'Tool allowlist',
+    desc: 'Comma-separated list of tools to enable. Leave blank to enable all.',
+    group: 'Tools',
+    type: 'text',
+    default: '',
+    placeholder: 'exec,read_file,write_file',
+    scope: 'client',
+  },
+  // ── Prompt ───────────────────────────────────────────────
+  {
+    key: 'AIGENT_SLIM_PROMPT',
+    label: 'Slim prompt',
+    desc: 'Omit MEMORY.md from the system prompt to save tokens.',
+    group: 'Prompt',
+    type: 'toggle',
+    default: false,
+    scope: 'client',
+  },
+  {
+    key: 'AIGENT_FULL_LOGS',
+    label: 'Full session logs in prompt',
+    desc: 'Include complete recent session logs (not just an index) in the system prompt.',
+    group: 'Prompt',
+    type: 'toggle',
+    default: false,
+    scope: 'client',
+  },
+  // ── Services ─────────────────────────────────────────────
+  {
+    key: 'AIGENT_WEB_PORT',
+    label: 'Web UI port',
+    desc: 'Port the web server listens on.',
+    group: 'Services',
+    type: 'number',
+    default: 3141,
+    min: 1024,
+    max: 65535,
+    scope: 'client',
+  },
+  {
+    key: 'AIGENT_STT_URL',
+    label: 'STT service URL',
+    desc: 'Speech-to-text service endpoint.',
+    group: 'Services',
+    type: 'text',
+    default: 'http://127.0.0.1:8765',
+    placeholder: 'http://127.0.0.1:8765',
+    scope: 'client',
+  },
+  {
+    key: 'AIGENT_TTS_URL',
+    label: 'TTS service URL',
+    desc: 'Text-to-speech service endpoint.',
+    group: 'Services',
+    type: 'text',
+    default: 'http://127.0.0.1:8766',
+    placeholder: 'http://127.0.0.1:8766',
+    scope: 'client',
+  },
+  // ── Microphone / VAD ─────────────────────────────────────
+  {
+    key: 'mic_silence_threshold',
+    label: 'Silence threshold',
+    desc: 'RMS level below which audio is treated as silence. Lower = more sensitive.',
+    group: 'Microphone',
+    type: 'number',
+    default: 0.015,
+    min: 0.001,
+    max: 0.2,
+    step: 0.001,
+    scope: 'client',
+  },
+  {
+    key: 'mic_loud_frames',
+    label: 'Speech onset frames',
+    desc: 'Consecutive loud frames required before speech is considered active. Higher = less false triggers.',
+    group: 'Microphone',
+    type: 'number',
+    default: 2,
+    min: 1,
+    max: 10,
+    step: 1,
+    unit: ' frames',
+    scope: 'client',
+  },
+  {
+    key: 'mic_silence_tail_ms',
+    label: 'Silence tail',
+    desc: 'How long to keep accumulating audio after speech ends (avoids clipping word endings).',
+    group: 'Microphone',
+    type: 'number',
+    default: 500,
+    min: 100,
+    max: 2000,
+    step: 50,
+    unit: ' ms',
+    scope: 'client',
+  },
+  {
+    key: 'mic_auto_send',
+    label: 'Auto-send on silence',
+    desc: 'In always-on mode: automatically submit after silence is detected.',
+    group: 'Microphone',
+    type: 'toggle',
+    default: false,
+    scope: 'client',
+  },
+  {
+    key: 'mic_auto_send_ms',
+    label: 'Auto-send silence duration',
+    desc: 'How long silence must persist before auto-sending (only used when auto-send is on).',
+    group: 'Microphone',
+    type: 'number',
+    default: 1500,
+    min: 300,
+    max: 5000,
+    step: 100,
+    unit: ' ms',
+    scope: 'client',
+  },
+];
+
+// serverSettings holds the current values of server-scoped settings as reported
+// by the gatekeeper (sent on connection). Pending edits are tracked separately
+// and flushed when the user saves.
+type SettingsValues = Record<string, boolean | number | string>;
+
+let serverSettings: SettingsValues = {};
+let serverSettingsPending: SettingsValues = {}; // unsaved edits
+
+// Load/save server settings from localStorage as a local cache (shown until server sends real values)
+function loadServerSettingsCache(): SettingsValues {
+  try {
+    const stored = localStorage.getItem('aigent-server-settings-cache');
+    if (stored) return JSON.parse(stored) as SettingsValues;
+  } catch { /* ignore */ }
+  return {};
+}
+
+function saveServerSettingsCache(values: SettingsValues): void {
+  localStorage.setItem('aigent-server-settings-cache', JSON.stringify(values));
+}
+
+serverSettings = loadServerSettingsCache();
+
+// ── Client settings (persisted to workspace/config/settings.json on the host) ─
+// localStorage is used as a fast-read cache; the server is the source of truth.
+// On WebSocket connect the server sends a 'client_settings' event which overwrites
+// the cache. Changes are written immediately to both cache and server.
+
+const CLIENT_SETTINGS_LS_KEY = 'aigent-client-settings';
+
+function loadClientSettingsCache(): Record<string, boolean | number | string> {
+  try {
+    const raw = localStorage.getItem(CLIENT_SETTINGS_LS_KEY);
+    if (raw) return JSON.parse(raw) as Record<string, boolean | number | string>;
+    // One-time migration from old per-key format (aigent-client-<key>)
+    const migrated: Record<string, boolean | number | string> = {};
+    for (const def of SETTINGS_SCHEMA.filter(d => d.scope === 'client')) {
+      const old = localStorage.getItem(`aigent-client-${def.key}`);
+      if (old !== null) {
+        migrated[def.key] = def.type === 'toggle' ? old === 'true'
+          : def.type === 'number' ? (Number(old) || def.default as number)
+          : old;
+        localStorage.removeItem(`aigent-client-${def.key}`);
+      }
+    }
+    return migrated;
+  } catch { /* ignore */ }
+  return {};
+}
+
+let clientSettings: Record<string, boolean | number | string> = loadClientSettingsCache();
+
+function saveClientSettingsCache(): void {
+  localStorage.setItem(CLIENT_SETTINGS_LS_KEY, JSON.stringify(clientSettings));
+}
+
+function getClientSetting(key: string): boolean | number | string {
+  const def = SETTINGS_SCHEMA.find(d => d.key === key && d.scope === 'client');
+  if (!def) return '';
+  if (key in clientSettings) return clientSettings[key]!;
+  return def.default;
+}
+
+function setClientSetting(key: string, value: boolean | number | string, onSaved?: () => void): void {
+  clientSettings[key] = value;
+  saveClientSettingsCache();
+  // Persist to server JSON file
+  fetch('/settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ [key]: value }),
+  }).then(() => { onSaved?.(); }).catch(() => { /* localStorage cache still updated */ });
+}
+
 // ── State ────────────────────────────────────────────────────
 
 let messages: DisplayMessage[] = [];
@@ -217,7 +507,8 @@ const $permTitle = $('perm-card-title');
 const $permDetail = $('perm-card-detail');
 const $permDuration = $('perm-card-duration');
 const $permDiff = $('perm-card-diff');
-const $permDiffTabs = $('perm-card-diff-tabs');
+const $patchViewer = $('patch-viewer');
+const $patchFileList = $('patch-file-list');
 const $permApproveBtn = $('perm-approve-btn') as HTMLButtonElement;
 const $permDenyBtn = $('perm-deny-btn') as HTMLButtonElement;
 
@@ -239,6 +530,24 @@ const $sbTtsToggle = $('sb-tts-toggle') as HTMLButtonElement;
 const $sbTtsRate = $('sb-tts-rate') as HTMLInputElement;
 const $sbTtsRateLabel = $('sb-tts-rate-label');
 const $sbConciseToggle = $('sb-concise-toggle') as HTMLButtonElement;
+
+// Settings modal DOM refs
+const $settingsOverlay = $('settings-overlay');
+const $settingsNav = $('settings-nav');
+const $settingsBody = $('settings-body');
+const $settingsBtn = $('settings-btn') as HTMLButtonElement;
+const $settingsClose = $('settings-close') as HTMLButtonElement;
+const $settingsToast = $('settings-toast');
+
+let settingsToastTimer: ReturnType<typeof setTimeout> | null = null;
+function showSettingsToast(): void {
+  $settingsToast.classList.remove('hidden', 'fade-out');
+  if (settingsToastTimer !== null) clearTimeout(settingsToastTimer);
+  settingsToastTimer = setTimeout(() => {
+    $settingsToast.classList.add('fade-out');
+    settingsToastTimer = setTimeout(() => $settingsToast.classList.add('hidden'), 400);
+  }, 1400);
+}
 
 // Command palette state
 let paletteItems: CommandDef[] = [];
@@ -643,6 +952,12 @@ function handleEvent(event: ServerEvent): void {
       mountsList = event.mounts;
       if (event.capabilities) capsList = event.capabilities;
       updateSidebar();
+      break;
+
+    case 'client_settings':
+      // Server is source of truth — merge into local cache and persist.
+      clientSettings = { ...clientSettings, ...event.settings };
+      saveClientSettingsCache();
       break;
 
     case 'mount_request': {
@@ -1784,23 +2099,78 @@ function parseDiffIntoFiles(diff: string): DiffFile[] {
   return files.length > 0 ? files : [{ name: 'patch', path: '', content: diff }];
 }
 
-/** Render a diff string into colored spans inside a container element. */
+/** Render a diff string as a VS Code / GitHub-style table with line numbers. */
 function renderDiffContent(container: HTMLElement, diffText: string): void {
   container.innerHTML = '';
+  const table = document.createElement('table');
+  table.className = 'diff-table';
+
+  let oldLine = 0;
+  let newLine = 0;
+
   for (const line of diffText.split('\n')) {
-    const span = document.createElement('span');
-    span.textContent = line + '\n';
-    if (line.startsWith('+') && !line.startsWith('+++')) {
-      span.className = 'diff-add';
-    } else if (line.startsWith('-') && !line.startsWith('---')) {
-      span.className = 'diff-remove';
-    } else if (line.startsWith('@@')) {
-      span.className = 'diff-hunk';
+    // Skip trailing empty line from the final split
+    if (line === '' && diffText.endsWith('\n') && line === diffText.split('\n').at(-1)) continue;
+
+    const tr = document.createElement('tr');
+
+    if (line.startsWith('@@')) {
+      // Hunk header — parse @@ -old,count +new,count @@
+      const m = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (m) { oldLine = parseInt(m[1]!, 10) - 1; newLine = parseInt(m[2]!, 10) - 1; }
+      tr.className = 'diff-hunk';
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.textContent = line;
+      tr.appendChild(td);
     } else if (line.startsWith('---') || line.startsWith('+++')) {
-      span.className = 'diff-header';
+      tr.className = 'diff-header';
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.textContent = line;
+      tr.appendChild(td);
+    } else if (line.startsWith('-')) {
+      oldLine++;
+      tr.className = 'diff-remove';
+      appendDiffCells(tr, String(oldLine), '', '-', line.slice(1));
+    } else if (line.startsWith('+')) {
+      newLine++;
+      tr.className = 'diff-add';
+      appendDiffCells(tr, '', String(newLine), '+', line.slice(1));
+    } else {
+      // Context line
+      oldLine++;
+      newLine++;
+      appendDiffCells(tr, String(oldLine), String(newLine), '', line.slice(1));
     }
-    container.appendChild(span);
+
+    table.appendChild(tr);
   }
+
+  container.appendChild(table);
+}
+
+function appendDiffCells(tr: HTMLTableRowElement, oldN: string, newN: string, marker: string, code: string): void {
+  const tdOld = document.createElement('td');
+  tdOld.className = 'diff-ln diff-ln-old';
+  tdOld.textContent = oldN;
+
+  const tdNew = document.createElement('td');
+  tdNew.className = 'diff-ln diff-ln-new';
+  tdNew.textContent = newN;
+
+  const tdMark = document.createElement('td');
+  tdMark.className = 'diff-mark';
+  tdMark.textContent = marker;
+
+  const tdCode = document.createElement('td');
+  tdCode.className = 'diff-code';
+  tdCode.textContent = code;
+
+  tr.appendChild(tdOld);
+  tr.appendChild(tdNew);
+  tr.appendChild(tdMark);
+  tr.appendChild(tdCode);
 }
 
 let activeDiffFileIdx = 0;
@@ -1809,9 +2179,9 @@ function showDiffFile(req: PermRequest, idx: number): void {
   activeDiffFileIdx = idx;
   const files = req.diffFiles ?? [];
 
-  // Update tab active state
-  const tabs = $permDiffTabs.querySelectorAll('.diff-tab');
-  tabs.forEach((t, i) => t.classList.toggle('active', i === idx));
+  // Update file list active state
+  const items = $patchFileList.querySelectorAll('.patch-file-item');
+  items.forEach((t, i) => t.classList.toggle('active', i === idx));
 
   // Render the selected file's diff content
   const fileContent = files[idx]?.content ?? req.diff ?? '';
@@ -1824,13 +2194,12 @@ function showNextPermRequest(): void {
     permShowing = false;
     $permOverlay.classList.remove('patch-mode');
     $permOverlay.classList.add('hidden');
-    // Restore tool bar if there's an active tool
-    if ($toolLabel.textContent) $toolBar.classList.remove('hidden');
+    $patchViewer.classList.add('hidden');
     return;
   }
   permShowing = true;
-  // Hide tool bar — the perm overlay shows what's pending
-  $toolBar.classList.add('hidden');
+  // Hide tool bar and clear its label — the perm overlay takes over
+  hideTool();
   $permIcon.textContent = req.type === 'mount' ? '📂' : req.type === 'patch' ? '🩹' : '✏️';
   $permTitle.textContent = req.title;
 
@@ -1843,34 +2212,48 @@ function showNextPermRequest(): void {
     $permDetail.appendChild(row);
   }
 
-  // Patch mode: full-page modal with file tabs + diff viewer
+  // Patch mode: full-page modal with file list sidebar + diff viewer
   if (req.type === 'patch') {
     $permOverlay.classList.add('patch-mode');
 
-    // Build file tabs
     const files = req.diffFiles ?? [];
-    $permDiffTabs.innerHTML = '';
-    if (files.length > 1) {
-      files.forEach((f, i) => {
-        const tab = document.createElement('button');
-        tab.className = 'diff-tab';
-        tab.textContent = f.name;
-        tab.title = f.path;
-        tab.addEventListener('click', () => showDiffFile(req, i));
-        $permDiffTabs.appendChild(tab);
-      });
-      $permDiffTabs.classList.remove('hidden');
-    } else {
-      $permDiffTabs.classList.add('hidden');
-    }
+    $patchFileList.innerHTML = '';
+
+    files.forEach((f, i) => {
+      const item = document.createElement('button');
+      item.className = 'patch-file-item';
+      item.title = f.path;
+
+      const slashIdx = f.path.lastIndexOf('/');
+      if (slashIdx !== -1) {
+        const dir = document.createElement('div');
+        dir.className = 'patch-file-dir';
+        dir.textContent = f.path.slice(0, slashIdx + 1);
+        const name = document.createElement('div');
+        name.className = 'patch-file-name';
+        name.textContent = f.path.slice(slashIdx + 1);
+        item.appendChild(dir);
+        item.appendChild(name);
+      } else {
+        const name = document.createElement('div');
+        name.className = 'patch-file-name';
+        name.textContent = f.path || f.name;
+        item.appendChild(name);
+      }
+
+      item.addEventListener('click', () => showDiffFile(req, i));
+      $patchFileList.appendChild(item);
+    });
+
+    // Show sidebar only when there are multiple files
+    $patchFileList.classList.toggle('hidden', files.length <= 1);
 
     activeDiffFileIdx = 0;
     showDiffFile(req, 0);
-    $permDiff.classList.remove('hidden');
+    $patchViewer.classList.remove('hidden');
   } else {
     $permOverlay.classList.remove('patch-mode');
-    $permDiff.classList.add('hidden');
-    $permDiffTabs.classList.add('hidden');
+    $patchViewer.classList.add('hidden');
   }
 
   // Duration badge — shown when agent specifies how long it needs access
@@ -2268,6 +2651,7 @@ const $micIconMic = $mic.querySelector('.icon-mic') as SVGElement;
 const $micIconStop = $mic.querySelector('.icon-stop') as SVGElement;
 const $micIconSpinner = $mic.querySelector('.icon-spinner') as SVGElement;
 const $micSticky = $('mic-sticky') as HTMLButtonElement;
+const $micClear = $('mic-clear') as HTMLButtonElement;
 const $micCapped = $('mic-capped') as HTMLSpanElement;
 
 let micRecording = false;
@@ -2278,7 +2662,7 @@ let micSamples: Float32Array[] = [];
 let micSource: MediaStreamAudioSourceNode | null = null;
 let micProcessor: ScriptProcessorNode | null = null;
 let micChunkTimer: ReturnType<typeof setInterval> | null = null;
-let micSilenceTimer: ReturnType<typeof setInterval> | null = null;
+let micSilenceTimer: ReturnType<typeof setTimeout> | null = null;
 let micLastText = '';
 let micReqSeq = 0;          // increments on each outgoing request
 let micDisplayedSeq = 0;   // seq of the last response we actually showed
@@ -2290,7 +2674,12 @@ let micLiveAbortCtrls: AbortController[] = []; // abort controllers for in-fligh
 
 // Max samples to send per live chunk (12 s at 16 kHz — more context improves Whisper accuracy)
 const MIC_WINDOW_SAMPLES = 16000 * 12;
-const MIC_SILENCE_THRESHOLD = 0.015; // RMS level for VAD pulse (speech vs silence)
+
+function micSilenceThreshold(): number { return getClientSetting('mic_silence_threshold') as number; }
+function micLoudFrames(): number       { return getClientSetting('mic_loud_frames') as number; }
+function micSilenceTailMs(): number    { return getClientSetting('mic_silence_tail_ms') as number; }
+function micAutoSend(): boolean        { return getClientSetting('mic_auto_send') as boolean; }
+function micAutoSendMs(): number       { return getClientSetting('mic_auto_send_ms') as number; }
 
 function encodeWav(samples: Float32Array[], sampleRate: number): ArrayBuffer {
   let totalLen = 0;
@@ -2382,6 +2771,7 @@ async function sendLiveChunk(): Promise<void> {
         $micCapped.classList.toggle('hidden', !windowCapped);
         $input.value = micBaseText ? micBaseText + ' ' + text : text;
         autoGrow();
+        micUpdateClearButton();
       }
     } else {
       micLog('[mic] chunk seq=', seq, 'skipped: resp.ok=', resp.ok, 'displayedSeq=', micDisplayedSeq);
@@ -2401,6 +2791,11 @@ function micSetState(state: 'idle' | 'recording' | 'transcribing'): void {
   $micIconSpinner.classList.toggle('hidden', state !== 'transcribing');
   $mic.classList.toggle('recording', state === 'recording');
   $mic.classList.toggle('transcribing', state === 'transcribing');
+  if (state !== 'recording') $micClear.classList.add('hidden');
+}
+
+function micUpdateClearButton(): void {
+  $micClear.classList.toggle('hidden', !micRecording || !micLastText);
 }
 
 function setMicSticky(on: boolean): void {
@@ -2426,29 +2821,50 @@ async function startMic(silent = false): Promise<void> {
     micLiveAbortCtrls = [];
     micProcessor.onaudioprocess = (e) => {
       const data = e.inputBuffer.getChannelData(0);
-      micSamples.push(new Float32Array(data));
 
       let sum = 0;
       for (let i = 0; i < data.length; i++) sum += data[i]! * data[i]!;
       const rms = Math.sqrt(sum / data.length);
 
-      // Speech tracking (lower threshold) — for silence detection and VAD pulse.
-      if (rms > MIC_SILENCE_THRESHOLD) {
+      // Only accumulate frames that contain speech — silent frames are skipped
+      // entirely so the buffer stays compact and Whisper sees clean audio.
+      // We keep a short tail after speech ends (vadSpeaking stays true briefly)
+      // to avoid cutting off the end of words.
+      const silenceThresh = micSilenceThreshold();
+      const loudFramesNeeded = micLoudFrames();
+      const silenceTail = micSilenceTailMs();
+      if (rms > silenceThresh) {
+        micSamples.push(new Float32Array(data));
         if (!vadSpeaking) micLog('[mic] speech detected rms=', rms.toFixed(4));
         micLastSpeechTime = Date.now();
+        // Cancel any pending auto-send timer when speech resumes.
+        if (micSilenceTimer !== null) { clearTimeout(micSilenceTimer); micSilenceTimer = null; }
         // Visual pulse: require a few consecutive loud frames to avoid flicker.
         vadLoudFrames++;
-        if (vadLoudFrames >= 2 && !vadSpeaking) {
+        if (vadLoudFrames >= loudFramesNeeded && !vadSpeaking) {
           vadSpeaking = true;
           $mic.classList.add('vad-active');
           if (micSticky) $micSticky.classList.add('vad-active');
         }
       } else {
+        // Keep a short tail of silence after speech so words don't get clipped.
+        if (vadSpeaking) micSamples.push(new Float32Array(data));
         vadLoudFrames = 0;
-        if (vadSpeaking) {
+        if (vadSpeaking && Date.now() - micLastSpeechTime > silenceTail) {
           vadSpeaking = false;
           $mic.classList.remove('vad-active');
           $micSticky.classList.remove('vad-active');
+        }
+        // Auto-send on silence: in sticky mode, schedule a submit after the
+        // configured silence duration. Only arm the timer once (when null).
+        if (micSticky && micAutoSend() && micLastText && micSilenceTimer === null) {
+          micSilenceTimer = setTimeout(() => {
+            micSilenceTimer = null;
+            if (micSticky && micRecording && micLastText) {
+              micLog('[mic] auto-send triggered after silence');
+              void stopMic(false).then(() => { submitMessage(); });
+            }
+          }, micAutoSendMs());
         }
       }
 
@@ -2496,7 +2912,7 @@ async function stopMic(silent = false): Promise<void> {
 
   // Stop timers and abort all in-flight live STT requests
   if (micChunkTimer !== null) { clearInterval(micChunkTimer); micChunkTimer = null; }
-  if (micSilenceTimer !== null) { clearInterval(micSilenceTimer); micSilenceTimer = null; }
+  if (micSilenceTimer !== null) { clearTimeout(micSilenceTimer); micSilenceTimer = null; }
   for (const c of micLiveAbortCtrls) c.abort();
   micLiveAbortCtrls = [];
 
@@ -2559,7 +2975,7 @@ function abortMic(): void {
   $micSticky.classList.remove('vad-active');
   $micCapped.classList.add('hidden');
   if (micChunkTimer !== null) { clearInterval(micChunkTimer); micChunkTimer = null; }
-  if (micSilenceTimer !== null) { clearInterval(micSilenceTimer); micSilenceTimer = null; }
+  if (micSilenceTimer !== null) { clearTimeout(micSilenceTimer); micSilenceTimer = null; }
   // Abort and invalidate any in-flight live STT requests
   for (const c of micLiveAbortCtrls) c.abort();
   micLiveAbortCtrls = [];
@@ -2588,6 +3004,21 @@ $micSticky.addEventListener('click', () => {
   setMicSticky(!micSticky);
   if (micSticky && !micRecording) void startMic();       // turned on → start
   else if (wasSticky && !micSticky && micRecording) void stopMic(); // turned off → stop
+  $input.focus();
+});
+
+$micClear.addEventListener('click', () => {
+  // Reset the transcription buffer — keep mic recording, just wipe the preview text
+  for (const c of micLiveAbortCtrls) c.abort();
+  micLiveAbortCtrls = [];
+  micSamples = [];
+  micLastText = '';
+  micReqSeq = 0;
+  micDisplayedSeq = 0;
+  $micCapped.classList.add('hidden');
+  $input.value = micBaseText;
+  autoGrow();
+  micUpdateClearButton();
   $input.focus();
 });
 
@@ -2687,6 +3118,235 @@ $sbEffortPills.addEventListener('click', (e) => {
   const level = pill.dataset.level;
   if (level) {
     wsSend({ type: 'message', content: `/effort ${level}` });
+  }
+});
+
+// ── Settings modal ───────────────────────────────────────────
+
+function formatSettingValue(def: SettingDef, value: boolean | number | string): string {
+  if (def.type === 'number') {
+    return `${Number(value)}${def.unit ?? ''}`;
+  }
+  return String(value);
+}
+
+function getEffectiveValue(def: SettingDef): boolean | number | string {
+  // Pending edit takes priority, then server-reported value, then default
+  if (def.key in serverSettingsPending) return serverSettingsPending[def.key]!;
+  if (def.key in serverSettings) return serverSettings[def.key]!;
+  return def.default;
+}
+
+function buildControl(def: SettingDef, currentValue: boolean | number | string, onChange: (v: boolean | number | string) => void): HTMLElement {
+  const ctrl = document.createElement('div');
+  ctrl.className = 'settings-row-control';
+
+  if (def.type === 'toggle') {
+    const label = document.createElement('label');
+    label.className = 'settings-toggle';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = currentValue as boolean;
+    input.addEventListener('change', () => onChange(input.checked));
+    const track = document.createElement('span');
+    track.className = 'settings-toggle-track';
+    label.appendChild(input);
+    label.appendChild(track);
+    ctrl.appendChild(label);
+
+  } else if (def.type === 'select') {
+    const sel = document.createElement('select');
+    sel.className = 'settings-select';
+    for (const opt of def.options ?? []) {
+      const o = document.createElement('option');
+      o.value = opt.value;
+      o.textContent = opt.label;
+      if (opt.value === String(currentValue)) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener('change', () => onChange(sel.value));
+    ctrl.appendChild(sel);
+
+  } else if (def.type === 'number') {
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.className = 'settings-number';
+    input.value = String(currentValue);
+    if (def.min !== undefined) input.min = String(def.min);
+    if (def.max !== undefined) input.max = String(def.max);
+    if (def.step !== undefined) input.step = String(def.step);
+    input.addEventListener('change', () => {
+      const v = Number(input.value);
+      if (!isNaN(v)) onChange(v);
+    });
+    ctrl.appendChild(input);
+    if (def.unit) {
+      const unitSpan = document.createElement('span');
+      unitSpan.textContent = def.unit;
+      unitSpan.style.cssText = 'font-size:12px;color:var(--text-dim);margin-left:4px';
+      ctrl.appendChild(unitSpan);
+    }
+
+  } else if (def.type === 'text' || def.type === 'password') {
+    const input = document.createElement('input');
+    input.type = def.type === 'password' ? 'password' : 'text';
+    input.className = 'settings-text';
+    input.value = String(currentValue === def.default && currentValue === '' ? '' : currentValue);
+    if (def.placeholder) input.placeholder = def.placeholder;
+    input.addEventListener('change', () => onChange(input.value));
+    ctrl.appendChild(input);
+  }
+
+  return ctrl;
+}
+
+function renderSettingsModal(): void {
+  $settingsNav.innerHTML = '';
+  $settingsBody.innerHTML = '';
+  serverSettingsPending = {}; // reset pending edits on open
+
+  const hasPending = () => Object.keys(serverSettingsPending).length > 0;
+
+  // Group defs by group name preserving order
+  const groups: Map<string, SettingDef[]> = new Map();
+  for (const def of SETTINGS_SCHEMA) {
+    if (!groups.has(def.group)) groups.set(def.group, []);
+    groups.get(def.group)!.push(def);
+  }
+
+  // Save bar (initially hidden) — rendered once, inside body
+  const saveBar = document.createElement('div');
+  saveBar.className = 'settings-save-bar hidden';
+  const saveNote = document.createElement('span');
+  saveNote.className = 'settings-save-note';
+  saveNote.textContent = 'Changes require a restart to take effect.';
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'settings-save-btn';
+  saveBtn.textContent = 'Save to .env';
+  saveBtn.addEventListener('click', () => {
+    if (!hasPending()) return;
+    wsSend({ type: 'message', content: `/set-env ${JSON.stringify(serverSettingsPending)}` });
+    Object.assign(serverSettings, serverSettingsPending);
+    saveServerSettingsCache(serverSettings);
+    serverSettingsPending = {};
+    updateSaveBar();
+  });
+  saveBar.appendChild(saveNote);
+  saveBar.appendChild(saveBtn);
+
+  function updateSaveBar(): void {
+    saveBar.classList.toggle('hidden', !hasPending());
+  }
+
+  // Build a pane for each group (hidden by default)
+  const panes: Map<string, HTMLElement> = new Map();
+  for (const [groupName, defs] of groups) {
+    const pane = document.createElement('div');
+    pane.className = 'settings-group hidden';
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'settings-group-label';
+    labelEl.textContent = groupName;
+    pane.appendChild(labelEl);
+
+    for (const def of defs) {
+      const row = document.createElement('div');
+      row.className = 'settings-row';
+
+      const labelWrap = document.createElement('div');
+      labelWrap.className = 'settings-row-label';
+      const labelText = document.createElement('div');
+      labelText.className = 'label-text';
+      labelText.textContent = def.label;
+      labelWrap.appendChild(labelText);
+      if (def.desc) {
+        const descEl = document.createElement('div');
+        descEl.className = 'label-desc';
+        descEl.textContent = def.desc;
+        labelWrap.appendChild(descEl);
+      }
+      row.appendChild(labelWrap);
+
+      const currentValue = def.scope === 'client' ? getClientSetting(def.key) : getEffectiveValue(def);
+
+      // ✓ saved indicator for client settings
+      let savedTimer: ReturnType<typeof setTimeout> | null = null;
+      const savedDot = document.createElement('span');
+      savedDot.className = 'settings-saved-dot hidden';
+      savedDot.textContent = '✓';
+
+      const ctrl = buildControl(def, currentValue, (v) => {
+        if (def.scope === 'client') {
+          setClientSetting(def.key, v, () => {
+            savedDot.classList.remove('hidden', 'fade-out');
+            if (savedTimer !== null) clearTimeout(savedTimer);
+            savedTimer = setTimeout(() => {
+              savedDot.classList.add('fade-out');
+              savedTimer = setTimeout(() => savedDot.classList.add('hidden'), 400);
+            }, 1200);
+          });
+        } else {
+          serverSettingsPending[def.key] = v;
+          updateSaveBar();
+        }
+      });
+      ctrl.appendChild(savedDot);
+      row.appendChild(ctrl);
+      pane.appendChild(row);
+    }
+
+    panes.set(groupName, pane);
+    $settingsBody.appendChild(pane);
+  }
+  $settingsBody.appendChild(saveBar);
+
+  // Build nav items and wire up group switching
+  const groupNames = [...groups.keys()];
+  let activeGroup = groupNames[0] ?? '';
+
+  function showGroup(name: string): void {
+    activeGroup = name;
+    for (const [g, pane] of panes) {
+      pane.classList.toggle('hidden', g !== name);
+    }
+    for (const btn of $settingsNav.querySelectorAll('.settings-nav-item')) {
+      btn.classList.toggle('active', (btn as HTMLElement).dataset.group === name);
+    }
+    // Only show save bar when on a group that has server settings with pending changes
+    updateSaveBar();
+  }
+
+  for (const name of groupNames) {
+    const btn = document.createElement('button');
+    btn.className = 'settings-nav-item';
+    btn.textContent = name;
+    btn.dataset.group = name;
+    btn.addEventListener('click', () => showGroup(name));
+    $settingsNav.appendChild(btn);
+  }
+
+  showGroup(activeGroup);
+}
+
+function openSettings(): void {
+  renderSettingsModal();
+  $settingsOverlay.classList.remove('hidden');
+}
+
+function closeSettings(): void {
+  $settingsOverlay.classList.add('hidden');
+}
+
+$settingsBtn.addEventListener('click', openSettings);
+$settingsClose.addEventListener('click', closeSettings);
+
+$settingsOverlay.addEventListener('click', (e) => {
+  if (e.target === $settingsOverlay) closeSettings();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$settingsOverlay.classList.contains('hidden')) {
+    closeSettings();
   }
 });
 

@@ -7,7 +7,8 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -20,6 +21,23 @@ const log = createLogger('web-bridge');
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..');
 const WEB_DIR = resolve(__dirname, '..', 'web');
+const SETTINGS_PATH = resolve(__dirname, '..', 'settings.json');
+
+type ClientSettings = Record<string, boolean | number | string>;
+
+async function readClientSettings(): Promise<ClientSettings> {
+  try {
+    if (!existsSync(SETTINGS_PATH)) return {};
+    const raw = await readFile(SETTINGS_PATH, 'utf-8');
+    return JSON.parse(raw) as ClientSettings;
+  } catch { return {}; }
+}
+
+async function writeClientSettings(updates: ClientSettings): Promise<void> {
+  const current = await readClientSettings();
+  const merged = { ...current, ...updates };
+  await writeFile(SETTINGS_PATH, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+}
 const MARKED_ESM = resolve(__dirname, '..', 'node_modules', 'marked', 'lib', 'marked.esm.js');
 
 const MIME_TYPES: Record<string, string> = {
@@ -139,6 +157,31 @@ export async function startWebServer(
       return;
     }
 
+    // Client settings — GET returns settings.json, POST merges updates into it.
+    if (url === '/settings') {
+      if (req.method === 'GET') {
+        const settings = await readClientSettings();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(settings));
+        return;
+      }
+      if (req.method === 'POST') {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => chunks.push(chunk));
+        req.on('end', async () => {
+          try {
+            const updates = JSON.parse(Buffer.concat(chunks).toString()) as ClientSettings;
+            await writeClientSettings(updates);
+            res.writeHead(204); res.end();
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid JSON' }));
+          }
+        });
+        return;
+      }
+    }
+
     // Vendor: serve marked ESM from node_modules
     if (url === '/vendor/marked.js') {
       return serveFile(res, MARKED_ESM);
@@ -176,6 +219,13 @@ export async function startWebServer(
     if (cachedMounts.length > 0 || cachedCapabilities) {
       ws.send(JSON.stringify({ type: 'host_state', mounts: cachedMounts, ...(cachedCapabilities ? { capabilities: cachedCapabilities } : {}) }));
     }
+
+    // Send current client settings so the browser can sync from the JSON file.
+    readClientSettings().then((settings) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'client_settings', settings }));
+      }
+    }).catch(() => { /* file missing is fine */ });
 
     // --- Relay AgentClient events → WebSocket ---
 

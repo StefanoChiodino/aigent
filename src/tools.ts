@@ -558,7 +558,7 @@ const applyPatchTool: ToolDef = {
     'code-review-style diff and approve or deny before anything is written. Use this to make ' +
     'targeted edits without needing a full rw mount — the agent only needs ro access to read files. ' +
     'Supports multi-file diffs: include multiple --- a/ +++ b/ sections in a single diff string. ' +
-    'Paths in the diff must be absolute container paths (e.g. /project/myapp/src/foo.ts). ' +
+    'Paths in the diff must be absolute container paths (e.g. /home/user/myapp/src/foo.ts — container paths mirror host paths exactly). ' +
     'Produce the diff in standard unified diff format with --- a/path, +++ b/path, and @@ hunks.',
   input_schema: {
     type: 'object' as const,

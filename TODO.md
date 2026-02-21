@@ -59,7 +59,7 @@ We could use a cheap ai to summarise the text from the AI response so that there
 
 store messages in the browser storage so that they don't disappear on reload. should also probably make sure to make this comprehensive and include all the various toggle and options that are changeable on the fly on the lelf panel
 
-would be nice to implement a config with various items we have so far hardcoded. JSON backing would be nice, and then a big modal that overlays the whole page (or something similar?) to fiddle with all the settings. I wonder if there is a framework that allows us to display all variables with nice UI automatically. E.g. set specific types and ranges to have sliders, text, textareas, etc.
+~~would be nice to implement a config with various items we have so far hardcoded. JSON backing would be nice, and then a big modal that overlays the whole page (or something similar?) to fiddle with all the settings. I wonder if there is a framework that allows us to display all variables with nice UI automatically. E.g. set specific types and ranges to have sliders, text, textareas, etc.~~ DONE — settings schema (SETTINGS_SCHEMA array with type/label/group/min/max/unit) auto-renders a modal with toggles, sliders, and number inputs. Gear icon in header. All settings backed by unified localStorage key `aigent-settings`. Covers: TTS auto-speak, TTS rate, mic sticky, max attachment size, max attachment count. Old per-key localStorage calls replaced.
 
 ~~change the keybinding to start recording to something much easier than alt+M~~ DONE — Alt+M global, `` ` `` or M when input unfocused; hints shown in bar
 

@@ -80,6 +80,7 @@ export type ServerEvent =
   | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
+  | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'pong' };
 
 // --- Worker → Gatekeeper (capability/mount requests) ---

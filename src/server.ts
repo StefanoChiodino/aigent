@@ -159,6 +159,10 @@ const clients = new Set<Socket>();
 // --- Mount request handling ---
 
 const pendingMountRequests = new Map<string, {
+  path: string;
+  mode: 'ro' | 'rw';
+  reason?: string;
+  durationMinutes?: number;
   resolve: (response: { ok: boolean; containerPath?: string; message: string }) => void;
 }>();
 let mountRequestCounter = 0;
@@ -183,6 +187,10 @@ export function requestMount(
     }, 60_000);
 
     pendingMountRequests.set(id, {
+      path,
+      mode,
+      ...(reason !== undefined ? { reason } : {}),
+      ...(durationMinutes !== undefined ? { durationMinutes } : {}),
       resolve: (response) => {
         clearTimeout(timer);
         resolve(response);
@@ -248,6 +256,9 @@ function resolveScreenshotRequest(id: string, response: { ok: boolean; data?: st
 // --- Config write request handling ---
 
 const pendingConfigWriteRequests = new Map<string, {
+  file: string;
+  content: string;
+  reason: string;
   resolve: (response: { ok: boolean; message: string }) => void;
 }>();
 let configWriteCounter = 0;
@@ -270,6 +281,9 @@ export function requestConfigWrite(
     }, 60_000);
 
     pendingConfigWriteRequests.set(id, {
+      file,
+      content,
+      reason,
       resolve: (response) => {
         clearTimeout(timer);
         resolve(response);
@@ -291,6 +305,8 @@ function resolveConfigWriteRequest(id: string, response: { ok: boolean; message:
 // --- Patch request handling ---
 
 const pendingPatchRequests = new Map<string, {
+  diff: string;
+  reason: string;
   resolve: (response: { ok: boolean; message: string }) => void;
 }>();
 let patchCounter = 0;
@@ -312,6 +328,8 @@ export function requestPatch(
     }, 120_000);
 
     pendingPatchRequests.set(id, {
+      diff,
+      reason,
       resolve: (response) => {
         clearTimeout(timer);
         resolve(response);
@@ -1184,6 +1202,17 @@ function handleClient(socket: Socket): void {
 
   // Send current state
   send(socket, { type: 'connected', state: getState() });
+
+  // Replay any pending permission requests so reconnecting clients see them
+  for (const [id, req] of pendingMountRequests) {
+    send(socket, { type: 'mount_request', id, path: req.path, mode: req.mode, ...(req.reason !== undefined ? { reason: req.reason } : {}), ...(req.durationMinutes !== undefined ? { durationMinutes: req.durationMinutes } : {}) });
+  }
+  for (const [id, req] of pendingConfigWriteRequests) {
+    send(socket, { type: 'config_write_request', id, file: req.file, content: req.content, reason: req.reason });
+  }
+  for (const [id, req] of pendingPatchRequests) {
+    send(socket, { type: 'patch_request', id, diff: req.diff, reason: req.reason });
+  }
 
   socket.on('data', (data) => {
     buffer += data.toString();
