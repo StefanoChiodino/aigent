@@ -135,6 +135,8 @@ See `docs/explore-computer-use.md` for a breakdown of patterns, safety models, a
 
 ## 🔌 Extensibility & Docs
 
+See `docs/explore-agent-orchestration.md` for patterns on managing parallel sub-agents, file concurrency, and the "Blackboard" communication model.
+
 - [ ] **README: "Extending with MCP"** — document `mcp.json` format with a working example (e.g. `@modelcontextprotocol/server-github`) so contributors know how to add tools without touching core code.
 - [ ] **README: MCP permissions** — document the permission model once implemented.
 - [ ] **CONTRIBUTING.md** — explain the "run the agent and ask it to implement something" workflow; code style, PR expectations, how to add a built-in tool vs. an MCP tool.
