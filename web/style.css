@@ -314,6 +314,48 @@ html, body {
   50% { opacity: 0.5; }
 }
 
+/* Speak preview icon + tooltip */
+.speak-preview {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  opacity: 0;
+  color: var(--text-dim);
+  cursor: default;
+  transition: opacity 0.15s, color 0.15s;
+}
+.message:hover .speak-preview {
+  opacity: 1;
+}
+.speak-preview:hover {
+  color: var(--text);
+}
+.speak-preview-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  max-width: 360px;
+  z-index: 100;
+  text-transform: none;
+  letter-spacing: 0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  pointer-events: none;
+}
+.speak-preview:hover .speak-preview-tooltip {
+  display: block;
+}
+
 /* Streaming message */
 .message.streaming {
   border-left-color: var(--accent);
@@ -1115,6 +1157,38 @@ html, body {
   gap: 8px;
 }
 
+#input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+}
+
+#mic-capped {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-right: 1px solid var(--border);
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--bg-input);
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+  letter-spacing: 0.05em;
+}
+
+#mic-capped.hidden { display: none; }
+
+/* When capped indicator is visible, indent textarea text to clear the chip */
+#input-wrap:has(#mic-capped:not(.hidden)) #input {
+  padding-left: 42px;
+}
+
 #input {
   flex: 1;
   background: var(--bg-surface);
@@ -1299,6 +1373,10 @@ html, body {
 #mic-sticky.active:hover {
   background: #e74c3c;
   color: #fff;
+}
+
+#mic-sticky.vad-active {
+  animation: mic-vad-pulse 0.5s ease-in-out infinite;
 }
 
 #screen-cap {
@@ -1902,13 +1980,27 @@ html, body {
   color: var(--text-secondary);
 }
 
-/* ── Permission request toast ─────────────────────────────── */
+/* ── Permission request overlay ──────────────────────────── */
 
+/* Default: toast pinned to top-right */
 #perm-overlay {
   position: fixed;
   top: 54px;
   right: 16px;
   z-index: 1000;
+}
+
+/* Patch mode: full-screen backdrop with centered card */
+#perm-overlay.patch-mode {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
 }
 
 #perm-card {
@@ -1920,6 +2012,29 @@ html, body {
   width: 290px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   animation: slideInRight 0.2s ease;
+}
+
+/* Patch mode card: wide, flex-column, fills most of the viewport */
+#perm-overlay.patch-mode #perm-card {
+  width: min(960px, 92vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px;
+  animation: scaleIn 0.15s ease;
+}
+
+#perm-overlay.patch-mode #perm-card-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+#perm-overlay.patch-mode #perm-card-diff {
+  flex: 1;
+  max-height: none;
 }
 
 #perm-card-header {
@@ -1943,6 +2058,10 @@ html, body {
   letter-spacing: 0.3px;
 }
 
+#perm-overlay.patch-mode #perm-card-title {
+  font-size: 13px;
+}
+
 #perm-card-body {
   margin-bottom: 9px;
 }
@@ -1956,6 +2075,12 @@ html, body {
   white-space: nowrap;
 }
 
+#perm-overlay.patch-mode #perm-card-detail {
+  font-size: 12px;
+  white-space: normal;
+  margin-bottom: 8px;
+}
+
 #perm-card-detail > div {
   white-space: nowrap;
   overflow: hidden;
@@ -1966,6 +2091,63 @@ html, body {
   color: var(--text-dim);
   font-size: 11px;
 }
+
+/* File tab strip */
+#perm-card-diff-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.diff-tab {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  background: var(--bg-base);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  transition: all var(--transition);
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-tab:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.diff-tab.active {
+  color: var(--warning);
+  border-color: var(--warning);
+  background: rgba(224, 160, 64, 0.08);
+}
+
+/* Diff content */
+#perm-card-diff {
+  margin: 8px 0 4px;
+  padding: 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--text-secondary);
+}
+
+.diff-add    { color: #7ec98b; background: rgba(126, 201, 139, 0.07); display: block; }
+.diff-remove { color: #e06c75; background: rgba(224, 108, 117, 0.07); display: block; }
+.diff-hunk   { color: #c792ea; display: block; }
+.diff-header { color: var(--text-dim); font-style: italic; display: block; }
 
 #perm-card-duration {
   margin-top: 6px;
@@ -1996,6 +2178,11 @@ html, body {
   transition: all var(--transition);
 }
 
+#perm-overlay.patch-mode .perm-btn {
+  padding: 6px 20px;
+  font-size: 13px;
+}
+
 .perm-deny {
   background: transparent;
   color: var(--text-secondary);
@@ -2016,6 +2203,11 @@ html, body {
 
 .perm-approve:hover {
   background: rgba(64, 176, 128, 0.25);
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 @keyframes fadeIn {

@@ -162,6 +162,9 @@ export class AgentClient extends EventEmitter {
       case 'config_write_request':
         this.emit('config_write_request', event.id, event.file, event.content, event.reason);
         break;
+      case 'patch_request':
+        this.emit('patch_request', event.id, event.diff, event.reason);
+        break;
       case 'screenshot_request':
         this.emit('screenshot_request', event.id);
         break;

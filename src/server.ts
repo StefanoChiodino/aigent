@@ -288,6 +288,48 @@ function resolveConfigWriteRequest(id: string, response: { ok: boolean; message:
   }
 }
 
+// --- Patch request handling ---
+
+const pendingPatchRequests = new Map<string, {
+  resolve: (response: { ok: boolean; message: string }) => void;
+}>();
+let patchCounter = 0;
+
+/**
+ * Send a patch request to the gatekeeper and wait for approval.
+ * The gatekeeper shows the unified diff to the user, who approves or denies.
+ */
+export function requestPatch(
+  diff: string,
+  reason: string,
+): Promise<{ ok: boolean; message: string }> {
+  const id = `patch_${++patchCounter}`;
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingPatchRequests.delete(id);
+      resolve({ ok: false, message: 'Patch request timed out (120s)' });
+    }, 120_000);
+
+    pendingPatchRequests.set(id, {
+      resolve: (response) => {
+        clearTimeout(timer);
+        resolve(response);
+      },
+    });
+
+    broadcast({ type: 'patch_request', id, diff, reason });
+  });
+}
+
+function resolvePatchRequest(id: string, response: { ok: boolean; message: string }): void {
+  const pending = pendingPatchRequests.get(id);
+  if (pending) {
+    pendingPatchRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
 // --- Background task queue ---
 
 import { TaskQueue } from './tasks.js';
@@ -1239,6 +1281,9 @@ function handleClient(socket: Socket): void {
             break;
           case 'config_write_response':
             resolveConfigWriteRequest(cmd.id, cmd);
+            break;
+          case 'patch_response':
+            resolvePatchRequest(cmd.id, cmd);
             break;
           case 'screenshot_response':
             resolveScreenshotRequest(cmd.id, {

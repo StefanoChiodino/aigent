@@ -72,3 +72,5 @@ add a little x next to the mounts to remove them
 browser extension — allow the agent to read/write page DOM, manage tabs, fill forms, navigate pages. Bigger lift than screen capture but enables agentic browser automation without computer-use overhead.
 
 browser accessibility / a11y tree — expose structured page content (labels, roles, interactive elements) to the agent via the Accessibility Object Model or Chrome DevTools Protocol. Cheaper than screenshots for understanding page structure.
+
+When asking for a permission I've happened to see the agent trying to ask for a permission that he already has, and I think that in part this is confusing for the agent because the mounts are not called exactly the same, and so sometimes I might tell you, for example, I may be referring to a particular folder, but then he doesn't know which folder I'm talking about, even though it is already mounted, so he he asks for the to mount it again and I think that that mount the request shouldn't appear to the user at all because the already the it is already there. And uh it should be much clear to the agent what has it got mounted on at the moment.

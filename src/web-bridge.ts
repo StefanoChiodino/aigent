@@ -221,6 +221,8 @@ export async function startWebServer(
         send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}), ...(durationMinutes !== undefined ? { durationMinutes } : {}) }),
       config_write_request: (id: string, file: string, content: string, reason: string) =>
         send({ type: 'config_write_request', id, file, content, reason }),
+      patch_request: (id: string, diff: string, reason: string) =>
+        send({ type: 'patch_request', id, diff, reason }),
       screenshot_request: (id: string) =>
         send({ type: 'screenshot_request', id }),
       host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, string>) =>

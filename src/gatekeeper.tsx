@@ -436,7 +436,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview']);
+const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -447,6 +447,7 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   // Check dynamic commands first (grant/deny, approve/reject/preview)
   if (await handleGrantDeny(input)) return;
   if (await handleConfigApproveReject(input)) return;
+  if (await handlePatchApproveReject(input)) return;
 
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
@@ -750,6 +751,134 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
   return false;
 }
 
+// --- Patch requests ---
+
+interface PendingPatch {
+  diff: string;
+  /** Resolved host paths extracted from diff headers. */
+  files: Array<{ containerPath: string; hostPath: string }>;
+}
+
+const pendingPatchRequests = new Map<string, PendingPatch>();
+
+/** Parse "--- a/<path>" or "+++ b/<path>" headers from a unified diff, returning unique container paths. */
+function parseDiffFilePaths(diff: string): string[] {
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  for (const m of diff.matchAll(/^\+\+\+ b\/(.+)$/gm)) {
+    const p = m[1]!.trim();
+    if (!seen.has(p)) { seen.add(p); paths.push(p); }
+  }
+  return paths;
+}
+
+function handlePatchRequest(id: string, diff: string, reason: string): void {
+  const containerPaths = parseDiffFilePaths(diff);
+
+  if (containerPaths.length === 0) {
+    client!.send({ type: 'patch_response', id, ok: false, message: 'No file paths found in diff (expected +++ b/<path> headers)' });
+    return;
+  }
+
+  const files: PendingPatch['files'] = [];
+  for (const cp of containerPaths) {
+    const hostPath = resolveContainerToHost(cp) ?? resolveHostPath(cp);
+    if (isForbiddenPath(hostPath)) {
+      client!.send({ type: 'patch_response', id, ok: false, message: `Refusing to patch ${hostPath} — sensitive path` });
+      return;
+    }
+    files.push({ containerPath: cp, hostPath });
+  }
+
+  const addedLines = (diff.match(/^\+[^+]/gm) ?? []).length;
+  const removedLines = (diff.match(/^-[^-]/gm) ?? []).length;
+  const fileList = files.map((f) => `    ${f.hostPath}`).join('\n');
+
+  pendingPatchRequests.set(id, { diff, files });
+
+  injectSystemMessage(
+    `Agent wants to patch ${files.length} file${files.length > 1 ? 's' : ''}:\n${fileList}\n` +
+    `  Reason: "${reason}"\n` +
+    `  Changes: +${addedLines} lines, -${removedLines} lines\n\n` +
+    `Reply: /approve-patch or /reject-patch`
+  );
+}
+
+async function handlePatchApproveReject(input: string): Promise<boolean> {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  if (cmd === '/approve-patch') {
+    let id = parts[1];
+    if (!id && pendingPatchRequests.size === 1) {
+      id = pendingPatchRequests.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingPatchRequests.size === 0
+        ? 'No pending patch requests.'
+        : `Multiple pending — specify ID: ${[...pendingPatchRequests.keys()].join(', ')}`);
+      return true;
+    }
+
+    const pending = pendingPatchRequests.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending patch request: ${id}`);
+      return true;
+    }
+
+    pendingPatchRequests.delete(id);
+
+    // Apply the full diff in one shot using `patch -p1`.
+    // -p1 strips the leading "a/" or "b/" from paths so they resolve relative to /.
+    // We cd to / so absolute paths in the diff work directly.
+    // --no-backup-if-mismatch: suppress .orig files.
+    try {
+      execSync('patch --no-backup-if-mismatch -p1', {
+        input: pending.diff,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: '/',
+      });
+      const patched = pending.files.map((f) => f.hostPath).join(', ');
+      log.info('Patch applied', { id, files: pending.files.map((f) => f.hostPath) });
+      client!.send({ type: 'patch_response', id, ok: true, message: `Applied: ${patched}` });
+      injectSystemMessage(`Approved: patch applied to ${pending.files.length} file${pending.files.length > 1 ? 's' : ''}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error('Patch failed', { id, error: msg });
+      client!.send({ type: 'patch_response', id, ok: false, message: `Patch failed: ${msg}` });
+      injectSystemMessage(`Patch failed: ${msg}`);
+    }
+    return true;
+  }
+
+  if (cmd === '/reject-patch') {
+    let id = parts[1];
+    if (!id && pendingPatchRequests.size === 1) {
+      id = pendingPatchRequests.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingPatchRequests.size === 0
+        ? 'No pending patch requests.'
+        : `Multiple pending — specify ID: ${[...pendingPatchRequests.keys()].join(', ')}`);
+      return true;
+    }
+
+    const pending = pendingPatchRequests.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending patch request: ${id}`);
+      return true;
+    }
+
+    pendingPatchRequests.delete(id);
+    log.info('Patch rejected', { id });
+    client!.send({ type: 'patch_response', id, ok: false, message: 'Patch rejected by user' });
+    injectSystemMessage(`Rejected patch for ${pending.files.map((f) => f.hostPath).join(', ')}`);
+    return true;
+  }
+
+  return false;
+}
+
 // --- Host Daemon ---
 
 let hostDaemonProcess: ChildProcess | null = null;
@@ -924,6 +1053,11 @@ client.on('mount_request', (id: string, path: string, mode: 'ro' | 'rw', reason?
 // Handle config write requests from the worker
 client.on('config_write_request', (id: string, file: string, content: string, reason: string) => {
   handleConfigWriteRequest(id, file, content, reason);
+});
+
+// Handle patch requests from the worker
+client.on('patch_request', (id: string, diff: string, reason: string) => {
+  handlePatchRequest(id, diff, reason);
 });
 
 // Expiry timer — check every 30s for mounts that have timed out

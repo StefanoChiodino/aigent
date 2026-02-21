@@ -68,6 +68,7 @@ type ServerEvent =
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
+  | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
   | { type: 'pong' };
@@ -103,9 +104,11 @@ const COMMANDS: CommandDef[] = [
   { name: '/mounts',    desc: 'List active mounts' },
   { name: '/grant',     desc: 'Approve pending request' },
   { name: '/deny',      desc: 'Deny pending request' },
-  { name: '/approve',   desc: 'Approve config write' },
-  { name: '/reject',    desc: 'Reject config write' },
-  { name: '/preview',   desc: 'Preview config write' },
+  { name: '/approve',        desc: 'Approve config write' },
+  { name: '/reject',         desc: 'Reject config write' },
+  { name: '/preview',        desc: 'Preview config write' },
+  { name: '/approve-patch',  desc: 'Approve patch request' },
+  { name: '/reject-patch',   desc: 'Reject patch request' },
 ];
 
 // ── Configure marked ─────────────────────────────────────────
@@ -135,14 +138,22 @@ let capsList: Record<string, string> = {};
 let modelPickerOpen = false;
 
 // Permission request queue
+interface DiffFile {
+  name: string;    // display filename (basename)
+  path: string;    // full container path
+  content: string; // the file's portion of the diff
+}
+
 interface PermRequest {
-  type: 'mount' | 'config_write';
+  type: 'mount' | 'config_write' | 'patch';
   id: string;
   title: string;
   detail: string;
   approveCmd: string;
   denyCmd: string;
   durationMinutes?: number;
+  diff?: string;
+  diffFiles?: DiffFile[]; // parsed per-file sections for tab navigation
 }
 
 let permQueue: PermRequest[] = [];
@@ -205,6 +216,8 @@ const $permIcon = $('perm-card-icon');
 const $permTitle = $('perm-card-title');
 const $permDetail = $('perm-card-detail');
 const $permDuration = $('perm-card-duration');
+const $permDiff = $('perm-card-diff');
+const $permDiffTabs = $('perm-card-diff-tabs');
 const $permApproveBtn = $('perm-approve-btn') as HTMLButtonElement;
 const $permDenyBtn = $('perm-deny-btn') as HTMLButtonElement;
 
@@ -659,6 +672,25 @@ function handleEvent(event: ServerEvent): void {
       break;
     }
 
+    case 'patch_request': {
+      const diffFiles = parseDiffIntoFiles(event.diff);
+      const fileCount = diffFiles.length;
+      const title = fileCount === 1
+        ? `Patch: ${diffFiles[0]!.name}`
+        : `Patch: ${fileCount} files`;
+      enqueuePermRequest({
+        type: 'patch',
+        id: event.id,
+        title,
+        detail: event.reason,
+        diff: event.diff,
+        diffFiles,
+        approveCmd: `/approve-patch ${event.id}`,
+        denyCmd: `/reject-patch ${event.id}`,
+      });
+      break;
+    }
+
     case 'screenshot_request': {
       const { id } = event;
       if (!screenStream || !screenVideo || screenVideo.videoWidth === 0 || screenVideo.videoHeight === 0) {
@@ -947,6 +979,18 @@ function createTTSBtn(text: string): HTMLElement {
   return btn;
 }
 
+/** Creates a small icon button that shows the <speak> summary on hover. */
+function createSpeakPreviewBtn(speakContent: string): HTMLElement {
+  const wrap = document.createElement('span');
+  wrap.className = 'speak-preview';
+  wrap.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+  const tooltip = document.createElement('div');
+  tooltip.className = 'speak-preview-tooltip';
+  tooltip.textContent = speakContent;
+  wrap.appendChild(tooltip);
+  return wrap;
+}
+
 function appendMessage(msg: DisplayMessage, animate = true): void {
   hideEmptyState();
 
@@ -982,7 +1026,9 @@ function appendMessage(msg: DisplayMessage, animate = true): void {
     label.appendChild(elapsed);
   }
   if (msg.role === 'assistant') {
-    label.appendChild(createTTSBtn(extractSpeakContent(msg.content) ?? msg.content));
+    const speakContent = extractSpeakContent(msg.content);
+    label.appendChild(createTTSBtn(speakContent ?? msg.content));
+    if (speakContent) label.appendChild(createSpeakPreviewBtn(speakContent));
   }
   el.appendChild(label);
 
@@ -1123,7 +1169,9 @@ function finalizeStreamEl(fullContent: string, elapsed?: number): void {
       elapsedEl.textContent = `${elapsed.toFixed(1)}s`;
       labelEl.appendChild(elapsedEl);
     }
-    labelEl.appendChild(createTTSBtn(fullContent));
+    const speakContent = extractSpeakContent(fullContent);
+    labelEl.appendChild(createTTSBtn(speakContent ?? fullContent));
+    if (speakContent) labelEl.appendChild(createSpeakPreviewBtn(speakContent));
   }
   scrollToBottom();
 }
@@ -1718,10 +1766,63 @@ function sendPermNotification(req: PermRequest): void {
   n.onclick = () => { window.focus(); n.close(); };
 }
 
+// ── Diff parsing helpers ─────────────────────────────────────
+
+/** Split a unified diff into per-file sections for tab navigation. */
+function parseDiffIntoFiles(diff: string): DiffFile[] {
+  const files: DiffFile[] = [];
+  // Split on "--- a/" boundaries (each file section starts here)
+  const sections = diff.split(/(?=^--- a\/)/m);
+  for (const section of sections) {
+    if (!section.trim()) continue;
+    const pathMatch = section.match(/^\+\+\+ b\/(.+)$/m);
+    if (!pathMatch) continue;
+    const path = pathMatch[1]!.trim();
+    const name = path.split('/').pop() ?? path;
+    files.push({ name, path, content: section });
+  }
+  return files.length > 0 ? files : [{ name: 'patch', path: '', content: diff }];
+}
+
+/** Render a diff string into colored spans inside a container element. */
+function renderDiffContent(container: HTMLElement, diffText: string): void {
+  container.innerHTML = '';
+  for (const line of diffText.split('\n')) {
+    const span = document.createElement('span');
+    span.textContent = line + '\n';
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      span.className = 'diff-add';
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      span.className = 'diff-remove';
+    } else if (line.startsWith('@@')) {
+      span.className = 'diff-hunk';
+    } else if (line.startsWith('---') || line.startsWith('+++')) {
+      span.className = 'diff-header';
+    }
+    container.appendChild(span);
+  }
+}
+
+let activeDiffFileIdx = 0;
+
+function showDiffFile(req: PermRequest, idx: number): void {
+  activeDiffFileIdx = idx;
+  const files = req.diffFiles ?? [];
+
+  // Update tab active state
+  const tabs = $permDiffTabs.querySelectorAll('.diff-tab');
+  tabs.forEach((t, i) => t.classList.toggle('active', i === idx));
+
+  // Render the selected file's diff content
+  const fileContent = files[idx]?.content ?? req.diff ?? '';
+  renderDiffContent($permDiff, fileContent);
+}
+
 function showNextPermRequest(): void {
   const req = permQueue[0];
   if (!req) {
     permShowing = false;
+    $permOverlay.classList.remove('patch-mode');
     $permOverlay.classList.add('hidden');
     // Restore tool bar if there's an active tool
     if ($toolLabel.textContent) $toolBar.classList.remove('hidden');
@@ -1730,7 +1831,7 @@ function showNextPermRequest(): void {
   permShowing = true;
   // Hide tool bar — the perm overlay shows what's pending
   $toolBar.classList.add('hidden');
-  $permIcon.textContent = req.type === 'mount' ? '📂' : '✏️';
+  $permIcon.textContent = req.type === 'mount' ? '📂' : req.type === 'patch' ? '🩹' : '✏️';
   $permTitle.textContent = req.title;
 
   // Show each line of detail as its own row
@@ -1740,6 +1841,36 @@ function showNextPermRequest(): void {
     const row = document.createElement('div');
     row.textContent = line;
     $permDetail.appendChild(row);
+  }
+
+  // Patch mode: full-page modal with file tabs + diff viewer
+  if (req.type === 'patch') {
+    $permOverlay.classList.add('patch-mode');
+
+    // Build file tabs
+    const files = req.diffFiles ?? [];
+    $permDiffTabs.innerHTML = '';
+    if (files.length > 1) {
+      files.forEach((f, i) => {
+        const tab = document.createElement('button');
+        tab.className = 'diff-tab';
+        tab.textContent = f.name;
+        tab.title = f.path;
+        tab.addEventListener('click', () => showDiffFile(req, i));
+        $permDiffTabs.appendChild(tab);
+      });
+      $permDiffTabs.classList.remove('hidden');
+    } else {
+      $permDiffTabs.classList.add('hidden');
+    }
+
+    activeDiffFileIdx = 0;
+    showDiffFile(req, 0);
+    $permDiff.classList.remove('hidden');
+  } else {
+    $permOverlay.classList.remove('patch-mode');
+    $permDiff.classList.add('hidden');
+    $permDiffTabs.classList.add('hidden');
   }
 
   // Duration badge — shown when agent specifies how long it needs access
@@ -2137,6 +2268,7 @@ const $micIconMic = $mic.querySelector('.icon-mic') as SVGElement;
 const $micIconStop = $mic.querySelector('.icon-stop') as SVGElement;
 const $micIconSpinner = $mic.querySelector('.icon-spinner') as SVGElement;
 const $micSticky = $('mic-sticky') as HTMLButtonElement;
+const $micCapped = $('mic-capped') as HTMLSpanElement;
 
 let micRecording = false;
 let micSticky = localStorage.getItem('mic-sticky') === 'true';
@@ -2205,9 +2337,10 @@ async function sendLiveChunk(): Promise<void> {
   // Build a sliding window over the last MIC_WINDOW_SAMPLES samples
   let totalLen = 0;
   for (const s of micSamples) totalLen += s.length;
+  const windowCapped = totalLen > MIC_WINDOW_SAMPLES;
 
   let window: Float32Array[];
-  if (totalLen <= MIC_WINDOW_SAMPLES) {
+  if (!windowCapped) {
     window = micSamples;
   } else {
     window = [];
@@ -2244,7 +2377,9 @@ async function sendLiveChunk(): Promise<void> {
       if (text) {
         micLastText = text;
         micDisplayedSeq = seq;
-        // Put live transcription directly in the textarea
+        // Show the capped indicator (…) as a UI overlay when the audio window is
+        // sliding — tells the user earlier speech exists but isn't in this preview.
+        $micCapped.classList.toggle('hidden', !windowCapped);
         $input.value = micBaseText ? micBaseText + ' ' + text : text;
         autoGrow();
       }
@@ -2306,12 +2441,14 @@ async function startMic(silent = false): Promise<void> {
         if (vadLoudFrames >= 2 && !vadSpeaking) {
           vadSpeaking = true;
           $mic.classList.add('vad-active');
+          if (micSticky) $micSticky.classList.add('vad-active');
         }
       } else {
         vadLoudFrames = 0;
         if (vadSpeaking) {
           vadSpeaking = false;
           $mic.classList.remove('vad-active');
+          $micSticky.classList.remove('vad-active');
         }
       }
 
@@ -2354,6 +2491,7 @@ async function stopMic(silent = false): Promise<void> {
   vadSpeaking = false;
   vadLoudFrames = 0;
   $mic.classList.remove('vad-active');
+  $micSticky.classList.remove('vad-active');
   if (!silent) playMicSound('stop');
 
   // Stop timers and abort all in-flight live STT requests
@@ -2380,23 +2518,23 @@ async function stopMic(silent = false): Promise<void> {
 
   let finalText = micLastText;
   try {
-    const sttAbort = new AbortController();
-    const sttTimeout = setTimeout(() => sttAbort.abort(), 8000);
+    // No client-side timeout for the final call — the full recording may be long
+    // and Whisper may need several seconds to process it. Live chunks use a 5 s cap
+    // to stay responsive, but the final pass just waits as long as it takes.
     const resp = await fetch('/stt', {
       method: 'POST',
       headers: { 'Content-Type': 'audio/wav' },
       body: encodeWav(samples, 16000),
-      signal: sttAbort.signal,
     });
-    clearTimeout(sttTimeout);
     if (resp.ok) {
       const { text } = await resp.json() as { text?: string };
       if (text) finalText = text;
     }
   } catch {
-    // STT service not running or timed out — use last live chunk result
+    // STT service not running — use last live chunk result
   }
 
+  $micCapped.classList.add('hidden');
   if (finalText) {
     $input.value = micBaseText ? micBaseText + ' ' + finalText : finalText;
     autoGrow();
@@ -2418,6 +2556,8 @@ function abortMic(): void {
   vadSpeaking = false;
   vadLoudFrames = 0;
   $mic.classList.remove('vad-active');
+  $micSticky.classList.remove('vad-active');
+  $micCapped.classList.add('hidden');
   if (micChunkTimer !== null) { clearInterval(micChunkTimer); micChunkTimer = null; }
   if (micSilenceTimer !== null) { clearInterval(micSilenceTimer); micSilenceTimer = null; }
   // Abort and invalidate any in-flight live STT requests

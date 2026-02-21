@@ -551,6 +551,33 @@ const requestConfigWriteTool: ToolDef = {
   },
 };
 
+const applyPatchTool: ToolDef = {
+  name: 'apply_patch',
+  description:
+    'Apply a unified diff to one or more files on the host filesystem. The user will see a ' +
+    'code-review-style diff and approve or deny before anything is written. Use this to make ' +
+    'targeted edits without needing a full rw mount — the agent only needs ro access to read files. ' +
+    'Supports multi-file diffs: include multiple --- a/ +++ b/ sections in a single diff string. ' +
+    'Paths in the diff must be absolute container paths (e.g. /project/myapp/src/foo.ts). ' +
+    'Produce the diff in standard unified diff format with --- a/path, +++ b/path, and @@ hunks.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      diff: {
+        type: 'string',
+        description:
+          'Unified diff to apply. May span multiple files. Each file section starts with ' +
+          '--- a/<path> and +++ b/<path> where <path> is the absolute container path.',
+      },
+      reason: {
+        type: 'string',
+        description: 'Why you want to make these changes. Shown to the user in the approval prompt.',
+      },
+    },
+    required: ['diff', 'reason'],
+  },
+};
+
 const requestScreenshotTool: ToolDef = {
   name: 'request_screenshot',
   description:
@@ -621,7 +648,7 @@ const searchMemoryTool: ToolDef = {
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
-  hostTool, requestMountTool, requestConfigWriteTool, requestScreenshotTool, switchModelTool,
+  hostTool, requestMountTool, requestConfigWriteTool, applyPatchTool, requestScreenshotTool, switchModelTool,
   searchMemoryTool,
 ];
 
@@ -657,9 +684,10 @@ interface DispatchTaskInput { task: string; context?: string; model?: string; ma
 interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
 interface RequestMountInput { path: string; mode?: string; reason: string; durationMinutes?: number }
 interface RequestConfigWriteInput { file: string; content: string; reason: string }
+interface ApplyPatchInput { diff: string; reason: string }
 interface SwitchModelInput { model: string; reason?: string }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput | SwitchModelInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput | ApplyPatchInput | SwitchModelInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -729,6 +757,14 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
     case 'request_config_write': {
       const { file } = input as RequestConfigWriteInput;
       return `config write: ${file}`;
+    }
+    case 'apply_patch': {
+      const { diff } = input as ApplyPatchInput;
+      // Extract file paths from diff headers for the summary
+      const files = [...diff.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1]);
+      return files.length > 0
+        ? `apply patch: ${files.slice(0, 2).join(', ')}${files.length > 2 ? ` +${files.length - 2} more` : ''}`
+        : 'apply patch';
     }
     case 'request_screenshot':
       return 'screenshot from browser';
@@ -1167,6 +1203,16 @@ export async function executeTool(
         return `Config file ${file} updated. ${res.message}`;
       }
       return `Config write denied: ${res.message}`;
+    }
+
+    case 'apply_patch': {
+      const { diff, reason } = input as ApplyPatchInput;
+      const { requestPatch } = await import('./server.js');
+      const res = await requestPatch(diff, reason);
+      if (res.ok) {
+        return `Patch applied. ${res.message}`;
+      }
+      return `Patch denied: ${res.message}`;
     }
 
     case 'request_mount': {

@@ -22,6 +22,7 @@ export type ClientCommand =
   | { type: 'command'; cmd: string }
   | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
   | { type: 'config_write_response'; id: string; ok: boolean; message: string }
+  | { type: 'patch_response'; id: string; ok: boolean; message: string }
   | { type: 'screenshot_response'; id: string; ok: boolean; data?: string; mediaType?: string; message: string }
   | { type: 'ping' };
 
@@ -76,6 +77,7 @@ export type ServerEvent =
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
+  | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
   | { type: 'pong' };

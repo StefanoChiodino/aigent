@@ -12,6 +12,7 @@ The agent runs in a Docker sandbox, can read and edit its own source code, and t
 - Executes shell commands, reads/writes files, searches code, fetches URLs
 - Modifies its own source — changes hot-reload, conversation survives restarts
 - Maintains persistent memory across sessions
+- Proposes changes to host files via patches — you see a diff and approve before anything is written
 - Spawns background sub-agents for long tasks without blocking your conversation
 - Speaks responses aloud (local TTS) and listens via microphone (local STT)
 
@@ -60,6 +61,7 @@ Open `http://localhost:3141` in your browser.
 
 - **Push-to-talk** — `Ctrl+\`` or the mic button; transcription streams into the input box in real time
 - **Always-on mode** — `Ctrl+Shift+\`` keeps the microphone open continuously; silence detection auto-submits
+  - **Interrupt** — talk over the agent's response and VAD will stop it, letting you speak
 - **Text-to-speech** — speaker button on each assistant message; auto-speak toggle in the sidebar
 - **Concise mode** — a cheap model summarises long responses before they're spoken, keeping TTS output brief
 
