@@ -1,1 +1,389 @@
-/**\n * Safety utilities for tool execution.\n *\n * - Environment sanitization (strip API keys from child processes)\n * - Path validation (restrict writes to safe directories)\n * - URL validation (block SSRF to private/internal networks)\n * - Command safety checks (warn on destructive patterns)\n */\n\nimport { resolve } from 'node:path';\nimport { minimatch } from 'minimatch';\n\n// --- Environment sanitization ---\n\n/**\n * Keys to strip from child process environments.\n * These are secrets that tools and MCP servers should never see.\n */\nconst SENSITIVE_ENV_KEYS = [\n  'ANTHROPIC_API_KEY',\n  'OPENAI_API_KEY',\n  'OPENAI_ORG_ID',\n  'GITHUB_TOKEN',\n  'GH_TOKEN',\n  'AWS_SECRET_ACCESS_KEY',\n  'AWS_SESSION_TOKEN',\n  'GOOGLE_API_KEY',\n  'HF_TOKEN',\n  'HUGGING_FACE_HUB_TOKEN',\n];\n\n/** Patterns to match against env key names (case-insensitive). */\nconst SENSITIVE_KEY_PATTERNS = [\n  /api[_-]?key/i,\n  /secret/i,\n  /token/i,\n  /password/i,\n  /credential/i,\n];\n\n/**\n * Return a sanitized copy of process.env with secrets removed.\n * Keeps PATH, HOME, USER, LANG, TERM, and other safe variables.\n */\nexport function sanitizedEnv(): Record<string, string | undefined> {\n  const env = { ...process.env };\n\n  // Remove known sensitive keys\n  for (const key of SENSITIVE_ENV_KEYS) {\n    delete env[key];\n  }\n\n  // Remove keys matching sensitive patterns\n  for (const key of Object.keys(env)) {\n    if (SENSITIVE_KEY_PATTERNS.some((p) => p.test(key))) {\n      delete env[key];\n    }\n  }\n\n  return env;\n}\n\n// --- Path validation ---\n\n/**\n * Directories the agent is allowed to write to.\n *\n * In the gatekeeper architecture, /app is read-only by default.\n * Additional writable directories are added dynamically when the user\n * mounts folders via /mount (these mirror the host path inside the container).\n * The Docker mounts are the real security boundary — this is defense in depth.\n */\nconst WRITABLE_ROOTS = [\n  '/workspace',     // Workspace (memory, config, sessions)\n  '/project',       // User-mounted project folders (gatekeeper-controlled)\n  '/tmp',           // Temp files\n];\n\n/**\n * Check if a file path is safe to write to.\n * Returns null if safe, or an error message if blocked.\n *\n * Note: this is defense-in-depth. The real write protection comes from\n * Docker mount modes (ro/rw) controlled by the gatekeeper. The kernel\n * enforces those regardless of what this function says.\n */\nexport function validateWritePath(filePath: string): string | null {\n  const resolved = resolve(filePath);\n\n  // Check if within a writable root\n  const inWritableRoot = WRITABLE_ROOTS.some((root) => resolved.startsWith(root + '/') || resolved === root);\n  if (!inWritableRoot) {\n    return `Blocked: writes only allowed under ${WRITABLE_ROOTS.join(', ')}. Use request_mount to ask for access to other folders.`;\n  }\n\n  return null; // Safe\n}\n\n// --- URL validation (SSRF protection) ---\n\n/**\n * Private/internal IP ranges that should not be accessed via fetch.\n */\nconst PRIVATE_RANGES = [\n  // IPv4\n  /^127\\./,                          // Loopback\n  /^10\\./,                           // RFC 1918\n  /^172\\.(1[6-9]|2[0-9]|3[01])\\./,  // RFC 1918\n  /^192\\.168\\./,                     // RFC 1918\n  /^169\\.254\\./,                     // Link-local / cloud metadata\n  /^0\\./,                            // \"This\" network\n  // IPv6 (common forms)\n  /^::1$/,                           // Loopback\n  /^fd[0-9a-f]{2}:/i,               // Unique local\n  /^fe80:/i,                         // Link-local\n];\n\n/** Hostnames that should be blocked. */\nconst BLOCKED_HOSTS = [\n  'localhost',\n  'metadata.google.internal',\n  'metadata.google.com',\n  'instance-data',\n];\n\n/**\n * Check if a URL is safe to fetch.\n * Returns null if safe, or an error message if blocked.\n */\nexport function validateFetchUrl(url: string, httpsOnly: boolean = false): string | null {\n  let parsed: URL;\n  try {\n    parsed = new URL(url);\n  } catch {\n    return 'Invalid URL';\n  }\n\n  const hostname = parsed.hostname.toLowerCase();\n\n  // Check blocked hostnames\n  if (BLOCKED_HOSTS.includes(hostname)) {\n    return `Blocked: cannot fetch ${hostname} (internal/metadata endpoint)`;\n  }\n\n  // Check private IP ranges\n  for (const range of PRIVATE_RANGES) {\n    if (range.test(hostname)) {\n      return `Blocked: cannot fetch private IP ${hostname}`;\n    }\n  }\n\n  // Only allow http/https\n  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {\n    return `Blocked: only http/https URLs allowed (got ${parsed.protocol})`;\n  }\n\n  if (httpsOnly && parsed.protocol !== 'https:') {\n     return `Blocked: only HTTPS URLs allowed when httpsOnly is true (got ${parsed.protocol})`;\n  }\n\n  return null; // Safe\n}\n\n/**\n * Validate host capability parameters, specifically for `host.open`.\n * Blocks risky protocols like `file://` or `javascript:`.\n */\nexport function validateHostCapability(capability: string, params: Record<string, unknown> | undefined): string | null {\n  if (capability === 'open' && params && typeof params.target === 'string') {\n    const target = params.target.toLowerCase();\n    \n    // Check scheme directly. Allow http/https, maybe mailto.\n    // Explicitly block file://, javascript:, data:, vbscript:\n    const badSchemes = ['file:', 'javascript:', 'data:', 'vbscript:'];\n    for (const scheme of badSchemes) {\n        if (target.startsWith(scheme)) {\n            return `Blocked: Host capability 'open' cannot be used with dangerous scheme '${scheme}'`;\n        }\n    }\n\n    // If it's not starting with http/https/mailto, let's just make sure it's not a sneaky file path\n    // Although open usually relies on OS to resolve, it's safer to only allow specific ones or warn.\n    // For now, blocking known bad schemes is a good first step.\n  }\n  return null;\n}\n\n\n// --- Command safety ---\n\n/** Patterns that indicate potentially destructive commands. */\nconst DANGEROUS_PATTERNS: [RegExp, string][] = [\n  [/\\brm\\s+(-[a-zA-Z]*f[a-zA-Z]*\\s+)?\\/\\s*$/, 'rm on root filesystem'],\n  [/\\bmkfs\\b/, 'filesystem format'],\n  [/\\bdd\\s+.*of=\\/dev\\//, 'raw device write'],\n  [/:\\(\\)\\s*\\{.*\\|.*&\\s*\\}\\s*;/, 'fork bomb'],\n  [/\\bgit\\s+push\\s+.*--force/, 'force push'],\n  [/\\bcurl\\b.*\\|\\s*(ba)?sh\\b/, 'pipe URL to shell'],\n  [/\\bwget\\b.*\\|\\s*(ba)?sh\\b/, 'pipe URL to shell'],\n  [/>\\s*\\/dev\\/[sh]d[a-z]/, 'write to raw device'],\n  [/\\bchmod\\s+777\\s+\\//, 'chmod 777 on root'],\n  [/\\bpasswd\\b/, 'password change'],\n];\n\n/**\n * Check a command for dangerous patterns.\n * Returns null if no issues found, or a warning string.\n * This is advisory, not blocking — the agent can still run the command.\n */\nexport function checkCommandSafety(command: string): string | null {\n  for (const [pattern, description] of DANGEROUS_PATTERNS) {\n    if (pattern.test(command)) {\n      return `Warning: ${description}`;\n    }\n  }\n  return null;\n}\n\n// --- Read-only command validation (for background agents) ---\n\n/** Patterns that indicate write/destructive operations. */\nconst READONLY_BLOCKLIST: [RegExp, string][] = [\n  // File mutation\n  [/\\brm\\b/, 'rm (file deletion)'],\n  [/\\bmv\\b/, 'mv (file move/rename)'],\n  [/\\bcp\\b/, 'cp (file copy)'],\n  [/\\bmkdir\\b/, 'mkdir (directory creation)'],\n  [/\\brmdir\\b/, 'rmdir (directory removal)'],\n  [/\\btouch\\b/, 'touch (file creation)'],\n  [/\\bchmod\\b/, 'chmod (permission change)'],\n  [/\\bchown\\b/, 'chown (ownership change)'],\n  [/\\bln\\b/, 'ln (link creation)'],\n  [/\\btee\\b/, 'tee (write to file)'],\n  [/\\bdd\\b/, 'dd (disk/file write)'],\n  [/\\btruncate\\b/, 'truncate (file truncation)'],\n\n  // In-place edits\n  [/\\bsed\\s+(-[a-zA-Z]*i|--in-place)/, 'sed -i (in-place edit)'],\n  [/\\bperl\\s+(-[a-zA-Z]*[pi]){2}/, 'perl -pi (in-place edit)'],\n\n  // Git write operations\n  [/\\bgit\\s+(add|commit|push|stash|checkout|reset|rebase|merge|cherry-pick|revert|clean|rm|mv)\\b/, 'git write operation'],\n  [/\\bgit\\s+branch\\s+-[dD]\\b/, 'git branch delete'],\n  [/\\bgit\\s+tag\\s+-d\\b/, 'git tag delete'],\n\n  // Package manager writes\n  [/\\b(npm|yarn|pnpm)\\s+(install|uninstall|remove|add|update|publish|init|create)\\b/, 'package manager write'],\n  [/\\bpip\\s+(install|uninstall)\\b/, 'pip write operation'],\n\n  // Process/system mutation\n  [/\\bkill\\b/, 'kill (process termination)'],\n  [/\\bpkill\\b/, 'pkill (process termination)'],\n  [/\\bsudo\\b/, 'sudo (privilege escalation)'],\n  [/\\bsu\\s/, 'su (user switch)'],\n\n  // Pipe to shell\n  [/\\bcurl\\b.*\\|\\s*(ba)?sh/, 'pipe to shell'],\n  [/\\bwget\\b.*\\|\\s*(ba)?sh/, 'pipe to shell'],\n];\n\n/**\n * Validate a command for read-only execution (background agents).\n * Returns null if safe, or an error message describing what was blocked.\n *\n * Strategy: blocklist of known destructive patterns + redirect detection.\n * Defense-in-depth — the system prompt also instructs read-only behavior.\n */\nexport function validateReadonlyCommand(command: string): string | null {\n  // Check for output redirection on the full command\n  if (/>{1,2}\\s*[^&]/.test(command)) {\n    return 'Blocked: output redirection — background agents are read-only';\n  }\n\n  // Split on shell operators and check each sub-command\n  const subCommands = command.split(/\\s*(?:\\|{1,2}|;|&&)\\s*/);\n\n  for (const sub of subCommands) {\n    for (const [pattern, description] of READONLY_BLOCKLIST) {\n      if (pattern.test(sub)) {\n        return `Blocked: ${description} — background agents are read-only`;\n      }\n    }\n  }\n\n  return null;\n}\n\n// --- Exec command permissions ---\n\nexport interface ExecPermissions {\n  alwaysAllow: string[];\n  prompt: string[];\n  deny: string[];\n}\n\nexport type ExecPermissionLevel = 'allow' | 'prompt' | 'deny';\n\nexport const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {\n  alwaysAllow: [\n    // Git read-only\n    'git log', 'git log *',\n    'git status', 'git status *',\n    'git diff', 'git diff *',\n    'git show *',\n    'git branch', 'git branch *',\n    'git remote', 'git remote *',\n    'git stash list',\n    'git stash show *',\n    'git tag', 'git tag *',\n    'git rev-parse *',\n    'git ls-files *',\n    // Filesystem read-only\n    'ls', 'ls *',\n    'cat *',\n    'head *', 'tail *',\n    'grep *', 'rg *',\n    'find *',\n    'wc *',\n    'file *',\n    'stat *',\n    // Shell builtins / system info\n    'pwd', 'echo *', 'which *', 'env', 'whoami', 'id', 'hostname',\n    'date', 'uname *', 'uptime',\n    // Node / build read-only\n    'node --version', 'node -v',\n    'npm --version', 'npm -v', 'npm list *', 'npm ls *',\n    'tsc --version', 'tsc -v',\n    'npx tsc --noEmit', 'npx tsc --noEmit *',\n  ],\n  prompt: [\n    // Git writes\n    'git add *', 'git commit *', 'git push *', 'git push',\n    'git checkout *', 'git switch *', 'git reset *', 'git rebase *',\n    'git merge *', 'git cherry-pick *', 'git stash *',\n    'git clean *',\n    // File mutations\n    'rm *', 'mv *', 'cp *', 'mkdir *', 'touch *', 'chmod *', 'chown *',\n    // Network\n    'curl *', 'wget *', 'ssh *', 'scp *', 'rsync *',\n    // Package managers\n    'npm install *', 'npm install', 'npm uninstall *',\n    'npm run *', 'npm start', 'npm build',\n    'yarn *', 'pnpm *',\n    'pip install *', 'pip uninstall *',\n    // Processes\n    'kill *', 'pkill *', 'killall *',\n  ],\n  deny: [\n    'sudo *',\n    'su *',\n    'mkfs *',\n    'dd if=* of=/dev/*', 'dd of=/dev/*',\n    ':() { :|: & }; :',\n    'rm -rf /*', 'rm -rf /',\n  ],\n};\n\n/**\n * Match a command string against a glob pattern.\n * Uses minimatch with matchBase enabled so bare patterns like \"ls\" match.\n */\nfunction matchesGlob(command: string, pattern: string): boolean {\n  const cmd = command.trim();\n  const pat = pattern.trim();\n  // Exact match first (fast path, also handles patterns without wildcards)\n  if (cmd === pat) return true;\n  // Check if command starts with the pattern prefix (for \"git log\" matching \"git log --oneline\")\n  // when the pattern has no wildcards\n  if (!pat.includes('*') && !pat.includes('?') && !pat.includes('[')) {\n    return cmd === pat || cmd.startsWith(pat + ' ');\n  }\n  return minimatch(cmd, pat, { nonull: false });\n}\n\n/**\n * Check what permission level a command requires given user-configured permissions.\n * Evaluation order: deny → alwaysAllow → prompt → default(prompt)\n */\nexport function checkExecPermission(\n  command: string,\n  permissions: ExecPermissions,\n): ExecPermissionLevel {\n  for (const pattern of permissions.deny) {\n    if (matchesGlob(command, pattern)) return 'deny';\n  }\n  for (const pattern of permissions.alwaysAllow) {\n    if (matchesGlob(command, pattern)) return 'allow';\n  }\n  for (const pattern of permissions.prompt) {\n    if (matchesGlob(command, pattern)) return 'prompt';\n  }\n  // Default: prompt for anything not explicitly listed\n  return 'prompt';\n}\n
+/**
+ * Safety utilities for tool execution.
+ *
+ * - Environment sanitization (strip API keys from child processes)
+ * - Path validation (restrict writes to safe directories)
+ * - URL validation (block SSRF to private/internal networks)
+ * - Command safety checks (warn on destructive patterns)
+ */
+
+import { resolve } from 'node:path';
+import { minimatch } from 'minimatch';
+
+// --- Environment sanitization ---
+
+/**
+ * Keys to strip from child process environments.
+ * These are secrets that tools and MCP servers should never see.
+ */
+const SENSITIVE_ENV_KEYS = [
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'OPENAI_ORG_ID',
+  'GITHUB_TOKEN',
+  'GH_TOKEN',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'GOOGLE_API_KEY',
+  'HF_TOKEN',
+  'HUGGING_FACE_HUB_TOKEN',
+];
+
+/** Patterns to match against env key names (case-insensitive). */
+const SENSITIVE_KEY_PATTERNS = [
+  /api[_-]?key/i,
+  /secret/i,
+  /token/i,
+  /password/i,
+  /credential/i,
+];
+
+/**
+ * Return a sanitized copy of process.env with secrets removed.
+ * Keeps PATH, HOME, USER, LANG, TERM, and other safe variables.
+ */
+export function sanitizedEnv(): Record<string, string | undefined> {
+  const env = { ...process.env };
+
+  // Remove known sensitive keys
+  for (const key of SENSITIVE_ENV_KEYS) {
+    delete env[key];
+  }
+
+  // Remove keys matching sensitive patterns
+  for (const key of Object.keys(env)) {
+    if (SENSITIVE_KEY_PATTERNS.some((p) => p.test(key))) {
+      delete env[key];
+    }
+  }
+
+  return env;
+}
+
+// --- Path validation ---
+
+/**
+ * Directories the agent is allowed to write to.
+ *
+ * In the gatekeeper architecture, /app is read-only by default.
+ * Additional writable directories are added dynamically when the user
+ * mounts folders via /mount (these mirror the host path inside the container).
+ * The Docker mounts are the real security boundary — this is defense in depth.
+ */
+const WRITABLE_ROOTS = [
+  '/workspace',     // Workspace (memory, config, sessions)
+  '/project',       // User-mounted project folders (gatekeeper-controlled)
+  '/tmp',           // Temp files
+];
+
+/**
+ * Check if a file path is safe to write to.
+ * Returns null if safe, or an error message if blocked.
+ *
+ * Note: this is defense-in-depth. The real write protection comes from
+ * Docker mount modes (ro/rw) controlled by the gatekeeper. The kernel
+ * enforces those regardless of what this function says.
+ */
+export function validateWritePath(filePath: string): string | null {
+  const resolved = resolve(filePath);
+
+  // Check if within a writable root
+  const inWritableRoot = WRITABLE_ROOTS.some((root) => resolved.startsWith(root + '/') || resolved === root);
+  if (!inWritableRoot) {
+    return `Blocked: writes only allowed under ${WRITABLE_ROOTS.join(', ')}. Use request_mount to ask for access to other folders.`;
+  }
+
+  return null; // Safe
+}
+
+// --- URL validation (SSRF protection) ---
+
+/**
+ * Private/internal IP ranges that should not be accessed via fetch.
+ */
+const PRIVATE_RANGES = [
+  // IPv4
+  /^127\./,                          // Loopback
+  /^10\./,                           // RFC 1918
+  /^172\.(1[6-9]|2[0-9]|3[01])\./,  // RFC 1918
+  /^192\.168\./,                     // RFC 1918
+  /^169\.254\./,                     // Link-local / cloud metadata
+  /^0\./,                            // "This" network
+  // IPv6 (common forms)
+  /^::1$/,                           // Loopback
+  /^fd[0-9a-f]{2}:/i,               // Unique local
+  /^fe80:/i,                         // Link-local
+];
+
+/** Hostnames that should be blocked. */
+const BLOCKED_HOSTS = [
+  'localhost',
+  'metadata.google.internal',
+  'metadata.google.com',
+  'instance-data',
+];
+
+/**
+ * Check if a URL is safe to fetch.
+ * Returns null if safe, or an error message if blocked.
+ */
+export function validateFetchUrl(url: string, httpsOnly: boolean = false): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'Invalid URL';
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Check blocked hostnames
+  if (BLOCKED_HOSTS.includes(hostname)) {
+    return `Blocked: cannot fetch ${hostname} (internal/metadata endpoint)`;
+  }
+
+  // Check private IP ranges
+  for (const range of PRIVATE_RANGES) {
+    if (range.test(hostname)) {
+      return `Blocked: cannot fetch private IP ${hostname}`;
+    }
+  }
+
+  // Only allow http/https
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return `Blocked: only http/https URLs allowed (got ${parsed.protocol})`;
+  }
+
+  if (httpsOnly && parsed.protocol !== 'https:') {
+     return `Blocked: only HTTPS URLs allowed when httpsOnly is true (got ${parsed.protocol})`;
+  }
+
+  return null; // Safe
+}
+
+/**
+ * Validate host capability parameters, specifically for `host.open`.
+ * Blocks risky protocols like `file://` or `javascript:`.
+ */
+export function validateHostCapability(capability: string, params: Record<string, unknown> | undefined): string | null {
+  if (capability === 'open' && params && typeof params.target === 'string') {
+    const target = params.target.toLowerCase();
+    
+    // Check scheme directly. Allow http/https, maybe mailto.
+    // Explicitly block file://, javascript:, data:, vbscript:
+    const badSchemes = ['file:', 'javascript:', 'data:', 'vbscript:'];
+    for (const scheme of badSchemes) {
+        if (target.startsWith(scheme)) {
+            return `Blocked: Host capability 'open' cannot be used with dangerous scheme '${scheme}'`;
+        }
+    }
+  }
+  return null;
+}
+
+// --- Command safety ---
+
+/** Patterns that indicate potentially destructive commands. */
+const DANGEROUS_PATTERNS: [RegExp, string][] = [
+  [/\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\s*$/, 'rm on root filesystem'],
+  [/\bmkfs\b/, 'filesystem format'],
+  [/\bdd\s+.*of=\/dev\//, 'raw device write'],
+  [/:(?:)\s*\{.*\|.*&\s*\}\s*;/, 'fork bomb'],
+  [/\bgit\s+push\s+.*--force/, 'force push'],
+  [/\bcurl\b.*\|\s*(ba)?sh\b/, 'pipe URL to shell'],
+  [/\bwget\b.*\|\s*(ba)?sh\b/, 'pipe URL to shell'],
+  [/>\s*\/dev\/[sh]d[a-z]/, 'write to raw device'],
+  [/\bchmod\s+777\s+\//, 'chmod 777 on root'],
+  [/\bpasswd\b/, 'password change'],
+];
+
+/**
+ * Check a command for dangerous patterns.
+ * Returns null if no issues found, or a warning string.
+ * This is advisory, not blocking — the agent can still run the command.
+ */
+export function checkCommandSafety(command: string): string | null {
+  for (const [pattern, description] of DANGEROUS_PATTERNS) {
+    if (pattern.test(command)) {
+      return `Warning: ${description}`;
+    }
+  }
+  return null;
+}
+
+// --- Read-only command validation (for background agents) ---
+
+/** Patterns that indicate write/destructive operations. */
+const READONLY_BLOCKLIST: [RegExp, string][] = [
+  // File mutation
+  [/\brm\b/, 'rm (file deletion)'],
+  [/\bmv\b/, 'mv (file move/rename)'],
+  [/\bcp\b/, 'cp (file copy)'],
+  [/\bmkdir\b/, 'mkdir (directory creation)'],
+  [/\brmdir\b/, 'rmdir (directory removal)'],
+  [/\btouch\b/, 'touch (file creation)'],
+  [/\bchmod\b/, 'chmod (permission change)'],
+  [/\bchown\b/, 'chown (ownership change)'],
+  [/\bln\b/, 'ln (link creation)'],
+  [/\btee\b/, 'tee (write to file)'],
+  [/\bdd\b/, 'dd (disk/file write)'],
+  [/\btruncate\b/, 'truncate (file truncation)'],
+
+  // In-place edits
+  [/\bsed\s+(-[a-zA-Z]*i|--in-place)/, 'sed -i (in-place edit)'],
+  [/\bperl\s+(-[a-zA-Z]*[pi]){2}/, 'perl -pi (in-place edit)'],
+
+  // Git write operations
+  [/\bgit\s+(add|commit|push|stash|checkout|reset|rebase|merge|cherry-pick|revert|clean|rm|mv)\b/, 'git write operation'],
+  [/\bgit\s+branch\s+-[dD]\b/, 'git branch delete'],
+  [/\bgit\s+tag\s+-d\b/, 'git tag delete'],
+
+  // Package manager writes
+  [/\b(npm|yarn|pnpm)\s+(install|uninstall|remove|add|update|publish|init|create)\b/, 'package manager write'],
+  [/\bpip\s+(install|uninstall)\b/, 'pip write operation'],
+
+  // Process/system mutation
+  [/\bkill\b/, 'kill (process termination)'],
+  [/\bpkill\b/, 'pkill (process termination)'],
+  [/\bsudo\b/, 'sudo (privilege escalation)'],
+  [/\bsu\s/, 'su (user switch)'],
+
+  // Pipe to shell
+  [/\bcurl\b.*\|\s*(ba)?sh/, 'pipe to shell'],
+  [/\bwget\b.*\|\s*(ba)?sh/, 'pipe to shell'],
+];
+
+/**
+ * Validate a command for read-only execution (background agents).
+ * Returns null if safe, or an error message describing what was blocked.
+ *
+ * Strategy: blocklist of known destructive patterns + redirect detection.
+ * Defense-in-depth — the system prompt also instructs read-only behavior.
+ */
+export function validateReadonlyCommand(command: string): string | null {
+  // Check for output redirection on the full command
+  if (/>{1,2}\s*[^&]/.test(command)) {
+    return 'Blocked: output redirection — background agents are read-only';
+  }
+
+  // Split on shell operators and check each sub-command
+  const subCommands = command.split(/\s*(?:\|{1,2}|;|&&)\s*/);
+
+  for (const sub of subCommands) {
+    for (const [pattern, description] of READONLY_BLOCKLIST) {
+      if (pattern.test(sub)) {
+        return `Blocked: ${description} — background agents are read-only`;
+      }
+    }
+  }
+
+  return null;
+}
+
+// --- Exec command permissions ---
+
+export interface ExecPermissions {
+  alwaysAllow: string[];
+  prompt: string[];
+  deny: string[];
+}
+
+export type ExecPermissionLevel = 'allow' | 'prompt' | 'deny';
+
+export const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {
+  alwaysAllow: [
+    // Git read-only
+    'git log', 'git log *',
+    'git status', 'git status *',
+    'git diff', 'git diff *',
+    'git show *',
+    'git branch', 'git branch *',
+    'git remote', 'git remote *',
+    'git stash list',
+    'git stash show *',
+    'git tag', 'git tag *',
+    'git rev-parse *',
+    'git ls-files *',
+    // Filesystem read-only
+    'ls', 'ls *',
+    'cat *',
+    'head *', 'tail *',
+    'grep *', 'rg *',
+    'find *',
+    'wc *',
+    'file *',
+    'stat *',
+    // Shell builtins / system info
+    'pwd', 'echo *', 'which *', 'env', 'whoami', 'id', 'hostname',
+    'date', 'uname *', 'uptime',
+    // Node / build read-only
+    'node --version', 'node -v',
+    'npm --version', 'npm -v', 'npm list *', 'npm ls *',
+    'tsc --version', 'tsc -v',
+    'npx tsc --noEmit', 'npx tsc --noEmit *',
+  ],
+  prompt: [
+    // Git writes
+    'git add *', 'git commit *', 'git push *', 'git push',
+    'git checkout *', 'git switch *', 'git reset *', 'git rebase *',
+    'git merge *', 'git cherry-pick *', 'git stash *',
+    'git clean *',
+    // File mutations
+    'rm *', 'mv *', 'cp *', 'mkdir *', 'touch *', 'chmod *', 'chown *',
+    // Network
+    'curl *', 'wget *', 'ssh *', 'scp *', 'rsync *',
+    // Package managers
+    'npm install *', 'npm install', 'npm uninstall *',
+    'npm run *', 'npm start', 'npm build',
+    'yarn *', 'pnpm *',
+    'pip install *', 'pip uninstall *',
+    // Processes
+    'kill *', 'pkill *', 'killall *',
+  ],
+  deny: [
+    'sudo *',
+    'su *',
+    'mkfs *',
+    'dd if=* of=/dev/*', 'dd of=/dev/*',
+    ':() { :|: & }; :',
+    'rm -rf /*', 'rm -rf /',
+  ],
+};
+
+/**
+ * Match a command string against a glob pattern.
+ * Uses minimatch with matchBase enabled so bare patterns like "ls" match.
+ */
+function matchesGlob(command: string, pattern: string): boolean {
+  const cmd = command.trim();
+  const pat = pattern.trim();
+  // Exact match first (fast path, also handles patterns without wildcards)
+  if (cmd === pat) return true;
+  // Check if command starts with the pattern prefix (for "git log" matching "git log --oneline")
+  // when the pattern has no wildcards
+  if (!pat.includes('*') && !pat.includes('?') && !pat.includes('[')) {
+    return cmd === pat || cmd.startsWith(pat + ' ');
+  }
+  return minimatch(cmd, pat, { nonull: false });
+}
+
+/**
+ * Check what permission level a command requires given user-configured permissions.
+ * Evaluation order: deny → alwaysAllow → prompt → default(prompt)
+ */
+export function checkExecPermission(
+  command: string,
+  permissions: ExecPermissions,
+): ExecPermissionLevel {
+  for (const pattern of permissions.deny) {
+    if (matchesGlob(command, pattern)) return 'deny';
+  }
+  for (const pattern of permissions.alwaysAllow) {
+    if (matchesGlob(command, pattern)) return 'allow';
+  }
+  for (const pattern of permissions.prompt) {
+    if (matchesGlob(command, pattern)) return 'prompt';
+  }
+  // Default: prompt for anything not explicitly listed
+  return 'prompt';
+}
