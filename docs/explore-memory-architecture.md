@@ -10,9 +10,32 @@ LLMs have finite context windows (e.g., 200k tokens for Claude 3.5 Sonnet). Howe
 
 Aigent currently employs two strategies to mitigate this: **Prompt Caching** (Anthropic) and **In-Place Compaction** (~70% usage trigger).
 
-## 2. Compaction Strategies (Short-Term Memory)
+## 2. Deep Dive: Optimizing Prompt Caching
 
-When the active conversation grows too large, the older messages must be compressed or evicted.
+Anthropic's Prompt Caching allows developers to mark specific blocks of text (like the system prompt or large documents) to be cached on Anthropic's servers. Cached tokens cost 10x less and resolve significantly faster.
+
+To maximize this, the payload structure must be deterministic and ordered from "most static" to "most dynamic."
+
+### The Ideal Payload Structure
+1.  **Block 1: Immutable Core (Cache Breakpoint 1)**
+    *   Base Agent Instructions (`AGENTS.md`, `SOUL.md`)
+    *   Tool Definitions (JSON Schemas)
+    *   *This block almost never changes. Caching it saves ~3k-5k tokens per request.*
+2.  **Block 2: Session Context (Cache Breakpoint 2)**
+    *   The User Profile (`USER.md`)
+    *   The Long-Term Memory (`MEMORY.md`)
+    *   *This block changes infrequently (usually only after a session reset or explicit edit).*
+3.  **Block 3: The Active Conversation (Uncached)**
+    *   The array of User and Assistant messages.
+    *   *This changes on every single turn and cannot be effectively cached across sequential turns.*
+
+### The Warm-Up Pattern
+When Aigent boots up, the Anthropic cache for Block 1 & 2 is cold. The first user request will incur full latency and cost.
+*   **Pattern:** On startup, the Gatekeeper fires a background, asynchronous "ping" request to Anthropic containing only Block 1 & 2 and a system prompt saying "Acknowledge receipt." By the time the user types their first message, the cache is warm, ensuring a sub-second response time.
+
+## 3. Deep Dive: Context Compaction Strategies
+
+When the active conversation (Block 3) grows too large (e.g., >70% of the available window), the older messages must be compressed or evicted.
 
 ### Strategy A: The Sliding Window (Eviction)
 *   **Mechanism:** Keep the system prompt and the last $N$ messages. Drop everything older.
@@ -29,7 +52,18 @@ When the active conversation grows too large, the older messages must be compres
 *   **Pros:** The agent explicitly decides what is worth keeping. Less lossy than third-party summarization.
 *   **Cons:** Requires the agent to be disciplined about updating the scratchpad constantly.
 
-## 3. Long-Term Memory (The Workspace)
+### Refining the Summarization Prompt (Actionable Fix)
+If sticking with Strategy B, the prompt given to the cheap summarization model (Haiku) must be strictly engineered. Currently, summarizations tend to be narrative ("The user asked to fix a bug. The agent ran a script. The bug was fixed."). 
+*   **The Fix:** Force structured output.
+    ```text
+    Summarize this conversation segment. You MUST retain:
+    1. Exact file paths referenced.
+    2. Specific error codes or terminal outputs discussed.
+    3. Unresolved user requests.
+    DO NOT write a narrative. Use bullet points.
+    ```
+
+## 4. Long-Term Memory (The Workspace)
 
 Aigent uses a filesystem-based memory structure (`AGENTS.md`, `SOUL.md`, `USER.md`, `MEMORY.md`, and daily logs). This is powerful because it is transparent to the user and easily editable.
 
@@ -48,18 +82,11 @@ Aigent uses a filesystem-based memory structure (`AGENTS.md`, `SOUL.md`, `USER.m
 *   **Pros:** Zero LLM cost to index. Extremely precise for finding specific terms or code snippets. Transparent and debuggable.
 *   **Cons:** Requires the agent to proactively realize it needs to search. It relies on the agent guessing the right keywords.
 
-## 4. Optimizing Prompt Caching
-
-Anthropic's Prompt Caching allows developers to mark specific blocks of text (like the system prompt or large documents) to be cached on Anthropic's servers, drastically reducing cost and latency for subsequent turns.
-
-To maximize this, Aigent must structure its payload carefully:
-
-1.  **Static First:** The system instructions (`AGENTS.md`, `SOUL.md`, tool definitions) rarely change during a session. These should be placed at the *very top* of the prompt and marked for caching.
-2.  **Dynamic Last:** The active conversation history, which changes on every turn, must be placed *after* the cached blocks.
-3.  **The Warm-Up Ping:** When Aigent boots up, it could send a minimal, invisible "ping" request containing the static system prompt to Anthropic. This ensures the cache is warm *before* the user types their first message, guaranteeing a fast first response.
-
 ## 5. Summary of Architectural Recommendations
 
 For Aigent's specific "hackable lab" use case, the current filesystem-based approach (Markdown files + `search_memory` tool) is elegant and debuggable. 
 
-To harden it, the focus should remain on **Prompt Caching optimization** (ensuring tool definitions and core instructions are perfectly aligned at the top of the context) and refining the **Compaction prompt** so that LLM-driven summaries preserve critical technical details (like specific file paths or resolved bug IDs) rather than just narrative flow.
+To harden it, the focus should be:
+1.  **Implement the Cache Warm-Up Ping** on Gatekeeper startup.
+2.  **Refine the Compaction Prompt** to enforce structured, technical bullet points rather than narrative summaries.
+3.  **Ensure strict Payload Ordering** (Tools -> System -> Memory -> Chat) to maximize cache hit rates across turns.
