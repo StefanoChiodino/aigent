@@ -4,7 +4,7 @@
 
 ## 🔒 Security & Safety (Current Priority)
 
-- [ ] **Safety unit tests** (#2)
+- [ ] **Safety unit tests**
   - **Why:** `src/safety.ts` handles path validation, command safety, and SSRF protection. It is the security boundary of the sandbox and must be tested to ensure no regressions.
   - **What:** Use Node's native `node:test` runner.
   - **Tasks:**
@@ -16,7 +16,7 @@
     - Test `validateReadonlyCommand`: ensure `rm`, `mkfs`, and output redirects (`>`) are blocked.
     - Test `sanitizedEnv`: ensure keys like `OPENAI_API_KEY` are stripped while `PATH` remains.
 
-- [ ] **`fetch` permission tiers** (#3)
+- [ ] **`fetch` permission tiers**
   - **Why:** Prevent data exfiltration. The agent shouldn't be able to POST sensitive host data to arbitrary domains without permission.
   - **What:** Implement a domain-based allow/prompt/deny model analogous to `ExecPermissions`.
   - **Tasks:**
@@ -25,7 +25,7 @@
     - Default unlisted domains to `prompt`.
     - Update `fetch` and `fetch_readonly` in `src/tools.ts` to request gatekeeper approval for `prompt` domains.
 
-- [ ] **Harden SSRF protection against DNS rebinding** (#6)
+- [ ] **Harden SSRF protection against DNS rebinding**
   - Ensure `validateFetchUrl` resolves the IP via `dns.lookup` and that `curl` uses that exact IP via `--resolve` to prevent TOCTOU bypass.
 
 - [ ] **`fetch` response size cap**
@@ -53,7 +53,7 @@
 
 ## 🐛 Known Bugs / Open Issues
 
-- [ ] **Duplicate mount suppression** (#5)
+- [ ] **Duplicate mount suppression**
   - **Why:** The agent sometimes forgets it already has a mount and re-requests it, triggering a redundant permission modal.
   - **What:** The Gatekeeper should silently auto-approve redundant requests and return context.
   - **Tasks:** Update `requestMount` logic in `server.ts`/`tools.ts` to check if `path` and `mode` (where `rw` satisfies `ro`) are already mounted. Return success silently if true.
@@ -80,7 +80,7 @@
 
 ## 🖥️ UI / UX
 
-- [ ] **Persist conversation in browser storage** (#4)
+- [ ] **Persist conversation in browser storage**
   - **Why:** Prevent data loss of the visual chat history and sidebar state on accidental refresh.
   - **What:** Use `localStorage` with incremental append for messages.
   - **Tasks:** Update `web/index.html` to save the message array, `aigent_model`, `aigent_reasoning`, and `aigent_effort`. Sync backend load with storage.
@@ -92,7 +92,7 @@
 
 ## 🤖 Computer Use / OS Automation
 
-- [ ] **Headless browser tool** (#7)
+- [ ] **Headless browser tool**
   - A first-class `browser` tool wrapping Playwright or an MCP Server. Enables interacting with SPAs, auth flows, and complex DOMs.
   - See `docs/design-headless-browser.md` for architectural options.
 - [ ] **Keyboard and mouse control** — send keystrokes and mouse events to the host or sandbox display; `xdotool` / `ydotool` on Linux, `nut.js` cross-platform; prerequisite for full GUI automation.
