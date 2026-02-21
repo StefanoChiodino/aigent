@@ -42,9 +42,6 @@
 - [ ] **MCP server permission model**
   - Optional `permissions` block per server in `mcp.json` (allow/prompt/deny); default: `prompt` for all calls from any MCP server.
 
-- [ ] **Audit log stream**
-  - Structured `[audit]` entries emitted regardless of log level for: permission requests, mount grants/denials, exec allow/prompt/deny outcomes, fetch calls; same KV format as `logger.ts`.
-
 - [ ] **Self-mod policy**
   - Explicit list of files/paths the agent may edit autonomously vs. paths that require human approval (e.g. UI code OK; `safety.ts`, `gatekeeper.tsx`, `llm-proxy.ts` require diff review).
 
@@ -73,9 +70,25 @@
 
 ## 🔭 Observability
 
-- [ ] **Request correlation ID** — random 6–8 char hex ID per incoming user message, threaded through gatekeeper ↔ worker ↔ MCP server log lines so traces can be joined across processes.
-- [ ] **Log rotation / max size** — document piping `stderr` to `logrotate` or `pino-roll`; or add built-in rolling file sink to `logger.ts`.
-- [ ] **Tool call audit trail in session logs** — persist tool call events to the daily log so they survive context compaction and can be reviewed after the fact.
+See `docs/design-observability.md` for architectural context.
+
+- [ ] **Request correlation ID (`reqId`)**
+  - Thread a random 6-char hex ID through UI → Gatekeeper → Sandbox → Sub-agents → MCP.
+  - **Tasks:**
+    - Generate `reqId` in `web/index.html` on submit.
+    - Update `gatekeeper.tsx` to log and forward the ID.
+    - Use `AsyncLocalStorage` in `src/logger.ts` to automatically prefix sandbox logs.
+    - Pass `AIGENT_REQ_ID` to background tasks spawned via `dispatch_task` and `spawn_agent`.
+
+- [ ] **Audit log stream**
+  - **Why:** Debug logs are noisy; security needs a guaranteed, structured event stream.
+  - **Tasks:** Write `[AUDIT]` entries to a dedicated rotating file on the host for mount approvals, exec/fetch permissions, config writes, and startup events.
+
+- [ ] **Log rotation / max size**
+  - Pipe `stderr` to `logrotate` or `pino-roll`, or build rolling file sinks into the logger.
+
+- [ ] **Tool call audit trail in session logs**
+  - Persist tool call events to the daily log so they survive context compaction and can be reviewed.
 
 ---
 
