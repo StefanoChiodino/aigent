@@ -4,7 +4,7 @@
 
 ## 🔒 Security & Safety (Current Priority)
 
-- [ ] **Safety unit tests**
+- [ ] **Safety unit tests** (#2)
   - **Why:** `src/safety.ts` handles path validation, command safety, and SSRF protection. It is the security boundary of the sandbox and must be tested to ensure no regressions.
   - **What:** Use Node's native `node:test` runner.
   - **Tasks:**
@@ -16,7 +16,7 @@
     - Test `validateReadonlyCommand`: ensure `rm`, `mkfs`, and output redirects (`>`) are blocked.
     - Test `sanitizedEnv`: ensure keys like `OPENAI_API_KEY` are stripped while `PATH` remains.
 
-- [ ] **`fetch` permission tiers**
+- [ ] **`fetch` permission tiers** (#3)
   - **Why:** Prevent data exfiltration. The agent shouldn't be able to POST sensitive host data to arbitrary domains without permission.
   - **What:** Implement a domain-based allow/prompt/deny model analogous to `ExecPermissions`.
   - **Tasks:**
@@ -24,6 +24,9 @@
     - Update `validateFetchUrl` to take the hostname and match against globs.
     - Default unlisted domains to `prompt`.
     - Update `fetch` and `fetch_readonly` in `src/tools.ts` to request gatekeeper approval for `prompt` domains.
+
+- [ ] **Harden SSRF protection against DNS rebinding** (#6)
+  - Ensure `validateFetchUrl` resolves the IP via `dns.lookup` and that `curl` uses that exact IP via `--resolve` to prevent TOCTOU bypass.
 
 - [ ] **`fetch` response size cap**
   - Hard limit (e.g. 10 MB) to prevent large-payload exfiltration or OOM from a malicious URL.
@@ -50,7 +53,7 @@
 
 ## 🐛 Known Bugs / Open Issues
 
-- [ ] **Duplicate mount suppression**
+- [ ] **Duplicate mount suppression** (#5)
   - **Why:** The agent sometimes forgets it already has a mount and re-requests it, triggering a redundant permission modal.
   - **What:** The Gatekeeper should silently auto-approve redundant requests and return context.
   - **Tasks:** Update `requestMount` logic in `server.ts`/`tools.ts` to check if `path` and `mode` (where `rw` satisfies `ro`) are already mounted. Return success silently if true.
@@ -77,7 +80,7 @@
 
 ## 🖥️ UI / UX
 
-- [ ] **Persist conversation in browser storage**
+- [ ] **Persist conversation in browser storage** (#4)
   - **Why:** Prevent data loss of the visual chat history and sidebar state on accidental refresh.
   - **What:** Use `localStorage` with incremental append for messages.
   - **Tasks:** Update `web/index.html` to save the message array, `aigent_model`, `aigent_reasoning`, and `aigent_effort`. Sync backend load with storage.
@@ -89,9 +92,11 @@
 
 ## 🤖 Computer Use / OS Automation
 
+- [ ] **Headless browser tool** (#7)
+  - A first-class `browser` tool wrapping Playwright or an MCP Server. Enables interacting with SPAs, auth flows, and complex DOMs.
+  - See `docs/design-headless-browser.md` for architectural options.
 - [ ] **Keyboard and mouse control** — send keystrokes and mouse events to the host or sandbox display; `xdotool` / `ydotool` on Linux, `nut.js` cross-platform; prerequisite for full GUI automation.
 - [ ] **OS accessibility API** — enumerate windows and UI elements with their labels/roles via platform accessibility APIs (AT-SPI on Linux, NSAccessibility on macOS, UI Automation on Windows); lets the agent interact with desktop GUIs without relying on screenshots.
-- [ ] **Headless browser tool** — a first-class `browser` tool wrapping Playwright or Puppeteer: navigate, click, type, extract DOM/a11y tree, take screenshots; far more reliable than `fetch` + `screenshot` for multi-step web tasks.
 - [ ] **Application scripting** — where the OS supports it: AppleScript / JXA on macOS, COM automation on Windows; enables deep integration with desktop apps (e.g. controlling editors, terminals, mail).
 - [ ] **Computer-use loop** — combine screenshot + accessibility + keyboard/mouse into a coherent "observe → decide → act" loop the agent can use for any GUI task.
 
@@ -99,7 +104,6 @@
 
 ## 🔌 Extensibility & Docs
 
-- [ ] **Threat Model documentation** — formally document the security boundaries, assumed attack vectors, and sandbox limitations in `docs/threat-model.md`.
 - [ ] **README: "Extending with MCP"** — document `mcp.json` format with a working example (e.g. `@modelcontextprotocol/server-github`) so contributors know how to add tools without touching core code.
 - [ ] **README: MCP permissions** — document the permission model once implemented.
 - [ ] **CONTRIBUTING.md** — explain the "run the agent and ask it to implement something" workflow; code style, PR expectations, how to add a built-in tool vs. an MCP tool.
@@ -136,3 +140,5 @@
 - Docker sandbox with `cap_drop ALL`
 - Web UI with Push-to-talk, TTS, STT, and Screen capture
 - Full MCP client support
+- Formal Threat Model documentation (`docs/threat-model.md`)
+- Adversarial Red Team analysis (`docs/red-team.md`)
