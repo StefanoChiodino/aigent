@@ -118,6 +118,8 @@ See `docs/design-observability.md` for architectural context.
 
 ## 🤖 Computer Use / OS Automation
 
+See `docs/explore-computer-use.md` for a breakdown of patterns, safety models, and trade-offs.
+
 - [ ] **Headless browser tool**
   - A first-class `browser` tool wrapping Playwright or an MCP Server. Enables interacting with SPAs, auth flows, and complex DOMs.
   - See `docs/design-headless-browser.md` for architectural options.
