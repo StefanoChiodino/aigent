@@ -214,6 +214,47 @@ function resolveMountRequest(id: string, response: { ok: boolean; containerPath?
   }
 }
 
+// --- Exec command approval handling ---
+
+const pendingExecRequests = new Map<string, {
+  command: string;
+  resolve: (response: { ok: boolean; alwaysAllow: boolean; message: string }) => void;
+}>();
+let execApprovalCounter = 0;
+
+/**
+ * Request user approval before running a shell command.
+ * Called by the exec tool when a command requires prompt-level permission.
+ */
+export function requestExecApproval(command: string): Promise<{ ok: boolean; alwaysAllow: boolean; message: string }> {
+  const id = `exec_${++execApprovalCounter}`;
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingExecRequests.delete(id);
+      resolve({ ok: false, alwaysAllow: false, message: 'Exec approval request timed out (60s)' });
+    }, 60_000);
+
+    pendingExecRequests.set(id, {
+      command,
+      resolve: (response) => {
+        clearTimeout(timer);
+        resolve(response);
+      },
+    });
+
+    broadcast({ type: 'exec_request', id, command });
+  });
+}
+
+function resolveExecRequest(id: string, response: { ok: boolean; alwaysAllow: boolean; message: string }): void {
+  const pending = pendingExecRequests.get(id);
+  if (pending) {
+    pendingExecRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
 // --- Browser screen share + screenshot request handling ---
 
 const pendingScreenShareRequests = new Map<string, {
@@ -443,6 +484,12 @@ async function processTaskResults(): Promise<void> {
     // Yield to user messages — they take priority
     if (isLoading || messageQueue.length > 0) break;
 
+    // user-pull tasks are surfaced via the sidebar — the agent is not involved
+    if (result.delivery === 'user-pull') {
+      taskQueue.prune();
+      continue;
+    }
+
     const statusLabel = result.status === 'completed' ? 'completed' : 'FAILED';
     const secs = ((new Date(result.completedAt).getTime() - new Date(result.startedAt).getTime()) / 1000).toFixed(1);
     const shortDesc = result.description.length > 50 ? result.description.slice(0, 50) + '…' : result.description;
@@ -535,7 +582,7 @@ async function processAgentTurn(
       onCompact: (summary) => {
         addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
       },
-      onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; thinking?: ThinkingLevel; max_iterations?: number; capabilities?: string[] }),
+      onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; thinking?: ThinkingLevel; max_iterations?: number; capabilities?: string[]; delivery?: 'agent-review' | 'user-pull' }),
       onModelSwitch: (newModel, reason) => {
         model = newModel;
         agent.currentModel = newModel;
@@ -641,8 +688,9 @@ function dispatchBackgroundTask(input: {
   thinking?: ThinkingLevel;
   max_iterations?: number;
   capabilities?: string[];
+  delivery?: 'agent-review' | 'user-pull';
 }): string {
-  const taskId = taskQueue.register(input.task);
+  const taskId = taskQueue.register(input.task, input.delivery ?? 'agent-review');
 
   // Fire and forget — run the sub-agent in the background
   void (async () => {
@@ -1284,6 +1332,9 @@ function handleClient(socket: Socket): void {
   for (const [id, req] of pendingPatchRequests) {
     send(socket, { type: 'patch_request', id, diff: req.diff, reason: req.reason });
   }
+  for (const [id, req] of pendingExecRequests) {
+    send(socket, { type: 'exec_request', id, command: req.command });
+  }
 
   socket.on('data', (data) => {
     buffer += data.toString();
@@ -1384,6 +1435,9 @@ function handleClient(socket: Socket): void {
             break;
           case 'patch_response':
             resolvePatchRequest(cmd.id, cmd);
+            break;
+          case 'exec_response':
+            resolveExecRequest(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
             break;
           case 'screenshot_response':
             resolveScreenshotRequest(cmd.id, {

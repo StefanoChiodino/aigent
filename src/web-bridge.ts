@@ -273,6 +273,8 @@ export async function startWebServer(
         send({ type: 'config_write_request', id, file, content, reason }),
       patch_request: (id: string, diff: string, reason: string) =>
         send({ type: 'patch_request', id, diff, reason }),
+      exec_request: (id: string, command: string) =>
+        send({ type: 'exec_request', id, command }),
       screenshot_request: (id: string) =>
         send({ type: 'screenshot_request', id }),
       screen_share_request: (id: string) =>

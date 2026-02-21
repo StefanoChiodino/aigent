@@ -36,6 +36,8 @@ interface BackgroundTaskInfo {
   inputTokens?: number;
   outputTokens?: number;
   cost?: number;
+  delivery?: 'agent-review' | 'user-pull';
+  result?: string;
 }
 
 interface ServerState {
@@ -70,6 +72,7 @@ type ServerEvent =
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'screenshot_request'; id: string }
+  | { type: 'screen_share_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
   | { type: 'pong' };
 
@@ -397,15 +400,15 @@ function getClientSetting(key: string): boolean | number | string {
   return def.default;
 }
 
-function setClientSetting(key: string, value: boolean | number | string, onSaved?: () => void): void {
+function setClientSetting(key: string, value: boolean | number | string): void {
   clientSettings[key] = value;
   saveClientSettingsCache();
-  // Persist to server JSON file
+  // Persist to server JSON file and show toast on success
   fetch('/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ [key]: value }),
-  }).then(() => { onSaved?.(); }).catch(() => { /* localStorage cache still updated */ });
+  }).then(() => { showSettingsToast(); }).catch(() => { /* localStorage cache still updated */ });
 }
 
 // ── State ────────────────────────────────────────────────────
@@ -1018,6 +1021,37 @@ function handleEvent(event: ServerEvent): void {
       canvas.getContext('2d')!.drawImage(screenVideo, 0, 0);
       const base64 = canvas.toDataURL('image/png').split(',')[1];
       wsSend({ type: 'screenshot_response', id, ok: true, data: base64, mediaType: 'image/png', message: 'Screenshot captured' });
+      break;
+    }
+
+    case 'screen_share_request': {
+      const { id } = event;
+      void (async () => {
+        try {
+          if (!screenStream || !screenVideo) {
+            // Start sharing — this opens the OS picker
+            screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            screenVideo = document.createElement('video');
+            screenVideo.srcObject = screenStream;
+            screenVideo.muted = true;
+            await new Promise<void>(resolve => { screenVideo!.onloadedmetadata = () => resolve(); });
+            await screenVideo.play();
+            await new Promise<void>(resolve => {
+              if (screenVideo!.readyState >= 3) resolve();
+              else screenVideo!.oncanplay = () => resolve();
+            });
+            screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+              screenStream = null;
+              screenVideo = null;
+              setScreenCapState(false);
+            });
+            setScreenCapState(true);
+          }
+          wsSend({ type: 'screen_share_response', id, ok: true, message: 'Screen sharing started' });
+        } catch {
+          wsSend({ type: 'screen_share_response', id, ok: false, message: 'Screen sharing cancelled or denied' });
+        }
+      })();
       break;
     }
 
@@ -1835,7 +1869,9 @@ function updateSidebar(): void {
     const sorted = [...tasks].reverse();
     for (const t of sorted) {
       const item = document.createElement('div');
-      item.className = 'task-item';
+      const isUserPullDone = t.delivery === 'user-pull' && (t.status === 'completed' || t.status === 'failed') && t.result;
+      item.className = 'task-item' + (isUserPullDone ? ' task-item-pull' : '');
+      if (isUserPullDone) item.title = 'Click to view result';
 
       const status = document.createElement('span');
       status.className = `task-status ${t.status}`;
@@ -1868,9 +1904,62 @@ function updateSidebar(): void {
         item.appendChild(meta);
       }
 
+      if (isUserPullDone) {
+        item.addEventListener('click', () => openTaskResultPanel(t));
+      }
+
       $sbTasksList.appendChild(item);
     }
   }
+}
+
+// ── Task result panel (user-pull) ────────────────────────────
+
+let $taskPanel: HTMLElement | null = null;
+
+function ensureTaskPanel(): HTMLElement {
+  if ($taskPanel) return $taskPanel;
+  const panel = document.createElement('div');
+  panel.id = 'task-result-panel';
+  panel.className = 'task-result-panel hidden';
+  panel.innerHTML = `
+    <div class="task-result-header">
+      <span class="task-result-title"></span>
+      <button class="task-result-close" title="Close">\u2715</button>
+    </div>
+    <pre class="task-result-body"></pre>
+    <div class="task-result-footer">
+      <button class="task-result-discuss">Discuss with agent</button>
+    </div>
+  `;
+  document.body.appendChild(panel);
+  $taskPanel = panel;
+
+  panel.querySelector('.task-result-close')!.addEventListener('click', closeTaskResultPanel);
+  return panel;
+}
+
+function openTaskResultPanel(t: BackgroundTaskInfo): void {
+  const panel = ensureTaskPanel();
+  panel.querySelector<HTMLElement>('.task-result-title')!.textContent = t.description;
+  panel.querySelector<HTMLElement>('.task-result-body')!.textContent = t.result ?? '';
+
+  const discuss = panel.querySelector<HTMLButtonElement>('.task-result-discuss')!;
+  discuss.onclick = () => {
+    closeTaskResultPanel();
+    const prompt = [
+      `Let's discuss the result of the background task: "${t.description}"`,
+      '',
+      t.result ?? '',
+    ].join('\n');
+    wsSend({ type: 'message', content: prompt });
+  };
+
+  panel.classList.remove('hidden');
+}
+
+function closeTaskResultPanel(): void {
+  $taskPanel?.classList.add('hidden');
 }
 
 function updateErrorBar(): void {
@@ -1887,6 +1976,7 @@ function updateInputState(): void {
   const showCancel = isLoading || ttsChunkPlaying;
   $send.classList.toggle('hidden', showCancel);
   $cancel.classList.toggle('hidden', !showCancel);
+  document.body.toggleAttribute('data-working', isLoading);
   if (micRecording) {
     $input.placeholder = 'Listening\u2026';
   } else {
@@ -3203,39 +3293,13 @@ function buildControl(def: SettingDef, currentValue: boolean | number | string, 
 function renderSettingsModal(): void {
   $settingsNav.innerHTML = '';
   $settingsBody.innerHTML = '';
-  serverSettingsPending = {}; // reset pending edits on open
-
-  const hasPending = () => Object.keys(serverSettingsPending).length > 0;
+  serverSettingsPending = {}; // reset any stale pending state
 
   // Group defs by group name preserving order
   const groups: Map<string, SettingDef[]> = new Map();
   for (const def of SETTINGS_SCHEMA) {
     if (!groups.has(def.group)) groups.set(def.group, []);
     groups.get(def.group)!.push(def);
-  }
-
-  // Save bar (initially hidden) — rendered once, inside body
-  const saveBar = document.createElement('div');
-  saveBar.className = 'settings-save-bar hidden';
-  const saveNote = document.createElement('span');
-  saveNote.className = 'settings-save-note';
-  saveNote.textContent = 'Changes require a restart to take effect.';
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'settings-save-btn';
-  saveBtn.textContent = 'Save to .env';
-  saveBtn.addEventListener('click', () => {
-    if (!hasPending()) return;
-    wsSend({ type: 'message', content: `/set-env ${JSON.stringify(serverSettingsPending)}` });
-    Object.assign(serverSettings, serverSettingsPending);
-    saveServerSettingsCache(serverSettings);
-    serverSettingsPending = {};
-    updateSaveBar();
-  });
-  saveBar.appendChild(saveNote);
-  saveBar.appendChild(saveBtn);
-
-  function updateSaveBar(): void {
-    saveBar.classList.toggle('hidden', !hasPending());
   }
 
   // Build a pane for each group (hidden by default)
@@ -3268,29 +3332,19 @@ function renderSettingsModal(): void {
       row.appendChild(labelWrap);
 
       const currentValue = def.scope === 'client' ? getClientSetting(def.key) : getEffectiveValue(def);
-
-      // ✓ saved indicator for client settings
-      let savedTimer: ReturnType<typeof setTimeout> | null = null;
-      const savedDot = document.createElement('span');
-      savedDot.className = 'settings-saved-dot hidden';
-      savedDot.textContent = '✓';
-
       const ctrl = buildControl(def, currentValue, (v) => {
         if (def.scope === 'client') {
-          setClientSetting(def.key, v, () => {
-            savedDot.classList.remove('hidden', 'fade-out');
-            if (savedTimer !== null) clearTimeout(savedTimer);
-            savedTimer = setTimeout(() => {
-              savedDot.classList.add('fade-out');
-              savedTimer = setTimeout(() => savedDot.classList.add('hidden'), 400);
-            }, 1200);
-          });
+          setClientSetting(def.key, v); // auto-saves + shows toast
         } else {
+          // API keys: write directly to .env via /set-env command
           serverSettingsPending[def.key] = v;
-          updateSaveBar();
+          wsSend({ type: 'message', content: `/set-env ${JSON.stringify({ [def.key]: v })}` });
+          Object.assign(serverSettings, { [def.key]: v });
+          saveServerSettingsCache(serverSettings);
+          serverSettingsPending = {};
+          showSettingsToast();
         }
       });
-      ctrl.appendChild(savedDot);
       row.appendChild(ctrl);
       pane.appendChild(row);
     }
@@ -3298,7 +3352,6 @@ function renderSettingsModal(): void {
     panes.set(groupName, pane);
     $settingsBody.appendChild(pane);
   }
-  $settingsBody.appendChild(saveBar);
 
   // Build nav items and wire up group switching
   const groupNames = [...groups.keys()];
@@ -3312,8 +3365,6 @@ function renderSettingsModal(): void {
     for (const btn of $settingsNav.querySelectorAll('.settings-nav-item')) {
       btn.classList.toggle('active', (btn as HTMLElement).dataset.group === name);
     }
-    // Only show save bar when on a group that has server settings with pending changes
-    updateSaveBar();
   }
 
   for (const name of groupNames) {

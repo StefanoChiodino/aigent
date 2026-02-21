@@ -22,6 +22,7 @@ import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
+import { checkExecPermission, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions } from './safety.js';
 
 const log = createLogger('gatekeeper');
 
@@ -72,7 +73,7 @@ interface GatekeeperArgs {
 
 const mounts: Mount[] = [
   // Implicit mounts from docker-compose.yml — shown in UI but not passed as -v flags.
-  { hostPath: resolve(REPO_DIR), containerPath: '/app', mode: 'rw', implicit: true },
+  { hostPath: resolve(REPO_DIR), containerPath: '/app', mode: 'ro', implicit: true },
   { hostPath: resolve(REPO_DIR, 'workspace'), containerPath: '/workspace', mode: 'rw', implicit: true },
   { hostPath: resolve(REPO_DIR, 'workspace', 'config'), containerPath: '/workspace/config', mode: 'ro', implicit: true },
 ];
@@ -454,7 +455,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/set-env']);
+const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/set-env']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -515,6 +516,7 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   if (await handleGrantDeny(input)) return;
   if (await handleConfigApproveReject(input)) return;
   if (await handlePatchApproveReject(input)) return;
+  if (await handleExecApproveReject(input)) return;
 
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
@@ -975,6 +977,139 @@ async function handlePatchApproveReject(input: string): Promise<boolean> {
   return false;
 }
 
+// --- Exec command approval ---
+
+const pendingExecApprovals = new Map<string, { command: string }>();
+
+const SETTINGS_PATH = resolve(REPO_DIR, 'settings.json');
+
+function readExecPermissions(): ExecPermissions {
+  try {
+    if (!existsSync(SETTINGS_PATH)) return DEFAULT_EXEC_PERMISSIONS;
+    const raw = readFileSync(SETTINGS_PATH, 'utf-8');
+    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const perms = settings['exec_permissions'];
+    if (!perms || typeof perms !== 'object') return DEFAULT_EXEC_PERMISSIONS;
+    const p = perms as Partial<ExecPermissions>;
+    return {
+      alwaysAllow: Array.isArray(p.alwaysAllow) ? p.alwaysAllow : DEFAULT_EXEC_PERMISSIONS.alwaysAllow,
+      prompt: Array.isArray(p.prompt) ? p.prompt : DEFAULT_EXEC_PERMISSIONS.prompt,
+      deny: Array.isArray(p.deny) ? p.deny : DEFAULT_EXEC_PERMISSIONS.deny,
+    };
+  } catch {
+    return DEFAULT_EXEC_PERMISSIONS;
+  }
+}
+
+function addCommandToAlwaysAllow(command: string): void {
+  try {
+    const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
+    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
+    const current = Array.isArray(perms.alwaysAllow) ? perms.alwaysAllow : [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow];
+    if (!current.includes(command)) {
+      current.push(command);
+    }
+    settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current };
+    writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    log.info('Added command to always-allow', { command });
+  } catch (err) {
+    log.error('Failed to update exec permissions', { error: String(err) });
+  }
+}
+
+function handleAgentExecRequest(id: string, command: string): void {
+  const permissions = readExecPermissions();
+  const level = checkExecPermission(command, permissions);
+
+  if (level === 'allow') {
+    log.info('Exec auto-allowed', { id, command });
+    client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by permission policy' });
+    return;
+  }
+
+  if (level === 'deny') {
+    log.info('Exec auto-denied', { id, command });
+    client!.send({ type: 'exec_response', id, ok: false, message: 'Denied by permission policy' });
+    injectSystemMessage(`[exec] Blocked by deny policy: ${command}`);
+    return;
+  }
+
+  // 'prompt' — store and forward to web UI for user approval
+  pendingExecApprovals.set(id, { command });
+  log.info('Exec approval requested', { id, command });
+
+  // Inject a message so TUI users also see the prompt
+  injectSystemMessage(
+    `Agent wants to run: ${command}\n` +
+    `  Reply: /approve-exec ${id} or /deny-exec ${id}\n` +
+    `  To always allow: /approve-exec ${id} --always`
+  );
+}
+
+async function handleExecApproveReject(input: string): Promise<boolean> {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  if (cmd === '/approve-exec') {
+    let id = parts[1];
+    if (!id && pendingExecApprovals.size === 1) {
+      id = pendingExecApprovals.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingExecApprovals.size === 0
+        ? 'No pending exec requests.'
+        : `Multiple pending — specify ID: ${[...pendingExecApprovals.keys()].join(', ')}`);
+      return true;
+    }
+
+    const pending = pendingExecApprovals.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending exec request: ${id}`);
+      return true;
+    }
+
+    const alwaysAllow = parts.includes('--always');
+    pendingExecApprovals.delete(id);
+
+    if (alwaysAllow) {
+      addCommandToAlwaysAllow(pending.command);
+      injectSystemMessage(`Approved and added to always-allow: ${pending.command}`);
+    } else {
+      injectSystemMessage(`Approved (once): ${pending.command}`);
+    }
+
+    client!.send({ type: 'exec_response', id, ok: true, alwaysAllow, message: 'Approved by user' });
+    return true;
+  }
+
+  if (cmd === '/deny-exec') {
+    let id = parts[1];
+    if (!id && pendingExecApprovals.size === 1) {
+      id = pendingExecApprovals.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingExecApprovals.size === 0
+        ? 'No pending exec requests.'
+        : `Multiple pending — specify ID: ${[...pendingExecApprovals.keys()].join(', ')}`);
+      return true;
+    }
+
+    const pending = pendingExecApprovals.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending exec request: ${id}`);
+      return true;
+    }
+
+    pendingExecApprovals.delete(id);
+    injectSystemMessage(`Denied: ${pending.command}`);
+    client!.send({ type: 'exec_response', id, ok: false, alwaysAllow: false, message: 'Denied by user' });
+    return true;
+  }
+
+  return false;
+}
+
 // --- Host Daemon ---
 
 let hostDaemonProcess: ChildProcess | null = null;
@@ -1154,6 +1289,11 @@ client.on('config_write_request', (id: string, file: string, content: string, re
 // Handle patch requests from the worker
 client.on('patch_request', (id: string, diff: string, reason: string) => {
   handlePatchRequest(id, diff, reason);
+});
+
+// Handle exec approval requests from the worker
+client.on('exec_request', (id: string, command: string) => {
+  handleAgentExecRequest(id, command);
 });
 
 // Expiry timer — check every 30s for mounts that have timed out

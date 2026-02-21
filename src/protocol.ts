@@ -23,6 +23,7 @@ export type ClientCommand =
   | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
   | { type: 'config_write_response'; id: string; ok: boolean; message: string }
   | { type: 'patch_response'; id: string; ok: boolean; message: string }
+  | { type: 'exec_response'; id: string; ok: boolean; alwaysAllow?: boolean; message: string }
   | { type: 'screenshot_response'; id: string; ok: boolean; data?: string; mediaType?: string; message: string }
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
   | { type: 'ping' };
@@ -46,6 +47,9 @@ export interface BackgroundTaskInfo {
   inputTokens?: number;
   outputTokens?: number;
   cost?: number;
+  delivery?: 'agent-review' | 'user-pull';
+  /** Raw result text — only set for user-pull tasks so the UI can display it. */
+  result?: string;
 }
 
 export interface ServerState {
@@ -79,6 +83,7 @@ export type ServerEvent =
   | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
+  | { type: 'exec_request'; id: string; command: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }

@@ -836,6 +836,113 @@ html, body {
   text-overflow: ellipsis;
 }
 
+.task-item-pull {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.task-item-pull:hover {
+  background: rgba(var(--accent-rgb, 100, 160, 255), 0.1);
+}
+
+.task-item-pull .task-status.completed {
+  color: var(--accent, #7cb4ff);
+}
+
+/* ── Task result panel (user-pull) ───────────────────────────── */
+
+.task-result-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 200;
+  width: min(680px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  overflow: hidden;
+}
+
+.task-result-panel.hidden {
+  display: none;
+}
+
+.task-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.1));
+  gap: 8px;
+}
+
+.task-result-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #cdd6f4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-result-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary, #6c7086);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.task-result-close:hover {
+  color: var(--text-primary, #cdd6f4);
+  background: rgba(255,255,255,0.08);
+}
+
+.task-result-body {
+  flex: 1;
+  margin: 0;
+  padding: 16px;
+  overflow-y: auto;
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-primary, #cdd6f4);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.task-result-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border, rgba(255,255,255,0.1));
+  display: flex;
+  justify-content: flex-end;
+}
+
+.task-result-discuss {
+  background: var(--accent, #7cb4ff);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.task-result-discuss:hover {
+  opacity: 0.85;
+}
+
 /* ── Sidebar model picker ────────────────────────────────── */
 
 .sb-model-section {
@@ -2376,6 +2483,96 @@ tr.diff-header td {
   to   { opacity: 1; transform: translateX(0); }
 }
 
+/* ── Ambient bokeh effect ─────────────────────────────────── */
+
+@keyframes bokeh-pulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.35); }
+}
+
+.bokeh {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* idle: barely perceptible */
+  opacity: 0.045;
+  transition: opacity 3s ease;
+}
+
+body[data-working] .bokeh {
+  /* working: gentle glow */
+  opacity: 0.22;
+}
+
+.bokeh span {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(110px);
+  animation: bokeh-pulse ease-in-out infinite;
+}
+
+/* Green — top-left */
+.bokeh .b1 {
+  width: 500px; height: 500px;
+  background: rgba(0, 210, 110, 1);
+  top: -80px; left: -60px;
+  animation-duration: 14s;
+  animation-delay: 0s;
+}
+
+/* Cyan — bottom-right */
+.bokeh .b2 {
+  width: 420px; height: 420px;
+  background: rgba(0, 200, 220, 1);
+  bottom: -60px; right: -40px;
+  animation-duration: 17s;
+  animation-delay: -4s;
+}
+
+/* Blue — top-right */
+.bokeh .b3 {
+  width: 380px; height: 380px;
+  background: rgba(60, 100, 240, 1);
+  top: 10%; right: 10%;
+  animation-duration: 11s;
+  animation-delay: -8s;
+}
+
+/* Purple — centre-left */
+.bokeh .b4 {
+  width: 460px; height: 460px;
+  background: rgba(140, 60, 230, 1);
+  top: 40%; left: 15%;
+  animation-duration: 19s;
+  animation-delay: -2s;
+}
+
+/* Magenta — bottom-left */
+.bokeh .b5 {
+  width: 340px; height: 340px;
+  background: rgba(210, 40, 170, 1);
+  bottom: 5%; left: 30%;
+  animation-duration: 13s;
+  animation-delay: -11s;
+}
+
+/* Teal — centre */
+.bokeh .b6 {
+  width: 400px; height: 400px;
+  background: rgba(0, 190, 180, 1);
+  top: calc(50% - 200px); left: calc(50% - 200px);
+  animation-duration: 16s;
+  animation-delay: -6s;
+}
+
+/* Ensure all #app children sit above the bokeh layer */
+#app > *:not(.bokeh) {
+  position: relative;
+  z-index: 1;
+}
+
 /* ── Utility ──────────────────────────────────────────────── */
 
 .hidden { display: none !important; }
@@ -2708,19 +2905,12 @@ tr.diff-header td {
   border-color: var(--accent);
 }
 
-/* Settings saved toast */
+/* Settings saved indicator — inline in the modal header */
 #settings-toast {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-elevated, #2a2a3a);
-  border: 1px solid var(--border-subtle);
-  border-radius: 20px;
-  padding: 6px 16px;
-  font-size: 12px;
+  margin-left: auto;
+  margin-right: 10px;
+  font-size: 11px;
   color: var(--text-dim);
-  z-index: 3000;
   pointer-events: none;
   opacity: 1;
   transition: opacity 0.4s ease;

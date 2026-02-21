@@ -10,16 +10,17 @@ services:
       - AIGENT_THINKING
       - AIGENT_WORKSPACE=/workspace
     volumes:
-      - .:/app:rw                    # repo read-write (self-modification)
+      - .:/app:ro                    # repo read-only (edits go through apply_patch)
       - node_modules:/app/node_modules  # persistent named volume (survives --rm)
       - ./workspace/config:/workspace/config:ro   # instruction files (read-only)
       - ./workspace:/workspace                    # memory, sessions, usage (read-write)
+      # Source code (/app) is read-only. Self-edits use the apply_patch tool, which
+      # shows a diff for user approval and writes from the host side.
       # Config files (SOUL.md, AGENTS.md, etc.) are read-only in the sandbox.
       # The agent can request config edits via the gatekeeper, which shows
       # a diff to the user for approval. The ro mount on /workspace/config
       # overlays the rw mount on /workspace, so config/ is truly read-only.
-      # No writable source or git mounts by default.
-      # Self-modification requires explicit grant via /mount.
+      # To grant write access to /app or any other folder, use /mount or request_mount.
     deploy:
       resources:
         limits:

@@ -298,6 +298,16 @@ const dispatchTaskTool: ToolDef = {
           '  net_rw  — fetch URLs (all HTTP methods)\n' +
           '  fs_write — write/edit files + full shell exec',
       },
+      delivery: {
+        type: 'string',
+        enum: ['agent-review', 'user-pull'],
+        description:
+          'How the result is delivered when the task completes.\n' +
+          '  agent-review (default) — result is injected into the conversation at the next natural pause; you review and summarize it for the user.\n' +
+          '  user-pull — result sits as a notification in the sidebar; the user clicks it when ready to discuss.\n' +
+          'Choose agent-review when the result feeds the current conversation (e.g. research you dispatched mid-chat).\n' +
+          'Choose user-pull for long-running background work the user will want to review on their own terms.',
+      },
     },
     required: ['task'],
   },
@@ -513,12 +523,12 @@ const hostTool: ToolDef = {
 const requestMountTool: ToolDef = {
   name: 'request_mount',
   description:
-    'Request read-only access to a folder on the host filesystem. The user will be prompted to approve. ' +
+    'Request access to a folder on the host filesystem. The user will be prompted to approve. ' +
     'The sandbox will restart with the folder mounted. Use this when the user asks you to work ' +
     'on a project or access files outside the current sandbox. Always explain why you need access.\n\n' +
-    'IMPORTANT: Always request "ro" (read-only) access. To make edits, use the apply_patch tool — ' +
-    'it proposes a diff that the user reviews and approves, without needing write mount access. ' +
-    'Only request "rw" if the task genuinely cannot be done with patches (e.g. running build tools that write outputs).',
+    'Default to "ro" (read-only). To propose file edits, use the apply_patch tool — it shows the user ' +
+    'a diff to review and approve without needing write access. Request "rw" only when the task ' +
+    'genuinely requires it (e.g. running build tools that write outputs, or when the user explicitly grants it).',
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -528,7 +538,7 @@ const requestMountTool: ToolDef = {
       },
       mode: {
         type: 'string',
-        description: 'Access mode: "ro" (read-only, strongly preferred) or "rw" (read-write, only if patches are insufficient)',
+        description: 'Access mode: "ro" (read-only, default) or "rw" (read-write, only when explicitly needed)',
       },
       reason: {
         type: 'string',
@@ -697,7 +707,7 @@ interface GlobInput { pattern: string; path?: string; max_results?: number }
 interface PatchInput { path: string; edits: Array<{ old_text: string; new_text: string }> }
 interface ScreenshotInput { region?: string }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
-interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number }
+interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number; delivery?: 'agent-review' | 'user-pull' }
 interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
 interface RequestMountInput { path: string; mode?: string; reason: string; durationMinutes?: number }
 interface RequestConfigWriteInput { file: string; content: string; reason: string }
@@ -873,6 +883,13 @@ export async function executeTool(
       const safetyWarning = checkCommandSafety(command);
       if (safetyWarning) {
         onOutput?.(`[safety] ${safetyWarning}\n`);
+      }
+
+      // Permission check — gatekeeper decides allow/prompt/deny based on settings
+      const { requestExecApproval } = await import('./server.js');
+      const approval = await requestExecApproval(command);
+      if (!approval.ok) {
+        return `Command not allowed: ${approval.message}`;
       }
 
       return executeCommand(command, cwd, timeout, onOutput);

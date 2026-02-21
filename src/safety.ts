@@ -8,6 +8,7 @@
  */
 
 import { resolve } from 'node:path';
+import { minimatch } from 'minimatch';
 
 // --- Environment sanitization ---
 
@@ -253,4 +254,112 @@ export function validateReadonlyCommand(command: string): string | null {
   }
 
   return null;
+}
+
+// --- Exec command permissions ---
+
+export interface ExecPermissions {
+  alwaysAllow: string[];
+  prompt: string[];
+  deny: string[];
+}
+
+export type ExecPermissionLevel = 'allow' | 'prompt' | 'deny';
+
+export const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {
+  alwaysAllow: [
+    // Git read-only
+    'git log', 'git log *',
+    'git status', 'git status *',
+    'git diff', 'git diff *',
+    'git show *',
+    'git branch', 'git branch *',
+    'git remote', 'git remote *',
+    'git stash list',
+    'git stash show *',
+    'git tag', 'git tag *',
+    'git rev-parse *',
+    'git ls-files *',
+    // Filesystem read-only
+    'ls', 'ls *',
+    'cat *',
+    'head *', 'tail *',
+    'grep *', 'rg *',
+    'find *',
+    'wc *',
+    'file *',
+    'stat *',
+    // Shell builtins / system info
+    'pwd', 'echo *', 'which *', 'env', 'whoami', 'id', 'hostname',
+    'date', 'uname *', 'uptime',
+    // Node / build read-only
+    'node --version', 'node -v',
+    'npm --version', 'npm -v', 'npm list *', 'npm ls *',
+    'tsc --version', 'tsc -v',
+    'npx tsc --noEmit', 'npx tsc --noEmit *',
+  ],
+  prompt: [
+    // Git writes
+    'git add *', 'git commit *', 'git push *', 'git push',
+    'git checkout *', 'git switch *', 'git reset *', 'git rebase *',
+    'git merge *', 'git cherry-pick *', 'git stash *',
+    'git clean *',
+    // File mutations
+    'rm *', 'mv *', 'cp *', 'mkdir *', 'touch *', 'chmod *', 'chown *',
+    // Network
+    'curl *', 'wget *', 'ssh *', 'scp *', 'rsync *',
+    // Package managers
+    'npm install *', 'npm install', 'npm uninstall *',
+    'npm run *', 'npm start', 'npm build',
+    'yarn *', 'pnpm *',
+    'pip install *', 'pip uninstall *',
+    // Processes
+    'kill *', 'pkill *', 'killall *',
+  ],
+  deny: [
+    'sudo *',
+    'su *',
+    'mkfs *',
+    'dd if=* of=/dev/*', 'dd of=/dev/*',
+    ':() { :|: & }; :',
+    'rm -rf /*', 'rm -rf /',
+  ],
+};
+
+/**
+ * Match a command string against a glob pattern.
+ * Uses minimatch with matchBase enabled so bare patterns like "ls" match.
+ */
+function matchesGlob(command: string, pattern: string): boolean {
+  const cmd = command.trim();
+  const pat = pattern.trim();
+  // Exact match first (fast path, also handles patterns without wildcards)
+  if (cmd === pat) return true;
+  // Check if command starts with the pattern prefix (for "git log" matching "git log --oneline")
+  // when the pattern has no wildcards
+  if (!pat.includes('*') && !pat.includes('?') && !pat.includes('[')) {
+    return cmd === pat || cmd.startsWith(pat + ' ');
+  }
+  return minimatch(cmd, pat, { nonull: false });
+}
+
+/**
+ * Check what permission level a command requires given user-configured permissions.
+ * Evaluation order: deny → alwaysAllow → prompt → default(prompt)
+ */
+export function checkExecPermission(
+  command: string,
+  permissions: ExecPermissions,
+): ExecPermissionLevel {
+  for (const pattern of permissions.deny) {
+    if (matchesGlob(command, pattern)) return 'deny';
+  }
+  for (const pattern of permissions.alwaysAllow) {
+    if (matchesGlob(command, pattern)) return 'allow';
+  }
+  for (const pattern of permissions.prompt) {
+    if (matchesGlob(command, pattern)) return 'prompt';
+  }
+  // Default: prompt for anything not explicitly listed
+  return 'prompt';
 }

@@ -29,6 +29,7 @@ export interface AgentClientEvents {
   error: (message: string) => void;
   state: (partial: { thinking?: string; profile?: string; sessionId?: string }) => void;
   host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[], capabilities?: Record<string, string>) => void;
+  exec_request: (id: string, command: string) => void;
   disconnected: () => void;
   reconnecting: (attempt: number) => void;
 }
@@ -164,6 +165,9 @@ export class AgentClient extends EventEmitter {
         break;
       case 'patch_request':
         this.emit('patch_request', event.id, event.diff, event.reason);
+        break;
+      case 'exec_request':
+        this.emit('exec_request', event.id, event.command);
         break;
       case 'screenshot_request':
         this.emit('screenshot_request', event.id);
