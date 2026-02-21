@@ -94,9 +94,12 @@ See `docs/design-observability.md` for architectural context.
 
 ## 🪙 Token / Cost Optimisation
 
+See `docs/explore-memory-architecture.md` for a breakdown of memory architectures, context compaction patterns, and caching strategies.
+
 - [ ] **MCP tool name shortening** — `mcp_{serverName}_{toolName}` can be long with many servers; consider a shorter/hashed prefix convention to reduce per-request token overhead.
 - [ ] **Tool description audit** — review all descriptions in `tools.ts`; trim any longer than ~100 tokens where the first sentence already gives the model sufficient context.
 - [ ] **Prompt cache warm-up on startup** — send a minimal no-op message on init to pre-warm the Anthropic prompt cache before the first real user message.
+- [ ] **Compaction prompt refinement** — Ensure LLM-driven summaries preserve critical technical details (specific file paths, bug IDs, code references) rather than just narrative flow.
 
 ---
 
