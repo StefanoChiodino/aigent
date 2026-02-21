@@ -24,6 +24,7 @@ export type ClientCommand =
   | { type: 'config_write_response'; id: string; ok: boolean; message: string }
   | { type: 'patch_response'; id: string; ok: boolean; message: string }
   | { type: 'screenshot_response'; id: string; ok: boolean; data?: string; mediaType?: string; message: string }
+  | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
   | { type: 'ping' };
 
 // --- Server → Client ---
@@ -79,6 +80,7 @@ export type ServerEvent =
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'screenshot_request'; id: string }
+  | { type: 'screen_share_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'pong' };

@@ -6,7 +6,8 @@
       "Bash(make:*)",
       "Read(//home/draga/repos/orchids/scripts/engines/**)",
       "Bash(npm run build:web:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Read(//home/draga/repos/orchids/website/**)"
     ]
   }
 }

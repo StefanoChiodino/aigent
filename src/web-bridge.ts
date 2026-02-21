@@ -275,6 +275,8 @@ export async function startWebServer(
         send({ type: 'patch_request', id, diff, reason }),
       screenshot_request: (id: string) =>
         send({ type: 'screenshot_request', id }),
+      screen_share_request: (id: string) =>
+        send({ type: 'screen_share_request', id }),
       host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, string>) =>
         send({ type: 'host_state', mounts, ...(capabilities ? { capabilities } : {}) }),
     };
@@ -324,6 +326,9 @@ export async function startWebServer(
             client.send(cmd);
             break;
           case 'screenshot_response':
+            client.send(cmd);
+            break;
+          case 'screen_share_response':
             client.send(cmd);
             break;
           case 'ping':

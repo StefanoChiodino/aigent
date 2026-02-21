@@ -168,6 +168,9 @@ export class AgentClient extends EventEmitter {
       case 'screenshot_request':
         this.emit('screenshot_request', event.id);
         break;
+      case 'screen_share_request':
+        this.emit('screen_share_request', event.id);
+        break;
       case 'pong':
         break;
     }

@@ -213,13 +213,15 @@ const globTool: ToolDef = {
 const spawnAgentTool: ToolDef = {
   name: 'spawn_agent',
   description:
-    'Spawn a sub-agent to work on a task independently. The sub-agent gets its own conversation ' +
-    'with full tool access (exec, read, write, edit, grep, list_files) and runs until the task is ' +
-    'complete or it hits the iteration limit. Use this for: complex tasks you want to delegate, ' +
-    'parallel research, reviewing code while you work on something else, or any task that benefits ' +
-    'from a fresh context. The sub-agent shares your workspace and filesystem.\n\n' +
-    'COST TIP: For simple read-only tasks (searching, reading, summarizing), use model "claude-haiku-4-5-20251001" ' +
-    'to save tokens. Only use the default (Opus) for tasks requiring complex reasoning or multi-step edits.',
+    'Spawn a sub-agent to complete a task synchronously (blocks until done, result returned inline). ' +
+    'Use this when you need the result before continuing, or for tasks that involve file writes.\n\n' +
+    'WHEN TO USE: delegate anything that would take multiple tool calls, requires parallel investigation, ' +
+    'or benefits from a fresh context window. This is the default strategy — do not hesitate to spawn.\n\n' +
+    'MODEL + THINKING STRATEGY (pick the right tool for the job):\n' +
+    '  • Simple search/read/summarize → model: "claude-haiku-4-5-20251001", thinking: "off"\n' +
+    '  • Moderate analysis or refactor → model: "claude-sonnet-4-6", thinking: "low"\n' +
+    '  • Complex reasoning, architecture → model: "claude-opus-4-6-20250514", thinking: "high"\n' +
+    'Thinking defaults to "off" for Haiku, "low" for Sonnet, "high" for Opus if not specified.',
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -233,7 +235,12 @@ const spawnAgentTool: ToolDef = {
       },
       model: {
         type: 'string',
-        description: 'Model to use (default: same as parent). Use "claude-haiku-4-5-20251001" for simple read-only tasks to save cost.',
+        description: 'Model to use. Haiku for simple tasks, Sonnet for moderate, Opus for complex. Default: same as parent.',
+      },
+      thinking: {
+        type: 'string',
+        enum: ['off', 'low', 'medium', 'high', 'max'],
+        description: 'Thinking level. Defaults to model-appropriate level: off (Haiku), low (Sonnet), high (Opus).',
       },
       max_iterations: {
         type: 'number',
@@ -247,14 +254,17 @@ const spawnAgentTool: ToolDef = {
 const dispatchTaskTool: ToolDef = {
   name: 'dispatch_task',
   description:
-    'Dispatch a task to a background agent. Returns immediately with a task ID — the main ' +
-    'conversation stays unblocked while the background agent works. Use this for any task that ' +
-    'takes more than a few seconds: research, code review, analysis, etc. ' +
-    'When the background task completes, its result will be injected back into the conversation. ' +
-    'Prefer this over spawn_agent for long-running work so the user can keep chatting.\n\n' +
-    'By default, background agents are READ-ONLY (no file writes, no network). ' +
-    'Grant additional capabilities via the capabilities parameter when needed.\n\n' +
-    'COST TIP: Background tasks are often read-only research — use model "claude-haiku-4-5-20251001" to save tokens.',
+    'Dispatch a task to a background agent. Returns immediately — the main conversation stays ' +
+    'unblocked while the agent works. Prefer this over spawn_agent for anything that takes more ' +
+    'than a few seconds, so the user can keep chatting while it runs.\n\n' +
+    'WHEN TO USE: long-running research, parallel investigations, code review, anything slow.\n' +
+    'Dispatch multiple tasks at once when you have independent things to investigate in parallel.\n\n' +
+    'MODEL + THINKING STRATEGY (match the model to the task complexity):\n' +
+    '  • Simple search/read/summarize → model: "claude-haiku-4-5-20251001", thinking: "off"\n' +
+    '  • Moderate analysis → model: "claude-sonnet-4-6", thinking: "low"\n' +
+    '  • Complex reasoning → model: "claude-opus-4-6-20250514", thinking: "high"\n' +
+    'Thinking defaults to "off" for Haiku, "low" for Sonnet, "high" for Opus if not specified.\n\n' +
+    'By default, background agents are READ-ONLY. Grant capabilities when needed.',
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -268,7 +278,12 @@ const dispatchTaskTool: ToolDef = {
       },
       model: {
         type: 'string',
-        description: 'Model to use (default: same as parent). Use "claude-haiku-4-5-20251001" for simple read-only tasks to save cost.',
+        description: 'Model to use. Haiku for simple tasks, Sonnet for moderate, Opus for complex. Default: same as parent.',
+      },
+      thinking: {
+        type: 'string',
+        enum: ['off', 'low', 'medium', 'high', 'max'],
+        description: 'Thinking level. Defaults to model-appropriate level: off (Haiku), low (Sonnet), high (Opus).',
       },
       max_iterations: {
         type: 'number',
@@ -498,9 +513,12 @@ const hostTool: ToolDef = {
 const requestMountTool: ToolDef = {
   name: 'request_mount',
   description:
-    'Request access to a folder on the host filesystem. The user will be prompted to approve. ' +
+    'Request read-only access to a folder on the host filesystem. The user will be prompted to approve. ' +
     'The sandbox will restart with the folder mounted. Use this when the user asks you to work ' +
-    'on a project or access files outside the current sandbox. Always explain why you need access.',
+    'on a project or access files outside the current sandbox. Always explain why you need access.\n\n' +
+    'IMPORTANT: Always request "ro" (read-only) access. To make edits, use the apply_patch tool — ' +
+    'it proposes a diff that the user reviews and approves, without needing write mount access. ' +
+    'Only request "rw" if the task genuinely cannot be done with patches (e.g. running build tools that write outputs).',
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -510,7 +528,7 @@ const requestMountTool: ToolDef = {
       },
       mode: {
         type: 'string',
-        description: 'Access mode: "ro" (read-only, default) or "rw" (read-write)',
+        description: 'Access mode: "ro" (read-only, strongly preferred) or "rw" (read-write, only if patches are insufficient)',
       },
       reason: {
         type: 'string',
@@ -581,12 +599,11 @@ const applyPatchTool: ToolDef = {
 const requestScreenshotTool: ToolDef = {
   name: 'request_screenshot',
   description:
-    'Capture a screenshot from the user\'s shared browser screen. ' +
-    'Only works when the user has screen sharing active (the monitor icon in the input bar). ' +
+    'Capture a screenshot from the user\'s browser screen. ' +
+    'If screen sharing is not yet active, the browser will automatically prompt the user to pick a window or screen to share. ' +
     'Returns a live PNG image of what is on their screen right now. ' +
     'Use this when you need to see the user\'s current state, verify they completed a step, ' +
-    'or understand what they are looking at. ' +
-    'If screen sharing is not active, tell the user to click the monitor icon first.',
+    'or understand what they are looking at.',
   input_schema: {
     type: 'object' as const,
     properties: {},

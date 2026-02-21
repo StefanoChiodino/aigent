@@ -28,6 +28,24 @@ const log = createLogger('gatekeeper');
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_DIR = resolve(__dirname, '..');
 
+// Load settings.json and apply non-secret values to process.env.
+// .env (already loaded via dotenv) takes lowest priority; CLI flags override all.
+{
+  const settingsPath = resolve(REPO_DIR, 'settings.json');
+  if (existsSync(settingsPath)) {
+    try {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
+      const SECRET_KEYS = new Set(['ANTHROPIC_API_KEY', 'OPENAI_API_KEY']);
+      for (const [key, value] of Object.entries(settings)) {
+        if (SECRET_KEYS.has(key)) continue; // never load secrets from settings.json
+        if (value !== null && value !== undefined && value !== '') {
+          process.env[key] = String(value);
+        }
+      }
+    } catch { /* malformed settings.json — ignore, fall back to .env */ }
+  }
+}
+
 // --- Types ---
 
 interface Mount {
@@ -819,7 +837,7 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
   return false;
 }
 
-// --- Patch requests ---
+// --- Patch requests --- (host-path rewrite fix)
 
 interface PendingPatch {
   diff: string;
@@ -828,6 +846,10 @@ interface PendingPatch {
 }
 
 const pendingPatchRequests = new Map<string, PendingPatch>();
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /** Parse "--- a/<path>" or "+++ b/<path>" headers from a unified diff, returning unique container paths. */
 function parseDiffFilePaths(diff: string): string[] {
@@ -896,13 +918,19 @@ async function handlePatchApproveReject(input: string): Promise<boolean> {
 
     pendingPatchRequests.delete(id);
 
-    // Apply the full diff in one shot using `patch -p1`.
-    // -p1 strips the leading "a/" or "b/" from paths so they resolve relative to /.
-    // We cd to / so absolute paths in the diff work directly.
-    // --no-backup-if-mismatch: suppress .orig files.
+    // Rewrite diff headers: replace container paths with resolved host paths,
+    // then apply with -p0 so patch uses the rewritten paths literally.
+    let rewrittenDiff = pending.diff;
+    for (const { containerPath, hostPath } of pending.files) {
+      // Replace "--- a/<containerPath>" and "+++ b/<containerPath>" headers
+      rewrittenDiff = rewrittenDiff
+        .replace(new RegExp(`^--- a/${escapeRegex(containerPath)}`, 'gm'), `--- ${hostPath}`)
+        .replace(new RegExp(`^\\+\\+\\+ b/${escapeRegex(containerPath)}`, 'gm'), `+++ ${hostPath}`);
+    }
+
     try {
-      execSync('patch --no-backup-if-mismatch -p1', {
-        input: pending.diff,
+      execSync('patch --no-backup-if-mismatch -p0', {
+        input: rewrittenDiff,
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd: '/',
       });

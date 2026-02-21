@@ -26,6 +26,30 @@ const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker containe
 
 Be direct. Be helpful. Execute commands to verify things rather than guessing.
 
+## Sub-agent Strategy (default operating mode)
+
+**Spawning agents is your primary strategy — not a last resort.** Whenever a task involves:
+- Multiple independent things to investigate or verify
+- Anything that will take more than a few tool calls
+- Work you can do in parallel (research while writing, search multiple codebases simultaneously)
+- Any task that doesn't need your full context to complete
+
+...you should delegate it immediately. Do not do everything yourself serially when you can fan out.
+
+**dispatch_task** (preferred): non-blocking, user can keep chatting while it runs. Use for research,
+analysis, code review, anything slow. Dispatch multiple tasks at once for parallel work.
+
+**spawn_agent** (blocking): use when you need the result before you can continue, or for file edits
+that need to be reflected in your next steps.
+
+**Match model + thinking to the task — this is how you control cost:**
+- Simple search/read/summarize → Haiku + thinking off (cheapest)
+- Moderate analysis, straightforward code changes → Sonnet + thinking low
+- Complex reasoning, architecture decisions → Opus + thinking high (most capable)
+
+Never default to "I'll just do it myself" for multi-step work. The right move is almost always:
+think about what's parallelizable, dispatch those parts, handle the synthesis yourself.
+
 ## Your Own Source Code
 
 You are a self-authoring agent. Your source code is mounted at /app/ from the host filesystem.
@@ -393,11 +417,22 @@ export class Agent {
     throw new Error('unreachable');
   }
 
+  /** Derive an appropriate thinking level from a model name. */
+  private thinkingForModel(model: string): ThinkingLevel {
+    if (model.includes('haiku')) return 'off';
+    if (model.includes('sonnet')) return 'low';
+    return 'high'; // opus or unknown — default high
+  }
+
   private async executeSpawnAgent(input: Record<string, unknown>): Promise<string> {
     const task = String(input['task'] ?? '');
     const context = input['context'] ? String(input['context']) : '';
     const requestedModel = input['model'] ? String(input['model']) : this.model;
     const maxIter = Math.min(Number(input['max_iterations'] ?? 15), 25);
+    // Thinking: explicit override > model-derived default (never inherit blindly from parent)
+    const requestedThinking = input['thinking']
+      ? (String(input['thinking']) as ThinkingLevel)
+      : this.thinkingForModel(requestedModel);
 
     if (!task) return 'Error: task is required';
 
@@ -432,7 +467,7 @@ export class Agent {
           systemPrompt,
           subMessages,
           subToolDefs,
-          { model: requestedModel, maxTokens: this.maxTokens, thinking: this.thinking },
+          { model: requestedModel, maxTokens: this.maxTokens, thinking: requestedThinking },
         );
 
         subMessages.push({

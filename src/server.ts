@@ -214,21 +214,58 @@ function resolveMountRequest(id: string, response: { ok: boolean; containerPath?
   }
 }
 
-// --- Browser screenshot request handling ---
+// --- Browser screen share + screenshot request handling ---
 
+const pendingScreenShareRequests = new Map<string, {
+  resolve: (response: { ok: boolean; message: string }) => void;
+}>();
 const pendingScreenshotRequests = new Map<string, {
   resolve: (response: { ok: boolean; data?: string; mediaType?: string; message: string }) => void;
 }>();
 let screenshotRequestCounter = 0;
 
 /**
- * Ask the browser to capture a frame from its active screen share.
- * Called by the request_screenshot tool.
+ * Ask the browser to start screen sharing (opens the OS picker).
+ * Resolves once the user picks a source (or cancels).
  */
-export function requestBrowserScreenshot(): Promise<{ ok: boolean; data?: string; mediaType?: string; message: string }> {
-  const id = `sc_${++screenshotRequestCounter}`;
+export function requestBrowserScreenShare(): Promise<{ ok: boolean; message: string }> {
+  const id = `ss_${++screenshotRequestCounter}`;
 
   return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingScreenShareRequests.delete(id);
+      resolve({ ok: false, message: 'Screen share request timed out (60s)' });
+    }, 60_000);
+
+    pendingScreenShareRequests.set(id, {
+      resolve: (response) => {
+        clearTimeout(timer);
+        resolve(response);
+      },
+    });
+
+    broadcast({ type: 'screen_share_request', id });
+  });
+}
+
+function resolveScreenShareRequest(id: string, response: { ok: boolean; message: string }): void {
+  const pending = pendingScreenShareRequests.get(id);
+  if (pending) {
+    pendingScreenShareRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
+/**
+ * Ask the browser to capture a frame from its active screen share.
+ * If screen sharing isn't active, automatically requests the user start sharing first.
+ * Called by the request_screenshot tool.
+ */
+export async function requestBrowserScreenshot(): Promise<{ ok: boolean; data?: string; mediaType?: string; message: string }> {
+  const id = `sc_${++screenshotRequestCounter}`;
+
+  // Try screenshot directly — if screen share isn't active, the browser will reply with ok:false
+  const result = await new Promise<{ ok: boolean; data?: string; mediaType?: string; message: string }>((resolve) => {
     const timer = setTimeout(() => {
       pendingScreenshotRequests.delete(id);
       resolve({ ok: false, message: 'Screenshot request timed out (30s)' });
@@ -242,6 +279,32 @@ export function requestBrowserScreenshot(): Promise<{ ok: boolean; data?: string
     });
 
     broadcast({ type: 'screenshot_request', id });
+  });
+
+  if (result.ok) return result;
+
+  // Screen share wasn't active — ask the browser to start it now
+  const shareResult = await requestBrowserScreenShare();
+  if (!shareResult.ok) {
+    return { ok: false, message: shareResult.message };
+  }
+
+  // Retry screenshot now that sharing is active
+  const retryId = `sc_${++screenshotRequestCounter}`;
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingScreenshotRequests.delete(retryId);
+      resolve({ ok: false, message: 'Screenshot request timed out after starting screen share (30s)' });
+    }, 30_000);
+
+    pendingScreenshotRequests.set(retryId, {
+      resolve: (response) => {
+        clearTimeout(timer);
+        resolve(response);
+      },
+    });
+
+    broadcast({ type: 'screenshot_request', id: retryId });
   });
 }
 
@@ -472,7 +535,7 @@ async function processAgentTurn(
       onCompact: (summary) => {
         addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
       },
-      onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; max_iterations?: number }),
+      onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; thinking?: ThinkingLevel; max_iterations?: number; capabilities?: string[] }),
       onModelSwitch: (newModel, reason) => {
         model = newModel;
         agent.currentModel = newModel;
@@ -565,10 +628,17 @@ function buildBackgroundToolSet(allTools: ProviderToolDef[], capabilities: Set<s
  * Background agents are capability-restricted by default (read-only, no network).
  * The caller can grant additional capabilities via the `capabilities` field.
  */
+function thinkingForModel(m: string): ThinkingLevel {
+  if (m.includes('haiku')) return 'off';
+  if (m.includes('sonnet')) return 'low';
+  return 'high';
+}
+
 function dispatchBackgroundTask(input: {
   task: string;
   context?: string;
   model?: string;
+  thinking?: ThinkingLevel;
   max_iterations?: number;
   capabilities?: string[];
 }): string {
@@ -578,6 +648,7 @@ function dispatchBackgroundTask(input: {
   void (async () => {
     try {
       const taskModel = input.model ?? model;
+      const taskThinking: ThinkingLevel = input.thinking ?? thinkingForModel(taskModel);
       const maxIter = Math.min(input.max_iterations ?? 25, 50);
       const capabilities = new Set(input.capabilities ?? []);
 
@@ -630,7 +701,7 @@ function dispatchBackgroundTask(input: {
           systemPrompt,
           subMessages,
           subToolDefs,
-          { model: taskModel, maxTokens: 16384, thinking: agent.thinkingLevel },
+          { model: taskModel, maxTokens: 16384, thinking: taskThinking },
         );
 
         taskInputTokens += response.usage.input + response.usage.cacheRead + response.usage.cacheWrite;
@@ -1321,6 +1392,9 @@ function handleClient(socket: Socket): void {
               ...(cmd.mediaType !== undefined ? { mediaType: cmd.mediaType } : {}),
               message: cmd.message,
             });
+            break;
+          case 'screen_share_response':
+            resolveScreenShareRequest(cmd.id, { ok: cmd.ok, message: cmd.message });
             break;
           case 'ping':
             send(socket, { type: 'pong' });
