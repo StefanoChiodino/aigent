@@ -20,13 +20,18 @@
   - **Why:** Prevent data exfiltration. The agent shouldn't be able to POST sensitive host data to arbitrary domains without permission.
   - **What:** Implement a domain-based allow/prompt/deny model analogous to `ExecPermissions`.
   - **Tasks:**
-    - Define `FetchPermissions` interface in `src/safety.ts` (e.g., `alwaysAllow: string[]`, `prompt: string[]`, `deny: string[]`).
-    - Update `validateFetchUrl` to take the hostname and match against globs.
+    - Define `FetchPermissions` interface (e.g., `alwaysAllow: string[]`, `prompt: string[]`, `deny: string[]`).
+    - Update `validateFetchUrl` in `src/safety.ts` to parse the hostname and match against globs.
     - Default unlisted domains to `prompt`.
     - Update `fetch` and `fetch_readonly` in `src/tools.ts` to request gatekeeper approval for `prompt` domains.
 
 - [ ] **Harden SSRF protection against DNS rebinding**
-  - Ensure `validateFetchUrl` resolves the IP via `dns.lookup` and that `curl` uses that exact IP via `--resolve` to prevent TOCTOU bypass.
+  - **Why:** The current regex check on the string hostname is vulnerable to Time-Of-Check to Time-Of-Use (TOCTOU) attacks. An attacker can use a domain that resolves to a public IP during validation, but changes to `127.0.0.1` a millisecond later when `curl` runs.
+  - **What:** Pin the IP address during validation and force `curl` to use it.
+  - **Tasks:**
+    - Use `dns.promises.lookup` in `validateFetchUrl` to resolve the hostname.
+    - Run the private IP regex checks against the *resolved IP address*, not the hostname.
+    - Update `src/tools.ts` to pass the `--resolve` flag to `curl` (e.g., `curl --resolve malicious.com:80:127.0.0.1 http://malicious.com`).
 
 - [ ] **`fetch` response size cap**
   - Hard limit (e.g. 10 MB) to prevent large-payload exfiltration or OOM from a malicious URL.
@@ -56,7 +61,11 @@
 - [ ] **Duplicate mount suppression**
   - **Why:** The agent sometimes forgets it already has a mount and re-requests it, triggering a redundant permission modal.
   - **What:** The Gatekeeper should silently auto-approve redundant requests and return context.
-  - **Tasks:** Update `requestMount` logic in `server.ts`/`tools.ts` to check if `path` and `mode` (where `rw` satisfies `ro`) are already mounted. Return success silently if true.
+  - **Tasks:**
+    - Update `requestMount` logic in `server.ts`/`tools.ts`.
+    - Check if the requested absolute host `path` and `mode` (where `rw` satisfies `ro`) are already in the active mounts list.
+    - If true, return `res.ok = true` without triggering the web UI. Inject a context note: `"Mount already active: ${path} (${mountMode})"`.
+
 - [ ] Not all models support reasoning; UI currently allows enabling it on models that don't (e.g. Haiku) — should disable the toggle or warn for incompatible models.
 - [ ] Messages disappear on hard browser reload — see UI section below.
 
@@ -83,7 +92,11 @@
 - [ ] **Persist conversation in browser storage**
   - **Why:** Prevent data loss of the visual chat history and sidebar state on accidental refresh.
   - **What:** Use `localStorage` with incremental append for messages.
-  - **Tasks:** Update `web/index.html` to save the message array, `aigent_model`, `aigent_reasoning`, and `aigent_effort`. Sync backend load with storage.
+  - **Tasks:**
+    - Update `web/index.html` to store the array of messages in `localStorage.getItem('aigent_chat_history')`.
+    - Retrieve and render the history on page load. Persist `aigent_model`, `aigent_reasoning`, and `aigent_effort`.
+    - If the user clears the chat via `/reset`, clear the storage.
+
 - [ ] **Reasoning / tool usage display** — show thinking blocks and tool calls more transparently in the UI without cluttering the main chat flow.
 - [ ] **Browser extension** — read/write page DOM, manage tabs, fill forms, navigate pages; enables agentic browser automation without the overhead of a visual model.
 - [ ] **Browser a11y tree** — expose structured page content (labels, roles, interactive elements) via the Accessibility Object Model or Chrome DevTools Protocol; cheaper and more reliable than screenshots for understanding page structure.
