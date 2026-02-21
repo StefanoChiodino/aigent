@@ -103,12 +103,6 @@
 
 ## 🔒 Security & Safety
 
-- [ ] **`fetch` policy hardening** — Add `HTTPS_ONLY` mode, per-domain allowlist/blocklist, max response size enforcement
-- [ ] **`host.open` scheme allowlist** — Block `file://`, `javascript:`, etc. from `host` tool's `open` capability
-- [ ] **Tool-level config** — Add a `TOOLS.md`-driven per-tool on/off flag so dangerous tools can be disabled without code changes
-- [ ] **Structured request logging** — Emit a JSON log line per tool call (name, duration, result size, exit code) for post-mortem trail
-- [ ] **Self-modification gate tightening** — Add a file allowlist check before any write/edit/patch on `/app/src/` — require an explicit `request_config_write`-style approval for changes to core files
-- [ ] **`CONTRIBUTING.md` + threat model doc** — Write the missing threat model and extension guide
 - [ ] **`fetch` permission tiers** — prompt/allow/deny by domain, analogous to exec permissions; default: `prompt` for any external domain not on an allow-list
 - [ ] **`fetch` response size cap** — hard limit (e.g. 10 MB) to prevent large-payload exfiltration or OOM from a malicious URL
 - [ ] **`host.open` default to prompt** — currently unrestricted; add domain/scheme policy (e.g. block `file://`, `javascript:`, non-HTTPS)
@@ -161,13 +155,14 @@
 - [ ] **README: "Extending with MCP"** — document `mcp.json` format with a working example (e.g. `@modelcontextprotocol/server-github`) so contributors know how to add tools without touching core code
 - [ ] **README: MCP permissions** — document the permission model once implemented
 - [ ] **CONTRIBUTING.md** — explain the "run the agent and ask it to implement something" workflow; code style, PR expectations, how to add a built-in tool vs. an MCP tool
+- [ ] **Threat Model documentation** — formally document the security boundaries and assumptions in `docs/threat-model.md`
 
 ---
 
 ## 🧪 Testing
 
+- [ ] **Safety unit tests** — implement `make test` target and add `node:test` coverage for `src/safety.ts` methods
 - [ ] **Integration smoke test** — headless `repl.ts`-based test: start agent, send a fixed message, assert a tool call is made; catches startup regressions
-- [ ] **Safety unit tests** — table-driven tests for `checkExecPermission`, `validateWritePath`, `validateFetchUrl`, `validateReadonlyCommand` covering known-good, known-bad, and edge-case inputs; these are the highest-correctness-value tests in the codebase
 - [ ] **Compaction round-trip test** — verify a compacted conversation can be continued without context errors or tool schema mismatches
 
 ---
