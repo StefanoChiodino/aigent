@@ -406,33 +406,36 @@ function resolveConfigWriteRequest(id: string, response: { ok: boolean; message:
   }
 }
 
-// --- Patch request handling ---
+// --- Host edit-file request handling ---
 
-const pendingPatchRequests = new Map<string, {
-  diff: string;
+const pendingEditFileRequests = new Map<string, {
+  path: string;
+  edits: Array<{ old_str: string; new_str: string; index?: number }>;
   reason: string;
   resolve: (response: { ok: boolean; message: string }) => void;
 }>();
-let patchCounter = 0;
+let editFileCounter = 0;
 
 /**
- * Send a patch request to the gatekeeper and wait for approval.
- * The gatekeeper shows the unified diff to the user, who approves or denies.
+ * Send a host_edit_file request to the gatekeeper and wait for approval.
+ * The gatekeeper matches eagerly, builds a diff, shows it to the user, who approves or denies.
  */
-export function requestPatch(
-  diff: string,
+export function requestHostEditFile(
+  path: string,
+  edits: Array<{ old_str: string; new_str: string; index?: number }>,
   reason: string,
 ): Promise<{ ok: boolean; message: string }> {
-  const id = `patch_${++patchCounter}`;
+  const id = `edit_${++editFileCounter}`;
 
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      pendingPatchRequests.delete(id);
-      resolve({ ok: false, message: 'Patch request timed out (120s)' });
+      pendingEditFileRequests.delete(id);
+      resolve({ ok: false, message: 'Edit request timed out (120s)' });
     }, 120_000);
 
-    pendingPatchRequests.set(id, {
-      diff,
+    pendingEditFileRequests.set(id, {
+      path,
+      edits,
       reason,
       resolve: (response) => {
         clearTimeout(timer);
@@ -440,14 +443,14 @@ export function requestPatch(
       },
     });
 
-    broadcast({ type: 'patch_request', id, diff, reason });
+    broadcast({ type: 'edit_file_request', id, path, edits, reason });
   });
 }
 
-function resolvePatchRequest(id: string, response: { ok: boolean; message: string }): void {
-  const pending = pendingPatchRequests.get(id);
+function resolveEditFileRequest(id: string, response: { ok: boolean; message: string }): void {
+  const pending = pendingEditFileRequests.get(id);
   if (pending) {
-    pendingPatchRequests.delete(id);
+    pendingEditFileRequests.delete(id);
     pending.resolve(response);
   }
 }
@@ -1160,6 +1163,11 @@ function handleCommand(cmd: string): boolean {
     return true;
   }
 
+  if (trimmed === '/context') {
+    broadcast({ type: 'context_breakdown', breakdown: agent.getContextBreakdown() });
+    return true;
+  }
+
   if (trimmed === '/tasks') {
     const allTasks = taskQueue.getInfos();
     if (allTasks.length === 0) {
@@ -1225,6 +1233,7 @@ function handleCommand(cmd: string): boolean {
       '  /model [name]       Show or switch model\n' +
       '  /image <path> [msg] Send an image with optional message\n' +
       '  /usage              Show token usage (session + lifetime)\n' +
+      '  /context            Show context window breakdown by component\n' +
       '  /tasks              Show background tasks\n' +
       '  /profiles           List profiles\n' +
       '  /profile <name>     Switch profile\n' +
@@ -1329,8 +1338,8 @@ function handleClient(socket: Socket): void {
   for (const [id, req] of pendingConfigWriteRequests) {
     send(socket, { type: 'config_write_request', id, file: req.file, content: req.content, reason: req.reason });
   }
-  for (const [id, req] of pendingPatchRequests) {
-    send(socket, { type: 'patch_request', id, diff: req.diff, reason: req.reason });
+  for (const [id, req] of pendingEditFileRequests) {
+    send(socket, { type: 'edit_file_request', id, path: req.path, edits: req.edits, reason: req.reason });
   }
   for (const [id, req] of pendingExecRequests) {
     send(socket, { type: 'exec_request', id, command: req.command });
@@ -1433,8 +1442,8 @@ function handleClient(socket: Socket): void {
           case 'config_write_response':
             resolveConfigWriteRequest(cmd.id, cmd);
             break;
-          case 'patch_response':
-            resolvePatchRequest(cmd.id, cmd);
+          case 'edit_file_response':
+            resolveEditFileRequest(cmd.id, cmd);
             break;
           case 'exec_response':
             resolveExecRequest(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
@@ -1449,6 +1458,9 @@ function handleClient(socket: Socket): void {
             break;
           case 'screen_share_response':
             resolveScreenShareRequest(cmd.id, { ok: cmd.ok, message: cmd.message });
+            break;
+          case 'context_breakdown_request':
+            send(socket, { type: 'context_breakdown', breakdown: agent.getContextBreakdown() });
             break;
           case 'ping':
             send(socket, { type: 'pong' });

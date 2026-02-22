@@ -54,6 +54,18 @@ interface ServerState {
   pendingResults: number;
 }
 
+interface ContextBreakdown {
+  systemBase: number;
+  systemBaseContent?: string;
+  workspaceContext: number;
+  workspaceContent?: string;
+  toolDefs: number;
+  toolDefsContent?: string;
+  messages: { role: string; tokens: number; preview?: string }[];
+  messagesTotal: number;
+  total: number;
+}
+
 type ServerEvent =
   | { type: 'connected'; state: ServerState }
   | { type: 'text'; content: string }
@@ -74,6 +86,7 @@ type ServerEvent =
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
+  | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'pong' };
 
 // ── Command registry (mirrors AnsiTUI) ───────────────────────
@@ -96,6 +109,7 @@ const COMMANDS: CommandDef[] = [
   { name: '/model',     desc: 'Show or switch model',      argHint: '<name>' },
   { name: '/image',     desc: 'Send an image',             argHint: '<path> [msg]' },
   { name: '/usage',     desc: 'Token usage stats' },
+  { name: '/context',   desc: 'Context window breakdown' },
   { name: '/tasks',     desc: 'Background tasks' },
   { name: '/profiles',  desc: 'List profiles' },
   { name: '/profile',   desc: 'Switch profile',            argHint: '<name>' },
@@ -411,6 +425,28 @@ function setClientSetting(key: string, value: boolean | number | string): void {
   }).then(() => { showSettingsToast(); }).catch(() => { /* localStorage cache still updated */ });
 }
 
+// ── Chat history persistence ──────────────────────────────────
+
+const CHAT_HISTORY_KEY = 'aigent_chat_history';
+
+function saveChatHistory(): void {
+  try {
+    localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(messages));
+  } catch { /* quota exceeded — ignore */ }
+}
+
+function loadChatHistory(): DisplayMessage[] {
+  try {
+    const raw = localStorage.getItem(CHAT_HISTORY_KEY);
+    if (raw) return JSON.parse(raw) as DisplayMessage[];
+  } catch { /* corrupt — ignore */ }
+  return [];
+}
+
+function clearChatHistory(): void {
+  localStorage.removeItem(CHAT_HISTORY_KEY);
+}
+
 // ── State ────────────────────────────────────────────────────
 
 let messages: DisplayMessage[] = [];
@@ -494,7 +530,7 @@ const $toolLabel = $('tool-label');
 const $connBadge = $('conn-badge');
 const $taskBadge = $('task-badge');
 const $costBadge = $('cost-badge');
-const $ctxMeter = $('ctx-meter');
+const $ctxMeterWrap = $('ctx-meter-wrap');
 const $ctxFill = $('ctx-fill');
 const $ctxLabel = $('ctx-label');
 const $errorBar = $('error-bar');
@@ -541,6 +577,14 @@ const $settingsBody = $('settings-body');
 const $settingsBtn = $('settings-btn') as HTMLButtonElement;
 const $settingsClose = $('settings-close') as HTMLButtonElement;
 const $settingsToast = $('settings-toast');
+
+// Context inspector DOM refs
+const $ctxInspectorOverlay = $('ctx-inspector-overlay');
+const $ctxInspectorClose = $('ctx-inspector-close') as HTMLButtonElement;
+const $ctxInspectorSummary = $('ctx-inspector-summary');
+const $ctxInspectorBars = $('ctx-inspector-bars');
+const $ctxInspectorMessagesHeader = $('ctx-inspector-messages-header');
+const $ctxInspectorMessages = $('ctx-inspector-messages');
 
 let settingsToastTimer: ReturnType<typeof setTimeout> | null = null;
 function showSettingsToast(): void {
@@ -763,7 +807,15 @@ function handleEvent(event: ServerEvent): void {
   switch (event.type) {
     case 'connected':
       connStatus = 'connected';
-      messages = event.state.messages;
+      // Server is the source of truth. Always take its messages when available.
+      // When server has 0 messages, keep the localStorage cache — the server
+      // may not have restored the session yet, or /reset will broadcast a
+      // system message immediately after anyway.
+      if (event.state.messages.length > 0) {
+        messages = event.state.messages;
+        saveChatHistory();
+      }
+      // else: keep current messages (from localStorage restore)
       usage = event.state.usage;
       thinkingLevel = event.state.thinking;
       if (thinkingLevel !== 'off') lastEffortLevel = thinkingLevel;
@@ -870,12 +922,14 @@ function handleEvent(event: ServerEvent): void {
         }
         finalizeStreamEl(event.message.content, event.message.elapsed);
         messages.push(event.message);
+        saveChatHistory();
         streamActive = false;
         streamText = '';
         streamEl = null;
         if (!ttsChunkPlaying) streamTtsBtn = null;
       } else {
         messages.push(event.message);
+        saveChatHistory();
         appendMessage(event.message);
         if (ttsAutoSpeak && event.message.role === 'assistant') {
           const speakContent = extractSpeakContent(event.message.content);
@@ -894,6 +948,7 @@ function handleEvent(event: ServerEvent): void {
         timestamp: new Date().toISOString(),
       };
       messages.push(sysMsg);
+      saveChatHistory();
       appendMessage(sysMsg);
       break;
     }
@@ -1054,6 +1109,10 @@ function handleEvent(event: ServerEvent): void {
       })();
       break;
     }
+
+    case 'context_breakdown':
+      renderContextInspector(event.breakdown);
+      break;
 
     case 'pong':
       break;
@@ -1367,7 +1426,7 @@ function appendMessage(msg: DisplayMessage, animate = true): void {
 
   const label = document.createElement('div');
   label.className = 'role-label';
-  label.textContent = msg.role === 'assistant' ? 'agent' : msg.role;
+  label.textContent = msg.role === 'assistant' ? 'aigent' : msg.role;
   if (msg.elapsed !== undefined) {
     const elapsed = document.createElement('span');
     elapsed.className = 'elapsed';
@@ -1417,7 +1476,7 @@ function createStreamingEl(): HTMLElement {
 
   const label = document.createElement('div');
   label.className = 'role-label';
-  label.textContent = 'agent';
+  label.textContent = 'aigent';
 
   const stopBtn = document.createElement('button');
   stopBtn.className = 'tts-btn hidden speaking';
@@ -1701,7 +1760,7 @@ function updateHeader(): void {
   // Context meter
   const ctxUsed = usage.contextTokens ?? 0;
   if (ctxUsed > 0) {
-    $ctxMeter.classList.remove('hidden');
+    $ctxMeterWrap.classList.remove('hidden');
     const pct = Math.min(100, Math.round((ctxUsed / 200_000) * 100));
     $ctxFill.style.width = `${pct}%`;
     // Color the bar based on usage
@@ -1716,7 +1775,7 @@ function updateHeader(): void {
       : String(ctxUsed);
     $ctxLabel.textContent = `${tokStr}`;
   } else {
-    $ctxMeter.classList.add('hidden');
+    $ctxMeterWrap.classList.add('hidden');
   }
 }
 
@@ -3388,6 +3447,358 @@ function closeSettings(): void {
   $settingsOverlay.classList.add('hidden');
 }
 
+// ── Context inspector ─────────────────────────────────────────
+
+const CTX_COLORS = [
+  { bg: '#7c6cf0', light: 'rgba(124,108,240,0.15)' }, // accent  — system prompt
+  { bg: '#40b080', light: 'rgba(64,176,128,0.15)'  }, // success — workspace
+  { bg: '#e0a040', light: 'rgba(224,160,64,0.15)'  }, // warning — tool defs
+  { bg: '#58a6ff', light: 'rgba(88,166,255,0.15)'  }, // blue    — conversation
+];
+
+const CTX_LABELS = ['System prompt', 'Workspace', 'Tool definitions', 'Messages'];
+
+function fmtTok(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+/** Detect if text looks like markdown (has headings, bullets, or fences). */
+function looksLikeMarkdown(text: string): boolean {
+  return /^(#{1,6} |```|> |\* |- |\d+\. )/m.test(text);
+}
+
+/** Syntax-highlight markdown text, returning an HTML string (for use in <pre>). */
+function highlightMarkdown(text: string): string {
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let inFence = false;
+  let fenceLang = '';
+
+  for (const rawLine of lines) {
+    const line = esc(rawLine);
+
+    // Fenced code block toggle
+    const fenceMatch = rawLine.match(/^(`{3,}|~{3,})([\w-]*)/);
+    if (fenceMatch) {
+      if (!inFence) {
+        inFence = true;
+        fenceLang = fenceMatch[2] ?? '';
+        const langLabel = fenceLang ? ` <span class="ctx-hl-fence-lang">${esc(fenceLang)}</span>` : '';
+        out.push(`<span class="ctx-hl-fence">${esc(fenceMatch[1]!)}</span>${langLabel}`);
+      } else {
+        inFence = false;
+        out.push(`<span class="ctx-hl-fence">${line}</span>`);
+      }
+      continue;
+    }
+
+    if (inFence) {
+      // Inside a code fence — dim the line slightly
+      out.push(`<span class="ctx-hl-code">${line}</span>`);
+      continue;
+    }
+
+    // Headings
+    const headingMatch = rawLine.match(/^(#{1,6}) (.+)/);
+    if (headingMatch) {
+      const hashes = esc(headingMatch[1]!);
+      const title = inlineMarkdown(esc(headingMatch[2]!));
+      const level = headingMatch[1]!.length;
+      out.push(`<span class="ctx-hl-h ctx-hl-h${level}">${hashes} ${title}</span>`);
+      continue;
+    }
+
+    // Blockquote
+    if (rawLine.startsWith('> ')) {
+      out.push(`<span class="ctx-hl-blockquote">${inlineMarkdown(line)}</span>`);
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(rawLine.trim())) {
+      out.push(`<span class="ctx-hl-hr">${line}</span>`);
+      continue;
+    }
+
+    // List items (bullet or numbered)
+    const bulletMatch = rawLine.match(/^(\s*)([-*+]|\d+\.) (.+)/);
+    if (bulletMatch) {
+      const indent = esc(bulletMatch[1]!);
+      const marker = esc(bulletMatch[2]!);
+      const content = inlineMarkdown(esc(bulletMatch[3]!));
+      out.push(`${indent}<span class="ctx-hl-bullet">${marker}</span> ${content}`);
+      continue;
+    }
+
+    // Regular line — apply inline formatting
+    out.push(inlineMarkdown(line));
+  }
+
+  return out.join('\n');
+}
+
+/** Apply inline markdown formatting (bold, italic, inline code, links) to an already-HTML-escaped line. */
+function inlineMarkdown(line: string): string {
+  return line
+    // Inline code — must come first to avoid double-processing
+    .replace(/`([^`]+)`/g, '<span class="ctx-hl-icode">$1</span>')
+    // Bold **text** or __text__
+    .replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_m, a, b) =>
+      `<span class="ctx-hl-bold">${a ?? b}</span>`)
+    // Italic *text* or _text_ (single, not inside word boundaries)
+    .replace(/(?<![*_])\*(?!\s)([^*]+?)(?<!\s)\*(?![*_])/g, '<span class="ctx-hl-italic">*$1*</span>')
+    // Markdown links [label](url)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+      '<span class="ctx-hl-link-label">[$1]</span><span class="ctx-hl-link-url">($2)</span>');
+}
+
+/** Syntax-highlight a string as JSON or plain text, returning an HTML string. */
+function highlightContent(text: string): string {
+  // Try to parse as JSON and pretty-print with highlighting
+  try {
+    const parsed = JSON.parse(text);
+    const pretty = JSON.stringify(parsed, null, 2);
+    // Escape HTML first, then apply JSON token highlighting.
+    // After escaping, literal \n inside JSON string values appears as the
+    // two characters \n — replace those with a line-break so they render properly.
+    const escaped = pretty
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    return escaped
+      // Render escaped \n sequences inside string values as real line breaks
+      .replace(/\\n/g, '\n')
+      // JSON syntax highlighting (applied after \n replacement so spans don't break)
+      .replace(/^("(?:\\.|[^"\\])*")(\s*:)/gm, '<span class="ctx-hl-key">$1</span>$2')
+      .replace(/:\s*("(?:[^"\\]|\\.)*")/g, (_m, s) => ': <span class="ctx-hl-str">' + s + '</span>')
+      .replace(/:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g, ': <span class="ctx-hl-num">$1</span>')
+      .replace(/:\s*(true|false|null)\b/g, ': <span class="ctx-hl-kw">$1</span>');
+  } catch {
+    // Not JSON — check if it looks like markdown
+    if (looksLikeMarkdown(text)) return highlightMarkdown(text);
+    // Plain text — escape HTML only; real \n characters render naturally in <pre>
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+}
+
+/** Creates an expandable content panel below a row. Returns the panel element. */
+function makeExpandPanel(content: string): HTMLElement {
+  const panel = document.createElement('pre');
+  panel.className = 'ctx-expand-panel hidden';
+  panel.innerHTML = highlightContent(content);
+  return panel;
+}
+
+function renderContextInspector(bd: ContextBreakdown): void {
+  // Ensure overlay is visible (handles both click-triggered and slash-command-triggered flows)
+  $ctxInspectorOverlay.classList.remove('hidden');
+
+  const segments = [bd.systemBase, bd.workspaceContext, bd.toolDefs, bd.messagesTotal];
+  const segmentContents = [bd.systemBaseContent, bd.workspaceContent, bd.toolDefsContent, undefined];
+  const total = bd.total || 1;
+
+  // Summary line
+  const contextWindowSize = 200_000;
+  const pctOfWindow = Math.round(total / contextWindowSize * 100);
+  $ctxInspectorSummary.innerHTML =
+    `<strong>~${fmtTok(total)}</strong> tokens estimated &mdash; ${pctOfWindow}% of 200k window`;
+
+  // Stacked bar
+  const stackBar = document.createElement('div');
+  stackBar.className = 'ctx-stacked-bar';
+  for (const [i, val] of segments.entries()) {
+    const seg = document.createElement('div');
+    seg.className = 'ctx-stacked-segment';
+    seg.style.width = `${Math.max(0, val / total * 100).toFixed(1)}%`;
+    seg.style.background = CTX_COLORS[i]!.bg;
+    stackBar.appendChild(seg);
+  }
+  $ctxInspectorBars.innerHTML = '';
+  $ctxInspectorBars.appendChild(stackBar);
+
+  // Per-component rows
+  for (const [i, val] of segments.entries()) {
+    const pct = Math.round(val / total * 100);
+    const color = CTX_COLORS[i]!;
+    const content = segmentContents[i];
+
+    const rowWrap = document.createElement('div');
+    rowWrap.className = 'ctx-bar-row-wrap';
+
+    const row = document.createElement('div');
+    row.className = 'ctx-bar-row' + (content ? ' ctx-clickable' : '');
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'ctx-bar-label';
+    const swatch = document.createElement('div');
+    swatch.className = 'ctx-bar-swatch';
+    swatch.style.background = color.bg;
+    labelEl.appendChild(swatch);
+    labelEl.appendChild(document.createTextNode(CTX_LABELS[i]!));
+
+    if (content) {
+      const chevron = document.createElement('span');
+      chevron.className = 'ctx-chevron';
+      chevron.textContent = '›';
+      labelEl.appendChild(chevron);
+    }
+
+    const track = document.createElement('div');
+    track.className = 'ctx-bar-track';
+    const fill = document.createElement('div');
+    fill.className = 'ctx-bar-fill';
+    fill.style.width = `${Math.max(0, val / total * 100).toFixed(1)}%`;
+    fill.style.background = color.bg;
+    track.appendChild(fill);
+
+    const tokEl = document.createElement('div');
+    tokEl.className = 'ctx-bar-tokens';
+    tokEl.textContent = fmtTok(val);
+
+    const pctEl = document.createElement('div');
+    pctEl.className = 'ctx-bar-pct';
+    pctEl.textContent = `${pct}%`;
+
+    row.appendChild(labelEl);
+    row.appendChild(track);
+    row.appendChild(tokEl);
+    row.appendChild(pctEl);
+    rowWrap.appendChild(row);
+
+    if (content) {
+      const panel = makeExpandPanel(content);
+      rowWrap.appendChild(panel);
+      row.addEventListener('click', () => {
+        const open = !panel.classList.contains('hidden');
+        panel.classList.toggle('hidden', open);
+        const chevron = row.querySelector('.ctx-chevron');
+        if (chevron) chevron.textContent = open ? '›' : '⌄';
+      });
+    }
+
+    $ctxInspectorBars.appendChild(rowWrap);
+  }
+
+  // Per-message breakdown
+  const msgs = bd.messages;
+  if (msgs.length === 0) {
+    $ctxInspectorMessagesHeader.textContent = '';
+    $ctxInspectorMessages.innerHTML = '';
+    return;
+  }
+
+  $ctxInspectorMessagesHeader.textContent = `Messages in context (${msgs.length} — click any row to inspect)`;
+
+  const MAX_SHOW = 20;
+  const skipped = Math.max(0, msgs.length - MAX_SHOW);
+  const shown = msgs.slice(skipped);
+
+  const table = document.createElement('div');
+  table.className = 'ctx-messages-table';
+
+  if (skipped > 0) {
+    const skippedTok = msgs.slice(0, skipped).reduce((s, m) => s + m.tokens, 0);
+    const omitRow = document.createElement('div');
+    omitRow.className = 'ctx-omitted-row';
+    omitRow.textContent = `… ${skipped} earlier messages (${fmtTok(skippedTok)} tokens)`;
+    table.appendChild(omitRow);
+  }
+
+  const maxMsgTokens = Math.max(...shown.map((m) => m.tokens), 1);
+
+  for (const [i, m] of shown.entries()) {
+    const idx = skipped + i + 1;
+
+    const rowWrap = document.createElement('div');
+    rowWrap.className = 'ctx-msg-row-wrap';
+
+    const row = document.createElement('div');
+    row.className = 'ctx-msg-row' + (m.preview ? ' ctx-clickable' : '');
+
+    const idxEl = document.createElement('div');
+    idxEl.className = 'ctx-msg-idx';
+    idxEl.textContent = String(idx);
+
+    const roleEl = document.createElement('div');
+    roleEl.className = `ctx-msg-role ${m.role}`;
+    const roleLabel = m.role === 'tool_result' ? 'tool' : m.role;
+    roleEl.textContent = roleLabel;
+
+    if (m.preview) {
+      const chevron = document.createElement('span');
+      chevron.className = 'ctx-msg-chevron';
+      chevron.textContent = ' ›';
+      roleEl.appendChild(chevron);
+    }
+
+    const barWrap = document.createElement('div');
+    barWrap.className = 'ctx-msg-bar-wrap';
+    const barFill = document.createElement('div');
+    barFill.className = 'ctx-msg-bar-fill';
+    barFill.style.width = `${(m.tokens / maxMsgTokens * 100).toFixed(1)}%`;
+    barWrap.appendChild(barFill);
+
+    const tokEl = document.createElement('div');
+    tokEl.className = 'ctx-msg-tokens';
+    tokEl.textContent = fmtTok(m.tokens);
+
+    row.appendChild(idxEl);
+    row.appendChild(roleEl);
+    row.appendChild(barWrap);
+    row.appendChild(tokEl);
+    rowWrap.appendChild(row);
+
+    if (m.preview) {
+      const panel = makeExpandPanel(m.preview);
+      rowWrap.appendChild(panel);
+      row.addEventListener('click', () => {
+        const open = !panel.classList.contains('hidden');
+        panel.classList.toggle('hidden', open);
+        const chevron = row.querySelector('.ctx-msg-chevron');
+        if (chevron) chevron.textContent = open ? ' ›' : ' ⌄';
+      });
+    }
+
+    table.appendChild(rowWrap);
+  }
+
+  $ctxInspectorMessages.innerHTML = '';
+  $ctxInspectorMessages.appendChild(table);
+}
+
+function openContextInspector(): void {
+  // Show overlay with a loading state immediately, populate when data arrives
+  $ctxInspectorSummary.textContent = 'Loading…';
+  $ctxInspectorBars.innerHTML = '';
+  $ctxInspectorMessagesHeader.textContent = '';
+  $ctxInspectorMessages.innerHTML = '';
+  $ctxInspectorOverlay.classList.remove('hidden');
+  wsSend({ type: 'context_breakdown_request' });
+}
+
+function closeContextInspector(): void {
+  $ctxInspectorOverlay.classList.add('hidden');
+}
+
+// Click context meter (header or sidebar) → open inspector
+$ctxMeterWrap.style.cursor = 'pointer';
+$ctxMeterWrap.addEventListener('click', openContextInspector);
+// Sidebar: click the whole context section
+const $sbCtxSection = document.querySelector('.ctx-meter-section') as HTMLElement;
+if ($sbCtxSection) {
+  $sbCtxSection.style.cursor = 'pointer';
+  $sbCtxSection.addEventListener('click', openContextInspector);
+}
+
+$ctxInspectorClose.addEventListener('click', closeContextInspector);
+$ctxInspectorOverlay.addEventListener('click', (e) => {
+  if (e.target === $ctxInspectorOverlay) closeContextInspector();
+});
+
 $settingsBtn.addEventListener('click', openSettings);
 $settingsClose.addEventListener('click', closeSettings);
 
@@ -3396,8 +3807,9 @@ $settingsOverlay.addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !$settingsOverlay.classList.contains('hidden')) {
-    closeSettings();
+  if (e.key === 'Escape') {
+    if (!$ctxInspectorOverlay.classList.contains('hidden')) closeContextInspector();
+    else if (!$settingsOverlay.classList.contains('hidden')) closeSettings();
   }
 });
 
@@ -3411,6 +3823,18 @@ $sbTtsRateLabel.textContent = ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePc
 if (micSticky) {
   $micSticky.classList.add('active');
   void startMic();
+}
+
+// Restore chat history from localStorage so messages are visible immediately
+// while the WebSocket is connecting. The server will overwrite on 'connected'.
+try {
+  const savedHistory = loadChatHistory();
+  if (savedHistory.length > 0) {
+    messages = savedHistory;
+    renderAllMessages();
+  }
+} catch {
+  clearChatHistory();
 }
 
 updateHeader();

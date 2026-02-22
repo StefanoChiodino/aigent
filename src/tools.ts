@@ -579,30 +579,41 @@ const requestConfigWriteTool: ToolDef = {
   },
 };
 
-const applyPatchTool: ToolDef = {
-  name: 'apply_patch',
+const hostEditFileTool: ToolDef = {
+  name: 'host_edit_file',
   description:
-    'Apply a unified diff to one or more files on the host filesystem. The user will see a ' +
-    'code-review-style diff and approve or deny before anything is written. Use this to make ' +
-    'targeted edits without needing a full rw mount — the agent only needs ro access to read files. ' +
-    'Supports multi-file diffs: include multiple --- a/ +++ b/ sections in a single diff string. ' +
-    'Paths in the diff must be absolute container paths (e.g. /home/user/myapp/src/foo.ts — container paths mirror host paths exactly). ' +
-    'Produce the diff in standard unified diff format with --- a/path, +++ b/path, and @@ hunks.',
+    'Make targeted str_replace edits to a file on the host filesystem. The user sees a diff ' +
+    'and approves or denies before anything is written. Use this instead of requesting a full rw mount. ' +
+    'Each edit finds old_str verbatim in the file and replaces it with new_str. ' +
+    'If old_str appears more than once and no index is given, the call fails immediately with the ' +
+    'line numbers of all matches so you can retry with the correct index (0-based). ' +
+    'Edits within a single call are applied in order; line offsets from earlier edits are tracked automatically.',
   input_schema: {
     type: 'object' as const,
     properties: {
-      diff: {
+      path: {
         type: 'string',
-        description:
-          'Unified diff to apply. May span multiple files. Each file section starts with ' +
-          '--- a/<path> and +++ b/<path> where <path> is the absolute container path.',
+        description: 'Absolute container path of the file to edit (mirrors host path exactly).',
+      },
+      edits: {
+        type: 'array',
+        description: 'Ordered list of str_replace edits to apply.',
+        items: {
+          type: 'object',
+          properties: {
+            old_str: { type: 'string', description: 'Exact text to find (verbatim, including whitespace).' },
+            new_str: { type: 'string', description: 'Text to replace it with. Empty string to delete.' },
+            index: { type: 'number', description: '0-based occurrence index when old_str matches multiple times.' },
+          },
+          required: ['old_str', 'new_str'],
+        },
       },
       reason: {
         type: 'string',
         description: 'Why you want to make these changes. Shown to the user in the approval prompt.',
       },
     },
-    required: ['diff', 'reason'],
+    required: ['path', 'edits', 'reason'],
   },
 };
 
@@ -675,7 +686,7 @@ const searchMemoryTool: ToolDef = {
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
-  hostTool, requestMountTool, requestConfigWriteTool, applyPatchTool, requestScreenshotTool, switchModelTool,
+  hostTool, requestMountTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
   searchMemoryTool,
 ];
 
@@ -711,10 +722,10 @@ interface DispatchTaskInput { task: string; context?: string; model?: string; ma
 interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
 interface RequestMountInput { path: string; mode?: string; reason: string; durationMinutes?: number }
 interface RequestConfigWriteInput { file: string; content: string; reason: string }
-interface ApplyPatchInput { diff: string; reason: string }
+interface HostEditFileInput { path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
 interface SwitchModelInput { model: string; reason?: string }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput | ApplyPatchInput | SwitchModelInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -785,13 +796,9 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       const { file } = input as RequestConfigWriteInput;
       return `config write: ${file}`;
     }
-    case 'apply_patch': {
-      const { diff } = input as ApplyPatchInput;
-      // Extract file paths from diff headers for the summary
-      const files = [...diff.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1]);
-      return files.length > 0
-        ? `apply patch: ${files.slice(0, 2).join(', ')}${files.length > 2 ? ` +${files.length - 2} more` : ''}`
-        : 'apply patch';
+    case 'host_edit_file': {
+      const { path: p, edits } = input as HostEditFileInput;
+      return `edit ${p} (${edits?.length ?? 0} edit${edits?.length === 1 ? '' : 's'})`;
     }
     case 'request_screenshot':
       return 'screenshot from browser';
@@ -1239,14 +1246,14 @@ export async function executeTool(
       return `Config write denied: ${res.message}`;
     }
 
-    case 'apply_patch': {
-      const { diff, reason } = input as ApplyPatchInput;
-      const { requestPatch } = await import('./server.js');
-      const res = await requestPatch(diff, reason);
+    case 'host_edit_file': {
+      const { path: filePath, edits, reason } = input as HostEditFileInput;
+      const { requestHostEditFile } = await import('./server.js');
+      const res = await requestHostEditFile(filePath, edits, reason);
       if (res.ok) {
-        return `Patch applied. ${res.message}`;
+        return `Edit applied. ${res.message}`;
       }
-      return `Patch denied: ${res.message}`;
+      return `Edit denied: ${res.message}`;
     }
 
     case 'request_mount': {

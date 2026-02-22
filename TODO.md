@@ -64,7 +64,7 @@
     - If true, return `res.ok = true` without triggering the web UI. Inject a context note: `"Mount already active: ${path} (${mountMode})"`.
 
 - [ ] Not all models support reasoning; UI currently allows enabling it on models that don't (e.g. Haiku) — should disable the toggle or warn for incompatible models.
-- [ ] Messages disappear on hard browser reload — see UI section below.
+- [x] Messages disappear on hard browser reload — fixed by localStorage persistence.
 
 ---
 
@@ -100,18 +100,13 @@ See `docs/explore-memory-architecture.md` for a breakdown of memory architecture
 - [ ] **Tool description audit** — review all descriptions in `tools.ts`; trim any longer than ~100 tokens where the first sentence already gives the model sufficient context.
 - [ ] **Prompt cache warm-up on startup** — send a minimal no-op message on init to pre-warm the Anthropic prompt cache before the first real user message.
 - [ ] **Compaction prompt refinement** — Ensure LLM-driven summaries preserve critical technical details (specific file paths, bug IDs, code references) rather than just narrative flow.
+- [ ] **Anthropic subscription usage tracking** — Display monthly usage stats (tokens, cost) from Anthropic API to help users monitor their subscription limits and spending.
 
 ---
 
 ## 🖥️ UI / UX
 
-- [ ] **Persist conversation in browser storage**
-  - **Why:** Prevent data loss of the visual chat history and sidebar state on accidental refresh.
-  - **What:** Use `localStorage` with incremental append for messages.
-  - **Tasks:**
-    - Update `web/index.html` to store the array of messages in `localStorage.getItem('aigent_chat_history')`.
-    - Retrieve and render the history on page load. Persist `aigent_model`, `aigent_reasoning`, and `aigent_effort`.
-    - If the user clears the chat via `/reset`, clear the storage.
+- [x] **Persist conversation in browser storage** — messages saved to `aigent_chat_history` in localStorage; restored on page load before WS connects; cleared on `/reset`.
 
 - [ ] **Reasoning / tool usage display** — show thinking blocks and tool calls more transparently in the UI without cluttering the main chat flow.
 - [ ] **Browser extension** — read/write page DOM, manage tabs, fill forms, navigate pages; enables agentic browser automation without the overhead of a visual model.

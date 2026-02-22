@@ -162,11 +162,26 @@ html, body {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+/* Wrapper makes the whole meter + hint clickable */
+#ctx-meter-wrap {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 10px;
+  padding: 2px 4px 2px 2px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+#ctx-meter-wrap:hover {
+  background: var(--bg-raised);
+}
+
 #ctx-meter {
   position: relative;
   width: 80px;
   height: 16px;
-  background: var(--bg-raised);
+  background: var(--bg-hover);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -625,6 +640,33 @@ html, body {
   font-size: 13px;
   color: var(--text-secondary);
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+}
+
+/* Sidebar context section hover */
+.ctx-meter-section {
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  transition: background 0.15s ease;
+}
+
+.ctx-meter-section:hover {
+  background: var(--bg-raised);
+}
+
+/* › hint next to the label */
+.ctx-open-hint {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-left: 2px;
+  transition: color 0.15s ease, transform 0.15s ease;
+  display: inline-block;
+}
+
+#ctx-meter-wrap:hover .ctx-open-hint,
+.ctx-meter-section:hover .ctx-open-hint {
+  color: var(--text-secondary);
+  transform: translateX(2px);
 }
 
 #sb-ctx-meter {
@@ -2612,6 +2654,317 @@ body[data-working] .bokeh {
 @media (min-width: 1200px) {
   #body { max-width: 1200px; }
 }
+
+/* ── Context inspector modal ─────────────────────────────── */
+
+#ctx-inspector-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.15s ease;
+}
+
+#ctx-inspector-overlay.hidden {
+  display: none !important;
+}
+
+#ctx-inspector-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: min(520px, 96vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  animation: scaleIn 0.15s ease;
+  overflow: hidden;
+}
+
+#ctx-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+#ctx-inspector-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#ctx-inspector-body {
+  overflow-y: auto;
+  padding: 18px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+#ctx-inspector-summary {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 18px;
+}
+
+#ctx-inspector-summary strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stacked bar chart */
+.ctx-stacked-bar {
+  display: flex;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  margin-bottom: 18px;
+  background: var(--bg-raised);
+}
+
+.ctx-stacked-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+/* Individual breakdown rows */
+.ctx-bar-row {
+  display: grid;
+  grid-template-columns: 130px 1fr 52px 42px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ctx-bar-row:last-child {
+  border-bottom: none;
+}
+
+.ctx-bar-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.ctx-bar-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.ctx-bar-track {
+  height: 6px;
+  background: var(--bg-raised);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.ctx-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.ctx-bar-tokens {
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-bar-pct {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Messages section */
+.ctx-inspector-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  margin: 20px 0 10px;
+}
+
+.ctx-messages-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.ctx-msg-row {
+  display: grid;
+  grid-template-columns: 28px 90px 1fr 52px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+
+.ctx-msg-row:last-child {
+  border-bottom: none;
+}
+
+.ctx-msg-idx {
+  color: var(--text-secondary);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  text-align: right;
+}
+
+.ctx-msg-role {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ctx-msg-role.user {
+  color: #6080d0;
+  background: rgba(96, 128, 208, 0.12);
+}
+
+.ctx-msg-role.assistant {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.ctx-msg-role.tool_result {
+  color: var(--success);
+  background: rgba(64, 176, 128, 0.1);
+}
+
+.ctx-msg-bar-wrap {
+  height: 4px;
+  background: var(--bg-raised);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.ctx-msg-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+.ctx-msg-tokens {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-omitted-row {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Wrapper for bar/message rows + their expand panel */
+.ctx-bar-row-wrap,
+.ctx-msg-row-wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Rows become last-child selectors are now on wrappers */
+.ctx-bar-row-wrap:last-child .ctx-bar-row,
+.ctx-msg-row-wrap:last-child .ctx-msg-row {
+  border-bottom: none;
+}
+
+/* Clickable rows get a pointer + hover highlight */
+.ctx-clickable {
+  cursor: pointer;
+}
+
+.ctx-clickable:hover {
+  background: var(--bg-raised);
+  border-radius: 4px;
+}
+
+/* Chevron indicator */
+.ctx-chevron,
+.ctx-msg-chevron {
+  font-style: normal;
+  color: var(--text-dim);
+  font-size: 14px;
+  margin-left: 2px;
+  transition: transform 0.15s ease;
+}
+
+/* Expandable content panel */
+.ctx-expand-panel {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-raised);
+  border-left: 2px solid var(--border-subtle);
+  border-radius: 0 4px 4px 0;
+  padding: 8px 10px;
+  margin: 2px 0 6px 15px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.ctx-expand-panel.hidden {
+  display: none;
+}
+
+/* JSON syntax highlighting inside expand panels */
+.ctx-hl-key  { color: #7c9ef5; }   /* object keys — blue */
+.ctx-hl-str  { color: #7ec87e; }   /* string values — green */
+.ctx-hl-num  { color: #f0a050; }   /* numbers — amber */
+.ctx-hl-kw   { color: #cc88ee; }   /* true/false/null — purple */
+
+/* Markdown syntax highlighting inside expand panels */
+.ctx-hl-h         { font-weight: bold; }
+.ctx-hl-h1        { color: #c084fc; }   /* h1 — violet */
+.ctx-hl-h2        { color: #a78bfa; }   /* h2 — purple */
+.ctx-hl-h3        { color: #818cf8; }   /* h3 — indigo */
+.ctx-hl-h4,
+.ctx-hl-h5,
+.ctx-hl-h6        { color: #7c9ef5; }   /* h4-h6 — blue */
+.ctx-hl-blockquote { color: #8888a0; font-style: italic; }
+.ctx-hl-hr        { color: #555568; }
+.ctx-hl-bullet    { color: #f0a050; }   /* list markers — amber */
+.ctx-hl-fence     { color: #555568; }   /* ``` delimiters — dim */
+.ctx-hl-fence-lang { color: #f0a050; font-style: italic; } /* language label */
+.ctx-hl-code      { color: #9ca3af; }   /* fenced code body — muted */
+.ctx-hl-icode     { color: #7ec87e; background: rgba(126,200,126,0.1); border-radius: 3px; padding: 0 2px; } /* `inline code` */
+.ctx-hl-bold      { font-weight: bold; color: #e2e8f0; }
+.ctx-hl-italic    { font-style: italic; color: #cbd5e1; }
+.ctx-hl-link-label { color: #7c9ef5; }  /* [label] — blue */
+.ctx-hl-link-url  { color: #555568; }   /* (url) — dim */
 
 /* ── Settings modal ───────────────────────────────────────── */
 

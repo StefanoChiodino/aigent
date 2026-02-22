@@ -144,6 +144,7 @@ export class Agent {
   private extraSystemPrompt: string;
   /** Track image hashes to deduplicate identical screenshots/images in tool results. */
   private seenImageHashes = new Set<string>();
+  private compactPromise: Promise<void> | null = null;
   readonly providerType: string;
 
   constructor(options: AgentOptions = {}) {
@@ -512,20 +513,36 @@ export class Agent {
   }
 
   private async compact(callbacks?: ChatCallbacks): Promise<void> {
+    // Deduplicate concurrent compaction calls — if one is already running,
+    // wait for it to finish rather than firing another LLM summarization.
+    if (this.compactPromise) {
+      log.info('Compaction already in progress — waiting');
+      await this.compactPromise;
+      return;
+    }
+
     const before = this.messages.length;
     log.info('Compacting', { messagesBefore: before });
 
-    const { messages: compacted, summary } = await compactConversation(
-      this.provider,
-      this.model,
-      this.messages,
-      this.workspacePath,
-    );
+    this.compactPromise = (async () => {
+      const { messages: compacted, summary } = await compactConversation(
+        this.provider,
+        this.model,
+        this.messages,
+        this.workspacePath,
+      );
 
-    if (summary) {
-      this.messages = compacted;
-      log.info('Compacted', { messagesBefore: before, messagesAfter: this.messages.length });
-      callbacks?.onCompact?.(summary);
+      if (summary) {
+        this.messages = compacted;
+        log.info('Compacted', { messagesBefore: before, messagesAfter: this.messages.length });
+        callbacks?.onCompact?.(summary);
+      }
+    })();
+
+    try {
+      await this.compactPromise;
+    } finally {
+      this.compactPromise = null;
     }
   }
 
@@ -695,5 +712,57 @@ export class Agent {
   setExtraSystemPrompt(extra: string): void {
     this.extraSystemPrompt = extra;
     this.reloadSystemPrompt();
+  }
+
+  /**
+   * Estimate token counts for each component of the context window.
+   * Uses chars/4 as a rough heuristic (good enough for diagnostics).
+   */
+  getContextBreakdown(): {
+    systemBase: number;
+    systemBaseContent?: string;
+    workspaceContext: number;
+    workspaceContent?: string;
+    toolDefs: number;
+    toolDefsContent?: string;
+    messages: { role: string; tokens: number; preview?: string }[];
+    messagesTotal: number;
+    total: number;
+  } {
+    const tok = (s: string) => Math.round(s.length / 4);
+
+    const sysBaseText = this.systemPromptParts[0] ?? '';
+    const wsText = this.systemPromptParts[1] ?? '';
+    const systemBase = tok(sysBaseText);
+    const workspaceContext = tok(wsText);
+
+    // Tool definitions serialized the same way the API receives them
+    const toolDefsJson = JSON.stringify(this.toolDefs);
+    const toolDefs = tok(toolDefsJson);
+    // For tool defs preview: one line per tool — name + full description
+    const toolSummary = (this.toolDefs as Array<{ name?: string; description?: string }>)
+      .map((t) => `${t.name ?? '?'}: ${(t.description ?? '').trim()}`)
+      .join('\n\n');
+
+    const messages = this.messages.map((m) => {
+      const payload = m.role === 'tool_result' ? m.results : m.content;
+      const raw = JSON.stringify(payload);
+      // Pretty-print for readability in the inspector — no truncation, panel scrolls
+      const pretty = JSON.stringify(payload, null, 2);
+      return { role: m.role, tokens: tok(raw), preview: pretty };
+    });
+    const messagesTotal = messages.reduce((s, m) => s + m.tokens, 0);
+
+    return {
+      systemBase,
+      ...(sysBaseText ? { systemBaseContent: sysBaseText } : {}),
+      workspaceContext,
+      ...(wsText ? { workspaceContent: wsText } : {}),
+      toolDefs,
+      ...(toolSummary ? { toolDefsContent: toolSummary } : {}),
+      messages,
+      messagesTotal,
+      total: systemBase + workspaceContext + toolDefs + messagesTotal,
+    };
   }
 }

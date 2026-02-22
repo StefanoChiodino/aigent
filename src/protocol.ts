@@ -22,10 +22,11 @@ export type ClientCommand =
   | { type: 'command'; cmd: string }
   | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
   | { type: 'config_write_response'; id: string; ok: boolean; message: string }
-  | { type: 'patch_response'; id: string; ok: boolean; message: string }
+  | { type: 'edit_file_response'; id: string; ok: boolean; message: string }
   | { type: 'exec_response'; id: string; ok: boolean; alwaysAllow?: boolean; message: string }
   | { type: 'screenshot_response'; id: string; ok: boolean; data?: string; mediaType?: string; message: string }
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
+  | { type: 'context_breakdown_request' }
   | { type: 'ping' };
 
 // --- Server → Client ---
@@ -35,6 +36,18 @@ export interface DisplayMessage {
   content: string;
   timestamp: string;
   elapsed?: number | undefined;
+}
+
+export interface ContextBreakdown {
+  systemBase: number;
+  systemBaseContent?: string;      // First ~500 chars of base system prompt
+  workspaceContext: number;
+  workspaceContent?: string;       // First ~500 chars of workspace context section
+  toolDefs: number;
+  toolDefsContent?: string;        // JSON snippet of tool names
+  messages: { role: string; tokens: number; preview?: string }[];
+  messagesTotal: number;
+  total: number;
 }
 
 export interface BackgroundTaskInfo {
@@ -82,12 +95,13 @@ export type ServerEvent =
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
-  | { type: 'patch_request'; id: string; diff: string; reason: string }
+  | { type: 'edit_file_request'; id: string; path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
   | { type: 'exec_request'; id: string; command: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
+  | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'pong' };
 
 // --- Worker → Gatekeeper (capability/mount requests) ---

@@ -163,8 +163,8 @@ export class AgentClient extends EventEmitter {
       case 'config_write_request':
         this.emit('config_write_request', event.id, event.file, event.content, event.reason);
         break;
-      case 'patch_request':
-        this.emit('patch_request', event.id, event.diff, event.reason);
+      case 'edit_file_request':
+        this.emit('edit_file_request', event.id, event.path, event.edits, event.reason);
         break;
       case 'exec_request':
         this.emit('exec_request', event.id, event.command);
@@ -174,6 +174,9 @@ export class AgentClient extends EventEmitter {
         break;
       case 'screen_share_request':
         this.emit('screen_share_request', event.id);
+        break;
+      case 'context_breakdown':
+        this.emit('context_breakdown', event.breakdown);
         break;
       case 'pong':
         break;

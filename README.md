@@ -8,10 +8,10 @@ The agent runs in a Docker sandbox, can read and edit its own source code, and t
 
 ## What it does
 
-- Streams responses from Claude (Anthropic) or GPT (OpenAI)
+- Streams responses from Claude (Anthropic) or GPT (OpenAI) or any OpenAI-compatible endpoint
 - Executes shell commands, reads/writes files, searches code, fetches URLs
 - Modifies its own source — changes hot-reload, conversation survives restarts
-- Maintains persistent memory across sessions
+- Maintains persistent memory across sessions (daily logs, curated MEMORY.md, workspace files)
 - Proposes changes to host files via patches — you see a diff and approve before anything is written
 - Spawns background sub-agents for long tasks without blocking your conversation
 - Speaks responses aloud (local TTS) and listens via microphone (local STT)
@@ -31,7 +31,7 @@ Host
 └── Docker Sandbox
     ├── agent.ts       — conversation loop, streaming, retry
     ├── provider.ts    — Anthropic + OpenAI abstraction
-    ├── tools.ts       — 14 tools
+    ├── tools.ts       — 19 tools
     ├── tasks.ts       — background task queue
     ├── workspace.ts   — memory system
     └── compact.ts     — context compaction
@@ -53,6 +53,13 @@ make start                  # launches gatekeeper + sandbox + web UI
 
 Open `http://localhost:3141` in your browser.
 
+For development with auto-rebuild of the web UI and auto-restart of the server on source changes:
+
+```bash
+make dev     # tsx --watch-forever + esbuild --watch + TTS/STT
+make dev-ts  # same, without TTS/STT services
+```
+
 ---
 
 ## Web UI features
@@ -62,30 +69,63 @@ Open `http://localhost:3141` in your browser.
 - **Push-to-talk** — `Ctrl+\`` or the mic button; transcription streams into the input box in real time
 - **Always-on mode** — `Ctrl+Shift+\`` keeps the microphone open continuously; silence detection auto-submits
   - **Interrupt** — talk over the agent's response and VAD will stop it, letting you speak
-- **Text-to-speech** — speaker button on each assistant message; auto-speak toggle in the sidebar
-- **Concise mode** — a cheap model summarises long responses before they're spoken, keeping TTS output brief
+- **Text-to-speech** — speaker button on each assistant message reads it aloud; auto-speak toggle in the sidebar plays responses automatically
+- **Speak preview** — assistant messages with a `<speak>` tag show a chat-bubble icon; hover to see the spoken summary without playing audio
+- **Concise mode** — when enabled, a cheap model generates a short spoken summary of each response; only the summary is read aloud, keeping TTS output brief and conversation-paced
 
 ### Input
 
 - `Enter` to send, `Shift+Enter` for newline
-- `Ctrl+Enter` — one-shot thinking boost (sends with max reasoning, then reverts)
-- `/` to open the slash-command menu
-- Paste or attach images; screen-capture button grabs any window via `getDisplayMedia`
+- `Ctrl+Enter` — one-shot thinking boost (sends with max reasoning, then reverts to current setting)
+- `/` to open the slash-command palette with autocomplete
+- Paste or drag images into the input box; attach files via the paperclip button
+- Screen-capture button grabs any window or tab via `getDisplayMedia` and attaches it as an image
+
+### Slash commands
+
+Type `/` to open the command palette. Available commands:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/reset` | Clear conversation and start fresh |
+| `/compact` | Manually trigger context compaction |
+| `/refresh` | Reload workspace files into the system prompt |
+| `/restart` | Restart the sandbox server |
+| `/reasoning on\|off` | Toggle extended thinking |
+| `/effort low\|medium\|high\|max` | Set thinking budget |
+| `/concise on\|off` | Toggle concise/voice mode |
+| `/model <name>` | Show or switch the active model |
+| `/image <path> [msg]` | Send an image from a sandbox path |
+| `/usage` | Show cumulative token and cost stats |
+| `/context` | Open the context window inspector |
+| `/tasks` | Show background task status |
+| `/profiles` | List available profiles |
+| `/profile <name>` | Switch to a different profile |
+| `/save` | Save the current session |
+| `/sessions` | List saved sessions |
+| `/load <id>` | Load a saved session |
+| `/mount <path> [ro\|rw]` | Mount a host folder into the sandbox |
+| `/unmount <path>` | Remove a mount |
+| `/mounts` | List active mounts |
+| `/grant` / `/deny` | Approve or deny a pending mount request |
+| `/approve` / `/reject` | Approve or reject a pending config-write request |
+| `/approve-patch` / `/reject-patch` | Approve or reject a pending patch request |
 
 ### Reasoning & effort
 
 Toggles in the left sidebar:
 
-| Toggle | What it does |
-|--------|-------------|
+| Control | What it does |
+|---------|-------------|
 | Reasoning on/off | Enable/disable extended thinking |
 | Effort level (min → max) | Budget tokens allocated to thinking |
 
-Settings persist across reloads. The agent applies thinking heuristics automatically — short messages get lower effort to save tokens.
+Settings persist across reloads. The agent applies thinking heuristics automatically — short messages get lower effort to save tokens. `Ctrl+Enter` temporarily overrides to max effort for one message.
 
 ### Model picker
 
-Choose any Claude model from the sidebar. The list is fetched live from the Anthropic API and falls back to a hardcoded default. Selection persists across restarts.
+Choose any available model from the sidebar dropdown. The list is fetched live from the Anthropic API and falls back to a hardcoded default. Selection persists across restarts.
 
 The agent can also switch its own model mid-conversation via the `switch_model` tool — upgrading for complex tasks, downgrading for cheap ones.
 
@@ -97,19 +137,62 @@ Dispatched via the `dispatch_task` tool. Shown in the sidebar with:
 - Context usage (tokens) and model used for each task
 - Checkmark / ✗ on completion or failure
 
-Background tasks can use cheaper models (e.g. Haiku for read-only work) to keep costs down.
+Background tasks can use cheaper models (e.g. Haiku for read-only work) to keep costs down. Multiple tasks run in parallel; completed results are injected into the conversation when the agent is next idle.
 
 ### Tool visibility
 
-Tool calls are shown inline in the chat — name, input summary, and output excerpt. Collapsed by default; expand to see the full result.
+Tool calls are shown inline in the chat — name, input summary, and output excerpt. Collapsed by default; click to expand and see the full input and output.
 
-Context usage is shown in the status bar: current tokens / context window, with a colour-coded bar.
+### Context inspector
+
+Click the context usage bar (in the header or the sidebar) to open the **Context Window** inspector overlay. Also accessible via `/context`. It shows:
+
+- Total estimated token count and percentage of the 200k window used
+- A stacked bar chart breaking usage into four components: System prompt, Workspace context, Tool definitions, and Conversation
+- A per-component breakdown with individual bars, token counts, and percentages
+- A per-message table listing every message in the context with its role and token cost
+
+Each row is expandable — click to reveal the actual content sent to the model:
+- **System prompt** — the base instructions text
+- **Workspace** — the workspace files section (AGENTS.md, MEMORY.md, etc.)
+- **Tool definitions** — name and one-line description of every active tool
+- **Messages** — the raw JSON payload for each message (first ~800 characters)
 
 ### Mounts
 
 The agent can request access to folders on your machine via the `request_mount` tool. You see a permission modal (with an audio cue and browser notification if the tab is backgrounded), approve or deny, and the agent gets a time-limited mount that auto-expires.
 
-Active mounts are shown in the sidebar with a countdown. Click ✕ to revoke early.
+Active mounts are shown in the sidebar with a countdown timer. Click ✕ to revoke early.
+
+You can also grant mounts directly from the chat with `/mount <path> [ro|rw]`.
+
+### Config writes
+
+When the agent wants to edit a workspace config file (SOUL.md, AGENTS.md, USER.md, IDENTITY.md, TOOLS.md), it uses the `request_config_write` tool. You see a modal with the proposed diff; approve to write or reject to cancel.
+
+### Conversation persistence
+
+Messages are saved to `localStorage` (`aigent_chat_history`) on every update and restored immediately on page load, before the WebSocket connects. This means the chat is visible even during server restarts. Messages are cleared on `/reset`.
+
+### Settings
+
+The ⚙ gear icon opens the settings panel. Settings are split into two scopes:
+
+- **Client settings** — stored in `settings.json` on the host, applied immediately (provider, model, tools allowlist, port, STT/TTS URLs, prompt options)
+- **Server settings** — stored in `.env`, require a server restart (API keys)
+
+Key settings:
+
+| Setting | Description |
+|---------|-------------|
+| Provider | Auto-detect, Anthropic, or OpenAI-compatible |
+| Anthropic / OpenAI API key | Stored in `.env`, never in `settings.json` |
+| OpenAI base URL | For local models (e.g. Ollama, LM Studio) |
+| Default model | Model used at startup |
+| Disable all tools | Send no tool definitions (useful for local models) |
+| Tool allowlist | Comma-separated list of tools to enable |
+| Slim prompt | Omit MEMORY.md to save tokens |
+| Full session logs | Include complete recent logs in the system prompt |
 
 ---
 
@@ -117,18 +200,27 @@ Active mounts are shown in the sidebar with a countdown. Click ✕ to revoke ear
 
 ```
 /workspace/
-├── AGENTS.md        — operating instructions
-├── SOUL.md          — personality and values
-├── USER.md          — info about you
-├── MEMORY.md        — curated long-term knowledge
-├── TOOLS.md         — tool notes
+├── config/
+│   ├── AGENTS.md      — operating instructions (read-only in sandbox)
+│   ├── SOUL.md        — personality and values
+│   ├── USER.md        — info about you
+│   ├── IDENTITY.md    — identity framing
+│   └── TOOLS.md       — tool usage notes
+├── MEMORY.md          — curated long-term knowledge (freely writable)
 └── memory/
     └── YYYY-MM-DD.md  — daily session logs
 ```
 
 - **Context compaction** at 70% usage — conversation is summarised in place; cost-optimised prompt
-- **Cache-aware** — stable system prompt blocks are cached; workspace files skip disk reads when unchanged
-- **Memory distillation** — on session end or `/reset`, the agent rewrites `MEMORY.md` from the day's logs
+- **Cache-aware** — stable system prompt blocks are cached with Anthropic prompt caching; workspace files skip disk reads when unchanged (mtime-based)
+- **Memory distillation** — on `/reset` or session end, the agent rewrites `MEMORY.md` from the day's logs
+- **Daily logs** — by default only an index of log files is included in the prompt; the agent reads specific logs on demand via `read_file`. Set `AIGENT_FULL_LOGS=1` to include recent logs in full.
+- **`search_memory`** — keyword search across all past daily logs at zero LLM cost
+
+### Profiles and sessions
+
+- **Profiles** — separate workspace directories, each with their own config files and memory. Use `/profiles` to list, `/profile create <name>` to create, `/profile <name>` to switch.
+- **Sessions** — named save points within a profile. Use `/save`, `/sessions`, and `/load <id>` to manage them.
 
 ---
 
@@ -164,21 +256,47 @@ Active mounts are shown in the sidebar with a countdown. Click ✕ to revoke ear
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...      # or use OAT token
+OPENAI_API_KEY=sk-...             # for OpenAI provider
+AIGENT_PROVIDER=anthropic         # anthropic | openai (auto-detected if omitted)
 AIGENT_MODEL=claude-opus-4-6      # default model
 AIGENT_THINKING=medium            # off | low | medium | high | max
 AIGENT_WEB_PORT=3141              # web UI port
+AIGENT_BASE_URL=...               # OpenAI-compatible base URL (e.g. Ollama)
 AIGENT_DEBUG=1                    # verbose logging
+AIGENT_SLIM_PROMPT=1              # omit MEMORY.md from system prompt
+AIGENT_FULL_LOGS=1                # include recent session logs in full
 ```
 
 ### TTS / STT setup
 
 ```bash
 make tts-setup   # install edge-tts (Microsoft TTS, no API key needed)
-make tts         # start the TTS server
+make tts         # start the TTS server on port 8766
 
 # STT uses NVIDIA Parakeet via local Python service
 cd stt && pip install -r requirements.txt && python main.py
+# Runs on port 8765 by default
 ```
+
+TTS and STT URLs are configurable in the settings panel or via `AIGENT_TTS_URL` / `AIGENT_STT_URL`.
+
+### MCP (Model Context Protocol)
+
+Add external tool servers in `workspace/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..." }
+    }
+  }
+}
+```
+
+Tools are automatically prefixed `mcp_<server>_<name>` and appear alongside built-in tools. The MCP client uses JSON-RPC 2.0 over stdio.
 
 ---
 
@@ -197,8 +315,9 @@ Agent: [reads tools.ts, implements PythonTool, adds to registry, runs tsc, commi
 
 - **Anthropic** — Claude models, extended thinking, prompt caching, OAT tokens
 - **OpenAI** — GPT models (streaming, tool calls, images)
+- **OpenAI-compatible** — any endpoint with an OpenAI-style API (Ollama, LM Studio, etc.) via `AIGENT_BASE_URL`
 
-Provider is auto-detected from the API key format. Switch with `AIGENT_PROVIDER=openai`.
+Provider is auto-detected from the API key format. Override with `AIGENT_PROVIDER=openai`.
 
 ---
 

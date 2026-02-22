@@ -271,8 +271,8 @@ export async function startWebServer(
         send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}), ...(durationMinutes !== undefined ? { durationMinutes } : {}) }),
       config_write_request: (id: string, file: string, content: string, reason: string) =>
         send({ type: 'config_write_request', id, file, content, reason }),
-      patch_request: (id: string, diff: string, reason: string) =>
-        send({ type: 'patch_request', id, diff, reason }),
+      edit_file_request: (id: string, path: string, edits: Array<{ old_str: string; new_str: string; index?: number }>, reason: string) =>
+        send({ type: 'edit_file_request', id, path, edits, reason }),
       exec_request: (id: string, command: string) =>
         send({ type: 'exec_request', id, command }),
       screenshot_request: (id: string) =>
@@ -281,6 +281,8 @@ export async function startWebServer(
         send({ type: 'screen_share_request', id }),
       host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, string>) =>
         send({ type: 'host_state', mounts, ...(capabilities ? { capabilities } : {}) }),
+      context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) =>
+        send({ type: 'context_breakdown', breakdown }),
     };
 
     function send(event: ServerEvent): void {
@@ -332,6 +334,9 @@ export async function startWebServer(
             break;
           case 'screen_share_response':
             client.send(cmd);
+            break;
+          case 'context_breakdown_request':
+            client.send({ type: 'context_breakdown_request' });
             break;
           case 'ping':
             ws.send(JSON.stringify({ type: 'pong' }));

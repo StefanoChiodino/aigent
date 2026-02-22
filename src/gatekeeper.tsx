@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * Gatekeeper — runs on the host, manages the Docker sandbox, runs the TUI.
+ * (Touched to restart tsx watcher after web-bridge.ts changes.)
  *
  * Responsibilities:
  *   - Container lifecycle (start, stop, restart with updated mounts)
@@ -515,7 +516,7 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   // Check dynamic commands first (grant/deny, approve/reject/preview)
   if (await handleGrantDeny(input)) return;
   if (await handleConfigApproveReject(input)) return;
-  if (await handlePatchApproveReject(input)) return;
+  if (await handleEditFileApproveReject(input)) return;
   if (await handleExecApproveReject(input)) return;
 
   const parts = input.trim().split(/\s+/);
@@ -839,138 +840,231 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
   return false;
 }
 
-// --- Patch requests --- (host-path rewrite fix)
+// --- Host edit-file requests (str_replace with index disambiguation) ---
 
-interface PendingPatch {
-  diff: string;
-  /** Resolved host paths extracted from diff headers. */
-  files: Array<{ containerPath: string; hostPath: string }>;
+interface ResolvedEdit {
+  old_str: string;
+  new_str: string;
+  /** Which occurrence to replace (0-based). Resolved eagerly from index or default 0 when unambiguous. */
+  occurrenceIndex: number;
+  /** Line number (1-based) of the chosen occurrence in the original file. For diff display. */
+  lineNumber: number;
 }
 
-const pendingPatchRequests = new Map<string, PendingPatch>();
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+interface PendingEditFile {
+  hostPath: string;
+  /** Original file content at request time. Applied against this. */
+  originalContent: string;
+  /** Resolved edits ready to apply in order. */
+  resolvedEdits: ResolvedEdit[];
+  reason: string;
 }
 
-/** Parse "--- a/<path>" or "+++ b/<path>" headers from a unified diff, returning unique container paths. */
-function parseDiffFilePaths(diff: string): string[] {
-  const seen = new Set<string>();
-  const paths: string[] = [];
-  for (const m of diff.matchAll(/^\+\+\+ b\/(.+)$/gm)) {
-    const p = m[1]!.trim();
-    if (!seen.has(p)) { seen.add(p); paths.push(p); }
+const pendingEditFileRequests = new Map<string, PendingEditFile>();
+
+/** Find all start indices of needle in haystack. */
+function findAllOccurrences(haystack: string, needle: string): number[] {
+  const positions: number[] = [];
+  let from = 0;
+  while (true) {
+    const idx = haystack.indexOf(needle, from);
+    if (idx === -1) break;
+    positions.push(idx);
+    from = idx + 1;
   }
-  return paths;
+  return positions;
 }
 
-function handlePatchRequest(id: string, diff: string, reason: string): void {
-  const containerPaths = parseDiffFilePaths(diff);
+/** Return the 1-based line number for a char offset in text. */
+function lineOfOffset(text: string, offset: number): number {
+  return text.slice(0, offset).split('\n').length;
+}
 
-  if (containerPaths.length === 0) {
-    client!.send({ type: 'patch_response', id, ok: false, message: 'No file paths found in diff (expected +++ b/<path> headers)' });
+/** Build a simple unified-diff-style string for display (no need for exact unified format, just readable). */
+function buildDisplayDiff(original: string, updated: string, label: string): string {
+  const origLines = original.split('\n');
+  const updLines = updated.split('\n');
+  const maxLen = Math.max(origLines.length, updLines.length);
+  const hunks: string[] = [`--- ${label} (original)`, `+++ ${label} (proposed)`];
+  for (let i = 0; i < maxLen; i++) {
+    const o = origLines[i];
+    const u = updLines[i];
+    if (o === u) {
+      if (o !== undefined) hunks.push(`  ${o}`);
+    } else {
+      if (o !== undefined) hunks.push(`- ${o}`);
+      if (u !== undefined) hunks.push(`+ ${u}`);
+    }
+  }
+  return hunks.join('\n');
+}
+
+function handleEditFileRequest(
+  id: string,
+  containerPath: string,
+  edits: Array<{ old_str: string; new_str: string; index?: number }>,
+  reason: string,
+): void {
+  const hostPath = resolveContainerToHost(containerPath) ?? resolveHostPath(containerPath);
+
+  if (isForbiddenPath(hostPath)) {
+    client!.send({ type: 'edit_file_response', id, ok: false, message: `Refusing to edit ${hostPath} — sensitive path` });
     return;
   }
 
-  const files: PendingPatch['files'] = [];
-  for (const cp of containerPaths) {
-    const hostPath = resolveContainerToHost(cp) ?? resolveHostPath(cp);
-    if (isForbiddenPath(hostPath)) {
-      client!.send({ type: 'patch_response', id, ok: false, message: `Refusing to patch ${hostPath} — sensitive path` });
-      return;
-    }
-    files.push({ containerPath: cp, hostPath });
+  let originalContent: string;
+  try {
+    originalContent = readFileSync(hostPath, 'utf-8');
+  } catch {
+    client!.send({ type: 'edit_file_response', id, ok: false, message: `Cannot read ${hostPath}` });
+    return;
   }
 
-  const addedLines = (diff.match(/^\+[^+]/gm) ?? []).length;
-  const removedLines = (diff.match(/^-[^-]/gm) ?? []).length;
-  const fileList = files.map((f) => `    ${f.hostPath}`).join('\n');
+  // Eagerly resolve each edit against the file state after previous edits.
+  const resolvedEdits: ResolvedEdit[] = [];
+  let workingContent = originalContent;
+  let lineOffset = 0; // net line delta from edits applied so far
 
-  pendingPatchRequests.set(id, { diff, files });
+  for (let i = 0; i < edits.length; i++) {
+    const edit = edits[i]!;
+    const positions = findAllOccurrences(workingContent, edit.old_str);
+
+    if (positions.length === 0) {
+      client!.send({ type: 'edit_file_response', id, ok: false, message: `Edit ${i + 1}: old_str not found in ${hostPath}` });
+      return;
+    }
+
+    if (positions.length > 1 && edit.index === undefined) {
+      const lineNumbers = positions.map((p) => lineOfOffset(workingContent, p) + lineOffset);
+      client!.send({
+        type: 'edit_file_response',
+        id,
+        ok: false,
+        message:
+          `Edit ${i + 1}: old_str matches ${positions.length} times in ${hostPath} at lines [${lineNumbers.join(', ')}]. ` +
+          `Retry with index (0-based) to select which occurrence to replace.`,
+      });
+      return;
+    }
+
+    const occurrenceIndex = edit.index ?? 0;
+    if (occurrenceIndex < 0 || occurrenceIndex >= positions.length) {
+      client!.send({
+        type: 'edit_file_response',
+        id,
+        ok: false,
+        message: `Edit ${i + 1}: index ${occurrenceIndex} out of range — only ${positions.length} occurrence(s) found.`,
+      });
+      return;
+    }
+
+    const charPos = positions[occurrenceIndex]!;
+    const lineNumber = lineOfOffset(workingContent, charPos) + lineOffset;
+
+    resolvedEdits.push({ old_str: edit.old_str, new_str: edit.new_str, occurrenceIndex, lineNumber });
+
+    // Apply to working content so subsequent edits see the updated file.
+    workingContent =
+      workingContent.slice(0, charPos) +
+      edit.new_str +
+      workingContent.slice(charPos + edit.old_str.length);
+
+    // Track line offset shift for subsequent edits' line number reporting.
+    lineOffset += edit.new_str.split('\n').length - edit.old_str.split('\n').length;
+  }
+
+  pendingEditFileRequests.set(id, { hostPath, originalContent, resolvedEdits, reason });
+
+  const diff = buildDisplayDiff(originalContent, workingContent, hostPath);
+  const editSummary = resolvedEdits.map((e, i) =>
+    `  Edit ${i + 1}: replace occurrence ${e.occurrenceIndex} at line ${e.lineNumber}`
+  ).join('\n');
 
   injectSystemMessage(
-    `Agent wants to patch ${files.length} file${files.length > 1 ? 's' : ''}:\n${fileList}\n` +
+    `Agent wants to edit ${hostPath}\n` +
     `  Reason: "${reason}"\n` +
-    `  Changes: +${addedLines} lines, -${removedLines} lines\n\n` +
-    `Reply: /approve-patch or /reject-patch`
+    `  ${resolvedEdits.length} edit${resolvedEdits.length > 1 ? 's' : ''}:\n${editSummary}\n\n` +
+    `\`\`\`diff\n${diff}\n\`\`\`\n\n` +
+    `Reply: /approve-edit or /reject-edit`
   );
 }
 
-async function handlePatchApproveReject(input: string): Promise<boolean> {
+async function handleEditFileApproveReject(input: string): Promise<boolean> {
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
 
-  if (cmd === '/approve-patch') {
+  if (cmd === '/approve-edit') {
     let id = parts[1];
-    if (!id && pendingPatchRequests.size === 1) {
-      id = pendingPatchRequests.keys().next().value as string;
+    if (!id && pendingEditFileRequests.size === 1) {
+      id = pendingEditFileRequests.keys().next().value as string;
     }
     if (!id) {
-      injectSystemMessage(pendingPatchRequests.size === 0
-        ? 'No pending patch requests.'
-        : `Multiple pending — specify ID: ${[...pendingPatchRequests.keys()].join(', ')}`);
+      injectSystemMessage(pendingEditFileRequests.size === 0
+        ? 'No pending edit requests.'
+        : `Multiple pending — specify ID: ${[...pendingEditFileRequests.keys()].join(', ')}`);
       return true;
     }
 
-    const pending = pendingPatchRequests.get(id);
+    const pending = pendingEditFileRequests.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending patch request: ${id}`);
+      injectSystemMessage(`No pending edit request: ${id}`);
       return true;
     }
 
-    pendingPatchRequests.delete(id);
+    pendingEditFileRequests.delete(id);
 
-    // Rewrite diff headers: replace container paths with resolved host paths,
-    // then apply with -p0 so patch uses the rewritten paths literally.
-    let rewrittenDiff = pending.diff;
-    for (const { containerPath, hostPath } of pending.files) {
-      // Replace "--- a/<containerPath>" and "+++ b/<containerPath>" headers
-      rewrittenDiff = rewrittenDiff
-        .replace(new RegExp(`^--- a/${escapeRegex(containerPath)}`, 'gm'), `--- ${hostPath}`)
-        .replace(new RegExp(`^\\+\\+\\+ b/${escapeRegex(containerPath)}`, 'gm'), `+++ ${hostPath}`);
+    // Re-apply edits against the original snapshot in order.
+    let content = pending.originalContent;
+    for (let i = 0; i < pending.resolvedEdits.length; i++) {
+      const edit = pending.resolvedEdits[i]!;
+      const positions = findAllOccurrences(content, edit.old_str);
+      if (positions.length === 0 || edit.occurrenceIndex >= positions.length) {
+        const msg = `Edit ${i + 1}: file changed since approval — old_str no longer found at expected position.`;
+        log.error('Edit apply failed', { id, error: msg });
+        client!.send({ type: 'edit_file_response', id, ok: false, message: msg });
+        injectSystemMessage(`Edit failed: ${msg}`);
+        return true;
+      }
+      const charPos = positions[edit.occurrenceIndex]!;
+      content = content.slice(0, charPos) + edit.new_str + content.slice(charPos + edit.old_str.length);
     }
 
     try {
-      execSync('patch --no-backup-if-mismatch -p0', {
-        input: rewrittenDiff,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        cwd: '/',
-      });
-      const patched = pending.files.map((f) => f.hostPath).join(', ');
-      log.info('Patch applied', { id, files: pending.files.map((f) => f.hostPath) });
-      client!.send({ type: 'patch_response', id, ok: true, message: `Applied: ${patched}` });
-      injectSystemMessage(`Approved: patch applied to ${pending.files.length} file${pending.files.length > 1 ? 's' : ''}`);
+      writeFileSync(pending.hostPath, content, 'utf-8');
+      log.info('Edit applied', { id, path: pending.hostPath, edits: pending.resolvedEdits.length });
+      client!.send({ type: 'edit_file_response', id, ok: true, message: `Applied ${pending.resolvedEdits.length} edit(s) to ${pending.hostPath}` });
+      injectSystemMessage(`Approved: edit applied to ${pending.hostPath}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.error('Patch failed', { id, error: msg });
-      client!.send({ type: 'patch_response', id, ok: false, message: `Patch failed: ${msg}` });
-      injectSystemMessage(`Patch failed: ${msg}`);
+      log.error('Edit write failed', { id, error: msg });
+      client!.send({ type: 'edit_file_response', id, ok: false, message: `Write failed: ${msg}` });
+      injectSystemMessage(`Edit failed: ${msg}`);
     }
     return true;
   }
 
-  if (cmd === '/reject-patch') {
+  if (cmd === '/reject-edit') {
     let id = parts[1];
-    if (!id && pendingPatchRequests.size === 1) {
-      id = pendingPatchRequests.keys().next().value as string;
+    if (!id && pendingEditFileRequests.size === 1) {
+      id = pendingEditFileRequests.keys().next().value as string;
     }
     if (!id) {
-      injectSystemMessage(pendingPatchRequests.size === 0
-        ? 'No pending patch requests.'
-        : `Multiple pending — specify ID: ${[...pendingPatchRequests.keys()].join(', ')}`);
+      injectSystemMessage(pendingEditFileRequests.size === 0
+        ? 'No pending edit requests.'
+        : `Multiple pending — specify ID: ${[...pendingEditFileRequests.keys()].join(', ')}`);
       return true;
     }
 
-    const pending = pendingPatchRequests.get(id);
+    const pending = pendingEditFileRequests.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending patch request: ${id}`);
+      injectSystemMessage(`No pending edit request: ${id}`);
       return true;
     }
 
-    pendingPatchRequests.delete(id);
-    log.info('Patch rejected', { id });
-    client!.send({ type: 'patch_response', id, ok: false, message: 'Patch rejected by user' });
-    injectSystemMessage(`Rejected patch for ${pending.files.map((f) => f.hostPath).join(', ')}`);
+    pendingEditFileRequests.delete(id);
+    log.info('Edit rejected', { id });
+    client!.send({ type: 'edit_file_response', id, ok: false, message: 'Edit rejected by user' });
+    injectSystemMessage(`Rejected edit for ${pending.hostPath}`);
     return true;
   }
 
@@ -1286,9 +1380,9 @@ client.on('config_write_request', (id: string, file: string, content: string, re
   handleConfigWriteRequest(id, file, content, reason);
 });
 
-// Handle patch requests from the worker
-client.on('patch_request', (id: string, diff: string, reason: string) => {
-  handlePatchRequest(id, diff, reason);
+// Handle edit_file requests from the worker
+client.on('edit_file_request', (id: string, path: string, edits: Array<{ old_str: string; new_str: string; index?: number }>, reason: string) => {
+  handleEditFileRequest(id, path, edits, reason);
 });
 
 // Handle exec approval requests from the worker
