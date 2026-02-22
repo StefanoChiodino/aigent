@@ -26,6 +26,7 @@ export type ClientCommand =
   | { type: 'exec_response'; id: string; ok: boolean; alwaysAllow?: boolean; message: string }
   | { type: 'screenshot_response'; id: string; ok: boolean; data?: string; mediaType?: string; message: string }
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
+  | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] }
   | { type: 'context_breakdown_request' }
   | { type: 'ping' };
 
@@ -96,6 +97,7 @@ export type ServerEvent =
   | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'edit_file_request'; id: string; path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
+  | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'exec_request'; id: string; command: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }

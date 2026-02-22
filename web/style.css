@@ -1269,35 +1269,6 @@ html, body {
   #cost-badge, #ctx-meter { display: none !important; }
 }
 
-/* ── Tool bar ─────────────────────────────────────────────── */
-
-#tool-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
-  background: var(--accent-soft);
-  border-left: 3px solid var(--accent);
-  margin: 4px 16px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
-}
-
-.tool-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--accent-soft);
-  border-top: 2px solid var(--accent);
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-  flex-shrink: 0;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
 
 /* ── Input area ───────────────────────────────────────────── */
 
@@ -2510,6 +2481,18 @@ tr.diff-header td {
   background: rgba(64, 176, 128, 0.25);
 }
 
+.perm-always-allow {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.perm-always-allow:hover {
+  background: rgba(100, 160, 255, 0.12);
+  color: #7ab4ff;
+  border-color: rgba(100, 160, 255, 0.4);
+}
+
 @keyframes scaleIn {
   from { opacity: 0; transform: scale(0.96); }
   to   { opacity: 1; transform: scale(1); }
@@ -3238,6 +3221,37 @@ body[data-working] .bokeh {
 }
 
 .settings-text:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* String-list textarea (exec permissions) */
+.settings-row--stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.settings-row--stacked .settings-row-control {
+  flex-shrink: 1;
+  width: 100%;
+}
+
+.settings-string-list {
+  width: 100%;
+  min-height: 120px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-mono, 'JetBrains Mono', 'Fira Mono', monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.settings-string-list:focus {
   outline: none;
   border-color: var(--accent);
 }

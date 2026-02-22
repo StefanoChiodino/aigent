@@ -302,12 +302,28 @@ Tools are automatically prefixed `mcp_<server>_<name>` and appear alongside buil
 
 ## Self-modification
 
-The agent's source is mounted at `/app/src/` inside the container. Edits persist on the host filesystem. The file watcher runs `tsc --noEmit` before restarting — bad code doesn't take down the server. Conversation state is auto-saved and restored on restart.
+The agent's source is mounted at `/app/src/` inside the container. Edits persist on the host filesystem. The file watcher ([worker.ts](src/worker.ts)) polls `src/` every second and, after a 2s debounce, runs `tsc --noEmit` before restarting the server.
 
 ```
 You:   Add a tool that runs Python snippets and returns stdout
 Agent: [reads tools.ts, implements PythonTool, adds to registry, runs tsc, commits]
 ```
+
+### Safety model
+
+**Typecheck gate** — the server never restarts on bad code. If `tsc --noEmit` fails, the running server is left untouched and the error is logged to `/tmp/aigent-server.log`. The agent sees the failure and can fix it before the change takes effect.
+
+**Rollback** — because the source is a normal git repo on your host, you can always revert agent edits manually:
+
+```bash
+git diff src/               # see what the agent changed
+git checkout src/<file>     # revert a specific file
+git checkout src/           # revert all of src/
+```
+
+To trigger a clean restart after reverting: use the `/restart` slash command in the chat.
+
+There is currently no automated rollback or git-stash integration. The typecheck gate plus manual `git checkout` is the intended safety net for now. A more granular self-mod policy (allowlist of files the agent may edit autonomously vs. files requiring human approval) is tracked in TODO.md.
 
 ---
 

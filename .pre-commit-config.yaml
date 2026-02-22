@@ -1,0 +1,17 @@
+repos:
+  - repo: local
+    hooks:
+      - id: typecheck
+        name: TypeScript typecheck
+        language: system
+        entry: npx tsc --noEmit
+        pass_filenames: false
+        types: [ts]
+
+      - id: tests
+        name: Unit tests
+        language: system
+        entry: node --import tsx/esm --test
+        args: ["src/**/*.test.ts"]
+        pass_filenames: false
+        types: [ts]

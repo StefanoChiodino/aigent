@@ -4,17 +4,10 @@
 
 ## 🔒 Security & Safety (Current Priority)
 
-- [ ] **Safety unit tests**
-  - **Why:** `src/safety.ts` handles path validation, command safety, and SSRF protection. It is the security boundary of the sandbox and must be tested to ensure no regressions.
-  - **What:** Use Node's native `node:test` runner.
-  - **Tasks:**
-    - Add `make test` target in `Makefile` (`tsx --test src/**/*.test.ts`).
-    - Create `src/safety.test.ts`.
-    - Test `validateWritePath`: ensure `/workspace` and `/tmp` pass, `/etc/passwd` and `../` fail.
-    - Test `validateFetchUrl`: ensure public HTTPS passes; `localhost`, `127.0.0.1`, `169.254.x.x`, and `file://` fail.
-    - Test `checkExecPermission`: ensure globs match correctly and `deny` overrides `allow`.
-    - Test `validateReadonlyCommand`: ensure `rm`, `mkfs`, and output redirects (`>`) are blocked.
-    - Test `sanitizedEnv`: ensure keys like `OPENAI_API_KEY` are stripped while `PATH` remains.
+- [x] **Safety unit tests** — 92 tests covering all functions in `src/safety.ts`; `make test` target added; pre-commit hook via `.pre-commit-config.yaml` runs typecheck + tests on every commit.
+  - **Known gaps documented in tests:**
+    - `mkfs *` deny glob doesn't match `mkfs.ext4 /dev/sdb` (minimatch treats `*` as not matching spaces/dots)
+    - `validateReadonlyCommand` curl-pipe-to-bash bypass: splits on `|` before checking blocklist patterns
 
 - [ ] **`fetch` permission tiers**
   - **Why:** Prevent data exfiltration. The agent shouldn't be able to POST sensitive host data to arbitrary domains without permission.
@@ -44,6 +37,11 @@
 
 - [ ] **Self-mod policy**
   - Explicit list of files/paths the agent may edit autonomously vs. paths that require human approval (e.g. UI code OK; `safety.ts`, `gatekeeper.tsx`, `llm-proxy.ts` require diff review).
+
+- [ ] **Self-mod rollback UX** *(revisit when self-mod policy is implemented)*
+  - **Current approach:** typecheck gate (`tsc --noEmit`) prevents bad code from ever restarting the server; manual `git checkout src/<file>` is the rollback path.
+  - **Deferred:** A UI restart button (header, top-right) would make `/restart` one-click instead of typed. Automated `git stash push -- <changed files>` before each agent self-edit would scope rollback to only the files the agent touched, avoiding stashing unrelated working-tree changes — but requires the gatekeeper (host side) to intercept the restart event and run git before starting the new server.
+  - **Conclusion:** Not worth the complexity until self-mod is frequent enough to be painful. Revisit alongside self-mod policy.
 
 - [ ] **Read-only self-mount** *(in progress)*
   - Agent source mounted read-only by default; self-modification requires explicit opt-in writable mount.

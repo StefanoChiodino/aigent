@@ -980,20 +980,26 @@ function handleEditFileRequest(
     `  Edit ${i + 1}: replace occurrence ${e.occurrenceIndex} at line ${e.lineNumber}`
   ).join('\n');
 
-  injectSystemMessage(
-    `Agent wants to edit ${hostPath}\n` +
-    `  Reason: "${reason}"\n` +
-    `  ${resolvedEdits.length} edit${resolvedEdits.length > 1 ? 's' : ''}:\n${editSummary}\n\n` +
-    `\`\`\`diff\n${diff}\n\`\`\`\n\n` +
-    `Reply: /approve-edit or /reject-edit`
-  );
+  // Emit a patch_request event so the web UI shows the diff modal with approve/reject buttons.
+  // Fall back to a system message if no client is connected yet.
+  if (client) {
+    client.emit('patch_request', id, diff, reason);
+  } else {
+    injectSystemMessage(
+      `Agent wants to edit ${hostPath}\n` +
+      `  Reason: "${reason}"\n` +
+      `  ${resolvedEdits.length} edit${resolvedEdits.length > 1 ? 's' : ''}:\n${editSummary}\n\n` +
+      `\`\`\`diff\n${diff}\n\`\`\`\n\n` +
+      `Reply: /approve-edit or /reject-edit`
+    );
+  }
 }
 
 async function handleEditFileApproveReject(input: string): Promise<boolean> {
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
 
-  if (cmd === '/approve-edit') {
+  if (cmd === '/approve-edit' || cmd === '/approve-patch') {
     let id = parts[1];
     if (!id && pendingEditFileRequests.size === 1) {
       id = pendingEditFileRequests.keys().next().value as string;
@@ -1043,7 +1049,7 @@ async function handleEditFileApproveReject(input: string): Promise<boolean> {
     return true;
   }
 
-  if (cmd === '/reject-edit') {
+  if (cmd === '/reject-edit' || cmd === '/reject-patch') {
     let id = parts[1];
     if (!id && pendingEditFileRequests.size === 1) {
       id = pendingEditFileRequests.keys().next().value as string;
@@ -1074,6 +1080,8 @@ async function handleEditFileApproveReject(input: string): Promise<boolean> {
 // --- Exec command approval ---
 
 const pendingExecApprovals = new Map<string, { command: string }>();
+// IDs auto-handled (allow/deny) before any browser listener fires — web-bridge skips these
+const autoHandledExecIds = new Set<string>();
 
 const SETTINGS_PATH = resolve(REPO_DIR, 'settings.json');
 
@@ -1118,12 +1126,14 @@ function handleAgentExecRequest(id: string, command: string): void {
 
   if (level === 'allow') {
     log.info('Exec auto-allowed', { id, command });
+    autoHandledExecIds.add(id);
     client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by permission policy' });
     return;
   }
 
   if (level === 'deny') {
     log.info('Exec auto-denied', { id, command });
+    autoHandledExecIds.add(id);
     client!.send({ type: 'exec_response', id, ok: false, message: 'Denied by permission policy' });
     injectSystemMessage(`[exec] Blocked by deny policy: ${command}`);
     return;
@@ -1345,7 +1355,7 @@ client = new AgentClient();
 
 // Start web UI server (non-blocking, runs alongside TUI)
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });

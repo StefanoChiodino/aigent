@@ -29,6 +29,7 @@ export interface AgentClientEvents {
   error: (message: string) => void;
   state: (partial: { thinking?: string; profile?: string; sessionId?: string }) => void;
   host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[], capabilities?: Record<string, string>) => void;
+  patch_request: (id: string, diff: string, reason: string) => void;
   exec_request: (id: string, command: string) => void;
   disconnected: () => void;
   reconnecting: (attempt: number) => void;

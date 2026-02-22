@@ -80,12 +80,14 @@ type ServerEvent =
   | { type: 'error'; message: string }
   | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string; concise?: boolean; availableModels?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
-  | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string }
+  | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string; durationMinutes?: number }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
+  | { type: 'exec_request'; id: string; command: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
+  | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'pong' };
 
@@ -137,7 +139,7 @@ marked.setOptions({
 
 // ── Settings ─────────────────────────────────────────────────
 
-type SettingType = 'toggle' | 'slider' | 'number' | 'text' | 'select' | 'password';
+type SettingType = 'toggle' | 'slider' | 'number' | 'text' | 'select' | 'password' | 'string-list';
 
 interface SettingDef {
   key: string;        // env var name (e.g. 'AIGENT_MODEL') or client key
@@ -349,6 +351,34 @@ const SETTINGS_SCHEMA: SettingDef[] = [
     unit: ' ms',
     scope: 'client',
   },
+  // ── Permissions ───────────────────────────────────────────
+  {
+    key: 'exec_perm_alwaysAllow',
+    label: 'Always Allow',
+    desc: 'Commands matching these glob patterns are always run without prompting. One pattern per line.',
+    group: 'Permissions',
+    type: 'string-list',
+    default: '[]',
+    scope: 'client',
+  },
+  {
+    key: 'exec_perm_prompt',
+    label: 'Require Approval',
+    desc: 'Commands matching these glob patterns require explicit approval before running. One pattern per line.',
+    group: 'Permissions',
+    type: 'string-list',
+    default: '[]',
+    scope: 'client',
+  },
+  {
+    key: 'exec_perm_deny',
+    label: 'Always Deny',
+    desc: 'Commands matching these glob patterns are always blocked. One pattern per line.',
+    group: 'Permissions',
+    type: 'string-list',
+    default: '[]',
+    scope: 'client',
+  },
 ];
 
 // serverSettings holds the current values of server-scoped settings as reported
@@ -417,12 +447,29 @@ function getClientSetting(key: string): boolean | number | string {
 function setClientSetting(key: string, value: boolean | number | string): void {
   clientSettings[key] = value;
   saveClientSettingsCache();
-  // Persist to server JSON file and show toast on success
-  fetch('/settings', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ [key]: value }),
-  }).then(() => { showSettingsToast(); }).catch(() => { /* localStorage cache still updated */ });
+  if (key.startsWith('exec_perm_')) {
+    // Reconstruct full exec_permissions object so all three lists are saved together
+    const getList = (k: string): string[] => {
+      try { return JSON.parse(String(clientSettings[k] ?? '[]')) as string[]; } catch { return []; }
+    };
+    const exec_permissions = {
+      alwaysAllow: getList('exec_perm_alwaysAllow'),
+      prompt: getList('exec_perm_prompt'),
+      deny: getList('exec_perm_deny'),
+    };
+    fetch('/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ exec_permissions }),
+    }).then(() => { showSettingsToast(); }).catch(() => {});
+  } else {
+    // Persist to server JSON file and show toast on success
+    fetch('/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [key]: value }),
+    }).then(() => { showSettingsToast(); }).catch(() => { /* localStorage cache still updated */ });
+  }
 }
 
 // ── Chat history persistence ──────────────────────────────────
@@ -474,12 +521,13 @@ interface DiffFile {
 }
 
 interface PermRequest {
-  type: 'mount' | 'config_write' | 'patch';
+  type: 'mount' | 'config_write' | 'patch' | 'exec';
   id: string;
   title: string;
   detail: string;
   approveCmd: string;
   denyCmd: string;
+  alwaysAllowCmd?: string;
   durationMinutes?: number;
   diff?: string;
   diffFiles?: DiffFile[]; // parsed per-file sections for tab navigation
@@ -525,8 +573,6 @@ const $ = (id: string) => document.getElementById(id)!;
 
 const $messages = $('messages');
 const $emptyState = $('empty-state');
-const $toolBar = $('tool-bar');
-const $toolLabel = $('tool-label');
 const $connBadge = $('conn-badge');
 const $taskBadge = $('task-badge');
 const $costBadge = $('cost-badge');
@@ -550,6 +596,7 @@ const $patchViewer = $('patch-viewer');
 const $patchFileList = $('patch-file-list');
 const $permApproveBtn = $('perm-approve-btn') as HTMLButtonElement;
 const $permDenyBtn = $('perm-deny-btn') as HTMLButtonElement;
+const $permAlwaysAllowBtn = $('perm-always-allow-btn') as HTMLButtonElement;
 
 // Sidebar DOM refs
 const $sbModelBtn = $('sb-model-btn') as HTMLButtonElement;
@@ -862,7 +909,6 @@ function handleEvent(event: ServerEvent): void {
         finalizeStreamingText();
         ttsFlushStream(true);
       }
-      showTool(event.name, event.summary);
       if (streamEl) appendToolToStream(event.name, event.summary, event.input);
       streamText = '';
       ttsStreamLastLen = 0;
@@ -874,7 +920,6 @@ function handleEvent(event: ServerEvent): void {
       break;
 
     case 'tool_end':
-      hideTool();
       if (currentToolEl) {
         finalizeToolBlock(currentToolEl, currentToolOutput);
         currentToolEl = null;
@@ -1060,6 +1105,19 @@ function handleEvent(event: ServerEvent): void {
         diffFiles,
         approveCmd: `/approve-patch ${event.id}`,
         denyCmd: `/reject-patch ${event.id}`,
+      });
+      break;
+    }
+
+    case 'exec_request': {
+      enqueuePermRequest({
+        type: 'exec',
+        id: event.id,
+        title: 'Run Command',
+        detail: event.command,
+        approveCmd: `/approve-exec ${event.id}`,
+        denyCmd: `/deny-exec ${event.id}`,
+        alwaysAllowCmd: `/approve-exec ${event.id} --always`,
       });
       break;
     }
@@ -1722,16 +1780,6 @@ function finalizeToolBlock(block: HTMLElement, output: string): void {
   }
 }
 
-function showTool(name: string, summary: string): void {
-  $toolBar.classList.remove('hidden');
-  $toolLabel.textContent = summary || name;
-}
-
-function hideTool(): void {
-  $toolBar.classList.add('hidden');
-  $toolLabel.textContent = '';
-}
-
 // ── Header / status ──────────────────────────────────────────
 
 function updateHeader(): void {
@@ -2347,9 +2395,8 @@ function showNextPermRequest(): void {
     return;
   }
   permShowing = true;
-  // Hide tool bar and clear its label — the perm overlay takes over
-  hideTool();
-  $permIcon.textContent = req.type === 'mount' ? '📂' : req.type === 'patch' ? '🩹' : '✏️';
+  $permIcon.textContent = req.type === 'mount' ? '📂' : req.type === 'patch' ? '🩹' : req.type === 'exec' ? '⚡' : '✏️';
+  $permAlwaysAllowBtn.classList.toggle('hidden', !req.alwaysAllowCmd);
   $permTitle.textContent = req.title;
 
   // Show each line of detail as its own row
@@ -2432,6 +2479,12 @@ function resolvePermRequest(approve: boolean): void {
 
 $permApproveBtn.addEventListener('click', () => resolvePermRequest(true));
 $permDenyBtn.addEventListener('click', () => resolvePermRequest(false));
+$permAlwaysAllowBtn.addEventListener('click', () => {
+  const req = permQueue.shift();
+  if (!req?.alwaysAllowCmd) return;
+  wsSend({ type: 'message', content: req.alwaysAllowCmd });
+  showNextPermRequest();
+});
 
 // Request browser notification permission on first user interaction
 let notifPermRequested = false;
@@ -3344,6 +3397,20 @@ function buildControl(def: SettingDef, currentValue: boolean | number | string, 
     if (def.placeholder) input.placeholder = def.placeholder;
     input.addEventListener('change', () => onChange(input.value));
     ctrl.appendChild(input);
+
+  } else if (def.type === 'string-list') {
+    const textarea = document.createElement('textarea');
+    textarea.className = 'settings-string-list';
+    let lines: string[] = [];
+    try { lines = JSON.parse(String(currentValue)) as string[]; } catch { /* empty list */ }
+    textarea.value = lines.join('\n');
+    textarea.rows = 8;
+    textarea.spellcheck = false;
+    textarea.addEventListener('change', () => {
+      const arr = textarea.value.split('\n').map(s => s.trim()).filter(Boolean);
+      onChange(JSON.stringify(arr));
+    });
+    ctrl.appendChild(textarea);
   }
 
   return ctrl;
@@ -3374,7 +3441,7 @@ function renderSettingsModal(): void {
 
     for (const def of defs) {
       const row = document.createElement('div');
-      row.className = 'settings-row';
+      row.className = def.type === 'string-list' ? 'settings-row settings-row--stacked' : 'settings-row';
 
       const labelWrap = document.createElement('div');
       labelWrap.className = 'settings-row-label';

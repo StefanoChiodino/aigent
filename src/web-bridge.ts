@@ -15,6 +15,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { AgentClient } from './client.js';
 import type { ServerEvent, ServerState } from './protocol.js';
 import type { ThinkingLevel } from './agent.js';
+import type { ExecPermissions } from './safety.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('web-bridge');
@@ -65,7 +66,9 @@ async function serveFile(res: ServerResponse, filePath: string): Promise<void> {
 export async function startWebServer(
   client: AgentClient,
   port?: number,
+  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions },
 ): Promise<{ port: number }> {
+  const { autoHandledExecIds, getExecPermissions } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -221,9 +224,21 @@ export async function startWebServer(
     }
 
     // Send current client settings so the browser can sync from the JSON file.
+    // Also include effective exec permissions (defaults merged with overrides) so the
+    // Permissions pane in the settings modal shows accurate data before any edits.
     readClientSettings().then((settings) => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'client_settings', settings }));
+        let merged: Record<string, boolean | number | string> = settings;
+        if (getExecPermissions) {
+          const perms = getExecPermissions();
+          merged = {
+            ...merged,
+            exec_perm_alwaysAllow: JSON.stringify(perms.alwaysAllow),
+            exec_perm_prompt: JSON.stringify(perms.prompt),
+            exec_perm_deny: JSON.stringify(perms.deny),
+          };
+        }
+        ws.send(JSON.stringify({ type: 'client_settings', settings: merged }));
       }
     }).catch(() => { /* file missing is fine */ });
 
@@ -273,8 +288,16 @@ export async function startWebServer(
         send({ type: 'config_write_request', id, file, content, reason }),
       edit_file_request: (id: string, path: string, edits: Array<{ old_str: string; new_str: string; index?: number }>, reason: string) =>
         send({ type: 'edit_file_request', id, path, edits, reason }),
-      exec_request: (id: string, command: string) =>
-        send({ type: 'exec_request', id, command }),
+      patch_request: (id: string, diff: string, reason: string) =>
+        send({ type: 'patch_request', id, diff, reason }),
+      exec_request: (id: string, command: string) => {
+        // Skip if gatekeeper already handled this (auto-allow or auto-deny)
+        if (autoHandledExecIds?.has(id)) {
+          autoHandledExecIds.delete(id);
+          return;
+        }
+        send({ type: 'exec_request', id, command });
+      },
       screenshot_request: (id: string) =>
         send({ type: 'screenshot_request', id }),
       screen_share_request: (id: string) =>

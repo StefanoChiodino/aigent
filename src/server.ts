@@ -158,6 +158,9 @@ const clients = new Set<Socket>();
 
 // --- Mount request handling ---
 
+// Cache of currently active mounts to avoid duplicate requests
+let activeMounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] = [];
+
 const pendingMountRequests = new Map<string, {
   path: string;
   mode: 'ro' | 'rw';
@@ -178,6 +181,20 @@ export function requestMount(
   durationMinutes?: number,
 ): Promise<{ ok: boolean; containerPath?: string; message: string }> {
   const id = `mount_${++mountRequestCounter}`;
+  
+  // Check if this mount already exists
+  // Note: rw mode satisfies ro requests, but not vice versa
+  const existingMount = activeMounts.find(mount => 
+    mount.hostPath === path && 
+    (mount.mode === mode || (mount.mode === 'rw' && mode === 'ro'))
+  );
+  
+  if (existingMount) {
+    // Return success immediately without triggering UI
+    const contextNote = `Mount already active: ${path} (${existingMount.mode})`;
+    log.info(contextNote);
+    return Promise.resolve({ ok: true, containerPath: existingMount.containerPath, message: contextNote });
+  }
 
   return new Promise((resolve) => {
     // Timeout after 60s
@@ -495,11 +512,6 @@ async function processTaskResults(): Promise<void> {
 
     const statusLabel = result.status === 'completed' ? 'completed' : 'FAILED';
     const secs = ((new Date(result.completedAt).getTime() - new Date(result.startedAt).getTime()) / 1000).toFixed(1);
-    const shortDesc = result.description.length > 50 ? result.description.slice(0, 50) + '…' : result.description;
-
-    // Brief notification — not the full dump
-    addSystemMessage(`Task ${statusLabel} (${secs}s): ${shortDesc}`);
-
     // Now trigger an agent turn to process the result.
     // The agent sees it as a user message asking for review.
     const reviewPrompt = [
@@ -1438,6 +1450,12 @@ function handleClient(socket: Socket): void {
             break;
           case 'mount_response':
             resolveMountRequest(cmd.id, cmd);
+            break;
+          case 'host_state':
+            // Update our cache of active mounts for duplicate detection
+            if (cmd.mounts) {
+              activeMounts = cmd.mounts;
+            }
             break;
           case 'config_write_response':
             resolveConfigWriteRequest(cmd.id, cmd);

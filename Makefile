@@ -1,4 +1,4 @@
-.PHONY: dev dev-full serve web web-watch build rebuild typecheck clean stt stt-setup tts tts-setup
+.PHONY: dev dev-full serve web web-watch build rebuild typecheck test clean stt stt-setup tts tts-setup
 
 # --- Development ---
 
@@ -50,6 +50,9 @@ rebuild:
 
 typecheck:
 	npx tsc --noEmit
+
+test:
+	node --import tsx/esm --test src/**/*.test.ts
 
 clean:
 	rm -rf dist/ web/dist/
