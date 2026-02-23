@@ -24,6 +24,7 @@ export type ClientCommand =
   | { type: 'config_write_response'; id: string; ok: boolean; message: string }
   | { type: 'edit_file_response'; id: string; ok: boolean; message: string }
   | { type: 'exec_response'; id: string; ok: boolean; alwaysAllow?: boolean; message: string }
+  | { type: 'fetch_response'; id: string; ok: boolean; alwaysAllow?: boolean; message: string }
   | { type: 'screenshot_response'; id: string; ok: boolean; data?: string; mediaType?: string; message: string }
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] }
@@ -113,6 +114,7 @@ export type ServerEvent =
   | { type: 'edit_file_request'; id: string; path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'exec_request'; id: string; command: string }
+  | { type: 'fetch_request'; id: string; url: string; method?: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }

@@ -14,6 +14,8 @@ import {
   validateReadonlyCommand,
   checkExecPermission,
   DEFAULT_EXEC_PERMISSIONS,
+  checkFetchPermission,
+  DEFAULT_FETCH_PERMISSIONS,
 } from './safety.js';
 
 // ---------------------------------------------------------------------------
@@ -256,5 +258,69 @@ describe('checkExecPermission (with DEFAULT_EXEC_PERMISSIONS)', () => {
     };
     assert.equal(checkExecPermission('git status', custom), 'allow');
     assert.equal(checkExecPermission('git push origin main', custom), 'deny');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkFetchPermission
+// ---------------------------------------------------------------------------
+
+describe('checkFetchPermission (with DEFAULT_FETCH_PERMISSIONS)', () => {
+  const perms = DEFAULT_FETCH_PERMISSIONS;
+
+  // Default: everything prompts
+  it('prompts for any public URL by default', () => assert.equal(checkFetchPermission('https://example.com/page', perms), 'prompt'));
+  it('prompts for an API endpoint by default', () => assert.equal(checkFetchPermission('https://api.github.com/repos', perms), 'prompt'));
+
+  // Invalid URL → deny
+  it('denies invalid URL', () => assert.equal(checkFetchPermission('not-a-url', perms), 'deny'));
+  it('denies empty string', () => assert.equal(checkFetchPermission('', perms), 'deny'));
+});
+
+describe('checkFetchPermission (custom permissions)', () => {
+  // alwaysAllow
+  it('allows exact hostname match in alwaysAllow', () => {
+    const perms = { alwaysAllow: ['api.github.com'], prompt: ['*'], deny: [] };
+    assert.equal(checkFetchPermission('https://api.github.com/repos', perms), 'allow');
+  });
+
+  it('allows wildcard subdomain match in alwaysAllow', () => {
+    const perms = { alwaysAllow: ['*.anthropic.com'], prompt: ['*'], deny: [] };
+    assert.equal(checkFetchPermission('https://api.anthropic.com/v1/messages', perms), 'allow');
+  });
+
+  it('does not allow non-matching hostname', () => {
+    const perms = { alwaysAllow: ['api.github.com'], prompt: ['*'], deny: [] };
+    assert.equal(checkFetchPermission('https://evil.com/steal', perms), 'prompt');
+  });
+
+  // deny
+  it('denies hostname matching deny pattern', () => {
+    const perms = { alwaysAllow: [], prompt: ['*'], deny: ['evil.com'] };
+    assert.equal(checkFetchPermission('https://evil.com/page', perms), 'deny');
+  });
+
+  it('denies wildcard deny pattern', () => {
+    const perms = { alwaysAllow: [], prompt: ['*'], deny: ['*.evil.com'] };
+    assert.equal(checkFetchPermission('https://sub.evil.com/page', perms), 'deny');
+  });
+
+  // deny takes precedence over alwaysAllow
+  it('deny overrides alwaysAllow when both match', () => {
+    const perms = { alwaysAllow: ['evil.com'], prompt: [], deny: ['evil.com'] };
+    assert.equal(checkFetchPermission('https://evil.com/page', perms), 'deny');
+  });
+
+  // unlisted domain defaults to prompt
+  it('prompts for unlisted domain when no wildcard prompt pattern', () => {
+    const perms = { alwaysAllow: ['api.github.com'], prompt: [], deny: [] };
+    assert.equal(checkFetchPermission('https://unknown.example.com', perms), 'prompt');
+  });
+
+  // URL hostname is normalized to lowercase before matching; patterns should be lowercase too
+  it('URL hostname is lowercased before matching', () => {
+    const perms = { alwaysAllow: ['api.github.com'], prompt: ['*'], deny: [] };
+    // Mixed-case in the URL should still match the lowercase pattern
+    assert.equal(checkFetchPermission('https://API.GITHUB.COM/repos', perms), 'allow');
   });
 });

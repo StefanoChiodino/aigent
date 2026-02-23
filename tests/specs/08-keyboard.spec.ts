@@ -6,11 +6,14 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { waitForConnected } from '../helpers/ui.js';
+import { waitForConnected, cancelIfLoading } from '../helpers/ui.js';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
   await waitForConnected(page);
+  // Cancel any in-progress LLM request left over from previous tests
+  // (e.g. @live tests that timed out while the server was still streaming).
+  await cancelIfLoading(page);
 });
 
 test('Ctrl held flips the send button icon vs current reasoning state', async ({ page }) => {

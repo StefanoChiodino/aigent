@@ -256,6 +256,49 @@ export function validateReadonlyCommand(command: string): string | null {
   return null;
 }
 
+// --- Fetch URL permissions ---
+
+export interface FetchPermissions {
+  alwaysAllow: string[]; // hostname glob patterns
+  prompt: string[];
+  deny: string[];
+}
+
+export type FetchPermissionLevel = 'allow' | 'prompt' | 'deny';
+
+export const DEFAULT_FETCH_PERMISSIONS: FetchPermissions = {
+  alwaysAllow: [],
+  prompt: ['*'], // everything prompts by default
+  deny: [],      // SSRF still blocked separately by validateFetchUrl
+};
+
+/**
+ * Check what permission level a fetch URL requires given user-configured permissions.
+ * Matches against the URL's hostname using glob patterns.
+ * Evaluation order: deny → alwaysAllow → prompt → default(prompt)
+ */
+export function checkFetchPermission(
+  url: string,
+  permissions: FetchPermissions,
+): FetchPermissionLevel {
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return 'deny';
+  }
+  for (const pattern of permissions.deny) {
+    if (minimatch(hostname, pattern)) return 'deny';
+  }
+  for (const pattern of permissions.alwaysAllow) {
+    if (minimatch(hostname, pattern)) return 'allow';
+  }
+  for (const pattern of permissions.prompt) {
+    if (minimatch(hostname, pattern)) return 'prompt';
+  }
+  return 'prompt';
+}
+
 // --- Exec command permissions ---
 
 export interface ExecPermissions {

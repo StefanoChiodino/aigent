@@ -28,9 +28,23 @@ export default async function globalTeardown() {
   // Kill anything still holding port 3142 (catches stray Docker processes)
   killPort(3142);
 
+  // Clean up any orphaned aigent Docker containers from this test run
+  cleanupDockerContainers();
+
   // Brief wait for OS cleanup
   await new Promise((r) => setTimeout(r, 800));
   console.log('[test-teardown] Done');
+}
+
+/** Remove all aigent-worker Docker containers that may have been orphaned. */
+function cleanupDockerContainers(): void {
+  try {
+    // List running aigent-worker containers and remove them
+    spawnSync('sh', ['-c', 'docker ps -q --filter name=aigent-worker | xargs -r docker rm -f'], {
+      stdio: 'ignore',
+      timeout: 10_000,
+    });
+  } catch { /* ignore */ }
 }
 
 /** Kill any process listening on the given port using fuser or lsof. */

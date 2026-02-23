@@ -13,8 +13,8 @@ interface ModelPricing {
 // Prices as of early 2026 — update as needed
 const PRICING: Record<string, ModelPricing> = {
   // Anthropic — cache read = 10% of input, cache write = 125% of input
-  'claude-opus-4-6-20250514': { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-  'claude-sonnet-4-20250514': { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  'claude-opus-4-6': { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+  'claude-sonnet-4-6': { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   'claude-haiku-3.5-20241022': { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 },
   // OpenAI
   'gpt-4o': { input: 2.5, output: 10, cacheRead: 1.25, cacheWrite: 2.5 },
@@ -25,8 +25,8 @@ const PRICING: Record<string, ModelPricing> = {
 
 // Map common model family names to their full keys
 const FAMILY_MAP: [string, string][] = [
-  ['opus', 'claude-opus-4-6-20250514'],
-  ['sonnet', 'claude-sonnet-4-20250514'],
+  ['opus', 'claude-opus-4-6'],
+  ['sonnet', 'claude-sonnet-4-6'],
   ['haiku', 'claude-haiku-3.5-20241022'],
   ['gpt-4o-mini', 'gpt-4o-mini'],
   ['gpt-4o', 'gpt-4o'],

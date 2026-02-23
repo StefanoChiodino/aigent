@@ -298,12 +298,13 @@ export class AnthropicProvider implements Provider {
       }
     }
 
-    // Add cache_control to the last 2 user messages with array content.
-    // System prompt (base) and tool definitions already use 2 of 4 available breakpoints;
-    // these 2 breakpoints cover the most recent tool results and user turn so they're
-    // cached across turns (10% of input cost vs full price).
+    // Add cache_control to the last N user messages with array content.
+    // Anthropic allows at most 4 cache_control blocks per request.
+    // Non-OAuth uses 2 (system base + tools), leaving 2 for messages.
+    // OAuth adds a 3rd system block (identity prefix), leaving only 1 for messages.
+    const maxMessageBreakpoints = this.isOAuth ? 1 : 2;
     let breakpointsAdded = 0;
-    for (let i = result.length - 1; i >= 0 && breakpointsAdded < 2; i--) {
+    for (let i = result.length - 1; i >= 0 && breakpointsAdded < maxMessageBreakpoints; i--) {
       const msg = result[i]!;
       if (msg.role === 'user' && Array.isArray(msg.content) && msg.content.length > 0) {
         const lastBlock = msg.content[msg.content.length - 1] as unknown as Record<string, unknown>;

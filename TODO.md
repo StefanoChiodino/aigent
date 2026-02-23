@@ -9,14 +9,8 @@
     - `mkfs *` deny glob doesn't match `mkfs.ext4 /dev/sdb` (minimatch treats `*` as not matching spaces/dots)
     - `validateReadonlyCommand` curl-pipe-to-bash bypass: splits on `|` before checking blocklist patterns
 
-- [ ] **`fetch` permission tiers**
-  - **Why:** Prevent data exfiltration. The agent shouldn't be able to POST sensitive host data to arbitrary domains without permission.
-  - **What:** Implement a domain-based allow/prompt/deny model analogous to `ExecPermissions`.
-  - **Tasks:**
-    - Define `FetchPermissions` interface (e.g., `alwaysAllow: string[]`, `prompt: string[]`, `deny: string[]`).
-    - Update `validateFetchUrl` in `src/safety.ts` to parse the hostname and match against globs.
-    - Default unlisted domains to `prompt`.
-    - Update `fetch` and `fetch_readonly` in `src/tools.ts` to request gatekeeper approval for `prompt` domains.
+- [x] **`fetch` permission tiers**
+  - Domain-based allow/prompt/deny model mirroring `ExecPermissions`. `FetchPermissions` + `checkFetchPermission()` in `src/safety.ts`; `requestFetchApproval()` in `src/server.ts`; gatekeeper handlers + `/approve-fetch` / `/deny-fetch` in `src/gatekeeper.tsx`; web UI approval modal with 🌐 icon; `--always` flag persists hostname to `settings.json` `fetch_permissions` key. 12 new unit tests.
 
 - [ ] **Harden SSRF protection against DNS rebinding**
   - **Why:** The current regex check on the string hostname is vulnerable to Time-Of-Check to Time-Of-Use (TOCTOU) attacks. An attacker can use a domain that resolves to a public IP during validation, but changes to `127.0.0.1` a millisecond later when `curl` runs.

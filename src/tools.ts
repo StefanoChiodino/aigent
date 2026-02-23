@@ -220,7 +220,7 @@ const spawnAgentTool: ToolDef = {
     'MODEL + THINKING STRATEGY (pick the right tool for the job):\n' +
     '  • Simple search/read/summarize → model: "claude-haiku-4-5-20251001", thinking: "off"\n' +
     '  • Moderate analysis or refactor → model: "claude-sonnet-4-6", thinking: "low"\n' +
-    '  • Complex reasoning, architecture → model: "claude-opus-4-6-20250514", thinking: "high"\n' +
+    '  • Complex reasoning, architecture → model: "claude-opus-4-6", thinking: "high"\n' +
     'Thinking defaults to "off" for Haiku, "low" for Sonnet, "high" for Opus if not specified.',
   input_schema: {
     type: 'object' as const,
@@ -262,7 +262,7 @@ const dispatchTaskTool: ToolDef = {
     'MODEL + THINKING STRATEGY (match the model to the task complexity):\n' +
     '  • Simple search/read/summarize → model: "claude-haiku-4-5-20251001", thinking: "off"\n' +
     '  • Moderate analysis → model: "claude-sonnet-4-6", thinking: "low"\n' +
-    '  • Complex reasoning → model: "claude-opus-4-6-20250514", thinking: "high"\n' +
+    '  • Complex reasoning → model: "claude-opus-4-6", thinking: "high"\n' +
     'Thinking defaults to "off" for Haiku, "low" for Sonnet, "high" for Opus if not specified.\n\n' +
     'By default, background agents are READ-ONLY. Grant capabilities when needed.',
   input_schema: {
@@ -641,16 +641,16 @@ const switchModelTool: ToolDef = {
     '- You are struggling and a stronger model may succeed\n\n' +
     'Common models (fastest/cheapest → most capable):\n' +
     '- claude-haiku-4-5-20251001 — fastest, cheapest; good for simple lookups and formatting\n' +
-    '- claude-sonnet-4-20250514 — balanced; good for most tasks\n' +
-    '- claude-opus-4-6-20250514 — most capable; best for complex reasoning, debugging, architecture\n\n' +
-    'Note: only claude-opus-4-6-20250514 supports extended thinking/reasoning.\n' +
+    '- claude-sonnet-4-6 — balanced; good for most tasks\n' +
+    '- claude-opus-4-6 — most capable; best for complex reasoning, debugging, architecture\n\n' +
+    'Note: only claude-opus-4-6 supports extended thinking/reasoning.\n' +
     'The switch takes effect immediately for subsequent API calls.',
   input_schema: {
     type: 'object' as const,
     properties: {
       model: {
         type: 'string',
-        description: 'Exact model ID to switch to (e.g. claude-opus-4-6-20250514)',
+        description: 'Exact model ID to switch to (e.g. claude-opus-4-6)',
       },
       reason: {
         type: 'string',
@@ -1023,6 +1023,14 @@ export async function executeTool(
       const { url, method = 'GET', headers: reqHeaders, body: reqBody, text_only = false, max_bytes = 100_000 } = input as FetchInput;
       const ssrfErr = validateFetchUrl(url);
       if (ssrfErr) return ssrfErr;
+
+      // Permission check — gatekeeper decides allow/prompt/deny based on fetch_permissions settings
+      const { requestFetchApproval } = await import('./server.js');
+      const fetchApproval = await requestFetchApproval(url, method, signal);
+      if (!fetchApproval.ok) {
+        return `Fetch not allowed: ${fetchApproval.message}`;
+      }
+
       try {
         const args: string[] = ['-sS', '-L', '--max-time', '30', '--max-filesize', String(max_bytes)];
         args.push('-X', method.toUpperCase());

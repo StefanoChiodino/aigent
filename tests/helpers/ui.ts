@@ -38,3 +38,22 @@ export async function dismissPermModal(page: Page): Promise<void> {
     await page.locator('#perm-deny-btn').click();
   }
 }
+
+/**
+ * If the agent is currently loading (streaming), send a cancel and wait for
+ * it to settle. Safe to call when not loading — no-op in that case.
+ */
+export async function cancelIfLoading(page: Page, timeout = 5_000): Promise<void> {
+  const isLoading = await page.evaluate(() => document.body.hasAttribute('data-working'));
+  if (!isLoading) return;
+  // Click the cancel button (or send cancel via keyboard)
+  const cancelBtn = page.locator('#cancel');
+  const isVisible = await cancelBtn.isVisible().catch(() => false);
+  if (isVisible) {
+    await cancelBtn.click();
+  } else {
+    await page.keyboard.press('Escape');
+  }
+  // Wait for loading to stop
+  await page.waitForFunction(() => !document.body.hasAttribute('data-working'), { timeout }).catch(() => {});
+}

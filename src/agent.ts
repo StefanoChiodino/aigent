@@ -161,7 +161,7 @@ export class Agent {
       this.provider = createProvider(providerType);
       this.isOAuth = providerType === 'anthropic' && (this.provider as AnthropicProvider).isOAuthToken;
     }
-    this.model = options.model ?? process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
+    this.model = options.model ?? process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6';
     this.maxTokens = options.maxTokens ?? 16384;
     this.thinking = options.thinking ?? (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
     this.mcpManager = options.mcpManager ?? null;

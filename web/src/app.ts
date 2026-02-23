@@ -97,6 +97,7 @@ type ServerEvent =
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'exec_request'; id: string; command: string }
+  | { type: 'fetch_request'; id: string; url: string; method?: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
@@ -441,6 +442,34 @@ const SETTINGS_SCHEMA: SettingDef[] = [
     default: '[]',
     scope: 'client',
   },
+  // ── Fetch Permissions ─────────────────────────────────────
+  {
+    key: 'fetch_perm_alwaysAllow',
+    label: 'Always Allow',
+    desc: 'Hostnames matching these glob patterns are always fetched without prompting (e.g. api.github.com, *.anthropic.com). One pattern per line.',
+    group: 'Fetch Permissions',
+    type: 'string-list',
+    default: '[]',
+    scope: 'client',
+  },
+  {
+    key: 'fetch_perm_prompt',
+    label: 'Require Approval',
+    desc: 'Hostnames matching these glob patterns require explicit approval before fetching. One pattern per line.',
+    group: 'Fetch Permissions',
+    type: 'string-list',
+    default: '["*"]',
+    scope: 'client',
+  },
+  {
+    key: 'fetch_perm_deny',
+    label: 'Always Deny',
+    desc: 'Hostnames matching these glob patterns are always blocked from fetching. One pattern per line.',
+    group: 'Fetch Permissions',
+    type: 'string-list',
+    default: '[]',
+    scope: 'client',
+  },
 ];
 
 // serverSettings holds the current values of server-scoped settings as reported
@@ -524,6 +553,21 @@ function setClientSetting(key: string, value: boolean | number | string): void {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ exec_permissions }),
     }).then(() => { showSettingsToast(); }).catch(() => {});
+  } else if (key.startsWith('fetch_perm_')) {
+    // Reconstruct full fetch_permissions object so all three lists are saved together
+    const getList = (k: string): string[] => {
+      try { return JSON.parse(String(clientSettings[k] ?? '[]')) as string[]; } catch { return []; }
+    };
+    const fetch_permissions = {
+      alwaysAllow: getList('fetch_perm_alwaysAllow'),
+      prompt: getList('fetch_perm_prompt'),
+      deny: getList('fetch_perm_deny'),
+    };
+    fetch('/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fetch_permissions }),
+    }).then(() => { showSettingsToast(); }).catch(() => {});
   } else if (key.startsWith('tools_')) {
     // Reconstruct the tools object so all summarization settings are saved together
     const getList = (k: string): string[] => {
@@ -601,7 +645,7 @@ interface DiffFile {
 }
 
 interface PermRequest {
-  type: 'mount' | 'config_write' | 'patch' | 'exec';
+  type: 'mount' | 'config_write' | 'patch' | 'exec' | 'fetch';
   id: string;
   title: string;
   detail: string;
@@ -1199,6 +1243,19 @@ function handleEvent(event: ServerEvent): void {
         approveCmd: `/approve-exec ${event.id}`,
         denyCmd: `/deny-exec ${event.id}`,
         alwaysAllowCmd: `/approve-exec ${event.id} --always`,
+      });
+      break;
+    }
+
+    case 'fetch_request': {
+      enqueuePermRequest({
+        type: 'fetch',
+        id: event.id,
+        title: 'Fetch URL',
+        detail: `${event.method ?? 'GET'} ${event.url}`,
+        approveCmd: `/approve-fetch ${event.id}`,
+        denyCmd: `/deny-fetch ${event.id}`,
+        alwaysAllowCmd: `/approve-fetch ${event.id} --always`,
       });
       break;
     }
@@ -2477,7 +2534,7 @@ function showNextPermRequest(): void {
   }
   permShowing = true;
   $permOverlay.classList.toggle('exec-mode', req.type === 'exec');
-  $permIcon.textContent = req.type === 'mount' ? '📂' : req.type === 'patch' ? '🩹' : req.type === 'exec' ? '⚡' : '✏️';
+  $permIcon.textContent = req.type === 'mount' ? '📂' : req.type === 'patch' ? '🩹' : req.type === 'exec' ? '⚡' : req.type === 'fetch' ? '🌐' : '✏️';
   $permAlwaysAllowBtn.classList.toggle('hidden', !req.alwaysAllowCmd);
   $permTitle.textContent = req.title;
 
@@ -2564,13 +2621,23 @@ $permDenyBtn.addEventListener('click', () => resolvePermRequest(false));
 $permAlwaysAllowBtn.addEventListener('click', () => {
   const req = permQueue.shift();
   if (!req?.alwaysAllowCmd) return;
-  // Optimistically add command to local exec_perm_alwaysAllow so the settings
-  // modal reflects the change immediately without waiting for a server roundtrip.
+  // Optimistically update local settings so the modal reflects the change immediately.
   if (req.type === 'exec' && req.detail) {
     try {
       const current: string[] = JSON.parse(String(clientSettings['exec_perm_alwaysAllow'] ?? '[]'));
       if (!current.includes(req.detail)) {
         clientSettings['exec_perm_alwaysAllow'] = JSON.stringify([...current, req.detail]);
+        saveClientSettingsCache();
+      }
+    } catch { /* ignore */ }
+  } else if (req.type === 'fetch' && req.detail) {
+    // Extract hostname from the "METHOD url" detail string
+    try {
+      const urlPart = req.detail.split(' ')[1] ?? req.detail;
+      const hostname = new URL(urlPart).hostname.toLowerCase();
+      const current: string[] = JSON.parse(String(clientSettings['fetch_perm_alwaysAllow'] ?? '[]'));
+      if (!current.includes(hostname)) {
+        clientSettings['fetch_perm_alwaysAllow'] = JSON.stringify([...current, hostname]);
         saveClientSettingsCache();
       }
     } catch { /* ignore */ }
@@ -2706,6 +2773,12 @@ function submitMessage(useThinkingOverride = false): void {
   if (useThinkingOverride) {
     // Flip: if thinking is on, override to off; if off, override to high
     msg.thinkingOverride = thinkingLevel === 'off' ? 'high' : 'off';
+  }
+  // Handle /context locally so we can open the inspector immediately, and so
+  // renderContextInspector() doesn't need to force-open the overlay itself.
+  if (text === '/context') {
+    openContextInspector();
+    return;
   }
   wsSend(msg);
   // Sticky voice mode: restart mic silently after submit (no sound, seamless loop)
@@ -3806,8 +3879,10 @@ function makeExpandPanel(content: string): HTMLElement {
 }
 
 function renderContextInspector(bd: ContextBreakdown): void {
-  // Ensure overlay is visible (handles both click-triggered and slash-command-triggered flows)
-  $ctxInspectorOverlay.classList.remove('hidden');
+  // Only open the overlay if it is already visible (opened by a click/request).
+  // Do NOT force-open here — if the user dismissed the inspector before the server
+  // responded, the overlay should stay closed. The /context slash command is handled
+  // client-side in submitMessage() which calls openContextInspector() first.
 
   const segments = [bd.systemBase, bd.workspaceContext, bd.toolDefs, bd.messagesTotal];
   const segmentContents = [bd.systemBaseContent, bd.workspaceContent, bd.toolDefsContent, undefined];

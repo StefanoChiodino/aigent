@@ -9,6 +9,7 @@
       "Bash(npm run:*)",
       "Read(//home/draga/repos/orchids/website/**)",
       "Bash(echo:*)",
+      "Bash(make test:*)",
       "Bash(npx playwright test:*)"
     ]
   }

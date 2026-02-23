@@ -8,7 +8,7 @@
 import { test, expect } from '@playwright/test';
 import { waitForConnected } from '../helpers/ui.js';
 
-const SETTINGS_GROUPS = ['Provider', 'Model', 'Tools', 'Prompt', 'Services', 'Microphone', 'Context', 'Permissions'];
+const SETTINGS_GROUPS = ['Provider', 'Model', 'Tools', 'Prompt', 'Services', 'Microphone', 'Context', 'Permissions', 'Fetch Permissions'];
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
@@ -50,7 +50,8 @@ test('settings modal has navigation items', async ({ page }) => {
 for (const group of SETTINGS_GROUPS) {
   test(`can navigate to ${group} settings tab`, async ({ page }) => {
     await openSettings(page);
-    const navBtn = page.locator('#settings-nav .settings-nav-item', { hasText: group });
+    // Use exact text match (regex with anchors) to avoid 'Permissions' matching 'Fetch Permissions'
+    const navBtn = page.locator('#settings-nav .settings-nav-item', { hasText: new RegExp(`^${group}$`) });
     // Skip if this group doesn't exist in this build
     const count = await navBtn.count();
     if (count === 0) return;
@@ -104,7 +105,7 @@ test('Microphone tab has auto-send toggle', async ({ page }) => {
 
 test('Permissions tab shows always-allow section', async ({ page }) => {
   await openSettings(page);
-  const permNav = page.locator('#settings-nav .settings-nav-item', { hasText: 'Permissions' });
+  const permNav = page.locator('#settings-nav .settings-nav-item', { hasText: /^Permissions$/ });
   if (await permNav.count() === 0) return;
   await permNav.click();
 
@@ -113,9 +114,29 @@ test('Permissions tab shows always-allow section', async ({ page }) => {
 
 test('Permissions tab shows deny section', async ({ page }) => {
   await openSettings(page);
-  const permNav = page.locator('#settings-nav .settings-nav-item', { hasText: 'Permissions' });
+  const permNav = page.locator('#settings-nav .settings-nav-item', { hasText: /^Permissions$/ });
   if (await permNav.count() === 0) return;
   await permNav.click();
+
+  await expect(page.locator('#settings-body')).toContainText(/deny/i);
+});
+
+// ── Fetch Permissions tab ─────────────────────────────────────────────────────
+
+test('Fetch Permissions tab shows always-allow section', async ({ page }) => {
+  await openSettings(page);
+  const fetchPermNav = page.locator('#settings-nav .settings-nav-item', { hasText: /^Fetch Permissions$/ });
+  if (await fetchPermNav.count() === 0) return;
+  await fetchPermNav.click();
+
+  await expect(page.locator('#settings-body')).toContainText(/always.?allow/i);
+});
+
+test('Fetch Permissions tab shows deny section', async ({ page }) => {
+  await openSettings(page);
+  const fetchPermNav = page.locator('#settings-nav .settings-nav-item', { hasText: /^Fetch Permissions$/ });
+  if (await fetchPermNav.count() === 0) return;
+  await fetchPermNav.click();
 
   await expect(page.locator('#settings-body')).toContainText(/deny/i);
 });

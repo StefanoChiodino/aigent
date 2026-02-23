@@ -15,7 +15,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { AgentClient } from './client.js';
 import type { ServerEvent, ServerState } from './protocol.js';
 import type { ThinkingLevel } from './agent.js';
-import type { ExecPermissions } from './safety.js';
+import type { ExecPermissions, FetchPermissions } from './safety.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('web-bridge');
@@ -66,9 +66,9 @@ async function serveFile(res: ServerResponse, filePath: string): Promise<void> {
 export async function startWebServer(
   client: AgentClient,
   port?: number,
-  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions },
+  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions },
 ): Promise<{ port: number }> {
-  const { autoHandledExecIds, getExecPermissions } = options ?? {};
+  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -259,6 +259,15 @@ export async function startWebServer(
             exec_perm_deny: JSON.stringify(perms.deny),
           };
         }
+        if (getFetchPermissions) {
+          const perms = getFetchPermissions();
+          merged = {
+            ...merged,
+            fetch_perm_alwaysAllow: JSON.stringify(perms.alwaysAllow),
+            fetch_perm_prompt: JSON.stringify(perms.prompt),
+            fetch_perm_deny: JSON.stringify(perms.deny),
+          };
+        }
         // Flatten nested tools config into tools_* keys for the settings panel
         const toolsCfg = (settings as Record<string, unknown>)['tools'] as Record<string, unknown> | undefined;
         if (toolsCfg) {
@@ -331,6 +340,14 @@ export async function startWebServer(
         }
         send({ type: 'exec_request', id, command });
       },
+      fetch_request: (id: string, url: string, method?: string) => {
+        // Skip if gatekeeper already handled this (auto-allow or auto-deny)
+        if (autoHandledFetchIds?.has(id)) {
+          autoHandledFetchIds.delete(id);
+          return;
+        }
+        send({ type: 'fetch_request', id, url, ...(method ? { method } : {}) });
+      },
       screenshot_request: (id: string) =>
         send({ type: 'screenshot_request', id }),
       screen_share_request: (id: string) =>
@@ -389,6 +406,9 @@ export async function startWebServer(
             client.send(cmd);
             break;
           case 'screen_share_response':
+            client.send(cmd);
+            break;
+          case 'fetch_response':
             client.send(cmd);
             break;
           case 'context_breakdown_request':

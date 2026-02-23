@@ -1,4 +1,4 @@
-.PHONY: dev dev-full serve web web-watch build rebuild typecheck test test-e2e test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup
+.PHONY: dev dev-full serve web web-watch build rebuild typecheck test test-e2e test-e2e-spec test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup
 
 # --- Development ---
 
@@ -55,7 +55,11 @@ test:
 	node --import tsx/esm --test src/**/*.test.ts
 
 test-e2e:
-	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts
+	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts --grep-invert @live
+
+# Run a single spec or glob, e.g. make test-e2e-spec SPEC=tests/specs/10-settings.spec.ts
+test-e2e-spec:
+	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts $(SPEC) --reporter=line
 
 test-e2e-live:
 	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts --grep @live

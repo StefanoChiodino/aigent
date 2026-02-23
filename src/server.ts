@@ -30,8 +30,8 @@ const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 
 // Default model list — used until the provider reports its own list.
 // Ordered most capable → fastest/cheapest.
 let AVAILABLE_MODELS = [
-  'claude-opus-4-6-20250514',
-  'claude-sonnet-4-20250514',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
   'claude-haiku-4-5-20251001',
 ];
 
@@ -279,6 +279,56 @@ function resolveExecRequest(id: string, response: { ok: boolean; alwaysAllow: bo
   const pending = pendingExecRequests.get(id);
   if (pending) {
     pendingExecRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
+// --- Fetch URL approval handling ---
+
+const pendingFetchRequests = new Map<string, {
+  url: string;
+  method?: string;
+  resolve: (response: { ok: boolean; alwaysAllow: boolean; message: string }) => void;
+}>();
+let fetchApprovalCounter = 0;
+
+/**
+ * Request user approval before fetching a URL.
+ * Called by the fetch tool when a URL requires prompt-level permission.
+ */
+export function requestFetchApproval(url: string, method?: string, signal?: AbortSignal): Promise<{ ok: boolean; alwaysAllow: boolean; message: string }> {
+  const id = `fetch_${++fetchApprovalCounter}`;
+
+  if (signal?.aborted) {
+    return Promise.resolve({ ok: false, alwaysAllow: false, message: 'Aborted by user' });
+  }
+
+  return new Promise((resolve) => {
+    const finish = (response: { ok: boolean; alwaysAllow: boolean; message: string }) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      pendingFetchRequests.delete(id);
+      resolve(response);
+    };
+
+    const onAbort = () => finish({ ok: false, alwaysAllow: false, message: 'Aborted by user' });
+
+    const timer = setTimeout(() => {
+      finish({ ok: false, alwaysAllow: false, message: 'Fetch approval request timed out (60s)' });
+    }, 60_000);
+
+    pendingFetchRequests.set(id, { url, ...(method !== undefined ? { method } : {}), resolve: finish });
+
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    broadcast({ type: 'fetch_request', id, url, ...(method ? { method } : {}) });
+  });
+}
+
+function resolveFetchRequest(id: string, response: { ok: boolean; alwaysAllow: boolean; message: string }): void {
+  const pending = pendingFetchRequests.get(id);
+  if (pending) {
+    pendingFetchRequests.delete(id);
     pending.resolve(response);
   }
 }
@@ -1478,6 +1528,9 @@ function handleClient(socket: Socket): void {
           case 'exec_response':
             resolveExecRequest(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
             break;
+          case 'fetch_response':
+            resolveFetchRequest(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
+            break;
           case 'screenshot_response':
             resolveScreenshotRequest(cmd.id, {
               ok: cmd.ok,
@@ -1602,7 +1655,7 @@ function restoreSession(): void {
 
 // --- Main ---
 
-model = process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6-20250514';
+model = process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6';
 currentThinking = (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
 workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
 

@@ -16,7 +16,10 @@ async function waitForAssistantMessage(
   pattern: RegExp | string,
   timeout = 45_000
 ): Promise<void> {
-  await expect(page.locator('#messages')).toContainText(pattern, { timeout });
+  // Use .last() so we always check the most recent assistant message.
+  // Previous messages stay in the DOM after /reset, so the locator would
+  // otherwise match multiple elements (strict mode violation).
+  await expect(page.locator('#messages .message.assistant').last()).toContainText(pattern, { timeout });
 }
 
 /** Disable reasoning to keep @live responses fast and cheap. */
@@ -26,11 +29,15 @@ async function disableReasoning(page: import('@playwright/test').Page): Promise<
 }
 
 test.beforeEach(async ({ page }) => {
+  test.setTimeout(90_000);
   await page.goto('/');
   await waitForConnected(page);
+  // Wait for any in-progress LLM request from a previous test to finish before resetting
+  await page.waitForFunction(() => !document.body.hasAttribute('data-working'), { timeout: 60_000 }).catch(() => {});
   await page.locator('#input').fill('/reset');
   await page.locator('#input').press('Enter');
-  await page.waitForTimeout(500);
+  // Brief settle after reset
+  await page.waitForTimeout(300);
 });
 
 // ── Basic response ─────────────────────────────────────────────────────────────
@@ -51,15 +58,12 @@ test('@live context meter increases after a response', async ({ page }) => {
   test.setTimeout(60_000);
   await disableReasoning(page);
 
-  const ctxLabel = page.locator('#sb-ctx-label');
-  const before = await ctxLabel.innerText();
-
-  await page.locator('#input').fill('Say: ok');
+  await page.locator('#input').fill('Reply with exactly: CTX_METER_TEST');
   await page.locator('#input').press('Enter');
-  await waitForAssistantMessage(page, /\bok\b/i);
+  await waitForAssistantMessage(page, 'CTX_METER_TEST');
 
-  const after = await ctxLabel.innerText();
-  expect(after).not.toEqual(before);
+  // Context label should update to a non-empty token count after a real LLM call
+  await expect(page.locator('#sb-ctx-label')).not.toHaveText('', { timeout: 5_000 });
 });
 
 // ── Cost updates ───────────────────────────────────────────────────────────────

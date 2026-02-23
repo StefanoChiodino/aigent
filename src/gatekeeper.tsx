@@ -23,7 +23,7 @@ import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
-import { checkExecPermission, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions } from './safety.js';
+import { checkExecPermission, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions } from './safety.js';
 
 const log = createLogger('gatekeeper');
 
@@ -113,7 +113,7 @@ Usage: aigent [project-folder] [options]
 
 Options:
   --rw                   Mount project folder read-write (default: read-only)
-  --model <model>        Model to use (default: claude-opus-4-6-20250514)
+  --model <model>        Model to use (default: claude-opus-4-6)
   --thinking <level>     Thinking level: off, low, medium, high, max
   --headless             Web UI only, no terminal interface
   --provider <type>      LLM provider: anthropic (default) or openai
@@ -320,12 +320,14 @@ function buildDockerArgs(): string[] {
     args.push('-v', `${mount.hostPath}:${mount.containerPath}:${mount.mode}`);
   }
 
-  // Environment
-  if (gatekeeperArgs.model) {
-    args.push('-e', `AIGENT_MODEL=${gatekeeperArgs.model}`);
+  // Environment — CLI flags take precedence over .env values
+  const model = gatekeeperArgs.model ?? process.env['AIGENT_MODEL'];
+  if (model) {
+    args.push('-e', `AIGENT_MODEL=${model}`);
   }
-  if (gatekeeperArgs.thinking) {
-    args.push('-e', `AIGENT_THINKING=${gatekeeperArgs.thinking}`);
+  const thinking = gatekeeperArgs.thinking ?? process.env['AIGENT_THINKING'];
+  if (thinking) {
+    args.push('-e', `AIGENT_THINKING=${thinking}`);
   }
   if (process.env['AIGENT_DEBUG']) {
     args.push('-e', `AIGENT_DEBUG=${process.env['AIGENT_DEBUG']}`);
@@ -456,7 +458,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/set-env']);
+const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/set-env']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -518,6 +520,7 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   if (await handleConfigApproveReject(input)) return;
   if (await handleEditFileApproveReject(input)) return;
   if (await handleExecApproveReject(input)) return;
+  if (await handleFetchApproveReject(input)) return;
 
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
@@ -1214,6 +1217,141 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
   return false;
 }
 
+// --- Fetch URL approval ---
+
+const pendingFetchApprovals = new Map<string, { url: string; method?: string }>();
+const autoHandledFetchIds = new Set<string>();
+
+function readFetchPermissions(): FetchPermissions {
+  try {
+    if (!existsSync(SETTINGS_PATH)) return DEFAULT_FETCH_PERMISSIONS;
+    const raw = readFileSync(SETTINGS_PATH, 'utf-8');
+    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const perms = settings['fetch_permissions'];
+    if (!perms || typeof perms !== 'object') return DEFAULT_FETCH_PERMISSIONS;
+    const p = perms as Partial<FetchPermissions>;
+    return {
+      alwaysAllow: Array.isArray(p.alwaysAllow) ? p.alwaysAllow : DEFAULT_FETCH_PERMISSIONS.alwaysAllow,
+      prompt: Array.isArray(p.prompt) ? p.prompt : DEFAULT_FETCH_PERMISSIONS.prompt,
+      deny: Array.isArray(p.deny) ? p.deny : DEFAULT_FETCH_PERMISSIONS.deny,
+    };
+  } catch {
+    return DEFAULT_FETCH_PERMISSIONS;
+  }
+}
+
+function addDomainToAlwaysAllow(hostname: string): void {
+  try {
+    const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
+    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const perms = (settings['fetch_permissions'] as Partial<FetchPermissions> | undefined) ?? {};
+    const current = Array.isArray(perms.alwaysAllow) ? perms.alwaysAllow : [...DEFAULT_FETCH_PERMISSIONS.alwaysAllow];
+    if (!current.includes(hostname)) {
+      current.push(hostname);
+    }
+    settings['fetch_permissions'] = { ...DEFAULT_FETCH_PERMISSIONS, ...perms, alwaysAllow: current };
+    writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    log.info('Added domain to fetch always-allow', { hostname });
+  } catch (err) {
+    log.error('Failed to update fetch permissions', { error: String(err) });
+  }
+}
+
+function handleAgentFetchRequest(id: string, url: string, method?: string): void {
+  const permissions = readFetchPermissions();
+  const level = checkFetchPermission(url, permissions);
+
+  if (level === 'allow') {
+    log.info('Fetch auto-allowed', { id, url });
+    autoHandledFetchIds.add(id);
+    client!.send({ type: 'fetch_response', id, ok: true, message: 'Allowed by permission policy' });
+    return;
+  }
+
+  if (level === 'deny') {
+    log.info('Fetch auto-denied', { id, url });
+    autoHandledFetchIds.add(id);
+    client!.send({ type: 'fetch_response', id, ok: false, message: 'Denied by permission policy' });
+    injectSystemMessage(`[fetch] Blocked by deny policy: ${url}`);
+    return;
+  }
+
+  // 'prompt' — store and forward to web UI for user approval
+  pendingFetchApprovals.set(id, { url, ...(method !== undefined ? { method } : {}) });
+  log.info('Fetch approval requested', { id, url, method });
+
+  injectSystemMessage(
+    `Agent wants to fetch: ${method ?? 'GET'} ${url}\n` +
+    `  Reply: /approve-fetch ${id} or /deny-fetch ${id}\n` +
+    `  To always allow this domain: /approve-fetch ${id} --always`
+  );
+}
+
+async function handleFetchApproveReject(input: string): Promise<boolean> {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  if (cmd === '/approve-fetch') {
+    let id = parts[1];
+    if (!id && pendingFetchApprovals.size === 1) {
+      id = pendingFetchApprovals.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingFetchApprovals.size === 0
+        ? 'No pending fetch requests.'
+        : `Multiple pending — specify ID: ${[...pendingFetchApprovals.keys()].join(', ')}`);
+      return true;
+    }
+
+    const pending = pendingFetchApprovals.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending fetch request: ${id}`);
+      return true;
+    }
+
+    const alwaysAllow = parts.includes('--always');
+    pendingFetchApprovals.delete(id);
+
+    if (alwaysAllow) {
+      let hostname = pending.url;
+      try { hostname = new URL(pending.url).hostname; } catch { /* keep raw */ }
+      addDomainToAlwaysAllow(hostname);
+      injectSystemMessage(`Approved and domain added to always-allow: ${hostname}`);
+    } else {
+      injectSystemMessage(`Approved (once): ${pending.url}`);
+    }
+
+    client!.send({ type: 'fetch_response', id, ok: true, alwaysAllow, message: 'Approved by user' });
+    return true;
+  }
+
+  if (cmd === '/deny-fetch') {
+    let id = parts[1];
+    if (!id && pendingFetchApprovals.size === 1) {
+      id = pendingFetchApprovals.keys().next().value as string;
+    }
+    if (!id) {
+      injectSystemMessage(pendingFetchApprovals.size === 0
+        ? 'No pending fetch requests.'
+        : `Multiple pending — specify ID: ${[...pendingFetchApprovals.keys()].join(', ')}`);
+      return true;
+    }
+
+    const pending = pendingFetchApprovals.get(id);
+    if (!pending) {
+      injectSystemMessage(`No pending fetch request: ${id}`);
+      return true;
+    }
+
+    pendingFetchApprovals.delete(id);
+    injectSystemMessage(`Denied: ${pending.url}`);
+    client!.send({ type: 'fetch_response', id, ok: false, alwaysAllow: false, message: 'Denied by user' });
+    return true;
+  }
+
+  return false;
+}
+
 // --- Host Daemon ---
 
 let hostDaemonProcess: ChildProcess | null = null;
@@ -1355,7 +1493,7 @@ client = new AgentClient();
 
 // Start web UI server (non-blocking, runs alongside TUI)
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions }).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });
@@ -1398,6 +1536,11 @@ client.on('edit_file_request', (id: string, path: string, edits: Array<{ old_str
 // Handle exec approval requests from the worker
 client.on('exec_request', (id: string, command: string) => {
   handleAgentExecRequest(id, command);
+});
+
+// Handle fetch approval requests from the worker
+client.on('fetch_request', (id: string, url: string, method?: string) => {
+  handleAgentFetchRequest(id, url, method);
 });
 
 // Expiry timer — check every 30s for mounts that have timed out

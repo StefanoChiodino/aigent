@@ -31,6 +31,7 @@ export interface AgentClientEvents {
   host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[], capabilities?: Record<string, string>) => void;
   patch_request: (id: string, diff: string, reason: string) => void;
   exec_request: (id: string, command: string) => void;
+  fetch_request: (id: string, url: string, method?: string) => void;
   disconnected: () => void;
   reconnecting: (attempt: number) => void;
 }
@@ -169,6 +170,9 @@ export class AgentClient extends EventEmitter {
         break;
       case 'exec_request':
         this.emit('exec_request', event.id, event.command);
+        break;
+      case 'fetch_request':
+        this.emit('fetch_request', event.id, event.url, event.method);
         break;
       case 'screenshot_request':
         this.emit('screenshot_request', event.id);
