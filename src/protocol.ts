@@ -113,7 +113,7 @@ export type ServerEvent =
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'edit_file_request'; id: string; path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
-  | { type: 'exec_request'; id: string; command: string }
+  | { type: 'exec_request'; id: string; command: string; segments?: import('./safety.js').CommandSegment[] }
   | { type: 'fetch_request'; id: string; url: string; method?: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }

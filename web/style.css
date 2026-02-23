@@ -2336,6 +2336,55 @@ html, body {
   text-overflow: clip;
 }
 
+/* Pipeline display for exec requests with multiple segments */
+.exec-pipeline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.exec-pipeline-token {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+}
+
+.exec-pipeline-token.is-subshell {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.exec-pipeline-exe {
+  font-weight: 600;
+  color: var(--text-primary, #ccc);
+}
+
+.exec-pipeline-token.is-subshell .exec-pipeline-exe {
+  color: var(--warning);
+}
+
+.exec-pipeline-op {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+  padding: 0 1px;
+}
+
+.exec-pipeline-full {
+  font-size: 10px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 2px;
+}
+
 #perm-overlay.fetch-mode #perm-card-detail {
   white-space: normal;
   word-break: break-all;

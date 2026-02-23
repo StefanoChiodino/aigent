@@ -78,6 +78,7 @@ make dev-ts  # same, without TTS/STT services
 - `Enter` to send, `Shift+Enter` for newline
 - `Ctrl+Enter` — one-shot thinking boost (sends with max reasoning, then reverts to current setting)
 - `/` to open the slash-command palette with autocomplete
+- `@` to open the mention palette — type `@screen` to start screen sharing
 - Paste or drag images into the input box; attach files via the paperclip button
 - Screen-capture button grabs any window or tab via `getDisplayMedia` and attaches it as an image
 

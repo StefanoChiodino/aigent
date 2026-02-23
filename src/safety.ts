@@ -402,6 +402,65 @@ function containsSubshell(command: string): boolean {
   return /\$\(/.test(command) || /`/.test(command) || /\b(ba)?sh\s+-c\b/.test(command);
 }
 
+// --- Pipeline parsing (for UI display) ---
+
+export interface CommandSegment {
+  /** The raw text of this pipeline segment. */
+  raw: string;
+  /** The operator that connects this segment to the next ('|', '||', '&&', ';'), or null for the last. */
+  operator: '|' | '||' | '&&' | ';' | null;
+  /** The executable name (first token), or null if it's a subshell/variable expression. */
+  executable: string | null;
+  /** True if this segment is or begins with a subshell construct ($(), backticks, bash -c). */
+  isSubshell: boolean;
+}
+
+/**
+ * Parse a shell command string into its pipeline segments for display in the UI.
+ * Splits on |, ||, &&, ; and extracts the executable name from each segment.
+ * Does not attempt full shell parsing — this is for display only.
+ */
+export function parseCommandPipeline(command: string): CommandSegment[] {
+  // Match shell operators, splitting the command into segments + their joining operators.
+  // We walk the string left-to-right, being careful to handle || before |.
+  const segments: CommandSegment[] = [];
+  const operatorRe = /(\|\||&&|[|;])/g;
+
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  const parts: Array<{ text: string; operator: CommandSegment['operator'] }> = [];
+
+  while ((match = operatorRe.exec(command)) !== null) {
+    const op = match[1]!;
+    const text = command.slice(lastIndex, match.index).trim();
+    if (text) parts.push({ text, operator: op as CommandSegment['operator'] });
+    lastIndex = match.index + op.length;
+  }
+  // Last segment (no trailing operator)
+  const tail = command.slice(lastIndex).trim();
+  if (tail) parts.push({ text: tail, operator: null });
+
+  for (const { text, operator } of parts) {
+    const isSubshell =
+      /\$\(/.test(text) || /`/.test(text) || /\b(ba)?sh\s+-c\b/.test(text);
+
+    // Extract executable: first token, ignoring leading env var assignments (FOO=bar cmd)
+    let executable: string | null = null;
+    const tokens = text.split(/\s+/);
+    for (const tok of tokens) {
+      if (!tok) continue;
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(tok)) continue; // env var assignment
+      if (tok.startsWith('$')) { executable = null; break; }
+      executable = tok.split('/').pop() ?? tok; // basename only
+      break;
+    }
+
+    segments.push({ raw: text, operator, executable, isSubshell });
+  }
+
+  return segments.length > 0 ? segments : [{ raw: command, operator: null, executable: null, isSubshell: false }];
+}
+
 /**
  * Check what permission level a command requires given user-configured permissions.
  * Evaluation order: deny → alwaysAllow → default(prompt)

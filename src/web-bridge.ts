@@ -10,12 +10,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
+import { glob } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { AgentClient } from './client.js';
 import type { ServerEvent, ServerState } from './protocol.js';
 import type { ThinkingLevel } from './agent.js';
 import type { ExecPermissions, FetchPermissions } from './safety.js';
+import { parseCommandPipeline } from './safety.js';
 import { createLogger } from './logger.js';
 
 const log = createLogger('web-bridge');
@@ -206,6 +208,44 @@ export async function startWebServer(
       }
     }
 
+    // File search — GET /files?q=<query> returns files from mounted paths matching a fuzzy query.
+    if (req.method === 'GET' && url.startsWith('/files')) {
+      const qs = new URLSearchParams(url.includes('?') ? url.slice(url.indexOf('?') + 1) : '');
+      const query = (qs.get('q') ?? '').trim().toLowerCase();
+      const results: { path: string; mountPath: string }[] = [];
+
+      if (cachedMounts.length > 0) {
+        const MAX_RESULTS = 50;
+        const parts = query ? query.split(/\s+/) : [];
+
+        for (const mount of cachedMounts) {
+          if (results.length >= MAX_RESULTS) break;
+          try {
+            // Use glob to walk the mount. Skip noisy dirs via exclude.
+            const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.next', 'dist', 'build', '.cache', 'target', 'vendor']);
+            const entries = glob('**/*', {
+              cwd: mount.hostPath,
+              exclude: (name: string) => SKIP_DIRS.has(name) || name.startsWith('.'),
+            });
+            for await (const entry of entries) {
+              if (results.length >= MAX_RESULTS) break;
+              // Skip paths that are too deep (> 8 levels)
+              if (entry.split('/').length > 8) continue;
+              // Fuzzy match: all query parts must appear (in order) in the path
+              const lower = entry.toLowerCase();
+              if (parts.length === 0 || parts.every(p => lower.includes(p))) {
+                results.push({ path: entry, mountPath: mount.containerPath });
+              }
+            }
+          } catch { /* inaccessible mount — skip */ }
+        }
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ files: results }));
+      return;
+    }
+
     // Vendor: serve marked ESM from node_modules
     if (url === '/vendor/marked.js') {
       return serveFile(res, MARKED_ESM);
@@ -336,7 +376,7 @@ export async function startWebServer(
           autoHandledExecIds.delete(id);
           return;
         }
-        send({ type: 'exec_request', id, command });
+        send({ type: 'exec_request', id, command, segments: parseCommandPipeline(command) });
       },
       fetch_request: (id: string, url: string, method?: string) => {
         // Skip if gatekeeper already handled this (auto-allow or auto-deny)

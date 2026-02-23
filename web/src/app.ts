@@ -79,6 +79,13 @@ interface ContextBreakdown {
   toolSummariesCount?: number;
 }
 
+interface CommandSegment {
+  raw: string;
+  operator: '|' | '||' | '&&' | ';' | null;
+  executable: string | null;
+  isSubshell: boolean;
+}
+
 type ServerEvent =
   | { type: 'connected'; state: ServerState }
   | { type: 'text'; content: string }
@@ -96,7 +103,7 @@ type ServerEvent =
   | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string; durationMinutes?: number }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
-  | { type: 'exec_request'; id: string; command: string }
+  | { type: 'exec_request'; id: string; command: string; segments?: CommandSegment[] }
   | { type: 'fetch_request'; id: string; url: string; method?: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
@@ -645,6 +652,7 @@ interface PermRequest {
   id: string;
   title: string;
   detail: string;
+  segments?: CommandSegment[]; // parsed pipeline segments for exec requests
   approveCmd: string;
   denyCmd: string;
   alwaysAllowCmd?: string;
@@ -776,6 +784,7 @@ interface AtItem {
   label: string;
   desc: string;
   insert: string;  // text inserted at the @ trigger position
+  isFile?: boolean;
 }
 
 const AT_ITEMS: AtItem[] = [
@@ -785,6 +794,9 @@ const AT_ITEMS: AtItem[] = [
 let atItems: AtItem[] = [];
 let atSelected = 0;
 let atTriggerPos = -1;  // caret position where @ was typed
+let atFileSearchTimer: ReturnType<typeof setTimeout> | null = null;
+let atFileItems: AtItem[] = [];  // file results from last fetch
+let atLastFileQuery = '';        // query used for last file fetch
 
 // ── Pending attachments (images + files) ─────────────────────
 
@@ -1261,6 +1273,7 @@ function handleEvent(event: ServerEvent): void {
         id: event.id,
         title: 'Run Command',
         detail: event.command,
+        segments: event.segments,
         approveCmd: `/approve-exec ${event.id}`,
         denyCmd: `/deny-exec ${event.id}`,
         alwaysAllowCmd: `/approve-exec ${event.id} --always`,
@@ -2757,13 +2770,40 @@ function showNextPermRequest(): void {
   $permAlwaysAllowDomainBtn.classList.toggle('hidden', !req.alwaysAllowDomainCmd);
   $permTitle.textContent = req.title;
 
-  // Show each line of detail as its own row
-  const lines = req.detail.split('\n').filter(Boolean);
+  // Show each line of detail as its own row; for exec requests with pipeline segments, render them visually
   $permDetail.innerHTML = '';
-  for (const line of lines) {
-    const row = document.createElement('div');
-    row.textContent = line;
-    $permDetail.appendChild(row);
+  if (req.type === 'exec' && req.segments && req.segments.length > 1) {
+    // Multi-segment pipeline: render each executable as a labelled token with pipe operators between
+    const pipeline = document.createElement('div');
+    pipeline.className = 'exec-pipeline';
+    for (const seg of req.segments) {
+      const token = document.createElement('span');
+      token.className = 'exec-pipeline-token' + (seg.isSubshell ? ' is-subshell' : '');
+      const name = document.createElement('span');
+      name.className = 'exec-pipeline-exe';
+      name.textContent = seg.executable ?? '(subshell)';
+      token.appendChild(name);
+      pipeline.appendChild(token);
+      if (seg.operator) {
+        const op = document.createElement('span');
+        op.className = 'exec-pipeline-op';
+        op.textContent = seg.operator;
+        pipeline.appendChild(op);
+      }
+    }
+    $permDetail.appendChild(pipeline);
+    // Full command on a second line for reference
+    const full = document.createElement('div');
+    full.className = 'exec-pipeline-full';
+    full.textContent = req.detail;
+    $permDetail.appendChild(full);
+  } else {
+    const lines = req.detail.split('\n').filter(Boolean);
+    for (const line of lines) {
+      const row = document.createElement('div');
+      row.textContent = line;
+      $permDetail.appendChild(row);
+    }
   }
 
   // Patch mode: full-page modal with file list sidebar + diff viewer
@@ -2999,10 +3039,27 @@ function updateAtPalette(): void {
 
   const query = text.slice(triggerPos + 1, caret).toLowerCase();
   atTriggerPos = triggerPos;
-  atItems = AT_ITEMS.filter(item => item.label.startsWith(query));
+
+  const staticItems = AT_ITEMS.filter(item => item.label.toLowerCase().includes(query));
+
+  // Schedule file search if mounts are available
+  if (mountsList.length > 0) {
+    if (atLastFileQuery !== query) {
+      if (atFileSearchTimer !== null) clearTimeout(atFileSearchTimer);
+      atFileSearchTimer = setTimeout(() => {
+        atFileSearchTimer = null;
+        fetchFileMatches(query);
+      }, 120);
+    }
+  } else {
+    atFileItems = [];
+    atLastFileQuery = query;
+  }
+
+  atItems = [...staticItems, ...atFileItems];
   atSelected = Math.min(atSelected, Math.max(0, atItems.length - 1));
 
-  if (atItems.length === 0) {
+  if (atItems.length === 0 && atFileSearchTimer === null) {
     closeAtPalette();
     return;
   }
@@ -3011,18 +3068,53 @@ function updateAtPalette(): void {
   renderAtPalette();
 }
 
+function fetchFileMatches(query: string): void {
+  const q = encodeURIComponent(query);
+  fetch(`/files?q=${q}`)
+    .then(r => r.json())
+    .then((data: { files: { path: string; mountPath: string }[] }) => {
+      atLastFileQuery = query;
+      atFileItems = data.files.map(f => ({
+        icon: '📄',
+        label: f.path,
+        desc: f.mountPath,
+        insert: f.mountPath.replace(/\/$/, '') + '/' + f.path,
+        isFile: true,
+      }));
+      // Re-merge and re-render only if the palette is still open for this query
+      const text = $input.value;
+      const caret = $input.selectionStart ?? 0;
+      const currentQuery = (() => {
+        for (let i = caret - 1; i >= 0; i--) {
+          if (text[i] === '@') return text.slice(i + 1, caret).toLowerCase();
+          if (/\s/.test(text[i])) break;
+        }
+        return null;
+      })();
+      if (currentQuery !== null && currentQuery === query) {
+        const staticItems = AT_ITEMS.filter(item => item.label.toLowerCase().includes(query));
+        atItems = [...staticItems, ...atFileItems];
+        atSelected = Math.min(atSelected, Math.max(0, atItems.length - 1));
+        if (atItems.length > 0) {
+          $atPalette.classList.remove('hidden');
+          renderAtPalette();
+        } else {
+          closeAtPalette();
+        }
+      }
+    })
+    .catch(() => { /* file search unavailable */ });
+}
+
 function renderAtPalette(): void {
   $atPalette.innerHTML = '';
 
-  const section = document.createElement('div');
-  section.className = 'at-palette-section';
-  section.textContent = 'Mention';
-  $atPalette.appendChild(section);
+  const staticItems = atItems.filter(i => !i.isFile);
+  const fileItems   = atItems.filter(i =>  i.isFile);
 
-  for (let i = 0; i < atItems.length; i++) {
-    const item = atItems[i];
+  function appendItem(item: AtItem, idx: number): void {
     const el = document.createElement('div');
-    el.className = 'at-palette-item' + (i === atSelected ? ' selected' : '');
+    el.className = 'at-palette-item' + (idx === atSelected ? ' selected' : '');
 
     const icon = document.createElement('span');
     icon.className = 'at-item-icon';
@@ -3033,11 +3125,11 @@ function renderAtPalette(): void {
 
     const label = document.createElement('span');
     label.className = 'at-item-label';
-    label.textContent = item.label;
+    label.textContent = item.isFile ? item.label.split('/').pop()! : item.label;
 
     const desc = document.createElement('span');
     desc.className = 'at-item-desc';
-    desc.textContent = item.desc;
+    desc.textContent = item.isFile ? item.label : item.desc;
 
     text.appendChild(label);
     text.appendChild(desc);
@@ -3045,12 +3137,28 @@ function renderAtPalette(): void {
     el.appendChild(text);
 
     el.addEventListener('mousedown', (e) => {
-      e.preventDefault(); // don't blur textarea
-      atSelected = i;
+      e.preventDefault();
+      atSelected = idx;
       completeAtSelection();
     });
 
     $atPalette.appendChild(el);
+  }
+
+  if (staticItems.length > 0) {
+    const section = document.createElement('div');
+    section.className = 'at-palette-section';
+    section.textContent = 'Mention';
+    $atPalette.appendChild(section);
+    staticItems.forEach((item, i) => appendItem(item, i));
+  }
+
+  if (fileItems.length > 0) {
+    const section = document.createElement('div');
+    section.className = 'at-palette-section';
+    section.textContent = 'Files';
+    $atPalette.appendChild(section);
+    fileItems.forEach((item, i) => appendItem(item, staticItems.length + i));
   }
 
   const selected = $atPalette.querySelector('.selected');
@@ -3106,8 +3214,11 @@ function triggerScreenShare(): void {
 
 function closeAtPalette(): void {
   atItems = [];
+  atFileItems = [];
+  atLastFileQuery = '';
   atSelected = 0;
   atTriggerPos = -1;
+  if (atFileSearchTimer !== null) { clearTimeout(atFileSearchTimer); atFileSearchTimer = null; }
   $atPalette.classList.add('hidden');
 }
 

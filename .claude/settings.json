@@ -10,7 +10,8 @@
       "Read(//home/draga/repos/orchids/website/**)",
       "Bash(echo:*)",
       "Bash(make test:*)",
-      "Bash(npx playwright test:*)"
+      "Bash(npx playwright test:*)",
+      "Bash(AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test:*)"
     ]
   }
 }
