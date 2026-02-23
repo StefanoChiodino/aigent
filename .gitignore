@@ -4,3 +4,8 @@ dist/
 workspace/
 stt/.venv/
 tts/.venv/
+settings.json
+test-results/
+tests/test-results/
+tests/playwright-report/
+tests/tests/

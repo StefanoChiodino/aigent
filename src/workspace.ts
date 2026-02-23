@@ -5,19 +5,6 @@ import { createLogger } from './logger.js';
 const log = createLogger('workspace');
 
 /**
- * Config files — instruction files that define the agent's behaviour.
- * These live in workspace/config/ and are mounted read-only in the sandbox.
- * Edits require gatekeeper approval (diff shown to user).
- */
-const CONFIG_FILES = [
-  { name: 'AGENTS.md', label: 'Operating Instructions' },
-  { name: 'SOUL.md', label: 'Personality' },
-  { name: 'IDENTITY.md', label: 'Identity' },
-  { name: 'USER.md', label: 'User Profile' },
-  { name: 'TOOLS.md', label: 'Tool Notes' },
-] as const;
-
-/**
  * Memory files — freely writable by the agent.
  * These live in the workspace root (not in config/).
  */
@@ -103,15 +90,18 @@ export function loadWorkspaceContext(workspacePath: string): string {
     mkdirSync(memoryDir, { recursive: true });
   }
 
-  // Load config files (read-only instruction files) — cached by mtime
-  // Look in config/ first, fall back to workspace root for backward compat
+  // Load config files (read-only instruction files) — all .md files in config/
   const configDir = join(workspacePath, 'config');
-  for (const file of CONFIG_FILES) {
-    const content =
-      readCached(join(configDir, file.name)) ??
-      readCached(join(workspacePath, file.name));
-    if (content?.trim()) {
-      sections.push(`## ${file.label} (config/${file.name}) [read-only]\n\n${content.trim()}`);
+  if (existsSync(configDir)) {
+    const configFiles = readdirSync(configDir)
+      .filter((f) => f.endsWith('.md'))
+      .sort();
+    for (const name of configFiles) {
+      const content = readCached(join(configDir, name));
+      if (content?.trim()) {
+        const label = name.replace(/\.md$/, '').replace(/[-_]/g, ' ');
+        sections.push(`## ${label} (config/${name}) [read-only]\n\n${content.trim()}`);
+      }
     }
   }
 

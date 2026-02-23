@@ -871,12 +871,14 @@ function executeCommand(
 /**
  * Execute a tool and return the result.
  * For exec, output is streamed via onOutput callback if provided.
+ * signal is forwarded to approval gates so cancellation unblocks immediately.
  */
 export async function executeTool(
   name: string,
   input: ToolInput,
   isOAuth: boolean,
   onOutput?: (chunk: string) => void,
+  signal?: AbortSignal,
 ): Promise<string | ToolContentBlock[]> {
   // Map Claude Code names back to internal names if needed
   const internalName = isOAuth ? fromClaudeCodeName(name) : name;
@@ -894,7 +896,7 @@ export async function executeTool(
 
       // Permission check — gatekeeper decides allow/prompt/deny based on settings
       const { requestExecApproval } = await import('./server.js');
-      const approval = await requestExecApproval(command);
+      const approval = await requestExecApproval(command, signal);
       if (!approval.ok) {
         return `Command not allowed: ${approval.message}`;
       }

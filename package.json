@@ -13,6 +13,9 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx/esm --test src/**/*.test.ts",
+    "test:e2e": "AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 playwright test --config tests/playwright.config.ts",
+    "test:e2e-live": "AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 playwright test --config tests/playwright.config.ts --grep @live",
+    "test:e2e-ui": "AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 playwright test --config tests/playwright.config.ts --ui",
     "web:build": "esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --minify --external:/vendor/*",
     "web:watch": "esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch --external:/vendor/*"
   },
@@ -36,6 +39,7 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@types/node": "^25.2.3",
     "@types/react": "^19.2.14",
     "concurrently": "^9.2.1",

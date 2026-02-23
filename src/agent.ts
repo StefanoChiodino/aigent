@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderResponse, type ProviderToolDef, type AnthropicProvider, type UserContent, type ToolContentBlock, type ToolResult } from './provider.js';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { getToolDefinitions, executeTool, summarizeToolCall, fromClaudeCodeName } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
@@ -113,7 +114,7 @@ export interface AgentOptions {
 
 // Re-export TokenUsage from protocol (single source of truth)
 export type { TokenUsage } from './protocol.js';
-import type { TokenUsage } from './protocol.js';
+import type { TokenUsage, ToolSummaryRecord } from './protocol.js';
 
 export interface ChatCallbacks {
   onText?: (fullText: string) => void;
@@ -145,6 +146,8 @@ export class Agent {
   /** Track image hashes to deduplicate identical screenshots/images in tool results. */
   private seenImageHashes = new Set<string>();
   private compactPromise: Promise<void> | null = null;
+  /** Track tool results that were summarized to save context tokens. */
+  private toolSummaries = new Map<string, ToolSummaryRecord>();
   readonly providerType: string;
 
   constructor(options: AgentOptions = {}) {
@@ -311,17 +314,20 @@ export class Agent {
           } else if (this.mcpManager?.isMCPTool(toolName)) {
             result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
           } else {
-            result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput);
+            result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput, signal);
           }
           const toolMs = (performance.now() - toolStart).toFixed(0);
           log.info('Tool executed', { tool: toolName, ms: toolMs });
 
-          // Truncate string results based on remaining context budget; deduplicate images
+          // Summarize large string results (if enabled), then truncate based on context budget;
+          // deduplicate images.
           if (typeof result === 'string') {
-            const maxLen = this.getToolOutputMaxChars(result.length);
-            const truncated = result.length > maxLen
-              ? result.slice(0, maxLen) + `\n\n... [truncated, ${result.length} bytes total]`
-              : result;
+            const summarized = await this.maybeSummarizeToolResult(tc.id, toolName, result);
+            const effective = summarized ?? result;
+            const maxLen = this.getToolOutputMaxChars(effective.length);
+            const truncated = effective.length > maxLen
+              ? effective.slice(0, maxLen) + `\n\n... [truncated, ${effective.length} bytes total]`
+              : effective;
             results.push({ id: tc.id, content: truncated });
           } else {
             results.push({ id: tc.id, content: this.deduplicateImages(result) });
@@ -605,6 +611,127 @@ export class Agent {
   }
 
   /**
+   * Read tool summarization config from settings.json.
+   * Falls back to safe defaults if the file is missing or malformed.
+   */
+  private _defaultSummarizeConfig() {
+    return {
+      enabled: false,
+      thresholdTokens: 500,
+      model: 'claude-haiku-4-5-20251001',
+      shouldSummarizeTool: (_name: string) => false,
+    };
+  }
+
+  /**
+   * Read tool summarization config from settings.json.
+   * Falls back to safe defaults if the file is missing or malformed.
+   */
+  private readSummarizeConfig(): {
+    enabled: boolean;
+    thresholdTokens: number;
+    model: string;
+    shouldSummarizeTool: (name: string) => boolean;
+  } {
+    // settings.json is at /app/settings.json inside the container (repo mounted at /app)
+    const settingsPath = process.env['AIGENT_SETTINGS_PATH'] ?? '/app/settings.json';
+    try {
+      const raw = readFileSync(settingsPath, 'utf-8');
+      const settings = JSON.parse(raw) as Record<string, unknown>;
+      const c = settings['tools'] as Record<string, unknown> | undefined;
+      if (!c) return this._defaultSummarizeConfig();
+
+      const mode = typeof c['summarizeMode'] === 'string' ? c['summarizeMode'] : 'allowlist';
+      const list: string[] = Array.isArray(c['summarizeTools']) ? (c['summarizeTools'] as string[]) : ['exec', 'fetch'];
+
+      let shouldSummarizeTool: (name: string) => boolean;
+      if (mode === 'all') {
+        shouldSummarizeTool = () => true;
+      } else if (mode === 'blocklist') {
+        shouldSummarizeTool = (name) => !list.includes(name);
+      } else {
+        shouldSummarizeTool = (name) => list.includes(name); // allowlist (default)
+      }
+
+      return {
+        enabled: c['summarizeLargeResults'] === true,
+        thresholdTokens: typeof c['summarizeThresholdTokens'] === 'number' ? c['summarizeThresholdTokens'] : 500,
+        model: typeof c['summarizeModel'] === 'string' ? c['summarizeModel'] : 'claude-haiku-4-5-20251001',
+        shouldSummarizeTool,
+      };
+    } catch { return this._defaultSummarizeConfig(); }
+  }
+
+  /**
+   * Summarize a large tool result using a cheap model (Haiku).
+   * Writes the full output to a temp file and returns a summary + retrieval path.
+   * Controlled by the `tools` block in settings.json. Only runs for Anthropic provider.
+   * Returns null if summarization is disabled, tool is not in the allowlist, or fails.
+   */
+  private async maybeSummarizeToolResult(
+    toolCallId: string,
+    toolName: string,
+    result: string,
+  ): Promise<string | null> {
+    if (this.providerType !== 'anthropic') return null;
+
+    const cfg = this.readSummarizeConfig();
+    if (!cfg.enabled) return null;
+    if (!cfg.shouldSummarizeTool(toolName)) return null;
+
+    const originalTokens = Math.round(result.length / 4);
+    if (originalTokens <= cfg.thresholdTokens) return null;
+
+    const summarizeModel = cfg.model;
+
+    // Write full output to temp file first (always, even if summarization fails)
+    const dir = '/tmp/aigent/tool-results';
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch { /* ignore */ }
+    const fullOutputPath = `${dir}/${toolCallId}.txt`;
+    try {
+      writeFileSync(fullOutputPath, result, 'utf-8');
+    } catch (e) {
+      log.warn('Failed to write tool result to temp file', { error: (e as Error).message });
+      return null;
+    }
+
+    // Call Haiku to summarize (truncate input to 40K chars to avoid blowing Haiku's window)
+    const inputText = result.length > 40_000 ? result.slice(0, 40_000) + '\n...[truncated for summarization]' : result;
+    let summary: string;
+    try {
+      const resp = await this.provider.sendMessage(
+        'You are a concise summarizer. Respond with only the summary, no preamble.',
+        [{ role: 'user', content: `Summarize this tool output in 2-3 sentences, capturing the key result and any errors or notable details:\n\n${inputText}` }],
+        [],
+        { model: summarizeModel, maxTokens: 200, thinking: 'off' },
+      );
+      summary = resp.text.trim();
+      if (!summary) return null;
+    } catch (e) {
+      log.warn('Tool result summarization failed', { error: (e as Error).message });
+      return null;
+    }
+
+    const summarizedContent = `${summary}\n\n[Full output (${originalTokens} tokens) saved to ${fullOutputPath} — use read_file to retrieve]`;
+    const summarizedTokens = Math.round(summarizedContent.length / 4);
+
+    this.toolSummaries.set(toolCallId, {
+      toolCallId,
+      toolName,
+      originalTokens,
+      summarizedTokens,
+      savedTokens: originalTokens - summarizedTokens,
+      fullOutputPath,
+      summary,
+    });
+
+    log.info('Tool result summarized', { toolName, originalTokens, summarizedTokens, saved: originalTokens - summarizedTokens });
+    return summarizedContent;
+  }
+
+  /**
    * Dynamic tool output truncation based on remaining context budget.
    * Returns the max char length for a tool result string.
    * - available = contextWindow - currentUsage - responseBuffer (in tokens)
@@ -687,6 +814,7 @@ export class Agent {
     this.messages = [];
     this._totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     this.seenImageHashes.clear();
+    this.toolSummaries.clear();
   }
 
   get conversationLength(): number { return this.messages.length; }
@@ -749,9 +877,25 @@ export class Agent {
       const raw = JSON.stringify(payload);
       // Pretty-print for readability in the inspector — no truncation, panel scrolls
       const pretty = JSON.stringify(payload, null, 2);
-      return { role: m.role, tokens: tok(raw), preview: pretty };
+
+      // Attach summary record if this tool_result message contains a summarized result
+      let summaryRecord: ToolSummaryRecord | undefined;
+      if (m.role === 'tool_result') {
+        for (const r of m.results) {
+          const sr = this.toolSummaries.get(r.id);
+          if (sr) {
+            summaryRecord = sr;
+            break;
+          }
+        }
+      }
+
+      return { role: m.role, tokens: tok(raw), preview: pretty, summaryRecord };
     });
     const messagesTotal = messages.reduce((s, m) => s + m.tokens, 0);
+
+    const allSummaries = [...this.toolSummaries.values()];
+    const totalSummarySavedTokens = allSummaries.reduce((s, r) => s + r.savedTokens, 0);
 
     return {
       systemBase,
@@ -763,6 +907,7 @@ export class Agent {
       messages,
       messagesTotal,
       total: systemBase + workspaceContext + toolDefs + messagesTotal,
+      ...(allSummaries.length > 0 ? { totalSummarySavedTokens, toolSummariesCount: allSummaries.length } : {}),
     };
   }
 }

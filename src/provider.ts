@@ -297,6 +297,21 @@ export class AnthropicProvider implements Provider {
         });
       }
     }
+
+    // Add cache_control to the last 2 user messages with array content.
+    // System prompt (base) and tool definitions already use 2 of 4 available breakpoints;
+    // these 2 breakpoints cover the most recent tool results and user turn so they're
+    // cached across turns (10% of input cost vs full price).
+    let breakpointsAdded = 0;
+    for (let i = result.length - 1; i >= 0 && breakpointsAdded < 2; i--) {
+      const msg = result[i]!;
+      if (msg.role === 'user' && Array.isArray(msg.content) && msg.content.length > 0) {
+        const lastBlock = msg.content[msg.content.length - 1] as unknown as Record<string, unknown>;
+        lastBlock['cache_control'] = { type: 'ephemeral' };
+        breakpointsAdded++;
+      }
+    }
+
     return result;
   }
 }

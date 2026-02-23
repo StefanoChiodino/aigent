@@ -20,7 +20,7 @@ import { computeCost } from './pricing.js';
 import { distillToMemory } from './compact.js';
 import { loadMCP, type MCPManager } from './mcp.js';
 import { createLogger } from './logger.js';
-import { execReadonlyTool, fetchReadonlyTool } from './tools.js';
+import { execReadonlyTool, fetchReadonlyTool, getToolDefinitions } from './tools.js';
 import type { ProviderToolDef } from './provider.js';
 
 const log = createLogger('server');
@@ -242,23 +242,34 @@ let execApprovalCounter = 0;
 /**
  * Request user approval before running a shell command.
  * Called by the exec tool when a command requires prompt-level permission.
+ * If signal is already aborted, or fires before the user responds, resolves
+ * immediately with ok:false so the agent can unblock and handle the abort.
  */
-export function requestExecApproval(command: string): Promise<{ ok: boolean; alwaysAllow: boolean; message: string }> {
+export function requestExecApproval(command: string, signal?: AbortSignal): Promise<{ ok: boolean; alwaysAllow: boolean; message: string }> {
   const id = `exec_${++execApprovalCounter}`;
 
+  // Already aborted — skip the UI prompt entirely
+  if (signal?.aborted) {
+    return Promise.resolve({ ok: false, alwaysAllow: false, message: 'Aborted by user' });
+  }
+
   return new Promise((resolve) => {
-    const timer = setTimeout(() => {
+    const finish = (response: { ok: boolean; alwaysAllow: boolean; message: string }) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       pendingExecRequests.delete(id);
-      resolve({ ok: false, alwaysAllow: false, message: 'Exec approval request timed out (60s)' });
+      resolve(response);
+    };
+
+    const onAbort = () => finish({ ok: false, alwaysAllow: false, message: 'Aborted by user' });
+
+    const timer = setTimeout(() => {
+      finish({ ok: false, alwaysAllow: false, message: 'Exec approval request timed out (60s)' });
     }, 60_000);
 
-    pendingExecRequests.set(id, {
-      command,
-      resolve: (response) => {
-        clearTimeout(timer);
-        resolve(response);
-      },
-    });
+    pendingExecRequests.set(id, { command, resolve: finish });
+
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     broadcast({ type: 'exec_request', id, command });
   });
@@ -922,6 +933,7 @@ function getState(): ServerState {
     sessionId: currentSessionId,
     model,
     availableModels: AVAILABLE_MODELS,
+    availableTools: getToolDefinitions(false).map((t) => t.name),
     isLoading,
     tasks: taskQueue.getInfos(),
     pendingResults: taskQueue.pendingCount,

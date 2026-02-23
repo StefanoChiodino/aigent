@@ -212,7 +212,6 @@ html, body {
   flex: 1;
   overflow-y: auto;
   padding: 16px 16px 8px;
-  scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar);
 }
@@ -2245,10 +2244,31 @@ html, body {
   margin-bottom: 8px;
 }
 
+/* Exec mode: card stays top-right but detail wraps to show full command */
+#perm-overlay.exec-mode #perm-card {
+  width: 320px;
+}
+
+#perm-overlay.exec-mode #perm-card-detail {
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: 180px;
+  text-overflow: clip;
+}
+
 #perm-card-detail > div {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#perm-overlay.exec-mode #perm-card-detail > div {
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 #perm-card-detail > div:not(:first-child) {
@@ -2882,6 +2902,15 @@ body[data-working] .bokeh {
   border-bottom: none;
 }
 
+/* Summarization savings sub-row */
+.ctx-msg-summary-info {
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 2px 8px 4px 28px;
+  font-style: italic;
+  letter-spacing: 0.2px;
+}
+
 /* Clickable rows get a pointer + hover highlight */
 .ctx-clickable {
   cursor: pointer;
@@ -3254,6 +3283,32 @@ body[data-working] .bokeh {
 .settings-string-list:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* Per-tool checklist in Context settings pane */
+.settings-tool-checklist {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 16px;
+  padding: 8px 0 4px;
+}
+
+.settings-tool-check-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-tool-check-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
 }
 
 /* Select */

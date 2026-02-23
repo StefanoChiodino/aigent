@@ -1,4 +1,4 @@
-.PHONY: dev dev-full serve web web-watch build rebuild typecheck test clean stt stt-setup tts tts-setup
+.PHONY: dev dev-full serve web web-watch build rebuild typecheck test test-e2e test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup
 
 # --- Development ---
 
@@ -53,6 +53,15 @@ typecheck:
 
 test:
 	node --import tsx/esm --test src/**/*.test.ts
+
+test-e2e:
+	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts
+
+test-e2e-live:
+	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts --grep @live
+
+test-e2e-ui:
+	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts --ui
 
 clean:
 	rm -rf dist/ web/dist/

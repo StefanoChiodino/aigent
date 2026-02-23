@@ -39,6 +39,17 @@ export interface DisplayMessage {
   elapsed?: number | undefined;
 }
 
+/** Record of a tool result that was summarized to save context tokens. */
+export interface ToolSummaryRecord {
+  toolCallId: string;
+  toolName: string;
+  originalTokens: number;
+  summarizedTokens: number;
+  savedTokens: number;
+  fullOutputPath: string; // e.g. /tmp/aigent/tool-results/<id>.txt
+  summary: string;
+}
+
 export interface ContextBreakdown {
   systemBase: number;
   systemBaseContent?: string;      // First ~500 chars of base system prompt
@@ -46,9 +57,11 @@ export interface ContextBreakdown {
   workspaceContent?: string;       // First ~500 chars of workspace context section
   toolDefs: number;
   toolDefsContent?: string;        // JSON snippet of tool names
-  messages: { role: string; tokens: number; preview?: string }[];
+  messages: { role: string; tokens: number; preview?: string; summaryRecord?: ToolSummaryRecord }[];
   messagesTotal: number;
   total: number;
+  totalSummarySavedTokens?: number;
+  toolSummariesCount?: number;
 }
 
 export interface BackgroundTaskInfo {
@@ -75,6 +88,7 @@ export interface ServerState {
   sessionId: string;
   model: string;
   availableModels: string[];
+  availableTools: string[];
   isLoading: boolean;
   tasks: BackgroundTaskInfo[];
   pendingResults: number;

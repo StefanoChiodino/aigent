@@ -122,6 +122,27 @@ export async function startWebServer(
       return;
     }
 
+    // Test injection endpoint — only active when AIGENT_TEST_MODE=1.
+    // Accepts a POST with a ServerEvent JSON body and broadcasts it to all connected WS clients.
+    // Allows Playwright tests to inject fake exec_request / mount_request events without an LLM.
+    if (process.env['AIGENT_TEST_MODE'] === '1' && req.method === 'POST' && url === '/test/inject') {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', () => {
+        try {
+          const event = JSON.parse(Buffer.concat(chunks).toString()) as ServerEvent;
+          for (const ws of wss.clients) {
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event));
+          }
+          res.writeHead(204); res.end();
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        }
+      });
+      return;
+    }
+
     // Browser log relay — browser POSTs JSON {level, args} here, we print to server stdout.
     if (req.method === 'POST' && url === '/log') {
       const chunks: Buffer[] = [];
@@ -236,6 +257,18 @@ export async function startWebServer(
             exec_perm_alwaysAllow: JSON.stringify(perms.alwaysAllow),
             exec_perm_prompt: JSON.stringify(perms.prompt),
             exec_perm_deny: JSON.stringify(perms.deny),
+          };
+        }
+        // Flatten nested tools config into tools_* keys for the settings panel
+        const toolsCfg = (settings as Record<string, unknown>)['tools'] as Record<string, unknown> | undefined;
+        if (toolsCfg) {
+          merged = {
+            ...merged,
+            tools_summarizeLargeResults: toolsCfg['summarizeLargeResults'] === true,
+            tools_summarizeThresholdTokens: typeof toolsCfg['summarizeThresholdTokens'] === 'number' ? toolsCfg['summarizeThresholdTokens'] : 500,
+            tools_summarizeModel: typeof toolsCfg['summarizeModel'] === 'string' ? toolsCfg['summarizeModel'] : 'claude-haiku-4-5-20251001',
+            tools_summarizeMode: typeof toolsCfg['summarizeMode'] === 'string' ? toolsCfg['summarizeMode'] : 'allowlist',
+            tools_summarizeTools: JSON.stringify(Array.isArray(toolsCfg['summarizeTools']) ? toolsCfg['summarizeTools'] : ['exec', 'fetch']),
           };
         }
         ws.send(JSON.stringify({ type: 'client_settings', settings: merged }));

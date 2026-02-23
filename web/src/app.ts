@@ -49,9 +49,20 @@ interface ServerState {
   sessionId: string;
   model: string;
   availableModels: string[];
+  availableTools: string[];
   isLoading: boolean;
   tasks: BackgroundTaskInfo[];
   pendingResults: number;
+}
+
+interface ToolSummaryRecord {
+  toolCallId: string;
+  toolName: string;
+  originalTokens: number;
+  summarizedTokens: number;
+  savedTokens: number;
+  fullOutputPath: string;
+  summary: string;
 }
 
 interface ContextBreakdown {
@@ -61,9 +72,11 @@ interface ContextBreakdown {
   workspaceContent?: string;
   toolDefs: number;
   toolDefsContent?: string;
-  messages: { role: string; tokens: number; preview?: string }[];
+  messages: { role: string; tokens: number; preview?: string; summaryRecord?: ToolSummaryRecord }[];
   messagesTotal: number;
   total: number;
+  totalSummarySavedTokens?: number;
+  toolSummariesCount?: number;
 }
 
 type ServerEvent =
@@ -351,6 +364,55 @@ const SETTINGS_SCHEMA: SettingDef[] = [
     unit: ' ms',
     scope: 'client',
   },
+  // ── Context / Summarization ───────────────────────────────
+  {
+    key: 'tools_summarizeLargeResults',
+    label: 'Summarize large results',
+    desc: 'Summarize tool outputs that exceed the token threshold using a cheap model. Full output is saved to a temp file for retrieval.',
+    group: 'Context',
+    type: 'toggle',
+    default: false,
+    scope: 'client',
+  },
+  {
+    key: 'tools_summarizeThresholdTokens',
+    label: 'Summarize threshold',
+    desc: 'Tool outputs larger than this (in tokens) will be summarized.',
+    group: 'Context',
+    type: 'number',
+    default: 500,
+    min: 100,
+    max: 10000,
+    step: 100,
+    unit: ' tok',
+    scope: 'client',
+  },
+  {
+    key: 'tools_summarizeModel',
+    label: 'Summarize model',
+    desc: 'Model used for summarization. Should be a fast, cheap model.',
+    group: 'Context',
+    type: 'text',
+    default: 'claude-haiku-4-5-20251001',
+    placeholder: 'claude-haiku-4-5-20251001',
+    scope: 'client',
+  },
+  {
+    key: 'tools_summarizeMode',
+    label: 'Tool filter mode',
+    desc: 'allowlist: only summarize checked tools. blocklist: summarize all except checked. all: summarize every tool.',
+    group: 'Context',
+    type: 'select',
+    default: 'allowlist',
+    options: [
+      { value: 'allowlist', label: 'Allowlist (only checked)' },
+      { value: 'blocklist', label: 'Blocklist (all except checked)' },
+      { value: 'all', label: 'All tools' },
+    ],
+    scope: 'client',
+  },
+  // tools_summarizeTools is rendered as a dynamic per-tool checklist — injected
+  // separately in renderSettingsModal after the schema-driven rows.
   // ── Permissions ───────────────────────────────────────────
   {
     key: 'exec_perm_alwaysAllow',
@@ -462,6 +524,23 @@ function setClientSetting(key: string, value: boolean | number | string): void {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ exec_permissions }),
     }).then(() => { showSettingsToast(); }).catch(() => {});
+  } else if (key.startsWith('tools_')) {
+    // Reconstruct the tools object so all summarization settings are saved together
+    const getList = (k: string): string[] => {
+      try { return JSON.parse(String(clientSettings[k] ?? '[]')) as string[]; } catch { return []; }
+    };
+    const tools = {
+      summarizeLargeResults: clientSettings['tools_summarizeLargeResults'] === true,
+      summarizeThresholdTokens: Number(clientSettings['tools_summarizeThresholdTokens'] ?? 500),
+      summarizeModel: String(clientSettings['tools_summarizeModel'] ?? 'claude-haiku-4-5-20251001'),
+      summarizeMode: String(clientSettings['tools_summarizeMode'] ?? 'allowlist'),
+      summarizeTools: getList('tools_summarizeTools'),
+    };
+    fetch('/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tools }),
+    }).then(() => { showSettingsToast(); }).catch(() => {});
   } else {
     // Persist to server JSON file and show toast on success
     fetch('/settings', {
@@ -509,6 +588,7 @@ let errorMsg: string | null = null;
 let turnStartCtx = 0; // contextTokens at start of current turn, for delta display
 let modelName = '';
 let availableModels: string[] = [];
+let availableTools: string[] = [];
 let mountsList: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[] = [];
 let capsList: Record<string, string> = {};
 let modelPickerOpen = false;
@@ -874,6 +954,7 @@ function handleEvent(event: ServerEvent): void {
       streamEl = null;
       modelName = event.state.model;
       availableModels = event.state.availableModels ?? [];
+      availableTools = event.state.availableTools ?? [];
       renderAllMessages();
       updateHeader();
       updateSidebar();
@@ -2395,6 +2476,7 @@ function showNextPermRequest(): void {
     return;
   }
   permShowing = true;
+  $permOverlay.classList.toggle('exec-mode', req.type === 'exec');
   $permIcon.textContent = req.type === 'mount' ? '📂' : req.type === 'patch' ? '🩹' : req.type === 'exec' ? '⚡' : '✏️';
   $permAlwaysAllowBtn.classList.toggle('hidden', !req.alwaysAllowCmd);
   $permTitle.textContent = req.title;
@@ -2482,6 +2564,17 @@ $permDenyBtn.addEventListener('click', () => resolvePermRequest(false));
 $permAlwaysAllowBtn.addEventListener('click', () => {
   const req = permQueue.shift();
   if (!req?.alwaysAllowCmd) return;
+  // Optimistically add command to local exec_perm_alwaysAllow so the settings
+  // modal reflects the change immediately without waiting for a server roundtrip.
+  if (req.type === 'exec' && req.detail) {
+    try {
+      const current: string[] = JSON.parse(String(clientSettings['exec_perm_alwaysAllow'] ?? '[]'));
+      if (!current.includes(req.detail)) {
+        clientSettings['exec_perm_alwaysAllow'] = JSON.stringify([...current, req.detail]);
+        saveClientSettingsCache();
+      }
+    } catch { /* ignore */ }
+  }
   wsSend({ type: 'message', content: req.alwaysAllowCmd });
   showNextPermRequest();
 });
@@ -3475,6 +3568,58 @@ function renderSettingsModal(): void {
       pane.appendChild(row);
     }
 
+    // Inject per-tool checklist into the Context pane
+    if (groupName === 'Context' && availableTools.length > 0) {
+      const checkRow = document.createElement('div');
+      checkRow.className = 'settings-row settings-row--stacked';
+
+      const checkLabelWrap = document.createElement('div');
+      checkLabelWrap.className = 'settings-row-label';
+      const checkLabelText = document.createElement('div');
+      checkLabelText.className = 'label-text';
+      checkLabelText.textContent = 'Tool list';
+      const checkDesc = document.createElement('div');
+      checkDesc.className = 'label-desc';
+      checkDesc.textContent = 'In allowlist mode: checked tools get summarized. In blocklist mode: checked tools are never summarized.';
+      checkLabelWrap.appendChild(checkLabelText);
+      checkLabelWrap.appendChild(checkDesc);
+      checkRow.appendChild(checkLabelWrap);
+
+      const checklist = document.createElement('div');
+      checklist.className = 'settings-tool-checklist';
+
+      // Current selection — stored as JSON array in tools_summarizeTools
+      const getCurrentSelected = (): Set<string> => {
+        try {
+          const raw = String(getClientSetting('tools_summarizeTools') ?? '["exec","fetch"]');
+          return new Set(JSON.parse(raw) as string[]);
+        } catch { return new Set(['exec', 'fetch']); }
+      };
+
+      const saveSelected = (selected: Set<string>): void => {
+        setClientSetting('tools_summarizeTools', JSON.stringify([...selected]));
+      };
+
+      const selected = getCurrentSelected();
+      for (const toolName of availableTools) {
+        const item = document.createElement('label');
+        item.className = 'settings-tool-check-item';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selected.has(toolName);
+        cb.addEventListener('change', () => {
+          const cur = getCurrentSelected();
+          if (cb.checked) cur.add(toolName); else cur.delete(toolName);
+          saveSelected(cur);
+        });
+        item.appendChild(cb);
+        item.appendChild(document.createTextNode(toolName));
+        checklist.appendChild(item);
+      }
+      checkRow.appendChild(checklist);
+      pane.appendChild(checkRow);
+    }
+
     panes.set(groupName, pane);
     $settingsBody.appendChild(pane);
   }
@@ -3671,8 +3816,11 @@ function renderContextInspector(bd: ContextBreakdown): void {
   // Summary line
   const contextWindowSize = 200_000;
   const pctOfWindow = Math.round(total / contextWindowSize * 100);
-  $ctxInspectorSummary.innerHTML =
-    `<strong>~${fmtTok(total)}</strong> tokens estimated &mdash; ${pctOfWindow}% of 200k window`;
+  let summaryHtml = `<strong>~${fmtTok(total)}</strong> tokens estimated &mdash; ${pctOfWindow}% of 200k window`;
+  if (bd.totalSummarySavedTokens && bd.toolSummariesCount) {
+    summaryHtml += ` &middot; saved <strong>~${fmtTok(bd.totalSummarySavedTokens)}</strong> via ${bd.toolSummariesCount} summarization${bd.toolSummariesCount > 1 ? 's' : ''}`;
+  }
+  $ctxInspectorSummary.innerHTML = summaryHtml;
 
   // Stacked bar
   const stackBar = document.createElement('div');
@@ -3793,7 +3941,7 @@ function renderContextInspector(bd: ContextBreakdown): void {
     const roleEl = document.createElement('div');
     roleEl.className = `ctx-msg-role ${m.role}`;
     const roleLabel = m.role === 'tool_result' ? 'tool' : m.role;
-    roleEl.textContent = roleLabel;
+    roleEl.textContent = roleLabel + (m.summaryRecord ? ' ✦' : '');
 
     if (m.preview) {
       const chevron = document.createElement('span');
@@ -3819,8 +3967,20 @@ function renderContextInspector(bd: ContextBreakdown): void {
     row.appendChild(tokEl);
     rowWrap.appendChild(row);
 
+    // Savings sub-row for summarized tool results
+    if (m.summaryRecord) {
+      const sr = m.summaryRecord;
+      const savingsRow = document.createElement('div');
+      savingsRow.className = 'ctx-msg-summary-info';
+      savingsRow.textContent = `${sr.toolName}: ${fmtTok(sr.originalTokens)} → ${fmtTok(sr.summarizedTokens)} (saved ${fmtTok(sr.savedTokens)})`;
+      rowWrap.appendChild(savingsRow);
+    }
+
     if (m.preview) {
-      const panel = makeExpandPanel(m.preview);
+      const panelContent = m.summaryRecord
+        ? `${m.summaryRecord.summary}\n\n[Full output at ${m.summaryRecord.fullOutputPath}]`
+        : m.preview;
+      const panel = makeExpandPanel(panelContent);
       rowWrap.appendChild(panel);
       row.addEventListener('click', () => {
         const open = !panel.classList.contains('hidden');
