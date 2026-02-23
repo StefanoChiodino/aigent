@@ -13,60 +13,64 @@ test.beforeEach(async ({ page }) => {
   await waitForConnected(page);
 });
 
-test('Ctrl+Enter flips reasoning state and shows brain icon on send button', async ({ page }) => {
+test('Ctrl held flips the send button icon vs current reasoning state', async ({ page }) => {
   const input = page.locator('#input');
   const brainIcon = page.locator('#send .icon-brain');
   const arrowIcon = page.locator('#send .icon-arrow');
 
-  // By default arrow is shown
-  await expect(arrowIcon).not.toHaveClass(/\bhidden\b/);
-
-  // Hold Ctrl — the send button should switch to brain icon
   await input.focus();
+
+  // Read initial icon state — depends on current reasoning setting
+  const arrowInitiallyHidden = (await arrowIcon.getAttribute('class') ?? '').includes('hidden');
+
+  // Hold Ctrl — icon should flip
   await page.keyboard.down('Control');
-  await expect(brainIcon).not.toHaveClass(/\bhidden\b/, { timeout: 2_000 });
-  await expect(arrowIcon).toHaveClass(/\bhidden\b/);
+  if (arrowInitiallyHidden) {
+    // Reasoning was ON → Ctrl flips to OFF → arrow shown
+    await expect(arrowIcon).not.toHaveClass(/\bhidden\b/, { timeout: 2_000 });
+    await expect(brainIcon).toHaveClass(/\bhidden\b/);
+  } else {
+    // Reasoning was OFF → Ctrl flips to ON → brain shown
+    await expect(brainIcon).not.toHaveClass(/\bhidden\b/, { timeout: 2_000 });
+    await expect(arrowIcon).toHaveClass(/\bhidden\b/);
+  }
   await page.keyboard.up('Control');
 
-  // After releasing, arrow should be back
-  await expect(arrowIcon).not.toHaveClass(/\bhidden\b/, { timeout: 2_000 });
+  // After releasing Ctrl, icons return to original state
+  if (arrowInitiallyHidden) {
+    await expect(arrowIcon).toHaveClass(/\bhidden\b/, { timeout: 2_000 });
+  } else {
+    await expect(arrowIcon).not.toHaveClass(/\bhidden\b/, { timeout: 2_000 });
+  }
 });
 
-test('Ctrl+Enter sends message with reasoning toggled', async ({ page }) => {
-  // Get current reasoning state
-  const reasoningToggle = page.locator('#sb-reasoning-toggle');
-  const stateBefore = (await reasoningToggle.innerText()).trim();
-
+test('Ctrl+Enter sends a message', async ({ page }) => {
   const input = page.locator('#input');
-  await input.fill('/reset'); // use /reset so no LLM needed
+  await input.fill('/reset');
   await input.press('Control+Enter');
-
-  // Input should clear (message was sent)
+  // Input clears — message was submitted
   await expect(input).toHaveValue('', { timeout: 3_000 });
-
-  // For slash commands the reasoning override doesn't apply, but the message was still sent
-  // Verify message arrived in chat
   await expect(page.locator('#messages')).toContainText(/reset|cleared/i, { timeout: 5_000 });
 });
 
-test('Escape clears input when not loading', async ({ page }) => {
+test('Escape clears input when palette is closed and not loading', async ({ page }) => {
   const input = page.locator('#input');
   await input.fill('some text here');
   await input.press('Escape');
   await expect(input).toHaveValue('');
 });
 
-test('Escape closes command palette', async ({ page }) => {
+test('Escape closes command palette (first press only hides palette)', async ({ page }) => {
   const input = page.locator('#input');
   await input.type('/');
   await expect(page.locator('#command-palette')).not.toHaveClass(/\bhidden\b/, { timeout: 2_000 });
   await input.press('Escape');
-  // Palette should close
   await expect(page.locator('#command-palette')).toHaveClass(/\bhidden\b/, { timeout: 2_000 });
+  // Input still has the text after first Escape
+  await expect(input).not.toHaveValue('');
 });
 
 test('Escape closes context inspector modal', async ({ page }) => {
-  // Open context inspector by clicking the ctx meter
   await page.locator('#sb-ctx-meter').click();
   const inspector = page.locator('#ctx-inspector-overlay');
   await expect(inspector).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
@@ -84,12 +88,15 @@ test('Escape closes settings modal', async ({ page }) => {
   await expect(overlay).toHaveClass(/\bhidden\b/, { timeout: 2_000 });
 });
 
-test('Tab autocompletes a command in the palette', async ({ page }) => {
+test('Tab completes a palette selection and submits it', async ({ page }) => {
   const input = page.locator('#input');
   await input.type('/res');
   await expect(page.locator('#command-palette')).not.toHaveClass(/\bhidden\b/, { timeout: 2_000 });
+
+  // Tab calls completePaletteSelection(). For /reset (no argHint) it submits immediately.
   await input.press('Tab');
-  // Input should now contain the full command
-  const value = await input.inputValue();
-  expect(value).toMatch(/^\/reset/i);
+
+  // Message is submitted — input clears and a system message appears
+  await expect(input).toHaveValue('', { timeout: 3_000 });
+  await expect(page.locator('#messages')).toContainText(/reset|cleared/i, { timeout: 5_000 });
 });

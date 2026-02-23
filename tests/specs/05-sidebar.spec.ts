@@ -75,12 +75,14 @@ test('reasoning toggle shows ON or OFF', async ({ page }) => {
 
 test('clicking reasoning toggle flips its state', async ({ page }) => {
   const toggle = page.locator('#sb-reasoning-toggle');
-  const before = await toggle.innerText();
+  const before = (await toggle.innerText()).trim();
+  const expected = before === 'ON' ? 'OFF' : 'ON';
   await toggle.click();
-  const after = await toggle.innerText();
-  expect(after.trim()).not.toEqual(before.trim());
+  // Toggle sends /reasoning on|off to the server; wait for state event round-trip
+  await expect(toggle).toHaveText(expected, { timeout: 5_000 });
   // Restore
   await toggle.click();
+  await expect(toggle).toHaveText(before, { timeout: 5_000 });
 });
 
 test('effort pills are present (L, M, H, MAX)', async ({ page }) => {

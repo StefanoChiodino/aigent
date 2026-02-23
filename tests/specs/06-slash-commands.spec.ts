@@ -53,14 +53,13 @@ test('Escape hides palette (first press) then clears input (second press)', asyn
   await expect(input).toHaveValue('');
 });
 
-test('ArrowDown highlights first palette item', async ({ page }) => {
+test('ArrowDown highlights a palette item with .selected class', async ({ page }) => {
   const input = page.locator('#input');
   await input.type('/');
   await expectVisible(page.locator('#command-palette'));
   await input.press('ArrowDown');
-  // An item should be highlighted — check for an active/highlighted class
-  const highlighted = page.locator('#command-palette .active, #command-palette .highlighted, #command-palette [aria-selected="true"]');
-  await expect(highlighted).toHaveCount(1, { timeout: 2_000 });
+  // The app uses .selected (not .active) for the highlighted palette item
+  await expect(page.locator('#command-palette .selected')).toHaveCount(1, { timeout: 2_000 });
 });
 
 test('/reset runs when sent via Enter', async ({ page }) => {

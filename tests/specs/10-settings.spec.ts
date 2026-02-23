@@ -136,14 +136,20 @@ test('Context tab has summarization controls', async ({ page }) => {
 test('settings toast appears after saving a client setting', async ({ page }) => {
   await openSettings(page);
 
-  // Find any toggle in the settings body and click it
-  const toggle = page.locator('#settings-body input[type="checkbox"]').first();
-  const count = await toggle.count();
-  if (count === 0) return; // No toggles visible — skip
+  // Navigate to Tools tab which has the first client-scope toggle ("Disable all tools")
+  const toolsNav = page.locator('#settings-nav .settings-nav-item', { hasText: 'Tools' });
+  if (await toolsNav.count() > 0) await toolsNav.click();
 
-  await toggle.click();
+  // Toggles render as <label class="settings-toggle"><input type="checkbox"><span class="settings-toggle-track">
+  // Click the visible label element — the hidden checkbox fires on label click
+  const toggleLabel = page.locator('#settings-body .settings-toggle').first();
+  if (await toggleLabel.count() === 0) return;
 
-  // Saved toast should flash
-  const toast = page.locator('#settings-toast');
-  await expect(toast).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
+  await toggleLabel.click();
+
+  // Saved toast should flash briefly
+  await expect(page.locator('#settings-toast')).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
+
+  // Click again to restore the original state
+  await toggleLabel.click();
 });

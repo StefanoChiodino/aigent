@@ -4,9 +4,12 @@
  * Uses port 3142 (not 3141) so it doesn't conflict with a running dev instance.
  * Sets AIGENT_TEST_MODE=1 to enable the /test/inject endpoint in web-bridge.ts.
  * Waits for the WebSocket endpoint to be ready before handing off to tests.
+ * If port 3142 is already occupied (stale from a previous failed run), it kills
+ * whatever is there rather than throwing.
  */
 
 import { spawn } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { writeFileSync, openSync } from 'node:fs';
@@ -19,12 +22,13 @@ const PID_FILE = '/tmp/aigent-test-gatekeeper.pid';
 const LOG_FILE = '/tmp/aigent-test-gatekeeper.log';
 
 export default async function globalSetup() {
-  const portInUse = await checkPortInUse(PORT);
-  if (portInUse) {
-    throw new Error(
-      `Port ${PORT} is already in use. Stop any existing aigent-test instance before running tests.\n` +
-      `Check: lsof -i :${PORT}`
-    );
+  if (await checkPortInUse(PORT)) {
+    console.log(`[test-setup] Port ${PORT} in use — killing stale process...`);
+    killPort(PORT);
+    await sleep(1_500);
+    if (await checkPortInUse(PORT)) {
+      throw new Error(`Port ${PORT} still in use after kill attempt. Run: lsof -i :${PORT}`);
+    }
   }
 
   console.log(`[test-setup] Spawning aigent gatekeeper on port ${PORT}...`);
@@ -64,7 +68,6 @@ export default async function globalSetup() {
     });
   });
 
-  // Docker + server startup can take up to 60s
   console.log('[test-setup] Waiting for WebSocket to be ready (up to 60s)...');
   await Promise.race([
     waitForWebSocket(`ws://localhost:${PORT}/ws`, 60_000),
@@ -80,6 +83,22 @@ function checkPortInUse(port: number): Promise<boolean> {
     socket.on('connect', () => { socket.destroy(); resolve(true); });
     socket.on('error', () => resolve(false));
   });
+}
+
+function killPort(port: number): void {
+  // fuser -k (Linux) kills all processes on the TCP port
+  try {
+    spawnSync('fuser', ['-k', `${port}/tcp`], { stdio: 'ignore' });
+    return;
+  } catch { /* not available */ }
+  // Fallback: lsof + kill (macOS/Linux)
+  try {
+    const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf-8' });
+    const pids = (result.stdout ?? '').trim().split('\n').filter(Boolean);
+    for (const p of pids) {
+      try { process.kill(parseInt(p, 10), 'SIGTERM'); } catch { /* ignore */ }
+    }
+  } catch { /* ignore */ }
 }
 
 async function waitForWebSocket(url: string, timeoutMs: number): Promise<void> {

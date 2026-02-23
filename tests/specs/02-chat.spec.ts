@@ -48,8 +48,13 @@ test('cancel button is hidden when not loading', async ({ page }) => {
   await expect(page.locator('#cancel')).toHaveClass(/hidden/);
 });
 
-test('send button shows arrow icon by default', async ({ page }) => {
-  // Arrow icon visible, brain icon hidden
-  await expect(page.locator('#send .icon-arrow')).toBeVisible();
-  await expect(page.locator('#send .icon-brain')).toHaveClass(/hidden/);
+test('send button icon reflects reasoning state', async ({ page }) => {
+  // Arrow = reasoning off, brain = reasoning on.
+  // The send button always shows exactly one of the two icons.
+  const arrowHidden = await page.locator('#send .icon-arrow').getAttribute('class');
+  const brainHidden = await page.locator('#send .icon-brain').getAttribute('class');
+  const arrowVisible = !arrowHidden?.includes('hidden');
+  const brainVisible = !brainHidden?.includes('hidden');
+  // Exactly one should be visible
+  expect(arrowVisible !== brainVisible).toBe(true);
 });
