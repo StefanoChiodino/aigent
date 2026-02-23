@@ -41,7 +41,6 @@ async function writeClientSettings(updates: ClientSettings): Promise<void> {
   const merged = { ...current, ...updates };
   await writeFile(SETTINGS_PATH, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
 }
-const MARKED_ESM = resolve(__dirname, '..', 'node_modules', 'marked', 'lib', 'marked.esm.js');
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -244,11 +243,6 @@ export async function startWebServer(
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ files: results }));
       return;
-    }
-
-    // Vendor: serve marked ESM from node_modules
-    if (url === '/vendor/marked.js') {
-      return serveFile(res, MARKED_ESM);
     }
 
     // Static files from web/

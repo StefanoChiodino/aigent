@@ -1362,6 +1362,14 @@ let hostDaemonProcess: ChildProcess | null = null;
 async function startHostDaemon(): Promise<void> {
   const { HOST_SOCKET_PATH } = await import('./host/protocol.js');
 
+  // Kill any orphaned daemon processes from previous runs (e.g. tsx --watch restarts
+  // spawn a fresh gatekeeper that loses the handle to the old daemon child).
+  try {
+    execSync("pkill -TERM -f 'host/daemon'", { stdio: 'ignore' });
+    // Give them a moment to exit cleanly before we unlink the socket
+    await new Promise<void>((r) => setTimeout(r, 200));
+  } catch { /* no existing daemons — that's fine */ }
+
   // Clean up stale socket
   if (existsSync(HOST_SOCKET_PATH)) {
     try { unlinkSync(HOST_SOCKET_PATH); } catch {}

@@ -3512,3 +3512,31 @@ body[data-working] .bokeh {
 #settings-toast.fade-out {
   opacity: 0;
 }
+
+/* ── React sidebar panel scroll ──────────────────────────── */
+
+#sidebar-panel {
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* ── cap-grant color for always-allow ───────────────────── */
+
+.cap-grant.always-allow {
+  color: var(--success);
+  background: rgba(64, 176, 128, 0.15);
+  border: 1px solid rgba(64, 176, 128, 0.25);
+}
+
+/* ── perm-body (reason text in permission modal) ─────────── */
+
+.perm-body {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  background: var(--bg-raised);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}

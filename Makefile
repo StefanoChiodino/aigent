@@ -4,23 +4,21 @@
 
 # Run gatekeeper + web frontend watcher
 dev-ts:
-	@mkdir -p web/dist
 	@npx concurrently \
 		--names "gate,web" \
 		--prefix-colors "cyan,blue" \
 		--kill-others-on-fail \
 		"npx tsx watch src/gatekeeper.tsx --headless $(ARGS)" \
-		"npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*'"
+		"npx vite build --config web/vite.config.ts --watch"
 
 # Run everything: gatekeeper + web watcher + TTS + STT
 dev:
-	@mkdir -p web/dist
 	@npx concurrently \
 		--names "gate,web,tts,stt" \
 		--prefix-colors "cyan,blue,yellow,magenta" \
 		--kill-others-on-fail \
 		"npx tsx watch src/gatekeeper.tsx --headless $(ARGS)" \
-		"npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*'" \
+		"npx vite build --config web/vite.config.ts --watch" \
 		"$(TTS_PYTHON) tts/main.py" \
 		"$(STT_PYTHON) stt/main.py --eager"
 
@@ -31,12 +29,10 @@ serve:
 # --- Web UI ---
 
 web:
-	@mkdir -p web/dist
-	npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --minify '--external:/vendor/*'
+	npx vite build --config web/vite.config.ts
 
 web-watch:
-	@mkdir -p web/dist
-	npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*'
+	npx vite build --config web/vite.config.ts --watch
 
 # --- Build ---
 

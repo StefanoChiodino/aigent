@@ -1,5 +1,10 @@
 # aigent — TODO
 
+Still getting this from the gate when changes happne. We need to nail this if we cant an Ai that can modify itself!
+[gate] Failed running 'src/gatekeeper.tsx --headless'. Waiting for file changes before restarting...
+
+
+
 ---
 
 ## 🔒 Security & Safety (Current Priority)
