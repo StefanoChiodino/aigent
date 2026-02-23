@@ -425,15 +425,6 @@ const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
-    key: 'exec_perm_prompt',
-    label: 'Require Approval',
-    desc: 'Commands matching these glob patterns require explicit approval before running. One pattern per line.',
-    group: 'Permissions',
-    type: 'string-list',
-    default: '[]',
-    scope: 'client',
-  },
-  {
     key: 'exec_perm_deny',
     label: 'Always Deny',
     desc: 'Commands matching these glob patterns are always blocked. One pattern per line.',
@@ -446,19 +437,10 @@ const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'fetch_perm_alwaysAllow',
     label: 'Always Allow',
-    desc: 'Hostnames matching these glob patterns are always fetched without prompting (e.g. api.github.com, *.anthropic.com). One pattern per line.',
+    desc: 'URLs or hostname glob patterns always fetched without prompting. Full URLs match exactly (e.g. https://api.github.com/repos/foo); hostname patterns match any path on that host (e.g. *.anthropic.com). One pattern per line.',
     group: 'Fetch Permissions',
     type: 'string-list',
     default: '[]',
-    scope: 'client',
-  },
-  {
-    key: 'fetch_perm_prompt',
-    label: 'Require Approval',
-    desc: 'Hostnames matching these glob patterns require explicit approval before fetching. One pattern per line.',
-    group: 'Fetch Permissions',
-    type: 'string-list',
-    default: '["*"]',
     scope: 'client',
   },
   {
@@ -539,13 +521,12 @@ function setClientSetting(key: string, value: boolean | number | string): void {
   clientSettings[key] = value;
   saveClientSettingsCache();
   if (key.startsWith('exec_perm_')) {
-    // Reconstruct full exec_permissions object so all three lists are saved together
+    // Reconstruct full exec_permissions object so both lists are saved together
     const getList = (k: string): string[] => {
       try { return JSON.parse(String(clientSettings[k] ?? '[]')) as string[]; } catch { return []; }
     };
     const exec_permissions = {
       alwaysAllow: getList('exec_perm_alwaysAllow'),
-      prompt: getList('exec_perm_prompt'),
       deny: getList('exec_perm_deny'),
     };
     fetch('/settings', {
@@ -554,13 +535,12 @@ function setClientSetting(key: string, value: boolean | number | string): void {
       body: JSON.stringify({ exec_permissions }),
     }).then(() => { showSettingsToast(); }).catch(() => {});
   } else if (key.startsWith('fetch_perm_')) {
-    // Reconstruct full fetch_permissions object so all three lists are saved together
+    // Reconstruct full fetch_permissions object so both lists are saved together
     const getList = (k: string): string[] => {
       try { return JSON.parse(String(clientSettings[k] ?? '[]')) as string[]; } catch { return []; }
     };
     const fetch_permissions = {
       alwaysAllow: getList('fetch_perm_alwaysAllow'),
-      prompt: getList('fetch_perm_prompt'),
       deny: getList('fetch_perm_deny'),
     };
     fetch('/settings', {
@@ -617,6 +597,22 @@ function clearChatHistory(): void {
   localStorage.removeItem(CHAT_HISTORY_KEY);
 }
 
+const USAGE_KEY = 'aigent_usage';
+
+function saveUsage(): void {
+  try {
+    localStorage.setItem(USAGE_KEY, JSON.stringify(usage));
+  } catch { /* ignore */ }
+}
+
+function loadUsage(): TokenUsage | null {
+  try {
+    const raw = localStorage.getItem(USAGE_KEY);
+    if (raw) return JSON.parse(raw) as TokenUsage;
+  } catch { /* ignore */ }
+  return null;
+}
+
 // ── State ────────────────────────────────────────────────────
 
 let messages: DisplayMessage[] = [];
@@ -652,6 +648,7 @@ interface PermRequest {
   approveCmd: string;
   denyCmd: string;
   alwaysAllowCmd?: string;
+  alwaysAllowDomainCmd?: string;
   durationMinutes?: number;
   diff?: string;
   diffFiles?: DiffFile[]; // parsed per-file sections for tab navigation
@@ -705,6 +702,7 @@ const $ctxFill = $('ctx-fill');
 const $ctxLabel = $('ctx-label');
 const $errorBar = $('error-bar');
 const $palette = $('command-palette');
+const $atPalette = $('at-palette');
 const $input = $('input') as HTMLTextAreaElement;
 const $send = $('send') as HTMLButtonElement;
 const $cancel = $('cancel') as HTMLButtonElement;
@@ -721,6 +719,7 @@ const $patchFileList = $('patch-file-list');
 const $permApproveBtn = $('perm-approve-btn') as HTMLButtonElement;
 const $permDenyBtn = $('perm-deny-btn') as HTMLButtonElement;
 const $permAlwaysAllowBtn = $('perm-always-allow-btn') as HTMLButtonElement;
+const $permAlwaysAllowDomainBtn = $('perm-always-allow-domain-btn') as HTMLButtonElement;
 
 // Sidebar DOM refs
 const $sbModelBtn = $('sb-model-btn') as HTMLButtonElement;
@@ -770,6 +769,22 @@ function showSettingsToast(): void {
 // Command palette state
 let paletteItems: CommandDef[] = [];
 let paletteSelected = 0;
+
+// @ palette state
+interface AtItem {
+  icon: string;
+  label: string;
+  desc: string;
+  insert: string;  // text inserted at the @ trigger position
+}
+
+const AT_ITEMS: AtItem[] = [
+  { icon: '🖥️', label: 'screen', desc: 'Share your screen with the agent', insert: '@screen' },
+];
+
+let atItems: AtItem[] = [];
+let atSelected = 0;
+let atTriggerPos = -1;  // caret position where @ was typed
 
 // ── Pending attachments (images + files) ─────────────────────
 
@@ -987,7 +1002,12 @@ function handleEvent(event: ServerEvent): void {
         saveChatHistory();
       }
       // else: keep current messages (from localStorage restore)
-      usage = event.state.usage;
+      // If the server has no contextTokens yet (fresh session), preserve the
+      // cached value so the counter isn't blank on page refresh.
+      usage = event.state.usage.contextTokens
+        ? event.state.usage
+        : { ...event.state.usage, contextTokens: usage.contextTokens };
+      saveUsage();
       thinkingLevel = event.state.thinking;
       if (thinkingLevel !== 'off') lastEffortLevel = thinkingLevel;
       conciseMode = event.state.concise ?? false;
@@ -1125,6 +1145,7 @@ function handleEvent(event: ServerEvent): void {
 
     case 'usage':
       usage = event.usage;
+      saveUsage();
       updateHeader();
       updateSidebar();
       break;
@@ -1256,6 +1277,7 @@ function handleEvent(event: ServerEvent): void {
         approveCmd: `/approve-fetch ${event.id}`,
         denyCmd: `/deny-fetch ${event.id}`,
         alwaysAllowCmd: `/approve-fetch ${event.id} --always`,
+        alwaysAllowDomainCmd: `/approve-fetch ${event.id} --always-domain`,
       });
       break;
     }
@@ -2434,58 +2456,255 @@ function parseDiffIntoFiles(diff: string): DiffFile[] {
   return files.length > 0 ? files : [{ name: 'patch', path: '', content: diff }];
 }
 
+/**
+ * Compute character-level diff between two strings (LCS-based).
+ * Returns segment arrays for old and new, each tagged {text, changed}.
+ */
+function charDiff(
+  oldStr: string,
+  newStr: string,
+): [Array<{ text: string; changed: boolean }>, Array<{ text: string; changed: boolean }>] {
+  const m = oldStr.length,
+    n = newStr.length;
+  if (m * n > 40000) {
+    return [[{ text: oldStr, changed: true }], [{ text: newStr, changed: true }]];
+  }
+  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0) as number[]);
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i]![j] =
+        oldStr[i - 1] === newStr[j - 1]
+          ? dp[i - 1]![j - 1]! + 1
+          : Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
+    }
+  }
+  const oldSegs: Array<{ text: string; changed: boolean }> = [];
+  const newSegs: Array<{ text: string; changed: boolean }> = [];
+  let i = m,
+    j = n,
+    oldBuf = '',
+    newBuf = '',
+    sameBuf = '';
+  const flush = (same: string, old: string, nw: string) => {
+    if (same) {
+      oldSegs.push({ text: same, changed: false });
+      newSegs.push({ text: same, changed: false });
+    }
+    if (old) oldSegs.push({ text: old, changed: true });
+    if (nw) newSegs.push({ text: nw, changed: true });
+  };
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldStr[i - 1] === newStr[j - 1]) {
+      if (oldBuf || newBuf) {
+        flush('', oldBuf, newBuf);
+        oldBuf = '';
+        newBuf = '';
+      }
+      sameBuf = oldStr[i - 1]! + sameBuf;
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
+      if (sameBuf) {
+        flush(sameBuf, '', '');
+        sameBuf = '';
+      }
+      newBuf = newStr[j - 1]! + newBuf;
+      j--;
+    } else {
+      if (sameBuf) {
+        flush(sameBuf, '', '');
+        sameBuf = '';
+      }
+      oldBuf = oldStr[i - 1]! + oldBuf;
+      i--;
+    }
+  }
+  flush(sameBuf, oldBuf, newBuf);
+  return [oldSegs, newSegs];
+}
+
+/** Build a .diff-code td with optional inline character-level highlights. */
+function buildCodeCell(
+  code: string,
+  segments?: Array<{ text: string; changed: boolean }>,
+): HTMLTableCellElement {
+  const td = document.createElement('td');
+  td.className = 'diff-code';
+  if (!segments) {
+    td.textContent = code;
+    return td;
+  }
+  for (const seg of segments) {
+    if (seg.changed) {
+      const mark = document.createElement('span');
+      mark.className = 'diff-inline-change';
+      mark.textContent = seg.text;
+      td.appendChild(mark);
+    } else {
+      td.appendChild(document.createTextNode(seg.text));
+    }
+  }
+  return td;
+}
+
 /** Render a diff string as a VS Code / GitHub-style table with line numbers. */
 function renderDiffContent(container: HTMLElement, diffText: string): void {
   container.innerHTML = '';
   const table = document.createElement('table');
   table.className = 'diff-table';
 
-  let oldLine = 0;
-  let newLine = 0;
+  // Pre-parse all lines so we can compute inline char-diffs and identify
+  // collapsible context runs before emitting any DOM.
+  interface ParsedLine {
+    kind: 'hunk' | 'header' | 'remove' | 'add' | 'context';
+    raw: string;
+    oldN: number;
+    newN: number;
+  }
+  const parsed: ParsedLine[] = [];
+  let tmpOld = 0,
+    tmpNew = 0;
+  const allLines = diffText.split('\n');
+  if (allLines.at(-1) === '' && diffText.endsWith('\n')) allLines.pop();
 
-  for (const line of diffText.split('\n')) {
-    // Skip trailing empty line from the final split
-    if (line === '' && diffText.endsWith('\n') && line === diffText.split('\n').at(-1)) continue;
+  for (const line of allLines) {
+    if (line.startsWith('@@')) {
+      const hm = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hm) {
+        tmpOld = parseInt(hm[1]!, 10) - 1;
+        tmpNew = parseInt(hm[2]!, 10) - 1;
+      }
+      parsed.push({ kind: 'hunk', raw: line, oldN: 0, newN: 0 });
+    } else if (line.startsWith('---') || line.startsWith('+++')) {
+      parsed.push({ kind: 'header', raw: line, oldN: 0, newN: 0 });
+    } else if (line.startsWith('-')) {
+      tmpOld++;
+      parsed.push({ kind: 'remove', raw: line.slice(1), oldN: tmpOld, newN: 0 });
+    } else if (line.startsWith('+')) {
+      tmpNew++;
+      parsed.push({ kind: 'add', raw: line.slice(1), oldN: 0, newN: tmpNew });
+    } else {
+      tmpOld++;
+      tmpNew++;
+      parsed.push({ kind: 'context', raw: line.slice(1), oldN: tmpOld, newN: tmpNew });
+    }
+  }
+
+  // Inline char diffs for adjacent remove+add pairs
+  const inlineOld = new Map<number, Array<{ text: string; changed: boolean }>>();
+  const inlineNew = new Map<number, Array<{ text: string; changed: boolean }>>();
+  for (let idx = 0; idx < parsed.length; idx++) {
+    if (parsed[idx]!.kind === 'remove' && parsed[idx + 1]?.kind === 'add') {
+      const [os, ns] = charDiff(parsed[idx]!.raw, parsed[idx + 1]!.raw);
+      inlineOld.set(idx, os);
+      inlineNew.set(idx + 1, ns);
+    }
+  }
+
+  // Identify long context runs that should be collapsed
+  const COLLAPSE_THRESHOLD = 6;
+  const KEEP_EDGES = 3;
+  const collapsedGroup = new Map<number, number>();
+  let gid = 0,
+    ctxStart = -1;
+  for (let idx = 0; idx <= parsed.length; idx++) {
+    const isCtx = idx < parsed.length && parsed[idx]!.kind === 'context';
+    if (isCtx && ctxStart === -1) ctxStart = idx;
+    if (!isCtx && ctxStart !== -1) {
+      const runLen = idx - ctxStart;
+      if (runLen >= COLLAPSE_THRESHOLD) {
+        for (let k = ctxStart + KEEP_EDGES; k < idx - KEEP_EDGES; k++) {
+          collapsedGroup.set(k, gid);
+        }
+        gid++;
+      }
+      ctxStart = -1;
+    }
+  }
+
+  // Render rows
+  const emittedGroups = new Set<number>();
+  for (let idx = 0; idx < parsed.length; idx++) {
+    const p = parsed[idx]!;
+    const group = collapsedGroup.get(idx);
+
+    if (group !== undefined) {
+      if (!emittedGroups.has(group)) {
+        emittedGroups.add(group);
+        const groupIdxs = [...collapsedGroup.entries()]
+          .filter(([, g]) => g === group)
+          .map(([k]) => k);
+        const count = groupIdxs.length;
+        // Build hidden rows up-front
+        const hiddenRows: HTMLTableRowElement[] = [];
+        for (const hiddenIdx of groupIdxs) {
+          const hp = parsed[hiddenIdx]!;
+          const hiddenTr = document.createElement('tr');
+          hiddenTr.className = 'diff-context diff-context-hidden';
+          appendDiffCells(hiddenTr, String(hp.oldN), String(hp.newN), '', hp.raw);
+          hiddenRows.push(hiddenTr);
+        }
+        // Collapsed placeholder row
+        const collapseTr = document.createElement('tr');
+        collapseTr.className = 'diff-collapsed';
+        const collapseTd = document.createElement('td');
+        collapseTd.colSpan = 4;
+        const toggle = document.createElement('span');
+        toggle.className = 'diff-collapsed-toggle';
+        toggle.textContent = `▶ ${count} unchanged lines`;
+        collapseTd.appendChild(toggle);
+        collapseTr.appendChild(collapseTd);
+        let expanded = false;
+        toggle.addEventListener('click', () => {
+          expanded = !expanded;
+          toggle.textContent = expanded
+            ? `▼ ${count} unchanged lines`
+            : `▶ ${count} unchanged lines`;
+          for (const hr of hiddenRows) hr.classList.toggle('diff-context-hidden', !expanded);
+        });
+        table.appendChild(collapseTr);
+        for (const hr of hiddenRows) table.appendChild(hr);
+      }
+      continue;
+    }
 
     const tr = document.createElement('tr');
-
-    if (line.startsWith('@@')) {
-      // Hunk header — parse @@ -old,count +new,count @@
-      const m = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      if (m) { oldLine = parseInt(m[1]!, 10) - 1; newLine = parseInt(m[2]!, 10) - 1; }
+    if (p.kind === 'hunk') {
       tr.className = 'diff-hunk';
       const td = document.createElement('td');
       td.colSpan = 4;
-      td.textContent = line;
+      td.textContent = p.raw;
       tr.appendChild(td);
-    } else if (line.startsWith('---') || line.startsWith('+++')) {
+    } else if (p.kind === 'header') {
       tr.className = 'diff-header';
       const td = document.createElement('td');
       td.colSpan = 4;
-      td.textContent = line;
+      td.textContent = p.raw;
       tr.appendChild(td);
-    } else if (line.startsWith('-')) {
-      oldLine++;
+    } else if (p.kind === 'remove') {
       tr.className = 'diff-remove';
-      appendDiffCells(tr, String(oldLine), '', '-', line.slice(1));
-    } else if (line.startsWith('+')) {
-      newLine++;
+      appendDiffCells(tr, String(p.oldN), '', '-', p.raw, inlineOld.get(idx));
+    } else if (p.kind === 'add') {
       tr.className = 'diff-add';
-      appendDiffCells(tr, '', String(newLine), '+', line.slice(1));
+      appendDiffCells(tr, '', String(p.newN), '+', p.raw, inlineNew.get(idx));
     } else {
-      // Context line
-      oldLine++;
-      newLine++;
-      appendDiffCells(tr, String(oldLine), String(newLine), '', line.slice(1));
+      tr.className = 'diff-context';
+      appendDiffCells(tr, String(p.oldN), String(p.newN), '', p.raw);
     }
-
     table.appendChild(tr);
   }
 
   container.appendChild(table);
 }
 
-function appendDiffCells(tr: HTMLTableRowElement, oldN: string, newN: string, marker: string, code: string): void {
+function appendDiffCells(
+  tr: HTMLTableRowElement,
+  oldN: string,
+  newN: string,
+  marker: string,
+  code: string,
+  segments?: Array<{ text: string; changed: boolean }>,
+): void {
   const tdOld = document.createElement('td');
   tdOld.className = 'diff-ln diff-ln-old';
   tdOld.textContent = oldN;
@@ -2498,9 +2717,7 @@ function appendDiffCells(tr: HTMLTableRowElement, oldN: string, newN: string, ma
   tdMark.className = 'diff-mark';
   tdMark.textContent = marker;
 
-  const tdCode = document.createElement('td');
-  tdCode.className = 'diff-code';
-  tdCode.textContent = code;
+  const tdCode = buildCodeCell(code, segments);
 
   tr.appendChild(tdOld);
   tr.appendChild(tdNew);
@@ -2527,15 +2744,17 @@ function showNextPermRequest(): void {
   const req = permQueue[0];
   if (!req) {
     permShowing = false;
-    $permOverlay.classList.remove('patch-mode');
+    $permOverlay.classList.remove('patch-mode', 'fetch-mode');
     $permOverlay.classList.add('hidden');
     $patchViewer.classList.add('hidden');
     return;
   }
   permShowing = true;
   $permOverlay.classList.toggle('exec-mode', req.type === 'exec');
+  $permOverlay.classList.toggle('fetch-mode', req.type === 'fetch');
   $permIcon.textContent = req.type === 'mount' ? '📂' : req.type === 'patch' ? '🩹' : req.type === 'exec' ? '⚡' : req.type === 'fetch' ? '🌐' : '✏️';
   $permAlwaysAllowBtn.classList.toggle('hidden', !req.alwaysAllowCmd);
+  $permAlwaysAllowDomainBtn.classList.toggle('hidden', !req.alwaysAllowDomainCmd);
   $permTitle.textContent = req.title;
 
   // Show each line of detail as its own row
@@ -2631,7 +2850,25 @@ $permAlwaysAllowBtn.addEventListener('click', () => {
       }
     } catch { /* ignore */ }
   } else if (req.type === 'fetch' && req.detail) {
-    // Extract hostname from the "METHOD url" detail string
+    // Extract full URL from the "METHOD url" detail string
+    try {
+      const urlPart = req.detail.split(' ')[1] ?? req.detail;
+      const current: string[] = JSON.parse(String(clientSettings['fetch_perm_alwaysAllow'] ?? '[]'));
+      if (!current.includes(urlPart)) {
+        clientSettings['fetch_perm_alwaysAllow'] = JSON.stringify([...current, urlPart]);
+        saveClientSettingsCache();
+      }
+    } catch { /* ignore */ }
+  }
+  wsSend({ type: 'message', content: req.alwaysAllowCmd });
+  showNextPermRequest();
+});
+
+$permAlwaysAllowDomainBtn.addEventListener('click', () => {
+  const req = permQueue.shift();
+  if (!req?.alwaysAllowDomainCmd) return;
+  // Optimistically update local settings with the hostname
+  if (req.type === 'fetch' && req.detail) {
     try {
       const urlPart = req.detail.split(' ')[1] ?? req.detail;
       const hostname = new URL(urlPart).hostname.toLowerCase();
@@ -2642,7 +2879,7 @@ $permAlwaysAllowBtn.addEventListener('click', () => {
       }
     } catch { /* ignore */ }
   }
-  wsSend({ type: 'message', content: req.alwaysAllowCmd });
+  wsSend({ type: 'message', content: req.alwaysAllowDomainCmd });
   showNextPermRequest();
 });
 
@@ -2734,6 +2971,146 @@ function completePaletteSelection(): void {
   }
 }
 
+// ── @ palette ────────────────────────────────────────────────
+
+function updateAtPalette(): void {
+  const text = $input.value;
+  const caret = $input.selectionStart ?? 0;
+
+  // Find the nearest @ before the caret that isn't preceded by a word char
+  let triggerPos = -1;
+  for (let i = caret - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === '@') {
+      // Only treat as trigger if at start or preceded by whitespace
+      if (i === 0 || /\s/.test(text[i - 1])) {
+        triggerPos = i;
+      }
+      break;
+    }
+    // Stop searching if we hit whitespace (no @ in current word)
+    if (/\s/.test(ch)) break;
+  }
+
+  if (triggerPos === -1) {
+    closeAtPalette();
+    return;
+  }
+
+  const query = text.slice(triggerPos + 1, caret).toLowerCase();
+  atTriggerPos = triggerPos;
+  atItems = AT_ITEMS.filter(item => item.label.startsWith(query));
+  atSelected = Math.min(atSelected, Math.max(0, atItems.length - 1));
+
+  if (atItems.length === 0) {
+    closeAtPalette();
+    return;
+  }
+
+  $atPalette.classList.remove('hidden');
+  renderAtPalette();
+}
+
+function renderAtPalette(): void {
+  $atPalette.innerHTML = '';
+
+  const section = document.createElement('div');
+  section.className = 'at-palette-section';
+  section.textContent = 'Mention';
+  $atPalette.appendChild(section);
+
+  for (let i = 0; i < atItems.length; i++) {
+    const item = atItems[i];
+    const el = document.createElement('div');
+    el.className = 'at-palette-item' + (i === atSelected ? ' selected' : '');
+
+    const icon = document.createElement('span');
+    icon.className = 'at-item-icon';
+    icon.textContent = item.icon;
+
+    const text = document.createElement('span');
+    text.className = 'at-item-text';
+
+    const label = document.createElement('span');
+    label.className = 'at-item-label';
+    label.textContent = item.label;
+
+    const desc = document.createElement('span');
+    desc.className = 'at-item-desc';
+    desc.textContent = item.desc;
+
+    text.appendChild(label);
+    text.appendChild(desc);
+    el.appendChild(icon);
+    el.appendChild(text);
+
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault(); // don't blur textarea
+      atSelected = i;
+      completeAtSelection();
+    });
+
+    $atPalette.appendChild(el);
+  }
+
+  const selected = $atPalette.querySelector('.selected');
+  if (selected) selected.scrollIntoView({ block: 'nearest' });
+}
+
+function completeAtSelection(): void {
+  const item = atItems[atSelected];
+  if (!item) return;
+  const text = $input.value;
+  const caret = $input.selectionStart ?? 0;
+  // Replace from triggerPos to caret with the insert text + space
+  $input.value = text.slice(0, atTriggerPos) + item.insert + ' ' + text.slice(caret);
+  const newCaret = atTriggerPos + item.insert.length + 1;
+  $input.setSelectionRange(newCaret, newCaret);
+  $input.focus();
+  autoGrow();
+  closeAtPalette();
+
+  // If @screen, trigger screen sharing
+  if (item.insert === '@screen') {
+    triggerScreenShare();
+  }
+}
+
+function triggerScreenShare(): void {
+  void (async () => {
+    try {
+      if (screenStream) return; // already sharing
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      screenVideo = document.createElement('video');
+      screenVideo.srcObject = screenStream;
+      screenVideo.muted = true;
+      await new Promise<void>(resolve => { screenVideo!.onloadedmetadata = () => resolve(); });
+      await screenVideo.play();
+      await new Promise<void>(resolve => {
+        if (screenVideo!.readyState >= 3) resolve();
+        else screenVideo!.oncanplay = () => resolve();
+      });
+      screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+        screenStream = null;
+        screenVideo = null;
+        setScreenCapState(false);
+      });
+      setScreenCapState(true);
+    } catch {
+      // User cancelled — remove the @screen token we just inserted
+      $input.value = $input.value.replace('@screen ', '').replace('@screen', '');
+      autoGrow();
+    }
+  })();
+}
+
+function closeAtPalette(): void {
+  atItems = [];
+  atSelected = 0;
+  atTriggerPos = -1;
+  $atPalette.classList.add('hidden');
+}
+
 // ── Input handling ───────────────────────────────────────────
 
 function submitMessage(useThinkingOverride = false): void {
@@ -2747,6 +3124,7 @@ function submitMessage(useThinkingOverride = false): void {
   paletteItems = [];
   paletteSelected = 0;
   $palette.classList.add('hidden');
+  closeAtPalette();
   autoGrow();
   const msg: Record<string, unknown> = { type: 'message', content: text };
   if (pendingAttachments.length > 0) {
@@ -2791,6 +3169,32 @@ function autoGrow(): void {
 }
 
 $input.addEventListener('keydown', (e) => {
+  // @ palette navigation (takes priority over command palette)
+  if (atItems.length > 0) {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      atSelected = Math.max(0, atSelected - 1);
+      renderAtPalette();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      atSelected = Math.min(atItems.length - 1, atSelected + 1);
+      renderAtPalette();
+      return;
+    }
+    if (e.key === 'Tab' || e.key === 'Enter') {
+      e.preventDefault();
+      completeAtSelection();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeAtPalette();
+      return;
+    }
+  }
+
   // Palette navigation
   if (paletteItems.length > 0) {
     if (e.key === 'ArrowUp') {
@@ -2873,6 +3277,7 @@ $input.addEventListener('keydown', (e) => {
 $input.addEventListener('input', () => {
   autoGrow();
   updatePalette();
+  updateAtPalette();
 });
 
 // ── Paste & drag-drop image handling ────────────────────────
@@ -4127,7 +4532,7 @@ if (micSticky) {
   void startMic();
 }
 
-// Restore chat history from localStorage so messages are visible immediately
+// Restore chat history and usage from localStorage so they are visible immediately
 // while the WebSocket is connecting. The server will overwrite on 'connected'.
 try {
   const savedHistory = loadChatHistory();
@@ -4138,6 +4543,9 @@ try {
 } catch {
   clearChatHistory();
 }
+
+const savedUsage = loadUsage();
+if (savedUsage) usage = savedUsage;
 
 updateHeader();
 updateSidebar();

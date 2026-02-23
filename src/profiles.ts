@@ -180,7 +180,7 @@ export function autoSaveSession(
   workspacePath: string,
   agentMessages: unknown[],
   uiMessages: unknown[],
-  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number },
+  usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; contextTokens?: number },
   thinking?: { current: string; savedEffort: string },
   model?: string,
   concise?: boolean,
@@ -207,7 +207,7 @@ export function autoSaveSession(
  */
 export function autoLoadSession(
   workspacePath: string,
-): { agentMessages: unknown[]; uiMessages: unknown[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number }; thinking?: { current: string; savedEffort: string }; model?: string; concise?: boolean } | null {
+): { agentMessages: unknown[]; uiMessages: unknown[]; usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; contextTokens?: number }; thinking?: { current: string; savedEffort: string }; model?: string; concise?: boolean } | null {
   const autoSavePath = join(workspacePath, '.autosave.json');
   if (!existsSync(autoSavePath)) return null;
 
@@ -217,7 +217,7 @@ export function autoLoadSession(
       savedAt: string;
       agentMessages: unknown[];
       uiMessages: unknown[];
-      usage?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+      usage?: { input: number; output: number; cacheRead: number; cacheWrite: number; contextTokens?: number };
       thinking?: { current: string; savedEffort: string };
       model?: string;
       concise?: boolean;

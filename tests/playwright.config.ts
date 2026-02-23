@@ -16,7 +16,7 @@ export default defineConfig({
     baseURL: BASE_URL,
     browserName: 'chromium',
     headless: true,
-    screenshot: 'only-on-failure',
+    screenshot: process.env['SCREENSHOTS'] ? 'on' : 'only-on-failure',
     trace: 'retain-on-failure',
   },
   projects: [

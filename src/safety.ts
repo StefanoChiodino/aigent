@@ -237,6 +237,15 @@ const READONLY_BLOCKLIST: [RegExp, string][] = [
  * Defense-in-depth — the system prompt also instructs read-only behavior.
  */
 export function validateReadonlyCommand(command: string): string | null {
+  // Block subshell constructs — static analysis cannot reliably inspect what runs inside them
+  if (/\$\(/.test(command) || /`/.test(command)) {
+    return 'Blocked: subshell constructs ($(...) or backticks) — background agents are read-only';
+  }
+  // Block explicit shell invocations that accept arbitrary command strings
+  if (/\b(ba)?sh\s+-c\b/.test(command)) {
+    return 'Blocked: shell -c invocation — background agents are read-only';
+  }
+
   // Check for output redirection on the full command
   if (/>{1,2}\s*[^&]/.test(command)) {
     return 'Blocked: output redirection — background agents are read-only';
@@ -259,8 +268,7 @@ export function validateReadonlyCommand(command: string): string | null {
 // --- Fetch URL permissions ---
 
 export interface FetchPermissions {
-  alwaysAllow: string[]; // hostname glob patterns
-  prompt: string[];
+  alwaysAllow: string[]; // URL or hostname glob patterns
   deny: string[];
 }
 
@@ -268,13 +276,25 @@ export type FetchPermissionLevel = 'allow' | 'prompt' | 'deny';
 
 export const DEFAULT_FETCH_PERMISSIONS: FetchPermissions = {
   alwaysAllow: [],
-  prompt: ['*'], // everything prompts by default
   deny: [],      // SSRF still blocked separately by validateFetchUrl
 };
 
 /**
+ * Match a URL against a permission pattern.
+ * - Patterns containing "://" are matched against the full URL.
+ * - Plain hostname patterns (e.g. "api.github.com", "*.anthropic.com") are
+ *   matched against the URL's hostname only (backward compat).
+ * - The catch-all "*" pattern matches any URL.
+ */
+function matchFetchPattern(url: string, hostname: string, pattern: string): boolean {
+  if (pattern === '*') return true;
+  if (pattern.includes('://')) return minimatch(url, pattern);
+  return minimatch(hostname, pattern);
+}
+
+/**
  * Check what permission level a fetch URL requires given user-configured permissions.
- * Matches against the URL's hostname using glob patterns.
+ * Patterns containing "://" match the full URL; plain patterns match the hostname.
  * Evaluation order: deny → alwaysAllow → prompt → default(prompt)
  */
 export function checkFetchPermission(
@@ -287,14 +307,12 @@ export function checkFetchPermission(
   } catch {
     return 'deny';
   }
+  const normalizedUrl = url.toLowerCase();
   for (const pattern of permissions.deny) {
-    if (minimatch(hostname, pattern)) return 'deny';
+    if (matchFetchPattern(normalizedUrl, hostname, pattern)) return 'deny';
   }
   for (const pattern of permissions.alwaysAllow) {
-    if (minimatch(hostname, pattern)) return 'allow';
-  }
-  for (const pattern of permissions.prompt) {
-    if (minimatch(hostname, pattern)) return 'prompt';
+    if (matchFetchPattern(normalizedUrl, hostname, pattern)) return 'allow';
   }
   return 'prompt';
 }
@@ -303,7 +321,6 @@ export function checkFetchPermission(
 
 export interface ExecPermissions {
   alwaysAllow: string[];
-  prompt: string[];
   deny: string[];
 }
 
@@ -341,24 +358,6 @@ export const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {
     'tsc --version', 'tsc -v',
     'npx tsc --noEmit', 'npx tsc --noEmit *',
   ],
-  prompt: [
-    // Git writes
-    'git add *', 'git commit *', 'git push *', 'git push',
-    'git checkout *', 'git switch *', 'git reset *', 'git rebase *',
-    'git merge *', 'git cherry-pick *', 'git stash *',
-    'git clean *',
-    // File mutations
-    'rm *', 'mv *', 'cp *', 'mkdir *', 'touch *', 'chmod *', 'chown *',
-    // Network
-    'curl *', 'wget *', 'ssh *', 'scp *', 'rsync *',
-    // Package managers
-    'npm install *', 'npm install', 'npm uninstall *',
-    'npm run *', 'npm start', 'npm build',
-    'yarn *', 'pnpm *',
-    'pip install *', 'pip uninstall *',
-    // Processes
-    'kill *', 'pkill *', 'killall *',
-  ],
   deny: [
     'sudo *',
     'su *',
@@ -371,7 +370,9 @@ export const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {
 
 /**
  * Match a command string against a glob pattern.
- * Uses minimatch with matchBase enabled so bare patterns like "ls" match.
+ * Commands are not file paths, so * must match any character including '/' and spaces.
+ * We convert the glob pattern to a regex rather than using minimatch (which is path-aware
+ * and refuses to match '/' with '*').
  */
 function matchesGlob(command: string, pattern: string): boolean {
   const cmd = command.trim();
@@ -383,12 +384,31 @@ function matchesGlob(command: string, pattern: string): boolean {
   if (!pat.includes('*') && !pat.includes('?') && !pat.includes('[')) {
     return cmd === pat || cmd.startsWith(pat + ' ');
   }
-  return minimatch(cmd, pat, { nonull: false });
+  // Convert glob to regex: escape special regex chars, then replace * and ? with regex equivalents.
+  // * matches anything (including '/' and spaces); ? matches any single character.
+  const regexSrc = pat
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
+  return new RegExp('^' + regexSrc + '$').test(cmd);
+}
+
+/**
+ * Returns true if a command contains subshell constructs or explicit shell invocations
+ * that make static permission matching unreliable.
+ * Used to downgrade 'allow' → 'prompt' so the user sees the full command.
+ */
+function containsSubshell(command: string): boolean {
+  return /\$\(/.test(command) || /`/.test(command) || /\b(ba)?sh\s+-c\b/.test(command);
 }
 
 /**
  * Check what permission level a command requires given user-configured permissions.
- * Evaluation order: deny → alwaysAllow → prompt → default(prompt)
+ * Evaluation order: deny → alwaysAllow → default(prompt)
+ *
+ * Subshell constructs ($(...), backticks, bash -c) always require prompt at minimum,
+ * even if the leading command would otherwise be auto-allowed — static pattern matching
+ * cannot inspect what runs inside a subshell.
  */
 export function checkExecPermission(
   command: string,
@@ -398,11 +418,10 @@ export function checkExecPermission(
     if (matchesGlob(command, pattern)) return 'deny';
   }
   for (const pattern of permissions.alwaysAllow) {
-    if (matchesGlob(command, pattern)) return 'allow';
+    if (matchesGlob(command, pattern)) {
+      // Downgrade to prompt if the command contains subshell constructs
+      return containsSubshell(command) ? 'prompt' : 'allow';
+    }
   }
-  for (const pattern of permissions.prompt) {
-    if (matchesGlob(command, pattern)) return 'prompt';
-  }
-  // Default: prompt for anything not explicitly listed
   return 'prompt';
 }

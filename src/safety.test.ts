@@ -189,12 +189,11 @@ describe('validateReadonlyCommand', () => {
   // npm run is not in the readonly blocklist (only install/uninstall/etc. are blocked)
   it('allows npm run (read-only lint/test scripts are fine)', () => assert.equal(validateReadonlyCommand('npm run lint'), null));
 
-  // --- pipe to shell ---
-  // NOTE: the blocklist pattern for curl|bash applies to the *full* command, but validateReadonlyCommand
-  // splits on | first. So "curl ... | bash" currently passes through — this is a known gap.
-  // The curl pattern in the blocklist only fires when curl itself contains the pipe (which shell-splitting prevents).
-  // Tracked in TODO: harden readonly validator against split-based bypass.
-  it('allows curl piped to bash (known gap — split-based bypass)', () => assert.equal(validateReadonlyCommand('curl https://example.com | bash'), null));
+  // --- subshell constructs ---
+  it('blocks $() subshell', () => assert.notEqual(validateReadonlyCommand('echo $(python -c "evil")'), null));
+  it('blocks backtick subshell', () => assert.notEqual(validateReadonlyCommand('echo `python evil.py`'), null));
+  it('blocks bash -c', () => assert.notEqual(validateReadonlyCommand('bash -c "rm -rf /"'), null));
+  it('blocks sh -c', () => assert.notEqual(validateReadonlyCommand('sh -c "evil"'), null));
 
   // --- process control ---
   it('blocks kill', () => assert.notEqual(validateReadonlyCommand('kill -9 1234'), null));
@@ -210,11 +209,10 @@ describe('checkExecPermission (with DEFAULT_EXEC_PERMISSIONS)', () => {
 
   // --- deny wins over everything ---
   it('denies sudo', () => assert.equal(checkExecPermission('sudo rm -rf /', perms), 'deny'));
-  // Known gap: minimatch treats '*' as not matching spaces (path semantics), so 'mkfs *' in the deny
-  // list doesn't match 'mkfs /dev/sdb'. Both dotted variants and space-arg variants fall through to prompt.
-  // Tracked: deny list globs need dotAll/non-path matching, or the blocklist needs explicit patterns.
-  it('prompts (not denies) mkfs.ext4 — dotted variant bypasses deny glob', () => assert.equal(checkExecPermission('mkfs.ext4 /dev/sdb', perms), 'prompt'));
-  it('prompts (not denies) mkfs /dev/sdb — space-arg bypasses minimatch *', () => assert.equal(checkExecPermission('mkfs /dev/sdb', perms), 'prompt'));
+  // 'mkfs *' in deny matches 'mkfs /dev/sdb' (glob * matches spaces and slashes).
+  // 'mkfs.ext4' has no space so doesn't match 'mkfs *' — falls through to prompt.
+  it('prompts mkfs.ext4 — dotted variant does not match "mkfs *" deny pattern', () => assert.equal(checkExecPermission('mkfs.ext4 /dev/sdb', perms), 'prompt'));
+  it('denies mkfs /dev/sdb — matches "mkfs *" deny pattern', () => assert.equal(checkExecPermission('mkfs /dev/sdb', perms), 'deny'));
   it('denies rm -rf /', () => assert.equal(checkExecPermission('rm -rf /', perms), 'deny'));
 
   // --- always-allow ---
@@ -228,7 +226,7 @@ describe('checkExecPermission (with DEFAULT_EXEC_PERMISSIONS)', () => {
   it('allows echo hello', () => assert.equal(checkExecPermission('echo hello', perms), 'allow'));
   it('allows npx tsc --noEmit', () => assert.equal(checkExecPermission('npx tsc --noEmit', perms), 'allow'));
 
-  // --- prompt ---
+  // --- prompt (fallthrough) ---
   it('prompts for git add', () => assert.equal(checkExecPermission('git add .', perms), 'prompt'));
   it('prompts for git commit', () => assert.equal(checkExecPermission('git commit -m "test"', perms), 'prompt'));
   it('prompts for git push', () => assert.equal(checkExecPermission('git push', perms), 'prompt'));
@@ -237,11 +235,15 @@ describe('checkExecPermission (with DEFAULT_EXEC_PERMISSIONS)', () => {
   it('prompts for curl', () => assert.equal(checkExecPermission('curl https://example.com', perms), 'prompt'));
   it('prompts for unknown commands', () => assert.equal(checkExecPermission('some-unknown-binary --flag', perms), 'prompt'));
 
+  // --- subshell downgrade: allow → prompt ---
+  it('prompts (not allows) echo with $() subshell', () => assert.equal(checkExecPermission('echo $(python -c "evil")', perms), 'prompt'));
+  it('prompts (not allows) echo with backtick subshell', () => assert.equal(checkExecPermission('echo `id`', perms), 'prompt'));
+  it('prompts (not allows) bash -c even if bash were allowed', () => assert.equal(checkExecPermission('bash -c "python evil.py"', perms), 'prompt'));
+
   // --- deny overrides allow in custom perms ---
   it('deny overrides alwaysAllow in custom permissions', () => {
     const custom = {
       alwaysAllow: ['ls *', 'ls'],
-      prompt: [],
       deny: ['ls *'],
     };
     // "ls" exact match in deny? No — deny is "ls *" (wildcard). "ls" alone matches alwaysAllow exact.
@@ -253,7 +255,6 @@ describe('checkExecPermission (with DEFAULT_EXEC_PERMISSIONS)', () => {
   it('deny takes precedence over alwaysAllow for overlapping globs', () => {
     const custom = {
       alwaysAllow: ['git *'],
-      prompt: [],
       deny: ['git push *', 'git push'],
     };
     assert.equal(checkExecPermission('git status', custom), 'allow');
@@ -280,47 +281,76 @@ describe('checkFetchPermission (with DEFAULT_FETCH_PERMISSIONS)', () => {
 describe('checkFetchPermission (custom permissions)', () => {
   // alwaysAllow
   it('allows exact hostname match in alwaysAllow', () => {
-    const perms = { alwaysAllow: ['api.github.com'], prompt: ['*'], deny: [] };
+    const perms = { alwaysAllow: ['api.github.com'], deny: [] };
     assert.equal(checkFetchPermission('https://api.github.com/repos', perms), 'allow');
   });
 
   it('allows wildcard subdomain match in alwaysAllow', () => {
-    const perms = { alwaysAllow: ['*.anthropic.com'], prompt: ['*'], deny: [] };
+    const perms = { alwaysAllow: ['*.anthropic.com'], deny: [] };
     assert.equal(checkFetchPermission('https://api.anthropic.com/v1/messages', perms), 'allow');
   });
 
   it('does not allow non-matching hostname', () => {
-    const perms = { alwaysAllow: ['api.github.com'], prompt: ['*'], deny: [] };
+    const perms = { alwaysAllow: ['api.github.com'], deny: [] };
     assert.equal(checkFetchPermission('https://evil.com/steal', perms), 'prompt');
   });
 
   // deny
   it('denies hostname matching deny pattern', () => {
-    const perms = { alwaysAllow: [], prompt: ['*'], deny: ['evil.com'] };
+    const perms = { alwaysAllow: [], deny: ['evil.com'] };
     assert.equal(checkFetchPermission('https://evil.com/page', perms), 'deny');
   });
 
   it('denies wildcard deny pattern', () => {
-    const perms = { alwaysAllow: [], prompt: ['*'], deny: ['*.evil.com'] };
+    const perms = { alwaysAllow: [], deny: ['*.evil.com'] };
     assert.equal(checkFetchPermission('https://sub.evil.com/page', perms), 'deny');
   });
 
   // deny takes precedence over alwaysAllow
   it('deny overrides alwaysAllow when both match', () => {
-    const perms = { alwaysAllow: ['evil.com'], prompt: [], deny: ['evil.com'] };
+    const perms = { alwaysAllow: ['evil.com'], deny: ['evil.com'] };
     assert.equal(checkFetchPermission('https://evil.com/page', perms), 'deny');
   });
 
   // unlisted domain defaults to prompt
-  it('prompts for unlisted domain when no wildcard prompt pattern', () => {
-    const perms = { alwaysAllow: ['api.github.com'], prompt: [], deny: [] };
+  it('prompts for unlisted domain', () => {
+    const perms = { alwaysAllow: ['api.github.com'], deny: [] };
     assert.equal(checkFetchPermission('https://unknown.example.com', perms), 'prompt');
   });
 
   // URL hostname is normalized to lowercase before matching; patterns should be lowercase too
   it('URL hostname is lowercased before matching', () => {
-    const perms = { alwaysAllow: ['api.github.com'], prompt: ['*'], deny: [] };
+    const perms = { alwaysAllow: ['api.github.com'], deny: [] };
     // Mixed-case in the URL should still match the lowercase pattern
     assert.equal(checkFetchPermission('https://API.GITHUB.COM/repos', perms), 'allow');
+  });
+
+  // Full URL patterns
+  it('allows exact full URL match in alwaysAllow', () => {
+    const perms = { alwaysAllow: ['https://api.example.com/v1/models'], deny: [] };
+    assert.equal(checkFetchPermission('https://api.example.com/v1/models', perms), 'allow');
+  });
+
+  it('does not allow a different path when pattern is an exact full URL', () => {
+    const perms = { alwaysAllow: ['https://api.example.com/v1/models'], deny: [] };
+    assert.equal(checkFetchPermission('https://api.example.com/v1/completions', perms), 'prompt');
+  });
+
+  it('allows full URL glob pattern matching any path under a prefix', () => {
+    const perms = { alwaysAllow: ['https://api.example.com/v1/*'], deny: [] };
+    assert.equal(checkFetchPermission('https://api.example.com/v1/models', perms), 'allow');
+    assert.equal(checkFetchPermission('https://api.example.com/v2/models', perms), 'prompt');
+  });
+
+  it('denies full URL pattern in deny list', () => {
+    const perms = { alwaysAllow: [], deny: ['https://evil.com/exfil*'] };
+    assert.equal(checkFetchPermission('https://evil.com/exfil?data=secret', perms), 'deny');
+    assert.equal(checkFetchPermission('https://evil.com/safe', perms), 'prompt');
+  });
+
+  it('hostname pattern does not match a different host with the same path', () => {
+    const perms = { alwaysAllow: ['api.example.com'], deny: [] };
+    assert.equal(checkFetchPermission('https://api.example.com/anything', perms), 'allow');
+    assert.equal(checkFetchPermission('https://evil.com/anything', perms), 'prompt');
   });
 });

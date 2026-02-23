@@ -255,7 +255,6 @@ export async function startWebServer(
           merged = {
             ...merged,
             exec_perm_alwaysAllow: JSON.stringify(perms.alwaysAllow),
-            exec_perm_prompt: JSON.stringify(perms.prompt),
             exec_perm_deny: JSON.stringify(perms.deny),
           };
         }
@@ -264,7 +263,6 @@ export async function startWebServer(
           merged = {
             ...merged,
             fetch_perm_alwaysAllow: JSON.stringify(perms.alwaysAllow),
-            fetch_perm_prompt: JSON.stringify(perms.prompt),
             fetch_perm_deny: JSON.stringify(perms.deny),
           };
         }

@@ -59,6 +59,7 @@ test('Always Allow button is visible for fetch requests', async ({ page }) => {
   await injectEvent({ type: 'fetch_request', id: 'f7', url: 'https://example.com/' });
   await expectVisible(page.locator('#perm-overlay'));
   await expect(page.locator('#perm-always-allow-btn')).not.toHaveClass(/\bhidden\b/);
+  await expect(page.locator('#perm-always-allow-domain-btn')).not.toHaveClass(/\bhidden\b/);
   await page.locator('#perm-deny-btn').click();
 });
 

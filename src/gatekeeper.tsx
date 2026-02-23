@@ -1,14 +1,14 @@
 #!/usr/bin/env tsx
 /**
- * Gatekeeper — runs on the host, manages the Docker sandbox, runs the TUI.
+ * Gatekeeper — runs on the host, manages the Docker sandbox and web UI.
  * (Touched to restart tsx watcher after web-bridge.ts changes.)
  *
  * Responsibilities:
  *   - Container lifecycle (start, stop, restart with updated mounts)
  *   - Mount management (add/remove folders, ro/rw, timed grants)
- *   - Permission prompts (inline in TUI)
- *   - OS bridge (clipboard, audio, etc. — future)
- *   - LLM proxy (future — API keys out of sandbox)
+ *   - LLM proxy (API keys never enter the sandbox)
+ *   - Web UI bridge (WebSocket ↔ Unix socket)
+ *   - OS bridge (clipboard, audio, etc.)
  *
  * The gatekeeper intercepts certain commands before they reach the worker:
  *   /mount, /unmount, /mounts — handled locally
@@ -130,7 +130,7 @@ Examples:
 Persistent config (~/.config/aigent/provider.json):
   { "provider": "openai", "baseURL": "http://localhost:11434/v1", "apiKey": "your-token" }
 
-Mount management (inside the TUI):
+Mount management (in the web UI or via slash commands):
   /mount <path> [ro|rw]   Mount a host folder into the sandbox
   /unmount <path>          Remove a mount (sandbox restarts)
   /mounts                  List active mounts
@@ -1098,7 +1098,6 @@ function readExecPermissions(): ExecPermissions {
     const p = perms as Partial<ExecPermissions>;
     return {
       alwaysAllow: Array.isArray(p.alwaysAllow) ? p.alwaysAllow : DEFAULT_EXEC_PERMISSIONS.alwaysAllow,
-      prompt: Array.isArray(p.prompt) ? p.prompt : DEFAULT_EXEC_PERMISSIONS.prompt,
       deny: Array.isArray(p.deny) ? p.deny : DEFAULT_EXEC_PERMISSIONS.deny,
     };
   } catch {
@@ -1232,7 +1231,6 @@ function readFetchPermissions(): FetchPermissions {
     const p = perms as Partial<FetchPermissions>;
     return {
       alwaysAllow: Array.isArray(p.alwaysAllow) ? p.alwaysAllow : DEFAULT_FETCH_PERMISSIONS.alwaysAllow,
-      prompt: Array.isArray(p.prompt) ? p.prompt : DEFAULT_FETCH_PERMISSIONS.prompt,
       deny: Array.isArray(p.deny) ? p.deny : DEFAULT_FETCH_PERMISSIONS.deny,
     };
   } catch {
@@ -1240,18 +1238,18 @@ function readFetchPermissions(): FetchPermissions {
   }
 }
 
-function addDomainToAlwaysAllow(hostname: string): void {
+function addToFetchAlwaysAllow(pattern: string): void {
   try {
     const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
     const settings = JSON.parse(raw) as Record<string, unknown>;
     const perms = (settings['fetch_permissions'] as Partial<FetchPermissions> | undefined) ?? {};
     const current = Array.isArray(perms.alwaysAllow) ? perms.alwaysAllow : [...DEFAULT_FETCH_PERMISSIONS.alwaysAllow];
-    if (!current.includes(hostname)) {
-      current.push(hostname);
+    if (!current.includes(pattern)) {
+      current.push(pattern);
     }
     settings['fetch_permissions'] = { ...DEFAULT_FETCH_PERMISSIONS, ...perms, alwaysAllow: current };
     writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-    log.info('Added domain to fetch always-allow', { hostname });
+    log.info('Added pattern to fetch always-allow', { pattern });
   } catch (err) {
     log.error('Failed to update fetch permissions', { error: String(err) });
   }
@@ -1283,7 +1281,8 @@ function handleAgentFetchRequest(id: string, url: string, method?: string): void
   injectSystemMessage(
     `Agent wants to fetch: ${method ?? 'GET'} ${url}\n` +
     `  Reply: /approve-fetch ${id} or /deny-fetch ${id}\n` +
-    `  To always allow this domain: /approve-fetch ${id} --always`
+    `  To always allow this URL: /approve-fetch ${id} --always\n` +
+    `  To always allow this domain: /approve-fetch ${id} --always-domain`
   );
 }
 
@@ -1309,14 +1308,18 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
       return true;
     }
 
-    const alwaysAllow = parts.includes('--always');
+    const alwaysAllow = parts.includes('--always') || parts.includes('--always-domain');
+    const alwaysDomain = parts.includes('--always-domain');
     pendingFetchApprovals.delete(id);
 
-    if (alwaysAllow) {
+    if (alwaysDomain) {
       let hostname = pending.url;
       try { hostname = new URL(pending.url).hostname; } catch { /* keep raw */ }
-      addDomainToAlwaysAllow(hostname);
+      addToFetchAlwaysAllow(hostname);
       injectSystemMessage(`Approved and domain added to always-allow: ${hostname}`);
+    } else if (alwaysAllow) {
+      addToFetchAlwaysAllow(pending.url);
+      injectSystemMessage(`Approved and URL added to always-allow: ${pending.url}`);
     } else {
       injectSystemMessage(`Approved (once): ${pending.url}`);
     }

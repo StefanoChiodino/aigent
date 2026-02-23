@@ -1776,6 +1776,71 @@ html, body {
   color: rgba(255, 255, 255, 0.7);
 }
 
+/* ── At-picker (@mention) ──────────────────────────────────── */
+#at-palette {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  margin-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.at-palette-section {
+  padding: 6px 12px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+}
+
+.at-palette-section:first-child {
+  border-top: none;
+}
+
+.at-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+}
+
+.at-item-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.at-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.at-item-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.at-item-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ── Thinking indicator ──────────────────────────────────── */
 
 .thinking-indicator {
@@ -2271,6 +2336,13 @@ html, body {
   text-overflow: clip;
 }
 
+#perm-overlay.fetch-mode #perm-card-detail {
+  white-space: normal;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  text-overflow: clip;
+}
+
 #perm-card-detail > div:not(:first-child) {
   color: var(--text-dim);
   font-size: 11px;
@@ -2445,6 +2517,40 @@ tr.diff-header td {
   white-space: pre;
 }
 
+/* Inline char-level change highlight within add/remove lines */
+tr.diff-add .diff-inline-change {
+  background: rgba(46, 160, 67, 0.45);
+  border-radius: 2px;
+}
+tr.diff-remove .diff-inline-change {
+  background: rgba(248, 81, 73, 0.45);
+  border-radius: 2px;
+}
+
+/* Collapsed context lines placeholder */
+tr.diff-collapsed td {
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 2px 10px;
+  text-align: center;
+}
+.diff-collapsed-toggle {
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+.diff-collapsed-toggle:hover {
+  color: var(--text);
+}
+
+/* Hidden context lines (inside a collapsed group) */
+tr.diff-context-hidden {
+  display: none;
+}
+
 #perm-card-duration {
   margin-top: 6px;
   display: inline-flex;
@@ -2511,6 +2617,20 @@ tr.diff-header td {
   background: rgba(100, 160, 255, 0.12);
   color: #7ab4ff;
   border-color: rgba(100, 160, 255, 0.4);
+}
+
+.perm-always-allow-domain {
+  background: transparent;
+  color: var(--text-muted, var(--text-secondary));
+  border: 1px solid var(--border);
+  opacity: 0.7;
+}
+
+.perm-always-allow-domain:hover {
+  background: rgba(100, 160, 255, 0.07);
+  color: var(--text-secondary);
+  border-color: rgba(100, 160, 255, 0.25);
+  opacity: 1;
 }
 
 @keyframes scaleIn {

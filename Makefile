@@ -9,7 +9,7 @@ dev-ts:
 		--names "gate,web" \
 		--prefix-colors "cyan,blue" \
 		--kill-others-on-fail \
-		"npx tsx --watch=forever src/gatekeeper.tsx --headless $(ARGS)" \
+		"npx tsx watch src/gatekeeper.tsx --headless $(ARGS)" \
 		"npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*'"
 
 # Run everything: gatekeeper + web watcher + TTS + STT
@@ -19,14 +19,14 @@ dev:
 		--names "gate,web,tts,stt" \
 		--prefix-colors "cyan,blue,yellow,magenta" \
 		--kill-others-on-fail \
-		"npx tsx --watch=forever src/gatekeeper.tsx --headless $(ARGS)" \
+		"npx tsx watch src/gatekeeper.tsx --headless $(ARGS)" \
 		"npx esbuild web/src/app.ts --bundle --outfile=web/dist/app.js --format=esm --watch '--external:/vendor/*'" \
 		"$(TTS_PYTHON) tts/main.py" \
 		"$(STT_PYTHON) stt/main.py --eager"
 
 # Server only (no frontend rebuild)
 serve:
-	npx tsx --watch=forever src/gatekeeper.tsx --headless $(ARGS)
+	npx tsx watch src/gatekeeper.tsx --headless $(ARGS)
 
 # --- Web UI ---
 
