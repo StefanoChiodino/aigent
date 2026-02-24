@@ -83,7 +83,7 @@ export function useWebSocket(): void {
         case 'tool_start': {
           const { streaming } = chat();
           if (streaming.isThinking) chat().finalizeThinkingBlock();
-          chat().startToolBlock(event.name, event.summary, event.input);
+          chat().startToolBlock(event.name, event.summary, event.input, event.model, event.thinking);
           break;
         }
 

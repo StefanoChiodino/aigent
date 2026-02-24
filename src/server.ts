@@ -14,7 +14,7 @@ import { resolve, join, dirname } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
 import type { ProviderMessage, UserContent, TextContent, ImageContent, DocumentContent, ImageMediaType, ToolResult } from './provider.js';
-import type { ClientCommand, ServerEvent, DisplayMessage, ServerState, TokenUsage } from './protocol.js';
+import type { ClientCommand, ServerEvent, DisplayMessage, DisplayAttachment, ServerState, TokenUsage } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
 import { computeCost } from './pricing.js';
 import { distillToMemory } from './compact.js';
@@ -607,13 +607,18 @@ async function processTaskResults(): Promise<void> {
  */
 async function processAgentTurn(
   content: string | UserContent,
-  opts: { isTaskResult?: boolean; displayText?: string } = {},
+  opts: { isTaskResult?: boolean; displayText?: string; displayAttachments?: DisplayAttachment[] } = {},
 ): Promise<void> {
-  const { isTaskResult = false, displayText } = opts;
+  const { isTaskResult = false, displayText, displayAttachments } = opts;
 
   if (!isTaskResult) {
     const text = displayText ?? (typeof content === 'string' ? content : '[message with attachments]');
-    const userMsg: DisplayMessage = { role: 'user', content: text, timestamp: new Date().toISOString() };
+    const userMsg: DisplayMessage = {
+      role: 'user',
+      content: text,
+      timestamp: new Date().toISOString(),
+      ...(displayAttachments && displayAttachments.length > 0 ? { attachments: displayAttachments } : {}),
+    };
     messages.push(userMsg);
     broadcast({ type: 'message', message: userMsg });
   }
@@ -643,9 +648,9 @@ async function processAgentTurn(
         if (controller.signal.aborted) return;
         broadcast({ type: 'thinking', content: text });
       },
-      onToolStart: (name, toolInput, summary) => {
+      onToolStart: (name, toolInput, summary, meta) => {
         if (controller.signal.aborted) return;
-        broadcast({ type: 'tool_start', name, input: toolInput, summary });
+        broadcast({ type: 'tool_start', name, input: toolInput, summary, ...meta });
       },
       onToolOutput: (toolContent) => {
         if (controller.signal.aborted) return;
@@ -1344,7 +1349,7 @@ function handleCommand(cmd: string): boolean {
 
 // --- Message processing ---
 
-interface QueuedMessage { content: string | UserContent; displayText?: string; thinkingOverride?: ThinkingLevel | undefined }
+interface QueuedMessage { content: string | UserContent; displayText?: string; displayAttachments?: DisplayAttachment[]; thinkingOverride?: ThinkingLevel | undefined }
 const messageQueue: QueuedMessage[] = [];
 let processingQueue = false;
 
@@ -1355,7 +1360,10 @@ async function processMessage(msg: QueuedMessage): Promise<void> {
     agent.thinkingLevel = msg.thinkingOverride;
   }
   try {
-    await processAgentTurn(msg.content, msg.displayText ? { displayText: msg.displayText } : {});
+    await processAgentTurn(msg.content, {
+      ...(msg.displayText ? { displayText: msg.displayText } : {}),
+      ...(msg.displayAttachments ? { displayAttachments: msg.displayAttachments } : {}),
+    });
   } finally {
     // Restore previous thinking level after one-shot override
     if (savedThinking !== undefined) {
@@ -1485,14 +1493,31 @@ function handleClient(socket: Socket): void {
               if (imgCount) labels.push(`${imgCount} image${imgCount > 1 ? 's' : ''}`);
               if (docCount) labels.push(`${docCount} PDF${docCount > 1 ? 's' : ''}`);
               if (fileCount) labels.push(`${fileCount} file${fileCount > 1 ? 's' : ''}`);
-              displayText = labels.length > 0
-                ? (trimmed ? `[${labels.join(', ')}] ${trimmed}` : `[${labels.join(', ')}]`)
-                : undefined;
+              // Thumbnails are now rendered in the UI, so just show the user's text.
+              // Fall back to a label only if the user sent no text at all.
+              displayText = trimmed || (labels.length > 0 ? `[${labels.join(', ')}]` : undefined);
             }
+
+            // Build display attachments with thumbnails for chat persistence
+            const displayAttachments: DisplayAttachment[] | undefined =
+              (hasImages || hasAttachments)
+                ? [
+                    ...(cmd.images ?? []).map((img, i) => ({
+                      name: `image-${i + 1}`,
+                      mediaType: img.mediaType,
+                    })),
+                    ...(cmd.attachments ?? []).map(att => ({
+                      name: att.name,
+                      mediaType: att.mediaType,
+                      ...(att.thumbnail ? { thumbnail: att.thumbnail } : {}),
+                    })),
+                  ]
+                : undefined;
 
             const queued: QueuedMessage = {
               content,
               ...(displayText ? { displayText } : {}),
+              ...(displayAttachments ? { displayAttachments } : {}),
               ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
             };
             if (isLoading) {
@@ -1501,6 +1526,7 @@ function handleClient(socket: Socket): void {
                 role: 'user',
                 content: `[queued] ${displayText ?? trimmed}`,
                 timestamp: new Date().toISOString(),
+                ...(displayAttachments ? { attachments: displayAttachments } : {}),
               };
               messages.push(queuedMsg);
               broadcast({ type: 'message', message: queuedMsg });

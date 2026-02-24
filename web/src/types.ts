@@ -26,6 +26,14 @@ export interface ToolTrace {
   toolInput: string;
   toolOutput: string;
   running: boolean;
+  model?: string;
+  thinking?: string;
+}
+
+export interface DisplayAttachment {
+  name: string;
+  mediaType: string;
+  thumbnail?: string; // data:image/jpeg;base64,... (small ~200px JPEG for chat display)
 }
 
 export interface DisplayMessage {
@@ -34,6 +42,7 @@ export interface DisplayMessage {
   timestamp: string;
   elapsed?: number;
   traces?: TraceEntry[];
+  attachments?: DisplayAttachment[];
 }
 
 export interface BackgroundTaskInfo {
@@ -100,7 +109,7 @@ export type ServerEvent =
   | { type: 'connected'; state: ServerState }
   | { type: 'text'; content: string }
   | { type: 'thinking'; content: string }
-  | { type: 'tool_start'; name: string; input: string; summary: string }
+  | { type: 'tool_start'; name: string; input: string; summary: string; model?: string; thinking?: string }
   | { type: 'tool_output'; content: string }
   | { type: 'tool_end' }
   | { type: 'message'; message: DisplayMessage }
@@ -156,6 +165,7 @@ export interface PendingAttachment {
   mediaType: string;
   data: string;
   dataUrl?: string;
+  thumbnail?: string; // small data URL for persisting in chat history
   size: number;
 }
 

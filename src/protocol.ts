@@ -17,7 +17,7 @@ export interface TokenUsage {
 // --- Client → Server ---
 
 export type ClientCommand =
-  | { type: 'message'; content: string; images?: { mediaType: string; data: string }[]; attachments?: { name: string; mediaType: string; data: string }[]; thinkingOverride?: ThinkingLevel }
+  | { type: 'message'; content: string; images?: { mediaType: string; data: string }[]; attachments?: { name: string; mediaType: string; data: string; thumbnail?: string }[]; thinkingOverride?: ThinkingLevel }
   | { type: 'cancel' }
   | { type: 'command'; cmd: string }
   | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
@@ -33,11 +33,18 @@ export type ClientCommand =
 
 // --- Server → Client ---
 
+export interface DisplayAttachment {
+  name: string;
+  mediaType: string;
+  thumbnail?: string; // data:image/jpeg;base64,... (small ~200px JPEG for chat display)
+}
+
 export interface DisplayMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
   elapsed?: number | undefined;
+  attachments?: DisplayAttachment[];
 }
 
 /** Record of a tool result that was summarized to save context tokens. */
@@ -99,7 +106,7 @@ export type ServerEvent =
   | { type: 'connected'; state: ServerState }
   | { type: 'text'; content: string }
   | { type: 'thinking'; content: string }
-  | { type: 'tool_start'; name: string; input: string; summary: string }
+  | { type: 'tool_start'; name: string; input: string; summary: string; model?: string; thinking?: string }
   | { type: 'tool_output'; content: string }
   | { type: 'tool_end' }
   | { type: 'message'; message: DisplayMessage }

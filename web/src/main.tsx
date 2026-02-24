@@ -41,8 +41,9 @@ import '../style.css';
   useUIStore.getState().setCtxInspectorOpen(open);
 };
 
-// Expose UI store for attachment preview tests
+// Expose stores for e2e tests
 (window as Record<string, unknown>).__zustand_ui = useUIStore;
+(window as Record<string, unknown>).__zustand_chat = useChatStore;
 
 // Return system message contents added after a given timestamp (ISO string).
 // Used by permission routing tests to check only messages caused by the test action.

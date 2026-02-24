@@ -1855,6 +1855,23 @@ html, body {
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   object-fit: contain;
+  cursor: pointer;
+}
+
+.message-attachments {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.message-file-badge {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
 }
 
 /* ── Command palette ──────────────────────────────────────── */
@@ -2267,6 +2284,41 @@ html, body {
 @keyframes task-block-pulse {
   0%, 100% { border-color: rgba(140, 100, 220, 0.35); }
   50% { border-color: rgba(160, 120, 230, 0.7); }
+}
+
+/* ── Agent meta (model + reasoning inside expanded body) ──── */
+
+.agent-meta {
+  display: flex;
+  gap: 12px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.78rem;
+}
+
+.agent-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-meta-label {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.agent-meta-value {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.task-block .agent-meta {
+  border-bottom-color: rgba(140, 100, 220, 0.15);
+}
+
+.task-block .agent-meta-value {
+  color: rgba(160, 120, 230, 0.9);
 }
 
 /* ── Tool block ───────────────────────────────────────────── */
@@ -3137,6 +3189,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 /* Stacked bar chart */
 .ctx-stacked-bar {
   display: flex;
+  flex-shrink: 0;
   height: 10px;
   border-radius: 5px;
   overflow: hidden;

@@ -22,6 +22,15 @@ function prettyToolName(name: string): string {
   return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+/** Shorten a full model ID to a readable name, e.g. "claude-sonnet-4-6" → "sonnet 4.6" */
+function shortModelName(model: string): string {
+  const m = model.replace(/^claude-/, '');
+  // Match pattern like "opus-4-6", "sonnet-4-6", "haiku-4-5-20251001"
+  const match = m.match(/^(\w+)-(\d+)-(\d+)/);
+  if (match) return `${match[1]} ${match[2]}.${match[3]}`;
+  return m;
+}
+
 interface Props {
   trace: TraceEntry;
 }
@@ -53,7 +62,9 @@ export function TraceBlock({ trace }: Props) {
   })();
 
   const isDispatchTask = trace.toolName === 'dispatch_task';
+  const isAgentTool = trace.toolName === 'spawn_agent' || isDispatchTask;
   const blockClass = isDispatchTask ? 'task-block' : 'tool-block';
+  const hasAgentMeta = isAgentTool && (trace.model || (trace.thinking && trace.thinking !== 'off'));
 
   return (
     <div className={`${blockClass}${trace.running ? ' running' : ' done'}${expanded ? ' expanded' : ''}`}>
@@ -72,6 +83,22 @@ export function TraceBlock({ trace }: Props) {
         <span className="trace-expand-hint">▸</span>
       </button>
       <div className={`tool-body${expanded ? '' : ' hidden'}`}>
+        {hasAgentMeta && (
+          <div className="agent-meta">
+            {trace.model && (
+              <span className="agent-meta-item">
+                <span className="agent-meta-label">model</span>
+                <span className="agent-meta-value">{shortModelName(trace.model)}</span>
+              </span>
+            )}
+            {trace.thinking && trace.thinking !== 'off' && (
+              <span className="agent-meta-item">
+                <span className="agent-meta-label">reasoning</span>
+                <span className="agent-meta-value">{trace.thinking}</span>
+              </span>
+            )}
+          </div>
+        )}
         {inputFormatted && (
           <pre className="tool-input">{inputFormatted}</pre>
         )}

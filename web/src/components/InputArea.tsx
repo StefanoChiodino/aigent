@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useConnectionStore } from '../stores/connection';
 import { isDemo } from '../demo/useDemoMode';
 import { useUIStore } from '../stores/ui';
@@ -103,6 +103,27 @@ function applyInlinePatterns(html: string): string {
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const ALLOWED_TYPES = [...IMAGE_TYPES, 'application/pdf', 'text/plain', 'text/markdown'];
 const MAX_ATTACHMENTS = 5;
+const THUMB_MAX_PX = 200;
+const THUMB_QUALITY = 0.7;
+
+/** Generate a small JPEG thumbnail data URL from an image data URL. */
+function generateThumbnail(dataUrl: string, maxSize = THUMB_MAX_PX): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', THUMB_QUALITY));
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
 
 let attachIdCounter = 0;
 
@@ -147,6 +168,19 @@ export function InputArea() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingCaretRef = useRef<number | null>(null);
+
+  // Apply pending caret position synchronously after React renders the new value.
+  // This avoids the race condition where setTimeout-based caret positioning
+  // interleaves with subsequent keystrokes.
+  useLayoutEffect(() => {
+    if (pendingCaretRef.current !== null) {
+      const pos = pendingCaretRef.current;
+      pendingCaretRef.current = null;
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(pos, pos);
+    }
+  });
   const micBaseTextRef = useRef('');
   const lastMicTextRef = useRef('');
   const [hasMicText, setHasMicText] = useState(false);
@@ -237,6 +271,7 @@ export function InputArea() {
     if (pendingAttachments.length > 0) {
       msg.attachments = pendingAttachments.map(a => ({
         name: a.name, mediaType: a.mediaType, data: a.data,
+        ...(a.thumbnail ? { thumbnail: a.thumbnail } : {}),
       }));
       clearAttachments();
     }
@@ -294,7 +329,14 @@ export function InputArea() {
         dataUrl,
         size: file.size,
       };
-      addAttachment(att);
+      if (dataUrl) {
+        generateThumbnail(dataUrl).then(thumb => {
+          att.thumbnail = thumb;
+          addAttachment(att);
+        }).catch(() => addAttachment(att));
+      } else {
+        addAttachment(att);
+      }
     };
     reader.readAsDataURL(file);
   }, [pendingAttachments.length, addAttachment]);
@@ -306,14 +348,18 @@ export function InputArea() {
       const base64 = captureScreenshot();
       if (!base64) return;
       const dataUrl = `data:image/png;base64,${base64}`;
-      addAttachment({
+      const att: PendingAttachment = {
         id: `att_${++attachIdCounter}`,
         name: 'screenshot.png',
         mediaType: 'image/png',
         data: base64,
         dataUrl,
         size: Math.round(base64.length * 0.75),
-      });
+      };
+      try {
+        att.thumbnail = await generateThumbnail(dataUrl);
+      } catch { /* proceed without thumbnail */ }
+      addAttachment(att);
     } catch (err) {
       const name = (err as Error).name;
       if (name !== 'NotAllowedError' && name !== 'AbortError') {
@@ -488,12 +534,8 @@ export function InputArea() {
     setAtTriggerPos(-1);
     setAtQuery('');
     setAtSelected(0);
-    const newCaret = atTriggerPos + token.length + 1;
-    setTimeout(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(newCaret, newCaret);
-      if (item.insert === '@screen') void startScreenShare().catch(() => { /* user can remove @screen manually */ });
-    }, 0);
+    pendingCaretRef.current = atTriggerPos + token.length + 1;
+    if (item.insert === '@screen') void startScreenShare().catch(() => { /* user can remove @screen manually */ });
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {

@@ -34,7 +34,7 @@ interface ChatState {
   appendThinkingText: (text: string) => void;
   finalizeThinkingBlock: () => void;
 
-  startToolBlock: (name: string, summary: string, input: string) => void;
+  startToolBlock: (name: string, summary: string, input: string, model?: string, thinking?: string) => void;
   appendToolOutput: (content: string) => void;
   finalizeToolBlock: () => void;
 }
@@ -103,7 +103,7 @@ export const useChatStore = create<ChatState>()(
         return { streaming: { ...s.streaming, isThinking: false, thinkingText: '', traces } };
       }),
 
-      startToolBlock: (name, summary, input) => set(s => {
+      startToolBlock: (name, summary, input, model?, thinking?) => set(s => {
         const id = `trace-${++traceIdCounter}`;
         return {
           streaming: {
@@ -113,6 +113,8 @@ export const useChatStore = create<ChatState>()(
             traces: [...s.streaming.traces, {
               id, type: 'tool', toolName: name, toolSummary: summary,
               toolInput: input, toolOutput: '', running: true,
+              ...(model ? { model } : {}),
+              ...(thinking ? { thinking } : {}),
             }],
           },
         };

@@ -98,7 +98,7 @@ import type { TokenUsage, ToolSummaryRecord } from './protocol.js';
 export interface ChatCallbacks {
   onText?: (fullText: string) => void;
   onThinking?: (fullText: string) => void;
-  onToolStart?: (name: string, input: string, summary: string) => void;
+  onToolStart?: (name: string, input: string, summary: string, meta?: { model?: string; thinking?: string }) => void;
   onToolOutput?: (content: string) => void;
   onToolEnd?: () => void;
   onUsage?: (usage: TokenUsage) => void;
@@ -272,7 +272,16 @@ export class Agent {
           const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '\u2026' : inputStr;
           const toolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
           const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
-          callbacks?.onToolStart?.(tc.name, truncatedInput, summary);
+          // Extract model/thinking meta for agent spawn tools
+          let agentMeta: { model?: string; thinking?: string } | undefined;
+          if (toolName === 'spawn_agent' || toolName === 'dispatch_task') {
+            const inp = tc.input as Record<string, unknown>;
+            const meta: { model?: string; thinking?: string } = {};
+            if (typeof inp['model'] === 'string') meta.model = inp['model'];
+            if (typeof inp['thinking'] === 'string') meta.thinking = inp['thinking'];
+            if (meta.model || meta.thinking) agentMeta = meta;
+          }
+          callbacks?.onToolStart?.(tc.name, truncatedInput, summary, agentMeta);
 
           const toolStart = performance.now();
           let result: string | ToolContentBlock[];

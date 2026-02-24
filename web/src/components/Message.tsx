@@ -80,6 +80,32 @@ function MessageTraces({ traces }: { traces: NonNullable<DisplayMessage['traces'
   );
 }
 
+function MessageAttachments({ attachments }: { attachments: NonNullable<DisplayMessage['attachments']> }) {
+  const images = attachments.filter(a => a.thumbnail && a.mediaType.startsWith('image/'));
+  const files = attachments.filter(a => !a.mediaType.startsWith('image/'));
+
+  return (
+    <>
+      {images.length > 0 && (
+        <div className="message-images">
+          {images.map((att, i) => (
+            <img key={i} className="message-image-thumb" src={att.thumbnail} alt={att.name} title={att.name} />
+          ))}
+        </div>
+      )}
+      {files.length > 0 && (
+        <div className="message-attachments">
+          {files.map((att, i) => (
+            <span key={i} className="message-file-badge" title={att.mediaType}>
+              {att.mediaType === 'application/pdf' ? '📑' : '📄'} {att.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 export const Message = React.memo(function Message({ message }: Props) {
   const rendered = useMemo(() => {
     if (message.role === 'system') return null;
@@ -105,6 +131,9 @@ export const Message = React.memo(function Message({ message }: Props) {
           </span>
         )}
       </div>
+      {message.attachments && message.attachments.length > 0 && (
+        <MessageAttachments attachments={message.attachments} />
+      )}
       {message.traces && message.traces.length > 0 && (
         <MessageTraces traces={message.traces} />
       )}
