@@ -349,6 +349,9 @@ test.describe('Mic-clear button: clearing transcribed text', () => {
     await fireLoudFrames(page, FRAMES_TO_EXCEED_WINDOW);
     await page.waitForTimeout(2500);
 
+    // Dismiss any permission overlay that appeared during the long wait
+    await dismissPermModal(page);
+
     // Phase 2: new text in second window
     sttText = 'second window';
     await fireLoudFrames(page, 10);
@@ -386,6 +389,9 @@ test.describe('Mic-clear button: clearing transcribed text', () => {
 
     await fireLoudFrames(page, FRAMES_TO_EXCEED_WINDOW);
     await page.waitForTimeout(2500);
+
+    // Dismiss any permission overlay that appeared during the long wait
+    await dismissPermModal(page);
 
     // Clear
     await page.locator('#mic-clear').click();

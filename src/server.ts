@@ -1101,6 +1101,7 @@ function handleCommand(cmd: string): boolean {
     agent.setExtraSystemPrompt(buildExtraSystemPrompt());
     addSystemMessage('Concise mode: on');
     broadcast({ type: 'state', concise: true });
+    doAutoSave();
     return true;
   }
 
@@ -1109,6 +1110,7 @@ function handleCommand(cmd: string): boolean {
     agent.setExtraSystemPrompt(buildExtraSystemPrompt());
     addSystemMessage('Concise mode: off');
     broadcast({ type: 'state', concise: false });
+    doAutoSave();
     return true;
   }
 

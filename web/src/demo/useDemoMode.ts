@@ -2,9 +2,13 @@ import { useEffect, useRef } from 'react';
 import { MockWebSocket } from './MockWebSocket';
 import { DemoPlaybackEngine } from './DemoPlaybackEngine';
 import { DEMO_SCENARIO } from './scenario';
+import { useDemoPlaybackStore } from './demoStore';
 
 /** Singleton mock WS — created once, shared with useWebSocket */
 let mockWs: MockWebSocket | null = null;
+
+/** Singleton engine — exposed for scrubber to call seekTo/pause/resume */
+let demoEngine: DemoPlaybackEngine | null = null;
 
 export function isDemo(): boolean {
   return import.meta.env.VITE_DEMO === 'true';
@@ -15,6 +19,10 @@ export function getDemoWebSocket(): MockWebSocket {
     mockWs = new MockWebSocket('ws://demo/ws');
   }
   return mockWs;
+}
+
+export function getDemoEngine(): DemoPlaybackEngine | null {
+  return demoEngine;
 }
 
 /**
@@ -38,6 +46,7 @@ export function useDemoMode(): void {
     const ws = getDemoWebSocket();
     const engine = new DemoPlaybackEngine(DEMO_SCENARIO, ws);
     engineRef.current = engine;
+    demoEngine = engine;
 
     // Small delay to let React mount everything before starting playback
     const startTimer = setTimeout(() => {
@@ -47,6 +56,8 @@ export function useDemoMode(): void {
     return () => {
       clearTimeout(startTimer);
       engine.stop();
+      demoEngine = null;
+      useDemoPlaybackStore.getState().setCurrentStep(0);
       document.body.removeAttribute('data-demo');
     };
   }, []);

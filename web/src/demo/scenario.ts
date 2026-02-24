@@ -156,6 +156,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 1: Connection & initial state
     // ════════════════════════════════════════════════════════════════════════
 
+    { action: 'label', text: 'Connecting' },
     wait(800),
     emit({
       type: 'connected',
@@ -190,6 +191,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 2: First exchange — read config, add health endpoint
     // ════════════════════════════════════════════════════════════════════════
 
+    { action: 'label', text: 'User types a message' },
     wait(1500),
     { action: 'type_input', text: 'Read the main config file and add a health check endpoint', charDelayMs: 45 },
     wait(800),
@@ -210,10 +212,12 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(300),
 
     // Extended thinking
+    { action: 'label', text: 'Extended thinking' },
     { action: 'stream_thinking', text: THINKING_1, chunkSize: 6, intervalMs: 35 },
     wait(400),
 
     // Tool: read_file
+    { action: 'label', text: 'Tool: read file' },
     emit({
       type: 'tool_start',
       name: 'read_file',
@@ -226,6 +230,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(300),
 
     // Tool: grep
+    { action: 'label', text: 'Tool: grep search' },
     emit({
       type: 'tool_start',
       name: 'grep',
@@ -238,16 +243,18 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(300),
 
     // Permission: patch request (diff viewer)
+    { action: 'label', text: 'Permission: file edit' },
     emit({
       type: 'patch_request',
       id: 'patch-001',
       diff: PATCH_1,
       reason: 'Adding health check endpoint to server.ts',
     }),
-    { action: 'auto_approve', delayMs: 2500 },
+    { action: 'auto_approve', delayMs: 4500 },
     wait(500),
 
     // Streaming response
+    { action: 'label', text: 'Streaming response' },
     { action: 'stream_text', text: RESPONSE_1, chunkSize: 4, intervalMs: 25 },
 
     // Finalize first exchange
@@ -280,6 +287,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 3: Brief pause, flash shortcuts modal
     // ════════════════════════════════════════════════════════════════════════
 
+    { action: 'label', text: 'Keyboard shortcuts' },
     wait(3000),
     { action: 'open_modal', modal: 'shortcuts' },
     wait(2500),
@@ -291,6 +299,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  (Markdown-rich input showcases live syntax highlighting)
     // ════════════════════════════════════════════════════════════════════════
 
+    { action: 'label', text: 'Markdown input' },
     { action: 'type_input', text: 'Now **write tests** for it and add `express-rate-limit`. Check /src/server.ts and install the package if needed.', charDelayMs: 35 },
     wait(600),
     { action: 'submit_input' },
@@ -308,10 +317,12 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(300),
 
     // Thinking
+    { action: 'label', text: 'Agent reasoning' },
     { action: 'stream_thinking', text: THINKING_2, chunkSize: 8, intervalMs: 30 },
     wait(300),
 
     // Tool: glob — find test setup
+    { action: 'label', text: 'Tool: glob search' },
     emit({
       type: 'tool_start',
       name: 'glob',
@@ -324,6 +335,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(200),
 
     // Tool: write_file — create test
+    { action: 'label', text: 'Tool: write file' },
     emit({
       type: 'tool_start',
       name: 'write_file',
@@ -336,6 +348,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(300),
 
     // Permission: exec — npm install express-rate-limit (pipeline visualization)
+    { action: 'label', text: 'Permission: shell command' },
     emit({
       type: 'exec_request',
       id: 'exec-001',
@@ -344,7 +357,7 @@ export const DEMO_SCENARIO: DemoScenario = {
         { raw: 'npm install express-rate-limit', operator: null, executable: 'npm', isSubshell: false },
       ],
     }),
-    { action: 'auto_approve', delayMs: 2000 },
+    { action: 'auto_approve', delayMs: 4000 },
     wait(300),
 
     // Tool: exec output (simulated install)
@@ -382,16 +395,18 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(200),
 
     // Permission: patch request (multi-line diff with import + rate limiter)
+    { action: 'label', text: 'Permission: file edit' },
     emit({
       type: 'patch_request',
       id: 'patch-002',
       diff: PATCH_2,
       reason: 'Adding rate limiting to health check endpoint',
     }),
-    { action: 'auto_approve', delayMs: 2500 },
+    { action: 'auto_approve', delayMs: 4500 },
     wait(400),
 
     // Permission: exec — run tests
+    { action: 'label', text: 'Permission: run tests' },
     emit({
       type: 'exec_request',
       id: 'exec-002',
@@ -401,7 +416,7 @@ export const DEMO_SCENARIO: DemoScenario = {
         { raw: 'head -30', operator: '|', executable: 'head', isSubshell: false },
       ],
     }),
-    { action: 'auto_approve', delayMs: 2000 },
+    { action: 'auto_approve', delayMs: 3500 },
     wait(200),
 
     // Tool: exec — test output
@@ -426,6 +441,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(300),
 
     // Background task: spawn a sub-agent for documentation
+    { action: 'label', text: 'Background sub-agent' },
     emit({
       type: 'task_update',
       task: {
@@ -439,13 +455,14 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(500),
 
     // Permission: fetch — check if the endpoint works
+    { action: 'label', text: 'Permission: network fetch' },
     emit({
       type: 'fetch_request',
       id: 'fetch-001',
       url: 'http://localhost:3000/health',
       method: 'GET',
     }),
-    { action: 'auto_approve', delayMs: 1800 },
+    { action: 'auto_approve', delayMs: 3500 },
     wait(200),
 
     // Tool: fetch result
@@ -514,6 +531,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 5: Flash settings modal & mount request
     // ════════════════════════════════════════════════════════════════════════
 
+    { action: 'label', text: 'Settings panel' },
     wait(2500),
 
     // Settings modal
@@ -523,6 +541,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(1500),
 
     // Mount request with expiry (shows timer bar in sidebar)
+    { action: 'label', text: 'Permission: mount directory' },
     emit({
       type: 'mount_request',
       id: 'mount-001',
@@ -531,7 +550,7 @@ export const DEMO_SCENARIO: DemoScenario = {
       reason: 'Need to check shared utility types',
       durationMinutes: 5,
     }),
-    { action: 'auto_approve', delayMs: 2000 },
+    { action: 'auto_approve', delayMs: 4000 },
     wait(500),
 
     // Update host_state with the new mount (including expiry)
@@ -546,6 +565,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(2000),
 
     // Context inspector — open, expand a couple of entries, then close
+    { action: 'label', text: 'Context inspector' },
     { action: 'open_modal', modal: 'context' },
     wait(1500),
 
@@ -574,6 +594,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 6: Concise/voice mode — STT, screenshot, TTS audio playback
     // ════════════════════════════════════════════════════════════════════════
 
+    { action: 'label', text: 'Concise mode' },
     wait(2000),
 
     // Toggle concise mode ON in the sidebar
@@ -581,6 +602,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(1000),
 
     // Simulate STT: mic starts recording
+    { action: 'label', text: 'Voice input (STT)' },
     { action: 'set_mic', state: 'recording', vadActive: false },
     wait(800),
 
@@ -602,6 +624,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(400),
 
     // Attach a fake screenshot
+    { action: 'label', text: 'Screenshot attachment' },
     {
       action: 'add_attachment',
       attachment: {
@@ -649,6 +672,7 @@ export const DEMO_SCENARIO: DemoScenario = {
 
     // Play pre-recorded TTS audio (waits until playback finishes)
     // Drop your audio file at web/public/demo/response.mp3
+    { action: 'label', text: 'Voice output (TTS)' },
     { action: 'play_audio', src: './demo/response.mp3' },
 
     // Usage update (accumulated)
@@ -671,6 +695,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 7: Loop
     // ════════════════════════════════════════════════════════════════════════
 
+    { action: 'label', text: 'Restarting demo' },
     wait(5000),
     { action: 'loop' },
   ],

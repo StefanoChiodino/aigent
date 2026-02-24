@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useDemoMode } from '../demo/useDemoMode';
+import { isDemo, useDemoMode } from '../demo/useDemoMode';
+import { DemoScrubber } from '../demo/DemoScrubber';
 import { useUIStore } from '../stores/ui';
 import { useChatStore } from '../stores/chat';
 import { useTTS } from '../hooks/useTTS';
@@ -67,6 +68,7 @@ export function App() {
       {createPortal(<ContextInspector />, document.body)}
       {createPortal(<TaskResultPanel />, document.body)}
       {createPortal(<ShortcutsModal />, document.body)}
+      {isDemo() && createPortal(<DemoScrubber />, document.body)}
     </div>
   );
 }

@@ -17,6 +17,7 @@ export type DemoStep =
   | { action: 'set_concise'; on: boolean }
   | { action: 'play_audio'; src: string }
   | { action: 'click'; selector: string }
+  | { action: 'label'; text: string }
   | { action: 'loop' };
 
 export interface DemoScenario {
