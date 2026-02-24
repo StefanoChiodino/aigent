@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * Gatekeeper — runs on the host, manages the Docker sandbox and web UI.
- * (Touched to restart tsx watcher after web-bridge.ts changes — 2026-02-23)
+ * (Touched to restart tsx watcher after web-bridge.ts changes — 2026-02-24)
  *
  * Responsibilities:
  *   - Container lifecycle (start, stop, restart with updated mounts)

@@ -114,6 +114,7 @@ console.log('Icons generated');
 const staticFiles = [
   ['manifest.json', 'manifest.json'],
   ['popup/popup.html', 'popup/popup.html'],
+  ['sidepanel/sidepanel.html', 'sidepanel/sidepanel.html'],
 ];
 
 for (const [src, dest] of staticFiles) {

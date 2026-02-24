@@ -251,7 +251,7 @@ function extractA11yContent(rootSelector: string | null): string {
     const role = getRole(el);
     const children: A11yNode[] = [];
 
-    for (const child of el.children) {
+    for (const child of Array.from(el.children)) {
       const childNode = walkNode(child, depth + 1);
       if (childNode) children.push(childNode);
     }

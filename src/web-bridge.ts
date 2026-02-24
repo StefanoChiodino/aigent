@@ -283,10 +283,27 @@ export async function startWebServer(
 
   // --- WebSocket server ---
 
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  // Use noServer mode and manually route upgrades by path.
+  // When two WebSocketServer instances share the same HTTP server, both fire
+  // their upgrade handlers for every incoming upgrade request. The one that
+  // doesn't match the path calls abortHandshake(), sending HTTP 400 text
+  // directly over a socket that the other WSS already upgraded to WebSocket —
+  // corrupting the stream with an "RSV1 must be clear" protocol error.
+  const wss = new WebSocketServer({ noServer: true });
+  const extWss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (req, socket, head) => {
+    const url = req.url ?? '/';
+    const pathname = url.includes('?') ? url.slice(0, url.indexOf('?')) : url;
+    if (pathname === '/ext') {
+      extWss.handleUpgrade(req, socket, head, (ws) => extWss.emit('connection', ws, req));
+    } else {
+      // Default to /ws (also handles any other paths)
+      wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    }
+  });
 
   // Extension bridge WebSocket — Chrome extension connects here
-  const extWss = new WebSocketServer({ server, path: '/ext' });
   extWss.on('connection', (ws: WebSocket) => extensionBridge.onConnection(ws));
 
   wss.on('connection', (ws: WebSocket) => {
