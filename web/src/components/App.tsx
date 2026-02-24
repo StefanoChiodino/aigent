@@ -1,8 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useDemoMode } from '../demo/useDemoMode';
 import { useUIStore } from '../stores/ui';
+import { useChatStore } from '../stores/chat';
+import { useTTS } from '../hooks/useTTS';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { ChatArea } from './ChatArea';
@@ -16,6 +18,23 @@ import { ShortcutsModal } from './modals/ShortcutsModal';
 export function App() {
   useWebSocket();
   useDemoMode();
+
+  // Wire TTS auto-speak to streaming text changes
+  const { flushStream } = useTTS();
+  const flushRef = useRef(flushStream);
+  flushRef.current = flushStream;
+  useEffect(() => {
+    let prev = '';
+    let wasActive = false;
+    return useChatStore.subscribe((s) => {
+      const text = s.streaming.text;
+      const active = s.streaming.active;
+      if (text && text !== prev) { prev = text; flushRef.current(); }
+      if (wasActive && !active) flushRef.current(true); // final flush
+      if (!text) prev = '';
+      wasActive = active;
+    });
+  }, []);
 
   const isLoading = useUIStore(s => s.isLoading);
 

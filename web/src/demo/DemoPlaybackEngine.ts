@@ -86,6 +86,12 @@ export class DemoPlaybackEngine {
         useVoiceStore.getState().setTtsAutoSpeak(step.on);
         break;
 
+      case 'click': {
+        const el = document.querySelector(step.selector) as HTMLElement | null;
+        if (el) el.click();
+        break;
+      }
+
       case 'loop':
         await this.loopReset();
         if (!this.aborted) await this.play();

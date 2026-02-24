@@ -6,7 +6,7 @@
 
 A self-authoring AI agent — an open-source Claude Code / OpenClaw-style coding assistant that can edit its own source code. It runs in a sandboxed Docker container with a gatekeeper on the host enforcing least-privilege access.
 
-**Current interface:** Web UI (previously TUI/terminal — abandoned due to Ink rendering complexity). The web is also the path to microphone, webcam, and other browser APIs we'll need later.
+**Current interface:** Web UI. The web is also the path to microphone, webcam, and other browser APIs we'll need later.
 
 **LLM support:** Anthropic subscriptions (OAT tokens) are the priority. OpenAI provider exists. Eventually support everything (Ollama, etc.), like OpenClaw does.
 
@@ -14,7 +14,7 @@ A self-authoring AI agent — an open-source Claude Code / OpenClaw-style coding
 
 ```
 Host (gatekeeper.tsx)
-  ├── TUI / Web UI — user-facing interface
+  ├── Web UI — user-facing interface
   ├── Container lifecycle (start/stop/restart Docker)
   ├── LLM proxy (API keys never enter sandbox)
   └── Permission engine (mounts, capabilities)

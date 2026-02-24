@@ -114,6 +114,34 @@ const RESPONSE_2 =
   '- Returns `{ error: "Too many requests" }` when limit exceeded\n\n' +
   'All existing tests pass. Run `npm test` to verify the new tests as well.';
 
+const THINKING_3 =
+  'The user is showing me a screenshot of the health check response in their terminal. ' +
+  'Let me look at the output to confirm the endpoint is functioning correctly with rate limiting headers.';
+
+const RESPONSE_3 =
+  'The screenshot confirms everything is working. The health endpoint returns a clean JSON ' +
+  'response with `status: "ok"` and the uptime value. I can also see the rate limiting headers ' +
+  'are active — `X-RateLimit-Limit` is set to 30 per minute. Your API is ready for production monitoring!';
+
+// Fake terminal screenshot (SVG data URL — shows a mini terminal with curl output)
+const SCREENSHOT_DATA_URL =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='130'%3E" +
+  "%3Crect width='200' height='130' fill='%231e1e2e' rx='6'/%3E" +
+  "%3Crect width='200' height='20' fill='%23313244' rx='6'/%3E" +
+  "%3Crect y='14' width='200' height='6' fill='%23313244'/%3E" +
+  "%3Ccircle cx='12' cy='10' r='4' fill='%23f38ba8'/%3E" +
+  "%3Ccircle cx='24' cy='10' r='4' fill='%23a6e3a1'/%3E" +
+  "%3Ccircle cx='36' cy='10' r='4' fill='%23f9e2af'/%3E" +
+  "%3Ctext x='8' y='42' fill='%2389b4fa' font-family='monospace' font-size='9'%3E" +
+  "$ curl localhost:3000/health%3C/text%3E" +
+  "%3Ctext x='8' y='60' fill='%23a6adc8' font-family='monospace' font-size='9'%3E" +
+  '%7B\"status\":\"ok\",\"uptime\":127%7D%3C/text%3E' +
+  "%3Ctext x='8' y='78' fill='%236c7086' font-family='monospace' font-size='9'%3E" +
+  "X-RateLimit-Limit: 30%3C/text%3E" +
+  "%3Ctext x='8' y='94' fill='%236c7086' font-family='monospace' font-size='9'%3E" +
+  "X-RateLimit-Remaining: 29%3C/text%3E" +
+  "%3C/svg%3E";
+
 // ── Helper to build emit steps more concisely ──────────────────────────────
 
 function emit(event: ServerEvent): { action: 'emit'; event: ServerEvent } {
@@ -266,9 +294,10 @@ export const DEMO_SCENARIO: DemoScenario = {
 
     // ════════════════════════════════════════════════════════════════════════
     //  PHASE 4: Second exchange — tests, rate limiting, exec, fetch, task
+    //  (Markdown-rich input showcases live syntax highlighting)
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'type_input', text: 'Now write tests for it and add rate limiting. Install the package if needed.', charDelayMs: 40 },
+    { action: 'type_input', text: 'Now **write tests** for it and add `express-rate-limit`. Check /src/server.ts and install the package if needed.', charDelayMs: 35 },
     wait(600),
     { action: 'submit_input' },
 
@@ -276,7 +305,7 @@ export const DEMO_SCENARIO: DemoScenario = {
       type: 'message',
       message: {
         role: 'user',
-        content: 'Now write tests for it and add rate limiting. Install the package if needed.',
+        content: 'Now **write tests** for it and add `express-rate-limit`. Check /src/server.ts and install the package if needed.',
         timestamp: new Date().toISOString(),
       },
     }),
@@ -522,13 +551,129 @@ export const DEMO_SCENARIO: DemoScenario = {
     }),
     wait(2000),
 
-    // Context inspector
+    // Context inspector — open, expand a couple of entries, then close
     { action: 'open_modal', modal: 'context' },
-    wait(3500),
+    wait(1500),
+
+    // Expand "System prompt" bar (1st row in #ctx-inspector-bars)
+    { action: 'click', selector: '#ctx-inspector-bars .ctx-bar-row-wrap:nth-child(1) .ctx-clickable' },
+    wait(3000),
+
+    // Collapse it, then expand "Workspace" bar (2nd row)
+    { action: 'click', selector: '#ctx-inspector-bars .ctx-bar-row-wrap:nth-child(1) .ctx-clickable' },
+    wait(500),
+    { action: 'click', selector: '#ctx-inspector-bars .ctx-bar-row-wrap:nth-child(2) .ctx-clickable' },
+    wait(2500),
+
+    // Collapse workspace, expand a message row
+    { action: 'click', selector: '#ctx-inspector-bars .ctx-bar-row-wrap:nth-child(2) .ctx-clickable' },
+    wait(500),
+    { action: 'click', selector: '#ctx-inspector-messages .ctx-msg-row-wrap:nth-child(2) .ctx-clickable' },
+    wait(2500),
+
+    // Collapse and close
+    { action: 'click', selector: '#ctx-inspector-messages .ctx-msg-row-wrap:nth-child(2) .ctx-clickable' },
+    wait(500),
     { action: 'close_modal', modal: 'context' },
 
     // ════════════════════════════════════════════════════════════════════════
-    //  PHASE 6: Loop
+    //  PHASE 6: Voice input, screenshot attachment, TTS output
+    // ════════════════════════════════════════════════════════════════════════
+
+    wait(2000),
+
+    // Enable TTS auto-speak so the response will be read aloud
+    { action: 'set_tts_auto', on: true },
+
+    // Simulate STT: mic starts recording
+    { action: 'set_mic', state: 'recording', vadActive: false },
+    wait(800),
+
+    // VAD detects speech
+    { action: 'set_mic', state: 'recording', vadActive: true },
+    wait(2500),
+
+    // Speech ends, VAD goes quiet
+    { action: 'set_mic', state: 'recording', vadActive: false },
+    wait(400),
+
+    // Transcription in progress
+    { action: 'set_mic', state: 'transcribing' },
+    wait(1200),
+
+    // Transcription complete — text appears in input
+    { action: 'set_mic', state: 'idle' },
+    { action: 'type_input', text: 'Check this screenshot — does the endpoint look right?', charDelayMs: 30 },
+    wait(600),
+
+    // Attach a fake screenshot
+    {
+      action: 'add_attachment',
+      attachment: {
+        id: 'demo-screenshot-001',
+        name: 'terminal-output.png',
+        mediaType: 'image/png',
+        data: 'AAAA',  // placeholder — never actually sent anywhere
+        dataUrl: SCREENSHOT_DATA_URL,
+        size: 24_576,
+      },
+    },
+    wait(1200),
+
+    // Submit the voice message + screenshot
+    { action: 'submit_input' },
+    { action: 'clear_attachments' },
+
+    emit({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: 'Check this screenshot — does the endpoint look right?\n\n[Attached: terminal-output.png]',
+        timestamp: new Date().toISOString(),
+      },
+    }),
+
+    emit({ type: 'loading', isLoading: true }),
+    wait(300),
+
+    // Thinking
+    { action: 'stream_thinking', text: THINKING_3, chunkSize: 8, intervalMs: 30 },
+    wait(300),
+
+    // Streaming response (TTS auto-speak will read this aloud via SpeechSynthesis)
+    { action: 'stream_text', text: RESPONSE_3, chunkSize: 5, intervalMs: 30 },
+
+    // Finalize third exchange
+    wait(200),
+    emit({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: RESPONSE_3,
+        timestamp: new Date().toISOString(),
+        elapsed: 3.1,
+      },
+    }),
+    emit({ type: 'loading', isLoading: false }),
+
+    // Usage update (accumulated)
+    emit({
+      type: 'usage',
+      usage: {
+        input: 34200,
+        output: 5080,
+        cacheRead: 22400,
+        cacheWrite: 11800,
+        cost: 0.118,
+        contextTokens: 39280,
+      },
+    }),
+
+    // Disable TTS for clean loop reset
+    { action: 'set_tts_auto', on: false },
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 7: Loop
     // ════════════════════════════════════════════════════════════════════════
 
     wait(5000),

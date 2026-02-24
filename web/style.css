@@ -3916,20 +3916,19 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 body[data-demo]::after {
   content: 'DEMO';
   position: fixed;
-  top: 10px;
+  top: 0;
   left: 50%;
   transform: translateX(-50%);
   z-index: 9999;
-  padding: 6px 24px;
-  background: var(--accent);
-  color: #fff;
-  border-radius: var(--radius);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  opacity: 0.85;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: #ff44cc;
+  text-shadow: 0 0 16px rgba(255, 68, 204, 0.7);
   pointer-events: none;
-  box-shadow: 0 2px 12px rgba(124, 108, 240, 0.4);
 }
 
 #app.demo-fade {

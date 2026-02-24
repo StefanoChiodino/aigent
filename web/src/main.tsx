@@ -44,9 +44,12 @@ import '../style.css';
 // Expose UI store for attachment preview tests
 (window as Record<string, unknown>).__zustand_ui = useUIStore;
 
-// Expose chat message clearing for permission routing tests
-(window as Record<string, unknown>).__testClearMessages = () => {
-  useChatStore.getState().clearMessages();
+// Return system message contents added after a given timestamp (ISO string).
+// Used by permission routing tests to check only messages caused by the test action.
+(window as Record<string, unknown>).__testGetSystemMessagesSince = (sinceMs: number) => {
+  return useChatStore.getState().messages
+    .filter(m => m.role === 'system' && new Date(m.timestamp).getTime() >= sinceMs)
+    .map(m => m.content);
 };
 
 const rootEl = document.getElementById('root')!;

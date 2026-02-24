@@ -14,6 +14,7 @@ export type DemoStep =
   | { action: 'add_attachment'; attachment: PendingAttachment }
   | { action: 'clear_attachments' }
   | { action: 'set_tts_auto'; on: boolean }
+  | { action: 'click'; selector: string }
   | { action: 'loop' };
 
 export interface DemoScenario {

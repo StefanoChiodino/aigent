@@ -8,6 +8,7 @@ export interface MicControls {
   startMic: (silent?: boolean, baseText?: string) => Promise<void>;
   stopMic: (silent?: boolean) => Promise<void>;
   abortMic: () => void;
+  clearTranscript: () => void;
   micRecording: boolean;
 }
 
@@ -258,6 +259,18 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     setMicState('idle');
   }, [sendLiveChunk, onTranscript, setMicState, setVadActive]);
 
+  const clearTranscript = useCallback((): void => {
+    // Discard all accumulated audio so the next sendLiveChunk has nothing to send
+    micSamples.current = [];
+    micLastText.current = '';
+    micBaseText.current = '';
+    // Bump seq so any in-flight responses are ignored (seq <= displayedSeq)
+    micDisplayedSeq.current = ++micReqSeq.current;
+    // Abort in-flight STT requests
+    for (const c of micLiveAbortCtrls.current) c.abort();
+    micLiveAbortCtrls.current = [];
+  }, []);
+
   const abortMic = useCallback((): void => {
     for (const ctrl of micLiveAbortCtrls.current) ctrl.abort();
     micLiveAbortCtrls.current = [];
@@ -281,6 +294,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     startMic,
     stopMic,
     abortMic,
+    clearTranscript,
     micRecording: useVoiceStore.getState().micState !== 'idle',
   };
 }

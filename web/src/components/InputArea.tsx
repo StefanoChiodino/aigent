@@ -57,24 +57,47 @@ function highlightInline(text: string): string {
   }).join('');
 }
 
-/** Apply bold / italic / strike / @mention patterns to an already-escaped segment. */
+/** Apply bold / italic / strike / @mention patterns to an already-escaped segment.
+ * Processes text in passes, always re-splitting on existing span tags so that
+ * later patterns never match across already-inserted HTML. */
 function applyInlinePatterns(html: string): string {
-  // Note: input is already HTML-escaped, so we only match on safe chars.
+  // Each pass: split the string into [text, span, text, span, ...] segments,
+  // apply the pattern only to text segments, then rejoin.
+  function applyPattern(
+    input: string,
+    pattern: RegExp,
+    replacer: (match: string, ...groups: string[]) => string,
+  ): string {
+    // Split on existing span tags to isolate already-processed regions
+    const segments = input.split(/(<span[^>]*>.*?<\/span>)/s);
+    return segments.map((seg, i) => {
+      if (i % 2 === 1) return seg; // it's an existing span — leave it alone
+      return seg.replace(pattern, replacer as (...args: unknown[]) => string);
+    }).join('');
+  }
+
   // Order matters: bold before italic so ** isn't parsed as two *.
-  return html
-    // ~~strikethrough~~
-    .replace(/~~([^~\n]+)~~/g, '<span class="input-hl-strike">~~$1~~</span>')
-    // **bold** or __bold__
-    .replace(/\*\*([^*\n]+)\*\*/g, '<span class="input-hl-bold">**$1**</span>')
-    .replace(/(?<![\w])__([^_\n]+)__(?![\w])/g, '<span class="input-hl-bold">__$1__</span>')
-    // *italic* or _italic_ (not inside words)
-    .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '<span class="input-hl-italic">*$1*</span>')
-    .replace(/(?<![\w_])_([^_\n]+)_(?![\w_])/g, '<span class="input-hl-italic">_$1_</span>')
-    // @mentions and /file/paths
-    .replace(/(@[\w./\-]+|(?<![.\w])\/[\w./\-]+)/g, (m) =>
-      (m.startsWith('@') && !m.includes('/'))
-        ? `<span class="input-hl-at">${m}</span>`
-        : `<span class="input-hl-at input-hl-at-file">${m}</span>`);
+  html = applyPattern(html,
+    /~~([^~\n]+)~~/g,
+    (_, g1) => `<span class="input-hl-strike">~~${g1}~~</span>`);
+  html = applyPattern(html,
+    /\*\*([^*\n]+)\*\*/g,
+    (_, g1) => `<span class="input-hl-bold">**${g1}**</span>`);
+  html = applyPattern(html,
+    /(?<![\w])__([^_\n]+)__(?![\w])/g,
+    (_, g1) => `<span class="input-hl-bold">__${g1}__</span>`);
+  html = applyPattern(html,
+    /(?<![\w*])\*([^*\n]+)\*(?![\w*])/g,
+    (_, g1) => `<span class="input-hl-italic">*${g1}*</span>`);
+  html = applyPattern(html,
+    /(?<![\w_])_([^_\n]+)_(?![\w_])/g,
+    (_, g1) => `<span class="input-hl-italic">_${g1}_</span>`);
+  html = applyPattern(html,
+    /(@[\w./\-]+|(?<![.\w])\/[\w./\-]+)/g,
+    (m) => (m.startsWith('@') && !m.includes('/'))
+      ? `<span class="input-hl-at">${m}</span>`
+      : `<span class="input-hl-at input-hl-at-file">${m}</span>`);
+  return html;
 }
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
@@ -130,7 +153,7 @@ export function InputArea() {
   const [micCapped, setMicCapped] = useState(false);
 
   const { stopAll: ttsStopAll } = useTTS();
-  const { startMic, stopMic, abortMic } = useMic(useCallback((text: string, windowCapped: boolean) => {
+  const { startMic, stopMic, abortMic, clearTranscript } = useMic(useCallback((text: string, windowCapped: boolean) => {
     lastMicTextRef.current = text;
     setHasMicText(!!text);
     setMicCapped(windowCapped);
@@ -645,10 +668,11 @@ export function InputArea() {
             disabled={!(micState === 'recording' && hasMicText)}
             title="Clear transcription"
             onClick={() => {
+              clearTranscript();
               lastMicTextRef.current = '';
               setHasMicText(false);
               setMicCapped(false);
-              setInputValue(micBaseTextRef.current);
+              setInputValue('');
             }}
           >
             ✕
