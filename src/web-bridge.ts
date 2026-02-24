@@ -14,6 +14,7 @@ import { glob } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { AgentClient } from './client.js';
+import { extensionBridge } from './ext-bridge.js';
 import type { ServerEvent, ServerState } from './protocol.js';
 import type { ThinkingLevel } from './agent.js';
 import type { ExecPermissions, FetchPermissions } from './safety.js';
@@ -283,6 +284,10 @@ export async function startWebServer(
   // --- WebSocket server ---
 
   const wss = new WebSocketServer({ server, path: '/ws' });
+
+  // Extension bridge WebSocket — Chrome extension connects here
+  const extWss = new WebSocketServer({ server, path: '/ext' });
+  extWss.on('connection', (ws: WebSocket) => extensionBridge.onConnection(ws));
 
   wss.on('connection', (ws: WebSocket) => {
     log.info('Web client connected');

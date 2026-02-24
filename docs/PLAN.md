@@ -156,10 +156,20 @@ Docker container (worker.ts → server.ts)
 - [x] Pre-restart typecheck: tsc --noEmit before server restart in file watcher
 - [ ] Test with OpenAI-compatible endpoint (e.g., Ollama)
 
-### Computer Use
-- [ ] Research Anthropic computer-use API
-- [ ] Screenshot capture tool
-- [ ] Mouse/keyboard action tools
+### Browser Automation (primary OS presence track)
+> Strategy: Chrome extension over the user's live session — not headless Playwright.
+> See `docs/os-automation-strategy.md` (strategy) and `docs/design-browser-extension.md` (full design).
+> Native OS APIs deferred. Headless Playwright deferred (wrong model — parallel robot browser, not live session).
+> Computer-use (screenshot + vision) deferred as expensive fallback for non-browser desktop apps.
+
+**Architecture:** Extension ↔ Gatekeeper WebSocket (port 3141 /ext) ↔ Agent Unix socket
+**Interaction model:** observe (1 LLM call) → plan (emit batched action script) → execute (extension runs locally, no LLM) → report
+**Permission model:** read-only default, write requires explicit grant, destructive actions need confirmation
+
+- [x] Phase 1 — Observe: extension + WebSocket bridge + `extract_a11y` + `screenshot` (read-only, no permissions). `aigent-extension/`, `src/ext-bridge.ts`, `src/web-bridge.ts` `/ext` path. `npm run ext:build` → load from `aigent-extension/dist/`.
+- [ ] Phase 2 — Write: `run_script` action with batched steps (fill, click, navigate, scroll, wait); write permission grant UI in web UI
+- [ ] Phase 3 — Multi-tab/navigation: tab enumeration, cross-page flows, `browser.autonomous` grant mode
+- [x] Prompt injection defense: page content wrapped in `=== BROWSER PAGE CONTENT (UNTRUSTED) ===`, system prompt hardening when extension connected
 
 ### Memory System (see docs/memory-architecture.md for full design)
 - [x] MEMORY.md as curated short-term memory in system prompt

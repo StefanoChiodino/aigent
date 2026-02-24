@@ -103,7 +103,7 @@ export const useChatStore = create<ChatState>()(
         return { streaming: { ...s.streaming, isThinking: false, thinkingText: '', traces } };
       }),
 
-      startToolBlock: (name, summary, input, model?, thinking?) => set(s => {
+      startToolBlock: (name, summary, input, model, thinking) => set(s => {
         const id = `trace-${++traceIdCounter}`;
         return {
           streaming: {

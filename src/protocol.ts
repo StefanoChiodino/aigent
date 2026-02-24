@@ -29,6 +29,7 @@ export type ClientCommand =
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] }
   | { type: 'context_breakdown_request' }
+  | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot'; tabId?: number; rootSelector?: string }
   | { type: 'ping' };
 
 // --- Server → Client ---
@@ -127,6 +128,7 @@ export type ServerEvent =
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
+  | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; error?: string }
   | { type: 'pong' };
 
 // --- Worker → Gatekeeper (capability/mount requests) ---

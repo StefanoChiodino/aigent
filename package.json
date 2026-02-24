@@ -23,7 +23,10 @@
     "web:dev": "vite --config web/vite.config.ts",
     "web:typecheck": "tsc --noEmit --project web/tsconfig.json",
     "web:demo": "VITE_DEMO=true vite --config web/vite.config.ts",
-    "web:demo-build": "VITE_DEMO=true vite build --config web/vite.config.ts --mode demo"
+    "web:demo-build": "VITE_DEMO=true vite build --config web/vite.config.ts --mode demo",
+    "ext:build": "cd aigent-extension && npm install && node build.mjs",
+    "ext:dev": "cd aigent-extension && npm install && node build.mjs --watch",
+    "ext:typecheck": "tsc --noEmit --project aigent-extension/tsconfig.json"
   },
   "keywords": [],
   "author": "",

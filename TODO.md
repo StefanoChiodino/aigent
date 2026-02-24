@@ -5,7 +5,7 @@
 ## Bugs / Quick Fixes
 
 - [x] **Attached images should persist in chat** — thumbnails generated client-side, stored in `DisplayMessage.attachments`, rendered in `Message.tsx`, persisted via Zustand localStorage. See `docs/image-handling.md` and `docs/implementation/2026-02-24-image-persistence.md`.
-- [ ] **Agent spawn details** — show model name and reasoning mode in the spawned-agent details panel.
+- [x] **Agent spawn details** — model name and reasoning level shown in the expandable details panel of `spawn_agent` and `dispatch_task` tool traces. Model shortened (e.g. `sonnet 4.6`), reasoning hidden when `off`. See `tests/specs/34-agent-spawn-details.spec.ts`.
 - [ ] **Reasoning toggle on incompatible models** — UI allows enabling reasoning on models that don't support it (e.g. Haiku); disable the toggle or warn.
 - [ ] **Duplicate mount suppression** — agent sometimes re-requests an already-active mount; gatekeeper should auto-approve redundant requests silently.
 
@@ -45,7 +45,7 @@
 
 ## 🪙 Token / Cost Optimisation
 
-- [ ] **MCP tool name shortening** — consider shorter/hashed prefix to reduce per-request token overhead.
+- [x] **MCP tool name shortening** — investigated, closed as won't-fix. Savings <0.3% of context, prompt caching already mitigates cost, LLM semantic degradation risk outweighs benefit. See `docs/mcp-tool-shortening.md`.
 - [ ] **Tool description audit** — trim descriptions in `tools.ts` longer than ~100 tokens.
 - [ ] **Prompt cache warm-up on startup** — send a minimal no-op message to pre-warm the Anthropic cache.
 - [ ] **Compaction prompt refinement** — ensure summaries preserve file paths, bug IDs, code references.
@@ -56,18 +56,21 @@
 ## 🖥️ UI / UX
 
 - [ ] **Reasoning / tool usage display** — show thinking blocks and tool calls more transparently without cluttering chat.
-- [ ] **Browser extension** — read/write page DOM, manage tabs, fill forms, navigate; agentic browser automation without visual model overhead.
-- [ ] **Browser a11y tree** — expose structured page content via AOM or CDP; cheaper than screenshots for understanding page structure.
+- [ ] **Browser extension** — see `docs/design-browser-extension.md` for full design. Live session automation (already logged in), a11y-tree-driven, batched action scripts, gatekeeper-bridged.
+- [ ] **Browser a11y tree** — covered in extension design; `extract_a11y` returns structured element tree, ~800–2000 tokens vs ~20k for raw HTML.
 
 ---
 
-## 🤖 Computer Use / OS Automation
+## 🤖 Browser Automation (Primary OS Presence Track)
 
-- [ ] **Headless browser tool** — Playwright or MCP Server wrapper. See `docs/design-headless-browser.md`.
-- [ ] **Keyboard and mouse control** — `xdotool`/`ydotool` on Linux, `nut.js` cross-platform.
-- [ ] **OS accessibility API** — AT-SPI (Linux), NSAccessibility (macOS), UI Automation (Windows).
-- [ ] **Application scripting** — AppleScript/JXA (macOS), COM automation (Windows).
-- [ ] **Computer-use loop** — screenshot + accessibility + keyboard/mouse in an observe → decide → act loop.
+> Strategy decided — see `docs/os-automation-strategy.md`. Browser-first, a11y-tree-driven, screenshot on demand.
+> Native OS APIs (AT-SPI, UIA, NSAccessibility) deferred — too platform-fragmented, broken in WSL2.
+
+- [x] **Phase 1 — Observe (shipped)** — `browser_ext` tool with `extract_a11y` + `screenshot`. Extension in `aigent-extension/`, bridge in `src/ext-bridge.ts`, gatekeeper `/ext` WebSocket in `src/web-bridge.ts`. Build: `npm run ext:build`. Load from `aigent-extension/dist/` in Chrome.
+- [ ] **Phase 2 — Write** — `run_script` action with batched steps (fill, click, navigate, scroll, wait); write permission grant UI in web UI (same pattern as exec/mount approval)
+- [ ] **Phase 3 — Multi-tab/navigation** — tab enumeration, cross-page flows, `browser.autonomous` grant
+- [ ] **Headless browser (deferred)** — Playwright fallback for unattended/CI runs. See `docs/design-headless-browser.md`.
+- [ ] **Computer-use loop (deferred)** — screenshot + Anthropic computer-use API for non-browser desktop apps; expensive fallback only
 
 ---
 

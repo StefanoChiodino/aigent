@@ -1,5 +1,13 @@
 # aigent — Project Instructions
 
+## General workflow
+
+Stick to this general plan for any non-trivial change:
+1. Investigate, explore, discover
+2. Write new docs, or update existing ones
+3. Create a plan for your changes for me to review
+4. Consider updating @README.md, demo website, e2e and unit tests
+
 ## What This Is
 
 A self-authoring AI agent that runs in a sandboxed Docker container with a gatekeeper on the host enforcing least-privilege access. Web UI is the current interface.
@@ -31,6 +39,7 @@ For architecture details see `docs/architecture.md`. For roadmap and current sta
 7. **TypeScript strict mode, ESM, Node 22+.** No CommonJS. No `any` unless absolutely necessary.
 8. **Don't over-engineer.** Simple and working beats clever and abstract.
 9. **Self-edits are real.** Changes to source persist on the host filesystem and survive container restarts.
+10. **Rebuild web UI after changing `web/src/` or `web/style.css`.** Run `rm -rf web/dist && npx vite build --outDir dist web/`. The test server and prod server both serve from `web/dist/`. Playwright e2e tests will fail on stale builds.
 
 ## TODO.md
 
