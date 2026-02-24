@@ -20,6 +20,7 @@ export function useWebSocket(): void {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     function send(data: Record<string, unknown>): void {
@@ -266,7 +267,6 @@ export function useWebSocket(): void {
 
         case 'context_breakdown':
           ui().setContextBreakdown(event.breakdown);
-          ui().setCtxInspectorOpen(true);
           break;
 
         case 'pong':
@@ -276,7 +276,10 @@ export function useWebSocket(): void {
 
     function connect(): void {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${proto}//${location.host}/ws`);
+      // In dev mode (Vite on :5173), connect directly to the backend
+      // to avoid Vite proxy errors during tsx-watch restarts.
+      const wsHost = import.meta.env.DEV ? 'localhost:3141' : location.host;
+      const ws = new WebSocket(`${proto}//${wsHost}/ws`);
       wsRef.current = ws;
       conn().setWs(ws);
       conn().setStatus('connecting');
@@ -300,11 +303,13 @@ export function useWebSocket(): void {
 
       ws.onclose = () => {
         if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
-        conn().setStatus('reconnecting');
         conn().setWs(null);
         wsRef.current = null;
         chat().endStream();
-        scheduleReconnect();
+        if (mountedRef.current) {
+          conn().setStatus('reconnecting');
+          scheduleReconnect();
+        }
       };
 
       ws.onerror = () => { /* onclose fires next */ };
@@ -320,11 +325,13 @@ export function useWebSocket(): void {
       }, delay);
     }
 
+    mountedRef.current = true;
     connect();
 
     return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (pingTimer.current) clearInterval(pingTimer.current);
+      mountedRef.current = false;
+      if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
+      if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
       wsRef.current?.close();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

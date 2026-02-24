@@ -11,6 +11,32 @@ import { AtPalette, getAtStaticMatches } from './AtPalette';
 import { AttachmentPreview } from './AttachmentPreview';
 import type { CommandDef, AtItem, PendingAttachment } from '../types';
 
+/** Escape HTML special chars */
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Highlight input text for the overlay: style `backtick spans` and @mentions.
+ * Returns HTML — must only be used with dangerouslySetInnerHTML.
+ */
+function highlightInputText(text: string): string {
+  // Split on backtick spans: `...`
+  const parts = text.split(/(`[^`\n]*`)/g);
+  return parts.map((part, i) => {
+    if (i % 2 === 1) {
+      // backtick span
+      return `<span class="input-hl-code">${esc(part)}</span>`;
+    }
+    // Outside backtick spans: highlight @mentions and bare file paths
+    // File @mentions with '/' and bare absolute paths get code-style chip
+    return esc(part).replace(/(@[\w./\-]+|(?<![.\w])\/[\w./\-]+)/g, (m) =>
+      (m.startsWith('@') && !m.includes('/'))
+        ? `<span class="input-hl-at">${m}</span>`
+        : `<span class="input-hl-at input-hl-at-file">${m}</span>`);
+  }).join('') + '\n'; // trailing newline prevents overlay height collapse at end
+}
+
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const ALLOWED_TYPES = [...IMAGE_TYPES, 'application/pdf', 'text/plain', 'text/markdown'];
 const MAX_ATTACHMENTS = 5;
@@ -56,18 +82,39 @@ export function InputArea() {
   const [ctrlHeld, setCtrlHeld] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const micBaseTextRef = useRef('');
   const lastMicTextRef = useRef('');
+  const [hasMicText, setHasMicText] = useState(false);
+  const [micCapped, setMicCapped] = useState(false);
 
   const { stopAll: ttsStopAll } = useTTS();
-  const { startMic, stopMic, abortMic } = useMic(useCallback((text: string) => {
+  const { startMic, stopMic, abortMic } = useMic(useCallback((text: string, windowCapped: boolean) => {
     lastMicTextRef.current = text;
-    setInputValue(micBaseTextRef.current ? micBaseTextRef.current + ' ' + text : text);
+    setHasMicText(!!text);
+    setMicCapped(windowCapped);
+    setInputValue(text);
   }, []));
 
   useEffect(() => {
     registerScreenCapCallback(setScreenCapActive);
+  }, []);
+
+  // Test helper: reset local component state between shared-page tests
+  useEffect(() => {
+    const handler = () => {
+      setMicCapped(false);
+      setHasMicText(false);
+      setScreenCapActive(false);
+      setPaletteHidden(false);
+      setPaletteSelected(0);
+      setAtTriggerPos(-1);
+      setAtQuery('');
+      setAtSelected(0);
+    };
+    window.addEventListener('__test_reset_input', handler);
+    return () => window.removeEventListener('__test_reset_input', handler);
   }, []);
 
   // Auto-grow textarea
@@ -81,6 +128,16 @@ export function InputArea() {
   useEffect(() => {
     autoGrow();
   }, [inputValue, autoGrow]);
+
+  // Keep highlight overlay scroll in sync with textarea
+  useEffect(() => {
+    const el = inputRef.current;
+    const hl = highlightRef.current;
+    if (!el || !hl) return;
+    const onScroll = () => { hl.scrollTop = el.scrollTop; };
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
 
   const computeAtTrigger = useCallback((text: string, caret: number) => {
     let trigPos = -1;
@@ -127,6 +184,7 @@ export function InputArea() {
 
     send(msg);
     setInputValue('');
+    setMicCapped(false);
     setPaletteSelected(0);
     setAtTriggerPos(-1);
     setAtQuery('');
@@ -186,10 +244,10 @@ export function InputArea() {
   }, [pendingAttachments.length, screenCapActive, addAttachment, setError]);
 
   const toggleMicSticky = useCallback(() => {
-    const wasSticky = micSticky;
-    setMicSticky(!micSticky);
-    if (!micSticky && micState === 'idle') void startMic();
-    else if (wasSticky && micSticky && micState === 'recording') void stopMic();
+    const newSticky = !micSticky;
+    setMicSticky(newSticky);
+    if (newSticky && micState === 'idle') void startMic();
+    else if (!newSticky && micState === 'recording') void stopMic();
   }, [micSticky, micState, setMicSticky, startMic, stopMic]);
 
   // Global keyboard shortcuts
@@ -265,7 +323,14 @@ export function InputArea() {
         if (item) handleAtComplete(item);
         return;
       }
-      if (e.key === 'Enter') { e.preventDefault(); return; }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const items = atItemsRef.current.length > 0 ? atItemsRef.current : getAtStaticMatches(atQuery);
+        const clampedIdx = items.length > 0 ? Math.min(atSelected, items.length - 1) : 0;
+        const item = items[clampedIdx] ?? items[0];
+        if (item) handleAtComplete(item);
+        return;
+      }
       if (e.key === 'Escape') { e.preventDefault(); setAtTriggerPos(-1); return; }
     }
     // Command palette nav
@@ -328,12 +393,13 @@ export function InputArea() {
 
   const handleAtComplete = (item: AtItem) => {
     const caret = inputRef.current?.selectionStart ?? inputValue.length;
-    const newVal = inputValue.slice(0, atTriggerPos) + item.insert + ' ' + inputValue.slice(caret);
+    const token = item.insert;
+    const newVal = inputValue.slice(0, atTriggerPos) + token + ' ' + inputValue.slice(caret);
     setInputValue(newVal);
     setAtTriggerPos(-1);
     setAtQuery('');
     setAtSelected(0);
-    const newCaret = atTriggerPos + item.insert.length + 1;
+    const newCaret = atTriggerPos + token.length + 1;
     setTimeout(() => {
       inputRef.current?.focus();
       inputRef.current?.setSelectionRange(newCaret, newCaret);
@@ -414,12 +480,6 @@ export function InputArea() {
       />
 
       <div id="input-row">
-        {/* Attach button */}
-        <button id="attach" title="Attach file" onClick={() => fileInputRef.current?.click()}>
-          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <path d="M15.5 10.5l-5.5 5.5a4 4 0 01-5.657-5.657l6.364-6.364a2.5 2.5 0 013.535 3.535l-6.364 6.364a1 1 0 01-1.414-1.414l5.657-5.657"/>
-          </svg>
-        </button>
         <input
           ref={fileInputRef}
           id="file-input"
@@ -435,21 +495,37 @@ export function InputArea() {
           }}
         />
 
-        {/* Textarea */}
-        <textarea
-          ref={inputRef}
-          id="input"
-          rows={1}
-          placeholder={
-            micState === 'recording' ? 'Listening…' :
-            isLoading ? 'Agent is working…' : 'Message aigent…'
-          }
-          value={inputValue}
-          onChange={handleInput}
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          autoFocus
-        />
+        {/* Textarea with syntax highlight overlay */}
+        <div id="input-wrap">
+          <span id="mic-capped" className={micCapped ? '' : 'hidden'}>…</span>
+          <div
+            ref={highlightRef}
+            id="input-highlight"
+            aria-hidden="true"
+            dangerouslySetInnerHTML={{ __html: highlightInputText(inputValue) }}
+          />
+          <textarea
+            ref={inputRef}
+            id="input"
+            rows={1}
+            placeholder={
+              micState === 'recording' ? 'Listening…' :
+              isLoading ? 'Agent is working…' : 'Message aigent…'
+            }
+            value={inputValue}
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            autoFocus
+          />
+        </div>
+
+        {/* Attach button */}
+        <button id="attach" title="Attach file" onClick={() => fileInputRef.current?.click()}>
+          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <path d="M15.5 10.5l-5.5 5.5a4 4 0 01-5.657-5.657l6.364-6.364a2.5 2.5 0 013.535 3.535l-6.364 6.364a1 1 0 01-1.414-1.414l5.657-5.657"/>
+          </svg>
+        </button>
 
         {/* Mic area */}
         <div id="mic-sticky-group">
@@ -492,23 +568,25 @@ export function InputArea() {
             className={[micSticky ? 'active' : '', vadActive ? 'vad-active' : ''].filter(Boolean).join(' ')}
             title="Always-on mic"
             onClick={toggleMicSticky}
+            style={{ fontSize: 18, lineHeight: 1 }}
           >
             ∞
           </button>
 
           <button
             id="mic-clear"
-            className={micState === 'recording' && lastMicTextRef.current ? '' : 'hidden'}
+            className={micState === 'recording' && hasMicText ? '' : 'disabled'}
+            disabled={!(micState === 'recording' && hasMicText)}
             title="Clear transcription"
             onClick={() => {
               lastMicTextRef.current = '';
+              setHasMicText(false);
+              setMicCapped(false);
               setInputValue(micBaseTextRef.current);
             }}
           >
             ✕
           </button>
-
-          <span id="mic-capped" className="hidden">…</span>
         </div>
 
         {/* Screen cap */}
@@ -518,9 +596,10 @@ export function InputArea() {
           title={screenCapActive ? 'Take screenshot' : 'Share screen & take screenshot'}
           onClick={() => void handleScreenCap()}
         >
-          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <rect x="1" y="4" width="18" height="12" rx="2"/>
-            <circle cx="10" cy="10" r="2.5"/>
+          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="1" y="3" width="18" height="12" rx="2"/>
+            <line x1="7" y1="19" x2="13" y2="19"/>
+            <line x1="10" y1="15" x2="10" y2="19"/>
           </svg>
         </button>
 
@@ -544,14 +623,15 @@ export function InputArea() {
           title={ctrlHeld ? (currentlyOn ? 'Send without thinking' : 'Send with thinking') : 'Send'}
           onClick={() => submitMessage(ctrlHeld)}
         >
-          <svg className={`icon-brain${willThink ? '' : ' hidden'}`} viewBox="0 0 20 20" width="18" height="18" fill="none">
-            <ellipse cx="10" cy="10" rx="7" ry="5.5" stroke="currentColor" strokeWidth="1.5"/>
-            <circle cx="7" cy="9" r="1.2" fill="currentColor"/>
-            <circle cx="13" cy="9" r="1.2" fill="currentColor"/>
-            <path d="M7 12 Q10 14 13 12" stroke="currentColor" strokeWidth="1.2"/>
+          <svg className={`icon-brain${willThink ? '' : ' hidden'}`} viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+            <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+            <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+            <path d="M12 18v4"/>
           </svg>
-          <svg className={`icon-arrow${willThink ? ' hidden' : ''}`} viewBox="0 0 20 20" width="18" height="18" fill="currentColor">
-            <path d="M10 2l8 8H12v8H8v-8H2z"/>
+          <svg className={`icon-arrow${willThink ? ' hidden' : ''}`} viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="10" y1="16" x2="10" y2="4"/>
+            <polyline points="5,9 10,4 15,9"/>
           </svg>
         </button>
 

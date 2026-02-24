@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * Gatekeeper — runs on the host, manages the Docker sandbox and web UI.
- * (Touched to restart tsx watcher after web-bridge.ts changes.)
+ * (Touched to restart tsx watcher after web-bridge.ts changes — 2026-02-23)
  *
  * Responsibilities:
  *   - Container lifecycle (start, stop, restart with updated mounts)
@@ -83,6 +83,9 @@ let containerName = '';
 let gatekeeperArgs: GatekeeperArgs;
 let client: InstanceType<typeof import('./client.js').AgentClient> | null = null;
 let isRestarting = false;
+
+// Container name prefix — namespaced so test instances don't kill dev containers.
+const CONTAINER_PREFIX = process.env['AIGENT_TEST_MODE'] ? 'aigent-test-worker' : 'aigent-worker';
 
 // --- CLI args ---
 
@@ -335,13 +338,17 @@ function buildDockerArgs(): string[] {
   if (process.env['AIGENT_LOG_LEVEL']) {
     args.push('-e', `AIGENT_LOG_LEVEL=${process.env['AIGENT_LOG_LEVEL']}`);
   }
+  // Pass socket dir so the container uses the same namespaced path as the host.
+  if (process.env['AIGENT_SOCKET_DIR']) {
+    args.push('-e', `AIGENT_SOCKET_DIR=${process.env['AIGENT_SOCKET_DIR']}`);
+  }
 
   args.push('aigent');
   return args;
 }
 
 async function startContainer(): Promise<void> {
-  containerName = `aigent-worker-${Date.now()}`;
+  containerName = `${CONTAINER_PREFIX}-${Date.now()}`;
 
   const dockerArgs = buildDockerArgs();
   log.info('Starting sandbox...');
@@ -1361,14 +1368,18 @@ let hostDaemonProcess: ChildProcess | null = null;
 
 async function startHostDaemon(): Promise<void> {
   const { HOST_SOCKET_PATH } = await import('./host/protocol.js');
+  const daemonPidFile = join(SOCKET_DIR, 'host-daemon.pid');
 
-  // Kill any orphaned daemon processes from previous runs (e.g. tsx --watch restarts
-  // spawn a fresh gatekeeper that loses the handle to the old daemon child).
-  try {
-    execSync("pkill -TERM -f 'host/daemon'", { stdio: 'ignore' });
-    // Give them a moment to exit cleanly before we unlink the socket
-    await new Promise<void>((r) => setTimeout(r, 200));
-  } catch { /* no existing daemons — that's fine */ }
+  // Kill any orphaned daemon from a previous run of THIS instance (e.g. tsx --watch
+  // restarts). Uses a PID file scoped to SOCKET_DIR so test and dev don't collide.
+  if (existsSync(daemonPidFile)) {
+    try {
+      const oldPid = parseInt(readFileSync(daemonPidFile, 'utf-8').trim(), 10);
+      process.kill(oldPid, 'SIGTERM');
+      await new Promise<void>((r) => setTimeout(r, 200));
+    } catch { /* already dead — that's fine */ }
+    try { unlinkSync(daemonPidFile); } catch {}
+  }
 
   // Clean up stale socket
   if (existsSync(HOST_SOCKET_PATH)) {
@@ -1391,6 +1402,11 @@ async function startHostDaemon(): Promise<void> {
   ], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+  // Write PID file so the next startup of this instance can clean up
+  if (hostDaemonProcess.pid !== undefined) {
+    writeFileSync(daemonPidFile, String(hostDaemonProcess.pid));
+  }
 
   // Pipe daemon output to log file
   hostDaemonProcess.stdout?.pipe(logStream, { end: false });
@@ -1482,12 +1498,40 @@ if (gatekeeperArgs.projectFolder) {
 mkdirSync(SOCKET_DIR, { recursive: true, mode: 0o777 });
 cleanupSocket();
 
+// Kill any stale worker containers left over from a previous crashed gatekeeper.
+// tsx --watch restarts spawn a new process that gets a new containerName, so cleanupAll()
+// on the old process won't find them. Force-remove anything matching the current prefix
+// (dev: aigent-worker-, test: aigent-test-worker-) so tests don't kill dev containers.
+try {
+  const stale = execSync(
+    `docker ps -q --filter 'name=${CONTAINER_PREFIX}-'`,
+    { encoding: 'utf-8' }
+  ).trim();
+  if (stale) {
+    execSync(`docker rm -f ${stale.split('\n').join(' ')}`, { stdio: 'ignore' });
+  }
+} catch { /* no stale containers — fine */ }
+
 // Start host daemon (clipboard, screen capture, etc.)
 await startHostDaemon();
 
 // Start LLM proxy (holds API keys, worker connects to this)
 await startLLMProxy();
 log.info('LLM proxy ready');
+
+// Set up client early (before container) so the web server can start immediately.
+// AgentClient doesn't require the container — it connects to the socket separately.
+const { AgentClient } = await import('./client.js');
+client = new AgentClient();
+
+// Start web UI server before the container so it's available during startup/restarts.
+// This prevents "connection refused" when tsx watch restarts the process.
+const { startWebServer } = await import('./web-bridge.js');
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions }).then(({ port }) => {
+  log.info('Web UI ready', { url: `http://localhost:${port}` });
+}).catch((err) => {
+  log.error('Web UI failed to start', { error: (err as Error).message });
+});
 
 // Start container
 try {
@@ -1497,18 +1541,6 @@ try {
   cleanupAll();
   process.exit(1);
 }
-
-// Set up client
-const { AgentClient } = await import('./client.js');
-client = new AgentClient();
-
-// Start web UI server (non-blocking, runs alongside TUI)
-const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions }).then(({ port }) => {
-  log.info('Web UI ready', { url: `http://localhost:${port}` });
-}).catch((err) => {
-  log.error('Web UI failed to start', { error: (err as Error).message });
-});
 
 // Push mount state to web UI when client connects to the worker
 client.on('connected', () => {
@@ -1527,6 +1559,20 @@ client.sendMessage = (content: string) => {
     return;
   }
   originalSendMessage(content);
+};
+
+// Also intercept sendCommand — the web UI sends /grant, /approve, etc. as commands
+const originalSendCommand = client.sendCommand.bind(client);
+client.sendCommand = (cmd: string) => {
+  if (isGatekeeperCommand(cmd)) {
+    handleGatekeeperCommand(cmd).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error('Gatekeeper command error', { error: msg });
+      injectSystemMessage(`Error: ${msg}`);
+    });
+    return;
+  }
+  originalSendCommand(cmd);
 };
 
 // Handle mount requests from the worker (agent requests a folder)

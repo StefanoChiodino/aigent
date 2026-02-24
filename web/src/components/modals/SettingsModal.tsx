@@ -10,7 +10,7 @@ export function SettingsModal() {
   const settingsOpen = useUIStore(s => s.settingsOpen);
   const setSettingsOpen = useUIStore(s => s.setSettingsOpen);
   const availableTools = useUIStore(s => s.availableTools);
-  const getClientSetting = useSettingsStore(s => s.getClientSetting);
+  const clientSettings = useSettingsStore(s => s.clientSettings);
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
   const serverSettings = useSettingsStore(s => s.serverSettings);
   const setServerSettingPending = useSettingsStore(s => s.setServerSettingPending);
@@ -58,8 +58,14 @@ export function SettingsModal() {
     }
   }
 
+  function getClientValue(key: string): boolean | number | string {
+    if (key in clientSettings) return clientSettings[key]!;
+    const schema = SETTINGS_SCHEMA.find(d => d.key === key && d.scope === 'client');
+    return schema?.default ?? '';
+  }
+
   // Tool summarize list
-  const summarizeToolsRaw = String(getClientSetting('tools_summarizeTools') ?? '[]');
+  const summarizeToolsRaw = String(getClientValue('tools_summarizeTools') ?? '[]');
   let summarizeTools: string[] = [];
   try { summarizeTools = JSON.parse(summarizeToolsRaw) as string[]; } catch { /* empty */ }
 
@@ -79,9 +85,9 @@ export function SettingsModal() {
       <div id="settings-modal">
         <div id="settings-header">
           <span>Settings</span>
+          <div id="settings-toast" className={toastVisible ? '' : 'hidden'}>Saved</div>
           <button id="settings-close" onClick={() => setSettingsOpen(false)}>×</button>
         </div>
-        <div id="settings-toast" className={toastVisible ? '' : 'hidden'}>Saved</div>
         <div id="settings-layout">
           <nav id="settings-nav">
             {groupNames.map(name => (
@@ -107,7 +113,7 @@ export function SettingsModal() {
                   <div className="settings-group-label">{name}</div>
                   {defs.map(def => {
                     const value = def.scope === 'client'
-                      ? getClientSetting(def.key)
+                      ? getClientValue(def.key)
                       : (serverSettings[def.key] ?? def.default ?? '');
                     const isStacked = def.type === 'string-list';
                     return (

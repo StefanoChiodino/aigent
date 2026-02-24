@@ -39,6 +39,12 @@
   padding: 0;
 }
 
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
 html, body {
   height: 100%;
   background: var(--bg);
@@ -78,13 +84,59 @@ html, body {
 
 /* ── Header ──────────────────────────────────────────────── */
 
+#header-wrap {
+  flex-shrink: 0;
+  position: relative;
+  /* Frozen glass: very low opacity so backdrop shows through */
+  background: rgba(10, 10, 18, 0.35);
+  backdrop-filter: blur(24px) saturate(3) brightness(1.15);
+  -webkit-backdrop-filter: blur(24px) saturate(3) brightness(1.15);
+  /* Frost rim: bright top edge + subtle purple bottom */
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(124, 108, 240, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* Icy gloss overlay: faint white-to-transparent sweep */
+#header-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.05) 0%,
+    rgba(255, 255, 255, 0.01) 50%,
+    transparent 100%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Accent shimmer: bokeh colours bleed through as a warm tint */
+#header-wrap::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    rgba(124, 108, 240, 0.08) 0%,
+    rgba(0, 200, 220, 0.05) 50%,
+    rgba(0, 210, 110, 0.04) 100%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Keep header content above the pseudo overlays */
 #header {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border-subtle);
-  flex-shrink: 0;
   gap: 12px;
   max-width: 1100px;
   margin: 0 auto;
@@ -521,6 +573,7 @@ html, body {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border-subtle);
+  align-self: stretch;
 }
 
 #sidebar-spacer {
@@ -529,6 +582,15 @@ html, body {
 
 #sidebar-panel {
   padding: 12px 14px;
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+#sb-tasks-section {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .sidebar-section {
@@ -668,7 +730,7 @@ html, body {
   transform: translateX(2px);
 }
 
-#sb-ctx-meter {
+.sb-ctx-bar {
   position: relative;
   width: 100%;
   height: 18px;
@@ -1265,7 +1327,7 @@ html, body {
 
 /* Desktop: hide header cost/context (sidebar shows them) */
 @media (min-width: 601px) {
-  #cost-badge, #ctx-meter { display: none !important; }
+  #cost-badge, #ctx-meter-wrap { display: none !important; }
 }
 
 
@@ -1298,6 +1360,45 @@ html, body {
   flex: 1;
   position: relative;
   display: flex;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--transition);
+}
+
+#input-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* Syntax highlight overlay — mirrors textarea geometry exactly */
+#input-highlight {
+  position: absolute;
+  inset: 0;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text);
+  border-radius: var(--radius);
+}
+
+.input-hl-code {
+  color: var(--accent);
+  font-family: var(--font-mono, monospace);
+}
+
+.input-hl-at {
+  color: var(--accent);
+}
+
+.input-hl-at-file {
+  color: #e8a060;
+  font-family: var(--font-mono, monospace);
 }
 
 #mic-capped {
@@ -1319,15 +1420,18 @@ html, body {
 #mic-capped.hidden { display: none; }
 
 /* When capped indicator is visible, indent textarea text to clear the separator */
-#input-wrap:has(#mic-capped:not(.hidden)) #input {
+#input-wrap:has(#mic-capped:not(.hidden)) #input,
+#input-wrap:has(#mic-capped:not(.hidden)) #input-highlight {
   padding-left: 40px;
 }
 
 #input {
   flex: 1;
-  background: var(--bg-surface);
-  color: var(--text);
-  border: 1px solid var(--border);
+  position: relative;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text);
+  border: none;
   border-radius: var(--radius);
   padding: 10px 14px;
   font-family: inherit;
@@ -1337,12 +1441,11 @@ html, body {
   outline: none;
   max-height: 200px;
   overflow-y: auto;
-  transition: border-color var(--transition);
+  z-index: 1;
 }
 
 #input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
 }
 
 #input {
@@ -1540,7 +1643,10 @@ html, body {
   background: var(--bg-hover);
 }
 
-#mic-clear.hidden { display: none; }
+#mic-clear.disabled {
+  visibility: hidden;
+  pointer-events: none;
+}
 
 #screen-cap {
   width: 36px;
@@ -1808,6 +1914,29 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 7px 12px;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.at-palette-item:hover {
+  background: var(--bg-hover);
+}
+
+.at-palette-item.selected {
+  background: var(--accent);
+}
+
+.at-palette-item.selected .at-item-label {
+  color: #fff;
+}
+
+.at-palette-item.selected .at-item-desc {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.at-palette-item.selected mark {
+  background: rgba(255, 255, 255, 0.35);
+  color: #fff;
 }
 
 .at-item-icon {
@@ -1833,12 +1962,41 @@ html, body {
   text-overflow: ellipsis;
 }
 
+.at-item-label mark {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .at-item-desc {
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.at-item-desc mark {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+/* ── @mention chips (in rendered messages) ───────────────── */
+
+.at-mention {
+  display: inline-block;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 0.88em;
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+  vertical-align: baseline;
 }
 
 /* ── Thinking indicator ──────────────────────────────────── */
@@ -2238,6 +2396,7 @@ html, body {
   border-radius: var(--radius);
   padding: 10px 12px;
   width: 290px;
+  max-width: calc(100vw - 32px);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   animation: slideInRight 0.2s ease;
 }
@@ -2245,6 +2404,7 @@ html, body {
 /* Patch mode card: wide, flex-column, fills most of the viewport */
 #perm-overlay.patch-mode #perm-card {
   width: min(960px, 92vw);
+  max-width: 92vw;
   max-height: 88vh;
   display: flex;
   flex-direction: column;
@@ -2704,34 +2864,63 @@ tr.diff-context-hidden {
   50%       { transform: scale(1.35); }
 }
 
+@keyframes bokeh-drift-1 {
+  0%   { transform: scale(1)    translate(0,    0); }
+  25%  { transform: scale(1.3)  translate(60px,  40px); }
+  50%  { transform: scale(1.15) translate(30px, -30px); }
+  75%  { transform: scale(1.4)  translate(-40px, 20px); }
+  100% { transform: scale(1)    translate(0,    0); }
+}
+@keyframes bokeh-drift-2 {
+  0%   { transform: scale(1)    translate(0,    0); }
+  25%  { transform: scale(1.25) translate(-50px, -30px); }
+  50%  { transform: scale(1.4)  translate(20px,   50px); }
+  75%  { transform: scale(1.1)  translate(40px,  -20px); }
+  100% { transform: scale(1)    translate(0,    0); }
+}
+@keyframes bokeh-drift-3 {
+  0%   { transform: scale(1)    translate(0,    0); }
+  33%  { transform: scale(1.35) translate(-30px,  60px); }
+  66%  { transform: scale(1.2)  translate(50px,  -40px); }
+  100% { transform: scale(1)    translate(0,    0); }
+}
+
 .bokeh {
   position: fixed;
   inset: 0;
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
-  /* idle: barely perceptible */
-  opacity: 0.045;
+  /* idle: visible enough for glass effect to pick up colour */
+  opacity: 0.32;
   transition: opacity 3s ease;
 }
 
 body[data-working] .bokeh {
-  /* working: gentle glow */
-  opacity: 0.22;
+  /* working: vivid glow */
+  opacity: 0.55;
 }
 
 .bokeh span {
   position: absolute;
   border-radius: 50%;
-  filter: blur(110px);
+  filter: blur(80px);
   animation: bokeh-pulse ease-in-out infinite;
 }
 
-/* Green — top-left */
+/* When working, swap blobs to drift animations at ~2.5× speed */
+body[data-working] .bokeh .b1 { animation-name: bokeh-drift-1; animation-duration: 5.6s !important; }
+body[data-working] .bokeh .b2 { animation-name: bokeh-drift-2; animation-duration: 6.8s !important; }
+body[data-working] .bokeh .b3 { animation-name: bokeh-drift-3; animation-duration: 4.4s !important; }
+body[data-working] .bokeh .b4 { animation-name: bokeh-drift-1; animation-duration: 7.6s !important; }
+body[data-working] .bokeh .b5 { animation-name: bokeh-drift-2; animation-duration: 5.2s !important; }
+body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duration: 6.4s !important; }
+
+/* Green — top-left, bleeds into header */
 .bokeh .b1 {
   width: 500px; height: 500px;
   background: rgba(0, 210, 110, 1);
-  top: -80px; left: -60px;
+  top: -120px; left: -80px;
   animation-duration: 14s;
   animation-delay: 0s;
 }
@@ -2781,6 +2970,16 @@ body[data-working] .bokeh {
   animation-delay: -6s;
 }
 
+/* Accent purple — top-centre, anchored behind the header */
+.bokeh .b7 {
+  width: 700px; height: 200px;
+  background: rgba(124, 108, 240, 1);
+  top: -80px; left: calc(50% - 350px);
+  filter: blur(60px);
+  animation-duration: 20s;
+  animation-delay: -3s;
+}
+
 /* Ensure all #app children sit above the bokeh layer */
 #app > *:not(.bokeh) {
   position: relative;
@@ -2815,6 +3014,8 @@ body[data-working] .bokeh {
   }
 
   #input-hint { display: none; }
+
+  #patch-file-list { display: none; }
 }
 
 @media (max-width: 900px) and (min-width: 601px) {
@@ -3193,6 +3394,32 @@ body[data-working] .bokeh {
   letter-spacing: 0.5px;
 }
 
+/* Shared close button style for all modals */
+#settings-close,
+#ctx-inspector-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition), background var(--transition);
+  flex-shrink: 0;
+}
+
+#settings-close:hover,
+#ctx-inspector-close:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
 #settings-layout {
   display: flex;
   flex: 1;
@@ -3496,28 +3723,28 @@ body[data-working] .bokeh {
   border-color: var(--accent);
 }
 
-/* Settings saved indicator — inline in the modal header */
+/* Settings saved indicator — lives in the modal header next to the × button */
 #settings-toast {
-  margin-left: auto;
-  margin-right: 10px;
   font-size: 11px;
-  color: var(--text-dim);
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 4px;
+  padding: 2px 8px;
   pointer-events: none;
   opacity: 1;
   transition: opacity 0.4s ease;
 }
 #settings-toast.hidden {
-  display: none;
-}
-#settings-toast.fade-out {
   opacity: 0;
+  visibility: hidden;
 }
 
 /* ── React sidebar panel scroll ──────────────────────────── */
 
 #sidebar-panel {
   overflow-y: auto;
-  flex: 1;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }

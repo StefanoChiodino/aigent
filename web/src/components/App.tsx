@@ -30,6 +30,7 @@ export function App() {
       <div className="bokeh" aria-hidden="true">
         <span className="b1" /><span className="b2" /><span className="b3" />
         <span className="b4" /><span className="b5" /><span className="b6" />
+        <span className="b7" />
       </div>
       <Header />
       <div id="body">

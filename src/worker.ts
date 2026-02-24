@@ -18,8 +18,8 @@ const SRC_DIR = join(APP_DIR, 'src');
 const SERVER_ENTRY = join(SRC_DIR, 'server.ts');
 const TSCONFIG = join(APP_DIR, 'tsconfig.json');
 
-// Ensure socket directory exists
-const SOCKET_DIR = '/tmp/aigent';
+// Ensure socket directory exists (matches AIGENT_SOCKET_DIR on host)
+const SOCKET_DIR = process.env['AIGENT_SOCKET_DIR'] ?? '/tmp/aigent';
 mkdirSync(SOCKET_DIR, { recursive: true });
 
 // ALL output goes to a log file — NOT to stdout/stderr.

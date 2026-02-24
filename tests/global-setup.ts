@@ -45,6 +45,7 @@ export default async function globalSetup() {
         ...process.env,
         AIGENT_WEB_PORT: String(PORT),
         AIGENT_TEST_MODE: '1',
+        AIGENT_SOCKET_DIR: '/tmp/aigent-test',
       },
       stdio: ['ignore', logFd, logFd],
       detached: false,

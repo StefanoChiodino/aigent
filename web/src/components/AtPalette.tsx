@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AtItem } from '../types';
 
 const STATIC_AT_ITEMS: AtItem[] = [
@@ -82,6 +82,7 @@ export const AtPalette = React.memo(function AtPalette({
             <AtPaletteItem
               key={item.insert}
               item={item}
+              query={query}
               idx={i}
               selected={clampedSelected}
               onSelect={onSelect}
@@ -97,6 +98,7 @@ export const AtPalette = React.memo(function AtPalette({
             <AtPaletteItem
               key={item.insert}
               item={item}
+              query={query}
               idx={staticItems.length + i}
               selected={clampedSelected}
               onSelect={onSelect}
@@ -109,10 +111,41 @@ export const AtPalette = React.memo(function AtPalette({
   );
 });
 
-function AtPaletteItem({ item, idx, selected, onSelect, onComplete }: {
-  item: AtItem; idx: number; selected: number;
+/** Wrap characters in `text` that are part of a fuzzy match for `query` in <mark> spans. */
+function highlightMatch(text: string, query: string): ReactNode {
+  if (!query) return text;
+  const lower = text.toLowerCase();
+  const q = query.toLowerCase();
+  // Find sequential character positions (fuzzy subsequence match)
+  const positions = new Set<number>();
+  let qi = 0;
+  for (let i = 0; i < lower.length && qi < q.length; i++) {
+    if (lower[i] === q[qi]) { positions.add(i); qi++; }
+  }
+  if (positions.size === 0) return text;
+  // Build React node array, grouping consecutive matched/unmatched chars
+  const nodes: ReactNode[] = [];
+  let buf = '';
+  let inMark = false;
+  for (let i = 0; i < text.length; i++) {
+    const matched = positions.has(i);
+    if (matched !== inMark) {
+      if (buf) nodes.push(inMark ? <mark key={i}>{buf}</mark> : buf);
+      buf = '';
+      inMark = matched;
+    }
+    buf += text[i];
+  }
+  if (buf) nodes.push(inMark ? <mark key="end">{buf}</mark> : buf);
+  return <>{nodes}</>;
+}
+
+function AtPaletteItem({ item, query, idx, selected, onSelect, onComplete }: {
+  item: AtItem; query: string; idx: number; selected: number;
   onSelect: (i: number) => void; onComplete: (item: AtItem) => void;
 }) {
+  const displayLabel = item.isFile ? (item.label.split('/').pop() ?? item.label) : item.label;
+  const displayDesc  = item.isFile ? item.label : item.desc;
   return (
     <div
       className={`at-palette-item${idx === selected ? ' selected' : ''}`}
@@ -121,8 +154,8 @@ function AtPaletteItem({ item, idx, selected, onSelect, onComplete }: {
     >
       <span className="at-item-icon">{item.icon}</span>
       <span className="at-item-text">
-        <span className="at-item-label">{item.isFile ? item.label.split('/').pop() : item.label}</span>
-        <span className="at-item-desc">{item.isFile ? item.label : item.desc}</span>
+        <span className="at-item-label">{highlightMatch(displayLabel, query)}</span>
+        <span className="at-item-desc">{item.isFile ? highlightMatch(displayDesc, query) : displayDesc}</span>
       </span>
     </div>
   );

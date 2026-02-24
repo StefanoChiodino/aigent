@@ -8,10 +8,25 @@ export function escapeHtml(s: string): string {
   return div.innerHTML;
 }
 
+/** Wrap @mention tokens outside of code blocks/spans with a chip span. */
+function highlightAtMentions(html: string): string {
+  // Split on code blocks to avoid touching code content
+  const parts = html.split(/(<pre[\s\S]*?<\/pre>|<code[\s\S]*?<\/code>)/g);
+  return parts.map((part, i) => {
+    // Odd-indexed parts are code blocks — leave them alone
+    if (i % 2 === 1) return part;
+    return part.replace(
+      /(@[\w./\-]+)/g,
+      '<span class="at-mention">$1</span>',
+    );
+  }).join('');
+}
+
 export function renderMarkdown(text: string): string {
   try {
     const result = marked.parse(text);
-    return (typeof result === 'string' ? result : '').trim();
+    const html = (typeof result === 'string' ? result : '').trim();
+    return highlightAtMentions(html);
   } catch {
     return escapeHtml(text);
   }

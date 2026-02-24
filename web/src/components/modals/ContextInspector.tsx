@@ -245,15 +245,17 @@ export function ContextInspector() {
       className={ctxInspectorOpen ? '' : 'hidden'}
       onClick={e => { if (e.target === e.currentTarget) setCtxInspectorOpen(false); }}
     >
-      <div className="ctx-inspector">
-        <div className="ctx-inspector-header">
-          <span>Context Inspector</span>
+      <div id="ctx-inspector-modal">
+        <div id="ctx-inspector-header">
+          <span id="ctx-inspector-title">Context Inspector</span>
           <button id="ctx-inspector-close" onClick={() => setCtxInspectorOpen(false)}>×</button>
         </div>
-        {contextBreakdown
-          ? <InspectorBody bd={contextBreakdown} />
-          : <div style={{ padding: 20, color: 'var(--text-dim)' }}>Loading…</div>
-        }
+        <div id="ctx-inspector-body">
+          {contextBreakdown
+            ? <InspectorBody bd={contextBreakdown} />
+            : <div style={{ color: 'var(--text-dim)' }}>Loading…</div>
+          }
+        </div>
       </div>
     </div>
   );

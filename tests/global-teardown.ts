@@ -28,7 +28,18 @@ export default async function globalTeardown() {
   // Kill anything still holding port 3142 (catches stray Docker processes)
   killPort(3142);
 
-  // Clean up any orphaned aigent Docker containers from this test run
+  // Clean up stale Unix sockets left by the test gatekeeper.
+  // Uses the test-specific socket dir so we never touch dev sockets.
+  const TEST_SOCKET_DIR = '/tmp/aigent-test';
+  for (const sock of ['worker.sock', 'host.sock', 'llm-proxy.sock', 'host-daemon.pid']) {
+    const sockPath = `${TEST_SOCKET_DIR}/${sock}`;
+    if (existsSync(sockPath)) {
+      try { unlinkSync(sockPath); } catch { /* ignore */ }
+    }
+  }
+
+  // Clean up any orphaned aigent-test Docker containers from this test run.
+  // Only targets aigent-test-worker containers — never touches dev containers.
   cleanupDockerContainers();
 
   // Brief wait for OS cleanup
@@ -36,11 +47,11 @@ export default async function globalTeardown() {
   console.log('[test-teardown] Done');
 }
 
-/** Remove all aigent-worker Docker containers that may have been orphaned. */
+/** Remove aigent-test-worker Docker containers that may have been orphaned. */
 function cleanupDockerContainers(): void {
   try {
-    // List running aigent-worker containers and remove them
-    spawnSync('sh', ['-c', 'docker ps -q --filter name=aigent-worker | xargs -r docker rm -f'], {
+    // Only target test containers (aigent-test-worker) — never dev containers (aigent-worker).
+    spawnSync('sh', ['-c', 'docker ps -q --filter name=aigent-test-worker | xargs -r docker rm -f'], {
       stdio: 'ignore',
       timeout: 10_000,
     });

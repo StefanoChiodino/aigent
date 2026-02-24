@@ -408,6 +408,10 @@ export async function requestBrowserScreenshot(): Promise<{ ok: boolean; data?: 
     return { ok: false, message: shareResult.message };
   }
 
+  // Small delay so the OS screen-share approval dialog has time to dismiss
+  // before we capture the first frame (otherwise the agent sees the dialog).
+  await new Promise((r) => setTimeout(r, 1500));
+
   // Retry screenshot now that sharing is active
   const retryId = `sc_${++screenshotRequestCounter}`;
   return new Promise((resolve) => {

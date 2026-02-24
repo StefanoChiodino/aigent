@@ -467,20 +467,28 @@ export async function startWebServer(
 
   // --- Start listening ---
 
-  return new Promise((resolvePromise, reject) => {
-    server.on('error', (err) => {
-      if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-        log.warn('Web server port in use', { port: listenPort });
-        // Don't crash — web UI is optional. Just log and resolve.
+  const tryListen = (attemptsLeft: number): Promise<{ port: number }> =>
+    new Promise((resolvePromise, reject) => {
+      const onError = (err: Error) => {
+        if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE' && attemptsLeft > 1) {
+          log.warn('Web server port in use, retrying…', { port: listenPort, attemptsLeft });
+          server.removeListener('error', onError);
+          // Port may still be releasing from the previous tsx-watch process — wait briefly.
+          setTimeout(() => tryListen(attemptsLeft - 1).then(resolvePromise, reject), 500);
+        } else if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+          log.error('Web server port still in use after retries', { port: listenPort });
+          reject(err);
+        } else {
+          reject(err);
+        }
+      };
+      server.once('error', onError);
+      server.listen(listenPort, '0.0.0.0', () => {
+        server.removeListener('error', onError);
+        log.info('Web UI available', { url: `http://localhost:${listenPort}` });
         resolvePromise({ port: listenPort });
-      } else {
-        reject(err);
-      }
+      });
     });
 
-    server.listen(listenPort, '0.0.0.0', () => {
-      log.info('Web UI available', { url: `http://localhost:${listenPort}` });
-      resolvePromise({ port: listenPort });
-    });
-  });
+  return tryListen(6); // up to ~3 seconds of retries
 }

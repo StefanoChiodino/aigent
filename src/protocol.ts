@@ -136,5 +136,6 @@ export type GatekeeperResponse =
 
 // Socket directory — shared mount between host and container.
 // The worker creates its socket here; the gatekeeper connects from the host.
-export const SOCKET_DIR = '/tmp/aigent';
+// Override with AIGENT_SOCKET_DIR to run multiple instances (e.g. dev + tests).
+export const SOCKET_DIR = process.env['AIGENT_SOCKET_DIR'] ?? '/tmp/aigent';
 export const SOCKET_PATH = `${SOCKET_DIR}/worker.sock`;

@@ -12,7 +12,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/ws': { target: 'ws://localhost:3141', ws: true },
+      // /ws is NOT proxied — the frontend connects directly to the backend
+      // WebSocket to avoid ECONNREFUSED noise during tsx-watch restarts.
       '/tts': 'http://localhost:3141',
       '/stt': 'http://localhost:3141',
       '/settings': 'http://localhost:3141',

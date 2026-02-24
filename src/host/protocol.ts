@@ -78,4 +78,6 @@ export interface CapabilityProvider {
 
 // Default socket path — inside the shared socket directory so it's
 // automatically available in the container via the existing volume mount.
-export const HOST_SOCKET_PATH = '/tmp/aigent/host.sock';
+// Derives from AIGENT_SOCKET_DIR so test instances don't collide with dev.
+import { SOCKET_DIR } from '../protocol.js';
+export const HOST_SOCKET_PATH = `${SOCKET_DIR}/host.sock`;

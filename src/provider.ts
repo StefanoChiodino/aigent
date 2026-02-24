@@ -298,15 +298,24 @@ export class AnthropicProvider implements Provider {
       }
     }
 
-    // Add cache_control to the last N user messages with array content.
+    // Add cache_control to the last N user messages.
     // Anthropic allows at most 4 cache_control blocks per request.
     // Non-OAuth uses 2 (system base + tools), leaving 2 for messages.
     // OAuth adds a 3rd system block (identity prefix), leaving only 1 for messages.
+    // String-content user messages are promoted to array form so they can receive cache_control.
     const maxMessageBreakpoints = this.isOAuth ? 1 : 2;
     let breakpointsAdded = 0;
     for (let i = result.length - 1; i >= 0 && breakpointsAdded < maxMessageBreakpoints; i--) {
       const msg = result[i]!;
-      if (msg.role === 'user' && Array.isArray(msg.content) && msg.content.length > 0) {
+      if (msg.role !== 'user') continue;
+
+      if (typeof msg.content === 'string') {
+        // Promote to array so we can attach cache_control
+        (msg as unknown as { content: Anthropic.ContentBlockParam[] }).content = [
+          { type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } },
+        ];
+        breakpointsAdded++;
+      } else if (Array.isArray(msg.content) && msg.content.length > 0) {
         const lastBlock = msg.content[msg.content.length - 1] as unknown as Record<string, unknown>;
         lastBlock['cache_control'] = { type: 'ephemeral' };
         breakpointsAdded++;

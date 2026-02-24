@@ -3,6 +3,7 @@ import { useConnectionStore } from '../stores/connection';
 import { useChatStore } from '../stores/chat';
 import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
+import { useSettingsStore } from '../stores/settings';
 import type { MountInfo, BackgroundTaskInfo } from '../types';
 
 function modelDisplayName(id: string): string {
@@ -113,6 +114,8 @@ export function Sidebar() {
   const modelPickerOpen = useUIStore(s => s.modelPickerOpen);
   const setModelPickerOpen = useUIStore(s => s.setModelPickerOpen);
 
+  const setClientSetting = useSettingsStore(s => s.setClientSetting);
+
   const ttsAutoSpeak = useVoiceStore(s => s.ttsAutoSpeak);
   const ttsRatePct = useVoiceStore(s => s.ttsRatePct);
   const setTtsAutoSpeak = useVoiceStore(s => s.setTtsAutoSpeak);
@@ -152,6 +155,19 @@ export function Sidebar() {
     <aside id="sidebar">
       <div id="sidebar-panel">
 
+        {/* Tasks */}
+        <div className="sidebar-section" id="sb-tasks-section">
+          <div className="sidebar-label">Tasks</div>
+          <div id="sb-tasks-list">
+            {tasks.length === 0
+              ? <span className="sidebar-value" style={{ fontSize: 11 }}>none</span>
+              : [...tasks].reverse().map(t => (
+                  <TaskItem key={t.id} task={t} onOpen={() => setTaskResultTask(t)} />
+                ))
+            }
+          </div>
+        </div>
+
         {/* Model picker */}
         <div className="sidebar-section sb-model-section" ref={modelPickerRef}>
           <div className="sidebar-label">Model</div>
@@ -170,7 +186,10 @@ export function Sidebar() {
                 className={`sb-model-option${mid === modelName ? ' active' : ''}`}
                 title={mid}
                 onClick={() => {
-                  if (mid !== modelName) send({ type: 'message', content: `/model ${mid}` });
+                  if (mid !== modelName) {
+                    send({ type: 'message', content: `/model ${mid}` });
+                    setClientSetting('AIGENT_MODEL', mid);
+                  }
                   setModelPickerOpen(false);
                 }}
               >
@@ -188,7 +207,11 @@ export function Sidebar() {
             <button
               id="sb-reasoning-toggle"
               className={`sb-toggle${reasoningOn ? ' on' : ''}`}
-              onClick={() => send({ type: 'message', content: reasoningOn ? '/reasoning off' : '/reasoning on' })}
+              onClick={() => {
+                const nextOff = reasoningOn;
+                send({ type: 'message', content: nextOff ? '/reasoning off' : '/reasoning on' });
+                setClientSetting('AIGENT_THINKING', nextOff ? 'off' : (lastEffortLevel || 'high'));
+              }}
             >
               {reasoningOn ? 'ON' : 'OFF'}
             </button>
@@ -199,7 +222,10 @@ export function Sidebar() {
                 key={level}
                 className={`sb-pill${activeLevel === level ? ' active' : ''}`}
                 data-level={level}
-                onClick={() => send({ type: 'message', content: `/effort ${level}` })}
+                onClick={() => {
+                  send({ type: 'message', content: `/effort ${level}` });
+                  setClientSetting('AIGENT_THINKING', level);
+                }}
               >
                 {level}
               </button>
@@ -215,9 +241,9 @@ export function Sidebar() {
           onClick={openCtxInspector}
         >
           <div className="sidebar-label">Context <span className="ctx-open-hint">›</span></div>
-          <div style={{ position: 'relative', width: '100%', height: 18, background: 'var(--bg-raised)', borderRadius: 9, overflow: 'hidden', marginBottom: 4 }}>
-            <div id="sb-ctx-fill" style={{ height: '100%', width: `${ctxPct}%`, background: ctxColor, borderRadius: 9, transition: 'width 0.4s ease', opacity: 0.6 }} />
-            <div id="sb-ctx-label" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, color: 'var(--text)', letterSpacing: '0.3px' }}>{tokStr}</div>
+          <div className="sb-ctx-bar">
+            <div id="sb-ctx-fill" style={{ width: `${ctxPct}%`, background: ctxColor }} />
+            <div id="sb-ctx-label">{tokStr}</div>
           </div>
           <div id="sb-ctx-tokens" className="sidebar-value" style={{ fontSize: 11, marginBottom: 2 }}>{ctxUsed > 0 ? `${tokStr} / 200k` : '--'}</div>
           <div id="sb-cost-value" className="sidebar-value" style={{ fontSize: 11 }}>
@@ -260,7 +286,11 @@ export function Sidebar() {
             <button
               id="sb-concise-toggle"
               className={`sb-toggle${conciseMode ? ' on' : ''}`}
-              onClick={() => send({ type: 'message', content: conciseMode ? '/concise off' : '/concise on' })}
+              onClick={() => {
+                const next = !conciseMode;
+                send({ type: 'message', content: next ? '/concise on' : '/concise off' });
+                setClientSetting('AIGENT_CONCISE', next);
+              }}
             >
               {conciseMode ? 'ON' : 'OFF'}
             </button>
@@ -298,18 +328,6 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Tasks */}
-        <div className="sidebar-section" id="sb-tasks-section">
-          <div className="sidebar-label">Tasks</div>
-          <div id="sb-tasks-list">
-            {tasks.length === 0
-              ? <span className="sidebar-value" style={{ fontSize: 11 }}>none</span>
-              : [...tasks].reverse().map(t => (
-                  <TaskItem key={t.id} task={t} onOpen={() => setTaskResultTask(t)} />
-                ))
-            }
-          </div>
-        </div>
 
       </div>
     </aside>
