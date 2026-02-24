@@ -14,6 +14,8 @@ export type DemoStep =
   | { action: 'add_attachment'; attachment: PendingAttachment }
   | { action: 'clear_attachments' }
   | { action: 'set_tts_auto'; on: boolean }
+  | { action: 'set_concise'; on: boolean }
+  | { action: 'play_audio'; src: string }
   | { action: 'click'; selector: string }
   | { action: 'loop' };
 

@@ -114,14 +114,8 @@ const RESPONSE_2 =
   '- Returns `{ error: "Too many requests" }` when limit exceeded\n\n' +
   'All existing tests pass. Run `npm test` to verify the new tests as well.';
 
-const THINKING_3 =
-  'The user is showing me a screenshot of the health check response in their terminal. ' +
-  'Let me look at the output to confirm the endpoint is functioning correctly with rate limiting headers.';
-
 const RESPONSE_3 =
-  'The screenshot confirms everything is working. The health endpoint returns a clean JSON ' +
-  'response with `status: "ok"` and the uptime value. I can also see the rate limiting headers ' +
-  'are active — `X-RateLimit-Limit` is set to 30 per minute. Your API is ready for production monitoring!';
+  'Health endpoint looks good — status ok, uptime reporting correctly, rate limit headers active at 30/min. Ready for production.';
 
 // Fake terminal screenshot (SVG data URL — shows a mini terminal with curl output)
 const SCREENSHOT_DATA_URL =
@@ -577,13 +571,14 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'close_modal', modal: 'context' },
 
     // ════════════════════════════════════════════════════════════════════════
-    //  PHASE 6: Voice input, screenshot attachment, TTS output
+    //  PHASE 6: Concise/voice mode — STT, screenshot, TTS audio playback
     // ════════════════════════════════════════════════════════════════════════
 
     wait(2000),
 
-    // Enable TTS auto-speak so the response will be read aloud
-    { action: 'set_tts_auto', on: true },
+    // Toggle concise mode ON in the sidebar
+    { action: 'set_concise', on: true },
+    wait(1000),
 
     // Simulate STT: mic starts recording
     { action: 'set_mic', state: 'recording', vadActive: false },
@@ -591,20 +586,20 @@ export const DEMO_SCENARIO: DemoScenario = {
 
     // VAD detects speech
     { action: 'set_mic', state: 'recording', vadActive: true },
-    wait(2500),
+    wait(2000),
 
-    // Speech ends, VAD goes quiet
+    // Speech ends
     { action: 'set_mic', state: 'recording', vadActive: false },
     wait(400),
 
     // Transcription in progress
     { action: 'set_mic', state: 'transcribing' },
-    wait(1200),
+    wait(1000),
 
     // Transcription complete — text appears in input
     { action: 'set_mic', state: 'idle' },
-    { action: 'type_input', text: 'Check this screenshot — does the endpoint look right?', charDelayMs: 30 },
-    wait(600),
+    { action: 'type_input', text: 'Does the endpoint look right?', charDelayMs: 30 },
+    wait(400),
 
     // Attach a fake screenshot
     {
@@ -618,9 +613,9 @@ export const DEMO_SCENARIO: DemoScenario = {
         size: 24_576,
       },
     },
-    wait(1200),
+    wait(1000),
 
-    // Submit the voice message + screenshot
+    // Submit
     { action: 'submit_input' },
     { action: 'clear_attachments' },
 
@@ -628,22 +623,18 @@ export const DEMO_SCENARIO: DemoScenario = {
       type: 'message',
       message: {
         role: 'user',
-        content: 'Check this screenshot — does the endpoint look right?\n\n[Attached: terminal-output.png]',
+        content: 'Does the endpoint look right?\n\n[Attached: terminal-output.png]',
         timestamp: new Date().toISOString(),
       },
     }),
 
     emit({ type: 'loading', isLoading: true }),
-    wait(300),
+    wait(400),
 
-    // Thinking
-    { action: 'stream_thinking', text: THINKING_3, chunkSize: 8, intervalMs: 30 },
-    wait(300),
+    // Short concise-mode response (no extended thinking in concise mode)
+    { action: 'stream_text', text: RESPONSE_3, chunkSize: 8, intervalMs: 25 },
 
-    // Streaming response (TTS auto-speak will read this aloud via SpeechSynthesis)
-    { action: 'stream_text', text: RESPONSE_3, chunkSize: 5, intervalMs: 30 },
-
-    // Finalize third exchange
+    // Finalize
     wait(200),
     emit({
       type: 'message',
@@ -651,26 +642,30 @@ export const DEMO_SCENARIO: DemoScenario = {
         role: 'assistant',
         content: RESPONSE_3,
         timestamp: new Date().toISOString(),
-        elapsed: 3.1,
+        elapsed: 1.4,
       },
     }),
     emit({ type: 'loading', isLoading: false }),
+
+    // Play pre-recorded TTS audio (waits until playback finishes)
+    // Drop your audio file at web/public/demo/response.mp3
+    { action: 'play_audio', src: './demo/response.mp3' },
 
     // Usage update (accumulated)
     emit({
       type: 'usage',
       usage: {
         input: 34200,
-        output: 5080,
+        output: 4920,
         cacheRead: 22400,
         cacheWrite: 11800,
-        cost: 0.118,
-        contextTokens: 39280,
+        cost: 0.112,
+        contextTokens: 39100,
       },
     }),
 
-    // Disable TTS for clean loop reset
-    { action: 'set_tts_auto', on: false },
+    // Disable concise mode for clean loop reset
+    { action: 'set_concise', on: false },
 
     // ════════════════════════════════════════════════════════════════════════
     //  PHASE 7: Loop

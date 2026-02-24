@@ -13,6 +13,7 @@ export class DemoPlaybackEngine {
   private scenario: DemoScenario;
   private mockWs: MockWebSocket;
   private aborted = false;
+  private currentAudio: HTMLAudioElement | null = null;
 
   constructor(scenario: DemoScenario, mockWs: MockWebSocket) {
     this.scenario = scenario;
@@ -86,6 +87,14 @@ export class DemoPlaybackEngine {
         useVoiceStore.getState().setTtsAutoSpeak(step.on);
         break;
 
+      case 'set_concise':
+        useUIStore.getState().setConciseMode(step.on);
+        break;
+
+      case 'play_audio':
+        await this.playAudio(step.src);
+        break;
+
       case 'click': {
         const el = document.querySelector(step.selector) as HTMLElement | null;
         if (el) el.click();
@@ -153,6 +162,23 @@ export class DemoPlaybackEngine {
     }
   }
 
+  /** Play a pre-recorded audio file, setting ttsPlaying during playback */
+  private async playAudio(src: string): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const audio = new Audio(src);
+      this.currentAudio = audio;
+      useVoiceStore.getState().setTtsPlaying(true);
+      const done = () => {
+        this.currentAudio = null;
+        useVoiceStore.getState().setTtsPlaying(false);
+        resolve();
+      };
+      audio.onended = done;
+      audio.onerror = done;
+      void audio.play().catch(done);
+    });
+  }
+
   /** Directly dequeue the top permission request from the UI store */
   private autoApprovePermission(): void {
     const { permQueue } = useUIStore.getState();
@@ -181,6 +207,8 @@ export class DemoPlaybackEngine {
     useVoiceStore.getState().setVadActive(false);
     useVoiceStore.getState().setTtsAutoSpeak(false);
     useVoiceStore.getState().setTtsPlaying(false);
+    useUIStore.getState().setConciseMode(false);
+    if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
     speechSynthesis.cancel();
 
     // Fade back in

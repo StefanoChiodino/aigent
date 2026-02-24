@@ -1,7 +1,7 @@
-import { useRef, useCallback } from 'react';
+import { useCallback } from 'react';
 import { useVoiceStore } from '../stores/voice';
 import { isDemo } from '../demo/useDemoMode';
-import { stripMarkdownForTTS, extractSpeakContent } from '../lib/markdown';
+import { stripMarkdownForTTS } from '../lib/markdown';
 import { useChatStore } from '../stores/chat';
 
 interface TTSControls {
@@ -10,61 +10,61 @@ interface TTSControls {
   stopStream: () => void;
   enqueueChunk: (text: string) => void;
   flushStream: (final?: boolean) => void;
-  ttsStreamLastLen: React.MutableRefObject<number>;
+  ttsStreamLastLen: { current: number };
 }
 
-export function useTTS(): TTSControls {
-  const ttsAudio = useRef<HTMLAudioElement | null>(null);
-  const ttsAbortCtrl = useRef<AbortController | null>(null);
-  const ttsChunkQueue = useRef<Array<Promise<string>>>([]);
-  const ttsChunkPlaying = useRef(false);
-  const ttsStreamFetchCtrls = useRef<AbortController[]>([]);
-  const ttsStreamLastLen = useRef(0);
+// Module-level singletons so all useTTS() instances share the same audio state.
+// Without this, App.tsx's flushStream starts audio on one set of refs while
+// InputArea.tsx's stopAll tries to stop a different (empty) set.
+let ttsAudio: HTMLAudioElement | null = null;
+let ttsAbortCtrl: AbortController | null = null;
+let ttsChunkQueue: Array<Promise<string>> = [];
+let ttsChunkPlaying = false;
+let ttsStreamFetchCtrls: AbortController[] = [];
+const ttsStreamLastLen = { current: 0 };
 
+export function useTTS(): TTSControls {
   const getRatePct = () => useVoiceStore.getState().ttsRatePct;
   const getAutoSpeak = () => useVoiceStore.getState().ttsAutoSpeak;
-  const getConcise = () => useChatStore.getState().streaming.active
-    ? useChatStore.getState().streaming.active
-    : false;
 
   const stopStream = useCallback((): void => {
-    for (const ctrl of ttsStreamFetchCtrls.current) ctrl.abort();
-    ttsStreamFetchCtrls.current = [];
-    ttsChunkQueue.current = [];
-    ttsChunkPlaying.current = false;
+    for (const ctrl of ttsStreamFetchCtrls) ctrl.abort();
+    ttsStreamFetchCtrls = [];
+    ttsChunkQueue = [];
+    ttsChunkPlaying = false;
     ttsStreamLastLen.current = 0;
-    if (ttsAudio.current) { ttsAudio.current.pause(); ttsAudio.current = null; }
+    if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
     if (isDemo()) speechSynthesis.cancel();
     useVoiceStore.getState().setTtsPlaying(false);
   }, []);
 
   const stopAll = useCallback((): void => {
     stopStream();
-    ttsAbortCtrl.current?.abort();
-    ttsAbortCtrl.current = null;
-    if (ttsAudio.current) { ttsAudio.current.pause(); ttsAudio.current = null; }
+    ttsAbortCtrl?.abort();
+    ttsAbortCtrl = null;
+    if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
     if (isDemo()) speechSynthesis.cancel();
   }, [stopStream]);
 
   const drainQueue = useCallback(async (): Promise<void> => {
-    ttsChunkPlaying.current = true;
+    ttsChunkPlaying = true;
     useVoiceStore.getState().setTtsPlaying(true);
-    while (ttsChunkQueue.current.length > 0) {
-      const p = ttsChunkQueue.current.shift()!;
+    while (ttsChunkQueue.length > 0) {
+      const p = ttsChunkQueue.shift()!;
       let blobUrl: string;
       try { blobUrl = await p; } catch { continue; }
-      if (!ttsChunkPlaying.current) { URL.revokeObjectURL(blobUrl); break; }
+      if (!ttsChunkPlaying) { URL.revokeObjectURL(blobUrl); break; }
       await new Promise<void>((resolve) => {
         const audio = new Audio(blobUrl);
-        ttsAudio.current = audio;
-        const cleanup = () => { URL.revokeObjectURL(blobUrl); ttsAudio.current = null; resolve(); };
+        ttsAudio = audio;
+        const cleanup = () => { URL.revokeObjectURL(blobUrl); ttsAudio = null; resolve(); };
         audio.onended = cleanup;
         audio.onerror = cleanup;
         void audio.play().catch(cleanup);
       });
-      if (!ttsChunkPlaying.current) break;
+      if (!ttsChunkPlaying) break;
     }
-    ttsChunkPlaying.current = false;
+    ttsChunkPlaying = false;
     useVoiceStore.getState().setTtsPlaying(false);
   }, []);
 
@@ -86,7 +86,7 @@ export function useTTS(): TTSControls {
     const ratePct = getRatePct();
     const rateStr = ratePct >= 0 ? `+${ratePct}%` : `${ratePct}%`;
     const ctrl = new AbortController();
-    ttsStreamFetchCtrls.current.push(ctrl);
+    ttsStreamFetchCtrls.push(ctrl);
     const p = fetch(`/tts?rate=${encodeURIComponent(rateStr)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -96,14 +96,13 @@ export function useTTS(): TTSControls {
       if (!r.ok) throw new Error('tts error');
       return URL.createObjectURL(await r.blob());
     });
-    ttsChunkQueue.current.push(p);
-    if (!ttsChunkPlaying.current) void drainQueue();
+    ttsChunkQueue.push(p);
+    if (!ttsChunkPlaying) void drainQueue();
   }, [drainQueue]);
 
   const flushStream = useCallback((final = false): void => {
     if (!getAutoSpeak()) return;
     const streamText = useChatStore.getState().streaming.text;
-    const conciseMode = useVoiceStore.getState().ttsAutoSpeak; // reuse concise from chat store if needed
 
     const unspoken = streamText.slice(ttsStreamLastLen.current);
     if (!unspoken) return;
@@ -145,7 +144,7 @@ export function useTTS(): TTSControls {
     const ratePct = getRatePct();
     const rateStr = ratePct >= 0 ? `+${ratePct}%` : `${ratePct}%`;
     const ctrl = new AbortController();
-    ttsAbortCtrl.current = ctrl;
+    ttsAbortCtrl = ctrl;
 
     fetch(`/tts?rate=${encodeURIComponent(rateStr)}`, {
       method: 'POST',
@@ -156,19 +155,19 @@ export function useTTS(): TTSControls {
       if (!resp.ok) throw new Error('TTS unavailable');
       const blob = await resp.blob();
       const blobUrl = URL.createObjectURL(blob);
-      if (ttsAbortCtrl.current !== ctrl) { URL.revokeObjectURL(blobUrl); return; }
+      if (ttsAbortCtrl !== ctrl) { URL.revokeObjectURL(blobUrl); return; }
       const audio = new Audio(blobUrl);
-      ttsAudio.current = audio;
+      ttsAudio = audio;
       audio.onended = () => {
         URL.revokeObjectURL(blobUrl);
-        ttsAudio.current = null;
-        if (ttsAbortCtrl.current === ctrl) ttsAbortCtrl.current = null;
+        ttsAudio = null;
+        if (ttsAbortCtrl === ctrl) ttsAbortCtrl = null;
         onDone?.();
       };
       void audio.play();
     }).catch((err: unknown) => {
       if (err instanceof Error && err.name === 'AbortError') return;
-      if (ttsAbortCtrl.current === ctrl) ttsAbortCtrl.current = null;
+      if (ttsAbortCtrl === ctrl) ttsAbortCtrl = null;
     });
   }, [stopAll]);
 
