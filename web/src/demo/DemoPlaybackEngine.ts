@@ -2,6 +2,7 @@ import type { DemoStep, DemoScenario } from './types';
 import type { MockWebSocket } from './MockWebSocket';
 import { useUIStore } from '../stores/ui';
 import { useChatStore } from '../stores/chat';
+import { useVoiceStore } from '../stores/voice';
 
 /**
  * Walks through a DemoScenario step-by-step, emitting ServerEvents
@@ -60,10 +61,44 @@ export class DemoPlaybackEngine {
         await this.streamThinking(step.text, step.chunkSize, step.intervalMs);
         break;
 
+      case 'open_modal':
+        this.setModal(step.modal, true);
+        break;
+
+      case 'close_modal':
+        this.setModal(step.modal, false);
+        break;
+
+      case 'set_mic':
+        useVoiceStore.getState().setMicState(step.state);
+        if (step.vadActive !== undefined) useVoiceStore.getState().setVadActive(step.vadActive);
+        break;
+
+      case 'add_attachment':
+        useUIStore.getState().addAttachment(step.attachment);
+        break;
+
+      case 'clear_attachments':
+        useUIStore.getState().clearAttachments();
+        break;
+
+      case 'set_tts_auto':
+        useVoiceStore.getState().setTtsAutoSpeak(step.on);
+        break;
+
       case 'loop':
         await this.loopReset();
         if (!this.aborted) await this.play();
         break;
+    }
+  }
+
+  private setModal(modal: 'settings' | 'shortcuts' | 'context', open: boolean): void {
+    const ui = useUIStore.getState();
+    switch (modal) {
+      case 'settings': ui.setSettingsOpen(open); break;
+      case 'shortcuts': ui.setShortcutsOpen(open); break;
+      case 'context': ui.setCtxInspectorOpen(open); break;
     }
   }
 
@@ -130,7 +165,17 @@ export class DemoPlaybackEngine {
     useChatStore.getState().clearMessages();
     useChatStore.getState().setUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     useChatStore.getState().endStream();
-    useUIStore.setState({ permQueue: [], permShowing: false });
+    useChatStore.getState().setTasks([]);
+    useUIStore.setState({
+      permQueue: [], permShowing: false,
+      settingsOpen: false, shortcutsOpen: false, ctxInspectorOpen: false,
+      pendingAttachments: [],
+    });
+    useVoiceStore.getState().setMicState('idle');
+    useVoiceStore.getState().setVadActive(false);
+    useVoiceStore.getState().setTtsAutoSpeak(false);
+    useVoiceStore.getState().setTtsPlaying(false);
+    speechSynthesis.cancel();
 
     // Fade back in
     document.getElementById('app')?.classList.remove('demo-fade');

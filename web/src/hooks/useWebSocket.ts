@@ -312,18 +312,20 @@ export function useWebSocket(): void {
 
       ws.onclose = () => {
         if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
-        // Only clear the store's ws ref if THIS ws is still the current one.
+        // Only clear the store if THIS ws is still the active connection.
         // In React StrictMode, the old ws's onclose fires AFTER the remount
         // has already stored a new ws — clearing it would wipe the new connection.
-        if (wsRef.current === ws) {
+        // Check the global store (not the local ref) since each hook instance
+        // has its own wsRef but they all share the same zustand store.
+        if (conn().ws === ws) {
           conn().setWs(null);
           wsRef.current = null;
-        }
-        chat().endStream();
-        // Only reconnect if this WebSocket wasn't intentionally closed by cleanup.
-        if (!closedIntentionally.current.has(ws)) {
-          conn().setStatus('reconnecting');
-          scheduleReconnect();
+          chat().endStream();
+          // Only reconnect if this WebSocket wasn't intentionally closed by cleanup.
+          if (!closedIntentionally.current.has(ws)) {
+            conn().setStatus('reconnecting');
+            scheduleReconnect();
+          }
         }
       };
 

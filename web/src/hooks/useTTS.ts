@@ -1,5 +1,6 @@
 import { useRef, useCallback } from 'react';
 import { useVoiceStore } from '../stores/voice';
+import { isDemo } from '../demo/useDemoMode';
 import { stripMarkdownForTTS, extractSpeakContent } from '../lib/markdown';
 import { useChatStore } from '../stores/chat';
 
@@ -33,6 +34,7 @@ export function useTTS(): TTSControls {
     ttsChunkPlaying.current = false;
     ttsStreamLastLen.current = 0;
     if (ttsAudio.current) { ttsAudio.current.pause(); ttsAudio.current = null; }
+    if (isDemo()) speechSynthesis.cancel();
     useVoiceStore.getState().setTtsPlaying(false);
   }, []);
 
@@ -41,6 +43,7 @@ export function useTTS(): TTSControls {
     ttsAbortCtrl.current?.abort();
     ttsAbortCtrl.current = null;
     if (ttsAudio.current) { ttsAudio.current.pause(); ttsAudio.current = null; }
+    if (isDemo()) speechSynthesis.cancel();
   }, [stopStream]);
 
   const drainQueue = useCallback(async (): Promise<void> => {
@@ -68,6 +71,18 @@ export function useTTS(): TTSControls {
   const enqueueChunk = useCallback((text: string): void => {
     const stripped = stripMarkdownForTTS(text);
     if (!stripped.trim()) return;
+
+    // Demo mode: use browser SpeechSynthesis (no server needed)
+    if (isDemo()) {
+      const utterance = new SpeechSynthesisUtterance(stripped);
+      utterance.rate = 1 + getRatePct() / 100;
+      utterance.onstart = () => useVoiceStore.getState().setTtsPlaying(true);
+      utterance.onend = () => useVoiceStore.getState().setTtsPlaying(false);
+      utterance.onerror = () => useVoiceStore.getState().setTtsPlaying(false);
+      speechSynthesis.speak(utterance);
+      return;
+    }
+
     const ratePct = getRatePct();
     const rateStr = ratePct >= 0 ? `+${ratePct}%` : `${ratePct}%`;
     const ctrl = new AbortController();
@@ -115,6 +130,18 @@ export function useTTS(): TTSControls {
     stopAll();
 
     const stripped = stripMarkdownForTTS(text);
+
+    // Demo mode: use browser SpeechSynthesis
+    if (isDemo()) {
+      const utterance = new SpeechSynthesisUtterance(stripped);
+      utterance.rate = 1 + getRatePct() / 100;
+      utterance.onstart = () => useVoiceStore.getState().setTtsPlaying(true);
+      utterance.onend = () => { useVoiceStore.getState().setTtsPlaying(false); onDone?.(); };
+      utterance.onerror = () => { useVoiceStore.getState().setTtsPlaying(false); onDone?.(); };
+      speechSynthesis.speak(utterance);
+      return;
+    }
+
     const ratePct = getRatePct();
     const rateStr = ratePct >= 0 ? `+${ratePct}%` : `${ratePct}%`;
     const ctrl = new AbortController();

@@ -1147,10 +1147,14 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
+  min-width: 0;
 }
 
 #sb-tts-rate {
   flex: 1;
+  min-width: 0;
+  width: 0;
   -webkit-appearance: none;
   appearance: none;
   height: 3px;
@@ -3912,18 +3916,20 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 body[data-demo]::after {
   content: 'DEMO';
   position: fixed;
-  top: 12px;
-  right: 12px;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 9999;
-  padding: 4px 12px;
+  padding: 6px 24px;
   background: var(--accent);
   color: #fff;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
+  border-radius: var(--radius);
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 1px;
-  opacity: 0.8;
+  letter-spacing: 2px;
+  opacity: 0.85;
   pointer-events: none;
+  box-shadow: 0 2px 12px rgba(124, 108, 240, 0.4);
 }
 
 #app.demo-fade {

@@ -44,6 +44,11 @@ import '../style.css';
 // Expose UI store for attachment preview tests
 (window as Record<string, unknown>).__zustand_ui = useUIStore;
 
+// Expose chat message clearing for permission routing tests
+(window as Record<string, unknown>).__testClearMessages = () => {
+  useChatStore.getState().clearMessages();
+};
+
 const rootEl = document.getElementById('root')!;
 createRoot(rootEl).render(
   <React.StrictMode>

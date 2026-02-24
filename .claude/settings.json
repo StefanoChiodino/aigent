@@ -24,7 +24,9 @@
       "Bash(ss:*)",
       "Bash(AIGENT_WEB_PORT=3142 AIGENT_TEST_MODE=1 AIGENT_SOCKET_DIR=/tmp/aigent-test npx tsx:*)",
       "Bash(AIGENT_WEB_PORT=3142 AIGENT_TEST_MODE=1 AIGENT_SOCKET_DIR=/tmp/aigent-test timeout 15 node:*)",
-      "Bash(tee:*)"
+      "Bash(tee:*)",
+      "Bash(npx vitest run:*)",
+      "Bash(npx vitest:*)"
     ]
   }
 }

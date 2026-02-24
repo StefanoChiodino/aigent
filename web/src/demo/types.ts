@@ -1,4 +1,4 @@
-import type { ServerEvent } from '../types';
+import type { ServerEvent, PendingAttachment } from '../types';
 
 export type DemoStep =
   | { action: 'wait'; ms: number }
@@ -8,6 +8,12 @@ export type DemoStep =
   | { action: 'auto_approve'; delayMs: number }
   | { action: 'stream_text'; text: string; chunkSize: number; intervalMs: number }
   | { action: 'stream_thinking'; text: string; chunkSize: number; intervalMs: number }
+  | { action: 'open_modal'; modal: 'settings' | 'shortcuts' | 'context' }
+  | { action: 'close_modal'; modal: 'settings' | 'shortcuts' | 'context' }
+  | { action: 'set_mic'; state: 'idle' | 'recording' | 'transcribing'; vadActive?: boolean }
+  | { action: 'add_attachment'; attachment: PendingAttachment }
+  | { action: 'clear_attachments' }
+  | { action: 'set_tts_auto'; on: boolean }
   | { action: 'loop' };
 
 export interface DemoScenario {

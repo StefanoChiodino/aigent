@@ -1,6 +1,9 @@
 import type { DemoScenario } from './types';
+import type { ServerEvent } from '../types';
 
-const RESPONSE_TEXT =
+// ── Text constants ──────────────────────────────────────────────────────────
+
+const RESPONSE_1 =
   "I've added a health check endpoint to your server. Here's what I did:\n\n" +
   '1. **Read** `src/config.ts` to understand the existing route structure\n' +
   '2. **Searched** for route registration patterns across the codebase\n' +
@@ -8,7 +11,7 @@ const RESPONSE_TEXT =
   'The endpoint is now available at `GET /health` and will return the server\'s ' +
   'uptime in seconds. You can use this for load balancer health checks or monitoring.';
 
-const THINKING_TEXT =
+const THINKING_1 =
   'The user wants me to read their config file first, then add a health check endpoint. ' +
   "Let me start by reading the existing configuration to understand the project structure. " +
   "I should look at how routes are registered so I can add the endpoint in the right place.\n\n" +
@@ -32,7 +35,7 @@ const GREP_RESULT =
   'src/server.ts:12: app.use(config.routes.api, apiRouter);\n' +
   'src/server.ts:13: app.use(config.routes.docs, docsRouter);';
 
-const PATCH_DIFF =
+const PATCH_1 =
   '--- a/src/server.ts\n' +
   '+++ b/src/server.ts\n' +
   '@@ -11,6 +11,11 @@\n' +
@@ -47,158 +50,488 @@ const PATCH_DIFF =
   ' \n' +
   ' app.listen(config.port, config.host, () => {';
 
+const THINKING_2 =
+  'The user wants me to write tests and also set up rate limiting on the health endpoint. ' +
+  'Let me think about this:\n\n' +
+  '1. First I\'ll check if there\'s a test framework already configured\n' +
+  '2. Write a test for the /health endpoint\n' +
+  '3. Add rate limiting middleware\n\n' +
+  'I should also run the existing tests to make sure nothing is broken. Let me start by ' +
+  'checking the test setup, then write the new test file, and finally add the rate limiter.';
+
+const TEST_FILE =
+  "import { describe, it, expect } from 'vitest';\n" +
+  "import request from 'supertest';\n" +
+  "import { app } from '../server';\n" +
+  '\n' +
+  "describe('/health', () => {\n" +
+  "  it('returns 200 with status ok', async () => {\n" +
+  "    const res = await request(app).get('/health');\n" +
+  '    expect(res.status).toBe(200);\n' +
+  "    expect(res.body.status).toBe('ok');\n" +
+  "    expect(res.body.uptime).toBeGreaterThan(0);\n" +
+  '  });\n' +
+  '\n' +
+  "  it('responds within 50ms', async () => {\n" +
+  '    const start = Date.now();\n' +
+  "    await request(app).get('/health');\n" +
+  '    expect(Date.now() - start).toBeLessThan(50);\n' +
+  '  });\n' +
+  '});';
+
+const PATCH_2 =
+  '--- a/src/server.ts\n' +
+  '+++ b/src/server.ts\n' +
+  '@@ -1,5 +1,6 @@\n' +
+  " import express from 'express';\n" +
+  " import { config } from './config';\n" +
+  "+import rateLimit from 'express-rate-limit';\n" +
+  ' \n' +
+  ' const app = express();\n' +
+  '@@ -14,7 +15,12 @@\n' +
+  ' \n' +
+  ' // Health check endpoint\n' +
+  '-app.get("/health", (_req, res) => {\n' +
+  '+const healthLimiter = rateLimit({\n' +
+  '+  windowMs: 60 * 1000,\n' +
+  '+  max: 30,\n' +
+  "+  message: { error: 'Too many requests' },\n" +
+  '+});\n' +
+  '+\n' +
+  '+app.get("/health", healthLimiter, (_req, res) => {\n' +
+  '   res.json({ status: "ok", uptime: process.uptime() });\n' +
+  ' });';
+
+const RESPONSE_2 =
+  "Done! I've added tests and rate limiting for the health endpoint:\n\n" +
+  '### Tests (`src/__tests__/health.test.ts`)\n' +
+  '- Verifies the endpoint returns `200` with `{ status: "ok" }`\n' +
+  '- Checks that uptime is a positive number\n' +
+  '- Asserts response time is under 50ms\n\n' +
+  '### Rate limiting\n' +
+  '- Added `express-rate-limit` middleware to `/health`\n' +
+  '- **30 requests per minute** per IP — prevents abuse while allowing monitoring\n' +
+  '- Returns `{ error: "Too many requests" }` when limit exceeded\n\n' +
+  'All existing tests pass. Run `npm test` to verify the new tests as well.';
+
+// ── Helper to build emit steps more concisely ──────────────────────────────
+
+function emit(event: ServerEvent): { action: 'emit'; event: ServerEvent } {
+  return { action: 'emit' as const, event };
+}
+
+function wait(ms: number): { action: 'wait'; ms: number } {
+  return { action: 'wait' as const, ms };
+}
+
+// ── Scenario ────────────────────────────────────────────────────────────────
+
 export const DEMO_SCENARIO: DemoScenario = {
   name: 'aigent showcase',
   steps: [
-    // ── Phase 1: Connection ──
-    { action: 'wait', ms: 800 },
-    {
-      action: 'emit',
-      event: {
-        type: 'connected',
-        state: {
-          messages: [],
-          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          thinking: 'high',
-          concise: false,
-          profile: 'default',
-          sessionId: 'demo-001',
-          model: 'claude-sonnet-4-20250514',
-          availableModels: [
-            'claude-sonnet-4-20250514',
-            'claude-opus-4-20250514',
-            'claude-haiku-3-5-20241022',
-          ],
-          availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch'],
-          isLoading: false,
-          tasks: [],
-          pendingResults: 0,
-        },
-      },
-    },
-    {
-      action: 'emit',
-      event: {
-        type: 'host_state',
-        mounts: [
-          { hostPath: '~/projects/myapp', containerPath: '/mnt/myapp', mode: 'rw' },
-        ],
-        capabilities: { clipboard: 'allow', audio: 'allow', screen: 'prompt' },
-      },
-    },
 
-    // ── Phase 2: User types a message ──
-    { action: 'wait', ms: 1500 },
-    {
-      action: 'type_input',
-      text: 'Read the main config file and add a health check endpoint',
-      charDelayMs: 45,
-    },
-    { action: 'wait', ms: 800 },
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 1: Connection & initial state
+    // ════════════════════════════════════════════════════════════════════════
+
+    wait(800),
+    emit({
+      type: 'connected',
+      state: {
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        thinking: 'high',
+        concise: false,
+        profile: 'default',
+        sessionId: 'demo-001',
+        model: 'claude-sonnet-4-20250514',
+        availableModels: [
+          'claude-sonnet-4-20250514',
+          'claude-opus-4-20250514',
+          'claude-haiku-3-5-20241022',
+        ],
+        availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch'],
+        isLoading: false,
+        tasks: [],
+        pendingResults: 0,
+      },
+    }),
+    emit({
+      type: 'host_state',
+      mounts: [
+        { hostPath: '~/projects/myapp', containerPath: '/mnt/myapp', mode: 'rw' },
+      ],
+      capabilities: { clipboard: 'allow', audio: 'allow', screen: 'prompt' },
+    }),
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 2: First exchange — read config, add health endpoint
+    // ════════════════════════════════════════════════════════════════════════
+
+    wait(1500),
+    { action: 'type_input', text: 'Read the main config file and add a health check endpoint', charDelayMs: 45 },
+    wait(800),
     { action: 'submit_input' },
 
     // User message echo
-    {
-      action: 'emit',
-      event: {
-        type: 'message',
-        message: {
-          role: 'user',
-          content: 'Read the main config file and add a health check endpoint',
-          timestamp: new Date().toISOString(),
-        },
+    emit({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: 'Read the main config file and add a health check endpoint',
+        timestamp: new Date().toISOString(),
       },
-    },
+    }),
 
-    // ── Phase 3: Agent starts working ──
-    { action: 'emit', event: { type: 'loading', isLoading: true } },
-    { action: 'wait', ms: 300 },
+    // Agent starts
+    emit({ type: 'loading', isLoading: true }),
+    wait(300),
 
     // Extended thinking
-    { action: 'stream_thinking', text: THINKING_TEXT, chunkSize: 6, intervalMs: 35 },
-    { action: 'wait', ms: 400 },
+    { action: 'stream_thinking', text: THINKING_1, chunkSize: 6, intervalMs: 35 },
+    wait(400),
 
-    // ── Phase 4: Tool — read_file ──
-    {
-      action: 'emit',
-      event: {
-        type: 'tool_start',
-        name: 'read_file',
-        summary: 'src/config.ts',
-        input: JSON.stringify({ path: '/mnt/myapp/src/config.ts' }),
-      },
-    },
-    { action: 'wait', ms: 600 },
-    { action: 'emit', event: { type: 'tool_output', content: CONFIG_FILE } },
-    { action: 'emit', event: { type: 'tool_end' } },
-    { action: 'wait', ms: 300 },
+    // Tool: read_file
+    emit({
+      type: 'tool_start',
+      name: 'read_file',
+      summary: 'src/config.ts',
+      input: JSON.stringify({ path: '/mnt/myapp/src/config.ts' }),
+    }),
+    wait(600),
+    emit({ type: 'tool_output', content: CONFIG_FILE }),
+    emit({ type: 'tool_end' }),
+    wait(300),
 
-    // ── Phase 5: Tool — grep ──
-    {
-      action: 'emit',
-      event: {
-        type: 'tool_start',
-        name: 'grep',
-        summary: 'Finding route registration',
-        input: JSON.stringify({ pattern: 'app\\.(get|post|use)', path: '/mnt/myapp/src' }),
-      },
-    },
-    { action: 'wait', ms: 400 },
-    { action: 'emit', event: { type: 'tool_output', content: GREP_RESULT } },
-    { action: 'emit', event: { type: 'tool_end' } },
-    { action: 'wait', ms: 300 },
+    // Tool: grep
+    emit({
+      type: 'tool_start',
+      name: 'grep',
+      summary: 'Finding route registration',
+      input: JSON.stringify({ pattern: 'app\\.(get|post|use)', path: '/mnt/myapp/src' }),
+    }),
+    wait(400),
+    emit({ type: 'tool_output', content: GREP_RESULT }),
+    emit({ type: 'tool_end' }),
+    wait(300),
 
-    // ── Phase 6: Permission — patch request ──
-    {
-      action: 'emit',
-      event: {
-        type: 'patch_request',
-        id: 'patch-001',
-        diff: PATCH_DIFF,
-        reason: 'Adding health check endpoint to server.ts',
-      },
-    },
-    // Let user see the modal for 2.5s, then auto-approve
+    // Permission: patch request (diff viewer)
+    emit({
+      type: 'patch_request',
+      id: 'patch-001',
+      diff: PATCH_1,
+      reason: 'Adding health check endpoint to server.ts',
+    }),
     { action: 'auto_approve', delayMs: 2500 },
-    { action: 'wait', ms: 500 },
+    wait(500),
 
-    // ── Phase 7: Streaming text response ──
-    { action: 'stream_text', text: RESPONSE_TEXT, chunkSize: 4, intervalMs: 25 },
+    // Streaming response
+    { action: 'stream_text', text: RESPONSE_1, chunkSize: 4, intervalMs: 25 },
 
-    // ── Phase 8: Finalize ──
-    { action: 'wait', ms: 200 },
-    {
-      action: 'emit',
-      event: {
-        type: 'message',
-        message: {
-          role: 'assistant',
-          content: RESPONSE_TEXT,
-          timestamp: new Date().toISOString(),
-          elapsed: 4.2,
-        },
+    // Finalize first exchange
+    wait(200),
+    emit({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: RESPONSE_1,
+        timestamp: new Date().toISOString(),
+        elapsed: 4.2,
       },
-    },
-    { action: 'emit', event: { type: 'loading', isLoading: false } },
+    }),
+    emit({ type: 'loading', isLoading: false }),
 
-    // ── Phase 9: Usage update ──
-    {
-      action: 'emit',
-      event: {
-        type: 'usage',
-        usage: {
-          input: 12480,
-          output: 1847,
-          cacheRead: 8200,
-          cacheWrite: 4280,
-          cost: 0.042,
-          contextTokens: 14327,
-        },
+    // Usage update
+    emit({
+      type: 'usage',
+      usage: {
+        input: 12480,
+        output: 1847,
+        cacheRead: 8200,
+        cacheWrite: 4280,
+        cost: 0.042,
+        contextTokens: 14327,
       },
-    },
+    }),
 
-    // ── Phase 10: Loop ──
-    { action: 'wait', ms: 8000 },
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 3: Brief pause, flash shortcuts modal
+    // ════════════════════════════════════════════════════════════════════════
+
+    wait(3000),
+    { action: 'open_modal', modal: 'shortcuts' },
+    wait(2500),
+    { action: 'close_modal', modal: 'shortcuts' },
+    wait(1000),
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 4: Second exchange — tests, rate limiting, exec, fetch, task
+    // ════════════════════════════════════════════════════════════════════════
+
+    { action: 'type_input', text: 'Now write tests for it and add rate limiting. Install the package if needed.', charDelayMs: 40 },
+    wait(600),
+    { action: 'submit_input' },
+
+    emit({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: 'Now write tests for it and add rate limiting. Install the package if needed.',
+        timestamp: new Date().toISOString(),
+      },
+    }),
+
+    emit({ type: 'loading', isLoading: true }),
+    wait(300),
+
+    // Thinking
+    { action: 'stream_thinking', text: THINKING_2, chunkSize: 8, intervalMs: 30 },
+    wait(300),
+
+    // Tool: glob — find test setup
+    emit({
+      type: 'tool_start',
+      name: 'glob',
+      summary: 'Finding test files',
+      input: JSON.stringify({ pattern: 'src/**/*.test.*' }),
+    }),
+    wait(400),
+    emit({ type: 'tool_output', content: 'src/__tests__/config.test.ts\nsrc/__tests__/routes.test.ts' }),
+    emit({ type: 'tool_end' }),
+    wait(200),
+
+    // Tool: write_file — create test
+    emit({
+      type: 'tool_start',
+      name: 'write_file',
+      summary: 'src/__tests__/health.test.ts',
+      input: JSON.stringify({ path: '/mnt/myapp/src/__tests__/health.test.ts', content: TEST_FILE }),
+    }),
+    wait(500),
+    emit({ type: 'tool_output', content: 'File written: src/__tests__/health.test.ts (324 bytes)' }),
+    emit({ type: 'tool_end' }),
+    wait(300),
+
+    // Permission: exec — npm install express-rate-limit (pipeline visualization)
+    emit({
+      type: 'exec_request',
+      id: 'exec-001',
+      command: 'npm install express-rate-limit',
+      segments: [
+        { raw: 'npm install express-rate-limit', operator: null, executable: 'npm', isSubshell: false },
+      ],
+    }),
+    { action: 'auto_approve', delayMs: 2000 },
+    wait(300),
+
+    // Tool: exec output (simulated install)
+    emit({
+      type: 'tool_start',
+      name: 'exec',
+      summary: 'npm install express-rate-limit',
+      input: JSON.stringify({ command: 'npm install express-rate-limit' }),
+    }),
+    wait(800),
+    emit({
+      type: 'tool_output',
+      content:
+        'added 1 package in 1.2s\n\n' +
+        '1 package is looking for funding\n' +
+        '  run `npm fund` for details',
+    }),
+    emit({ type: 'tool_end' }),
+    wait(300),
+
+    // Tool: edit_file — add rate limiter to server.ts
+    emit({
+      type: 'tool_start',
+      name: 'edit_file',
+      summary: 'Adding rate limiter to server.ts',
+      input: JSON.stringify({
+        path: '/mnt/myapp/src/server.ts',
+        old: 'app.get("/health", (_req, res) => {',
+        new: 'const healthLimiter = rateLimit(...);\n\napp.get("/health", healthLimiter, (_req, res) => {',
+      }),
+    }),
+    wait(400),
+    emit({ type: 'tool_output', content: 'Edit applied: src/server.ts' }),
+    emit({ type: 'tool_end' }),
+    wait(200),
+
+    // Permission: patch request (multi-line diff with import + rate limiter)
+    emit({
+      type: 'patch_request',
+      id: 'patch-002',
+      diff: PATCH_2,
+      reason: 'Adding rate limiting to health check endpoint',
+    }),
+    { action: 'auto_approve', delayMs: 2500 },
+    wait(400),
+
+    // Permission: exec — run tests
+    emit({
+      type: 'exec_request',
+      id: 'exec-002',
+      command: 'npm test -- --reporter verbose 2>&1 | head -30',
+      segments: [
+        { raw: 'npm test -- --reporter verbose 2>&1', operator: null, executable: 'npm', isSubshell: false },
+        { raw: 'head -30', operator: '|', executable: 'head', isSubshell: false },
+      ],
+    }),
+    { action: 'auto_approve', delayMs: 2000 },
+    wait(200),
+
+    // Tool: exec — test output
+    emit({
+      type: 'tool_start',
+      name: 'exec',
+      summary: 'npm test',
+      input: JSON.stringify({ command: 'npm test -- --reporter verbose 2>&1 | head -30' }),
+    }),
+    wait(1000),
+    emit({
+      type: 'tool_output',
+      content:
+        ' ✓ src/__tests__/config.test.ts (3 tests) 12ms\n' +
+        ' ✓ src/__tests__/routes.test.ts (8 tests) 45ms\n' +
+        ' ✓ src/__tests__/health.test.ts (2 tests) 28ms\n\n' +
+        ' Test Files  3 passed (3)\n' +
+        '      Tests  13 passed (13)\n' +
+        '   Duration  0.92s',
+    }),
+    emit({ type: 'tool_end' }),
+    wait(300),
+
+    // Background task: spawn a sub-agent for documentation
+    emit({
+      type: 'task_update',
+      task: {
+        id: 'task-001',
+        description: 'Updating API docs with /health endpoint',
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        model: 'claude-haiku-3-5-20241022',
+      },
+    }),
+    wait(500),
+
+    // Permission: fetch — check if the endpoint works
+    emit({
+      type: 'fetch_request',
+      id: 'fetch-001',
+      url: 'http://localhost:3000/health',
+      method: 'GET',
+    }),
+    { action: 'auto_approve', delayMs: 1800 },
+    wait(200),
+
+    // Tool: fetch result
+    emit({
+      type: 'tool_start',
+      name: 'fetch',
+      summary: 'GET http://localhost:3000/health',
+      input: JSON.stringify({ url: 'http://localhost:3000/health', method: 'GET' }),
+    }),
+    wait(500),
+    emit({
+      type: 'tool_output',
+      content: '200 OK\n\n{"status":"ok","uptime":127.384}',
+    }),
+    emit({ type: 'tool_end' }),
+    wait(300),
+
+    // Background task completes
+    emit({
+      type: 'task_update',
+      task: {
+        id: 'task-001',
+        description: 'Updating API docs with /health endpoint',
+        status: 'completed',
+        startedAt: new Date(Date.now() - 8000).toISOString(),
+        completedAt: new Date().toISOString(),
+        model: 'claude-haiku-3-5-20241022',
+        inputTokens: 3200,
+        outputTokens: 890,
+        cost: 0.004,
+        delivery: 'agent-review',
+      },
+    }),
+    wait(200),
+
+    // Streaming response
+    { action: 'stream_text', text: RESPONSE_2, chunkSize: 5, intervalMs: 22 },
+
+    // Finalize second exchange
+    wait(200),
+    emit({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: RESPONSE_2,
+        timestamp: new Date().toISOString(),
+        elapsed: 11.8,
+      },
+    }),
+    emit({ type: 'loading', isLoading: false }),
+
+    // Usage update (accumulated)
+    emit({
+      type: 'usage',
+      usage: {
+        input: 28940,
+        output: 4210,
+        cacheRead: 18600,
+        cacheWrite: 10340,
+        cost: 0.098,
+        contextTokens: 33150,
+      },
+    }),
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 5: Flash settings modal & mount request
+    // ════════════════════════════════════════════════════════════════════════
+
+    wait(2500),
+
+    // Settings modal
+    { action: 'open_modal', modal: 'settings' },
+    wait(3000),
+    { action: 'close_modal', modal: 'settings' },
+    wait(1500),
+
+    // Mount request with expiry (shows timer bar in sidebar)
+    emit({
+      type: 'mount_request',
+      id: 'mount-001',
+      path: '~/projects/shared-lib',
+      mode: 'ro',
+      reason: 'Need to check shared utility types',
+      durationMinutes: 5,
+    }),
+    { action: 'auto_approve', delayMs: 2000 },
+    wait(500),
+
+    // Update host_state with the new mount (including expiry)
+    emit({
+      type: 'host_state',
+      mounts: [
+        { hostPath: '~/projects/myapp', containerPath: '/mnt/myapp', mode: 'rw' },
+        { hostPath: '~/projects/shared-lib', containerPath: '/mnt/shared-lib', mode: 'ro' },
+      ],
+      capabilities: { clipboard: 'allow', audio: 'allow', screen: 'prompt' },
+    }),
+    wait(2000),
+
+    // Context inspector
+    { action: 'open_modal', modal: 'context' },
+    wait(3500),
+    { action: 'close_modal', modal: 'context' },
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 6: Loop
+    // ════════════════════════════════════════════════════════════════════════
+
+    wait(5000),
     { action: 'loop' },
   ],
 };
