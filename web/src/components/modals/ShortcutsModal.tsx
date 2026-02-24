@@ -15,7 +15,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     label: 'Global',
     shortcuts: [
-      { keys: ['Ctrl', '?'], description: 'Show keyboard shortcuts' },
+      { keys: ['Ctrl', 'Shift', '?'], description: 'Show keyboard shortcuts' },
       { keys: ['Ctrl', '`'], description: 'Toggle microphone' },
       { keys: ['Ctrl', 'Shift', '`'], description: 'Toggle sticky mic (always-on)' },
       { keys: ['`'], description: 'Toggle mic (when not typing)' },

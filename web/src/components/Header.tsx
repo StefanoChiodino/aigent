@@ -50,7 +50,7 @@ export function Header() {
           <button
             id="shortcuts-btn"
             className="icon-btn has-tip"
-            data-tip="Shortcuts (Ctrl+?)"
+            data-tip="Keyboard shortcuts"
             onClick={() => setShortcutsOpen(true)}
             title="Keyboard shortcuts"
           >
@@ -58,6 +58,7 @@ export function Header() {
               <circle cx="12" cy="12" r="10"/>
               <text x="12" y="17" textAnchor="middle" fill="currentColor" stroke="none" fontSize="14" fontWeight="700">?</text>
             </svg>
+            <span className="shortcut-hint">Ctrl+Shift+?</span>
           </button>
           <button
             id="settings-btn"

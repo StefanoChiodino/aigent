@@ -105,45 +105,45 @@ test.describe('Context Inspector E2E', () => {
 
   // ── Live Backend Data ───────────────────────────────────────────────────────
 
-  test('loads data from backend (not stuck on Loading)', async () => {
-    const page = getPage();
+  /** Open inspector via sidebar and wait for backend data to arrive. */
+  async function openAndWaitForBackend(page: import('@playwright/test').Page): Promise<void> {
     await page.locator('#sb-ctx-meter').click();
     await expect(page.locator('#ctx-inspector-overlay')).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
-    const summary = page.locator('#ctx-inspector-summary');
-    await expect(summary).toBeVisible({ timeout: 8_000 });
-    const text = await summary.innerText();
+    // Wait for summary (proves backend responded with breakdown data)
+    await expect(page.locator('#ctx-inspector-summary')).toBeVisible({ timeout: 12_000 });
+  }
+
+  test('loads data from backend (not stuck on Loading)', async () => {
+    const page = getPage();
+    await openAndWaitForBackend(page);
+    const text = await page.locator('#ctx-inspector-summary').innerText();
     expect(text).toMatch(/\d/);
   });
 
   test('shows stacked bar from backend', async () => {
     const page = getPage();
-    await page.locator('#sb-ctx-meter').click();
-    await expect(page.locator('#ctx-inspector-overlay')).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
-    await expect(page.locator('#ctx-stacked-bar')).toBeVisible({ timeout: 8_000 });
+    await openAndWaitForBackend(page);
+    await expect(page.locator('#ctx-stacked-bar')).toBeVisible({ timeout: 2_000 });
   });
 
   test('shows bar rows from backend', async () => {
     const page = getPage();
-    await page.locator('#sb-ctx-meter').click();
-    await expect(page.locator('#ctx-inspector-overlay')).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
+    await openAndWaitForBackend(page);
     const bars = page.locator('#ctx-inspector-bars');
-    await expect(bars).toBeVisible({ timeout: 8_000 });
+    await expect(bars).toBeVisible({ timeout: 2_000 });
     expect(await bars.locator('.ctx-bar-row').count()).toBeGreaterThan(0);
   });
 
   test('messages section is present from backend', async () => {
     const page = getPage();
-    await page.locator('#sb-ctx-meter').click();
-    await expect(page.locator('#ctx-inspector-overlay')).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
-    await expect(page.locator('#ctx-inspector-messages-header')).toBeAttached({ timeout: 8_000 });
+    await openAndWaitForBackend(page);
+    await expect(page.locator('#ctx-inspector-messages-header')).toBeAttached({ timeout: 2_000 });
     await expect(page.locator('#ctx-inspector-messages')).toBeAttached();
   });
 
   test('bar rows are expandable from backend data', async () => {
     const page = getPage();
-    await page.locator('#sb-ctx-meter').click();
-    await expect(page.locator('#ctx-inspector-overlay')).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
-    await expect(page.locator('#ctx-inspector-summary')).toBeVisible({ timeout: 8_000 });
+    await openAndWaitForBackend(page);
     const firstRow = page.locator('#ctx-inspector-bars .ctx-bar-row').first();
     await firstRow.click();
     await expect(page.locator('#ctx-inspector-bars .ctx-expand-panel').first()).toBeVisible({ timeout: 2_000 });

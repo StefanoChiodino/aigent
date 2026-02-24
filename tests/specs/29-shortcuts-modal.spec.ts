@@ -16,9 +16,10 @@ test.describe('Keyboard Shortcuts Modal', () => {
     await expect(page.locator('#shortcuts-overlay')).not.toHaveClass(/\bhidden\b/, { timeout: 2_000 });
   }
 
-  test('shortcuts button is visible in header', async () => {
+  test('shortcuts button is visible in header with hint label', async () => {
     const page = getPage();
     await expect(page.locator('#shortcuts-btn')).toBeVisible();
+    await expect(page.locator('#shortcuts-btn .shortcut-hint')).toHaveText('Ctrl+Shift+?');
   });
 
   test('clicking shortcuts button opens modal', async () => {

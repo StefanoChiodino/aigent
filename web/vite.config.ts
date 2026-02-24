@@ -6,6 +6,8 @@ export default defineConfig(({ mode }) => {
 
   return {
     root: 'web',
+    // For GitHub Pages sub-path: set VITE_BASE_PATH=/aigent/ (or whatever the repo name is)
+    base: isDemo ? (process.env.VITE_BASE_PATH ?? '/') : '/',
     plugins: [react()],
     build: {
       outDir: isDemo ? 'dist-demo' : 'dist',
