@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useDemoMode } from '../demo/useDemoMode';
 import { useUIStore } from '../stores/ui';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
@@ -10,9 +11,11 @@ import { PermissionModal } from './modals/PermissionModal';
 import { SettingsModal } from './modals/SettingsModal';
 import { ContextInspector } from './modals/ContextInspector';
 import { TaskResultPanel } from './modals/TaskResultPanel';
+import { ShortcutsModal } from './modals/ShortcutsModal';
 
 export function App() {
   useWebSocket();
+  useDemoMode();
 
   const isLoading = useUIStore(s => s.isLoading);
 
@@ -44,6 +47,7 @@ export function App() {
       {createPortal(<SettingsModal />, document.body)}
       {createPortal(<ContextInspector />, document.body)}
       {createPortal(<TaskResultPanel />, document.body)}
+      {createPortal(<ShortcutsModal />, document.body)}
     </div>
   );
 }

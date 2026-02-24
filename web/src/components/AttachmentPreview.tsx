@@ -14,26 +14,32 @@ export const AttachmentPreview = React.memo(function AttachmentPreview() {
   if (pendingAttachments.length === 0) return null;
 
   return (
-    <div className="attachment-preview">
-      {pendingAttachments.map(att => (
-        <div key={att.id} className="attachment-chip">
-          {att.dataUrl && att.mediaType.startsWith('image/') ? (
-            <img className="attachment-chip-img" src={att.dataUrl} alt={att.name} />
-          ) : (
-            <>
-              <span className="attachment-chip-name">{att.name}</span>
-              <span className="attachment-chip-size">{fmtSize(att.size)}</span>
-            </>
-          )}
-          <button
-            className="attachment-remove"
-            onClick={() => removeAttachment(att.id)}
-            title="Remove"
-          >
-            ×
-          </button>
-        </div>
-      ))}
+    <div id="attachment-preview">
+      {pendingAttachments.map(att => {
+        const isImage = att.dataUrl && att.mediaType.startsWith('image/');
+        return (
+          <div key={att.id} className={`attachment-thumb ${isImage ? 'image-thumb' : 'file-badge'}`}>
+            {isImage ? (
+              <img src={att.dataUrl} alt={att.name} />
+            ) : (
+              <>
+                <span className="file-icon">📄</span>
+                <span className="file-info">
+                  <span className="file-name">{att.name}</span>
+                  <span className="file-size">{fmtSize(att.size)}</span>
+                </span>
+              </>
+            )}
+            <button
+              className="attachment-remove"
+              onClick={() => removeAttachment(att.id)}
+              title="Remove"
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 });

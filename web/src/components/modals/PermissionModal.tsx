@@ -128,19 +128,21 @@ export function PermissionModal() {
           )}
 
           <div id="perm-card-actions">
-            <button className="perm-btn perm-approve" onClick={() => resolvePermRequest(send, true)}>
+            <button id="perm-approve-btn" className="perm-btn perm-approve" onClick={() => resolvePermRequest(send, true)}>
               Approve
             </button>
-            <button className="perm-btn perm-deny" onClick={() => resolvePermRequest(send, false)}>
+            <button id="perm-deny-btn" className="perm-btn perm-deny" onClick={() => resolvePermRequest(send, false)}>
               Deny
             </button>
             <button
+              id="perm-always-allow-btn"
               className={`perm-btn perm-always-allow${req.alwaysAllowCmd ? '' : ' hidden'}`}
               onClick={() => req.alwaysAllowCmd && resolvePermRequest(send, true, true, false)}
             >
               Always Allow
             </button>
             <button
+              id="perm-always-allow-domain-btn"
               className={`perm-btn perm-always-allow-domain${req.alwaysAllowDomainCmd ? '' : ' hidden'}`}
               onClick={() => req.alwaysAllowDomainCmd && resolvePermRequest(send, true, false, true)}
             >

@@ -13,7 +13,7 @@ export function Header() {
   const status = useConnectionStore(s => s.status);
   const usage = useChatStore(s => s.usage);
   const tasks = useChatStore(s => s.tasks);
-  const { setSettingsOpen, setCtxInspectorOpen } = useUIStore.getState();
+  const { setSettingsOpen, setShortcutsOpen, setCtxInspectorOpen } = useUIStore.getState();
 
   const running = tasks.filter(t => t.status === 'running').length;
   const cost = usage.cost ?? 0;
@@ -47,6 +47,18 @@ export function Header() {
               <span id="ctx-label">{fmtCtx(ctxUsed)}</span>
             </div>
           )}
+          <button
+            id="shortcuts-btn"
+            className="icon-btn has-tip"
+            data-tip="Shortcuts (Ctrl+?)"
+            onClick={() => setShortcutsOpen(true)}
+            title="Keyboard shortcuts"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <text x="12" y="17" textAnchor="middle" fill="currentColor" stroke="none" fontSize="14" fontWeight="700">?</text>
+            </svg>
+          </button>
           <button
             id="settings-btn"
             className="icon-btn has-tip"

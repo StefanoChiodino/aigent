@@ -57,6 +57,7 @@ interface Mount {
   expiresAt?: number;      // Timestamp for timed grants
   durationMinutes?: number; // Granted duration (for UI progress bar)
   implicit?: boolean;      // true for docker-compose.yml built-in mounts (not passed as -v)
+  originalMode?: 'ro' | 'rw'; // set when an implicit mount is upgraded (tracks pre-upgrade mode)
 }
 
 interface GatekeeperArgs {
@@ -217,7 +218,15 @@ function addMount(hostPath: string, mode: 'ro' | 'rw', expiresAt?: number, durat
   const existing = findMount(normalized);
   if (existing) {
     if (existing.implicit) {
-      return { ok: false, message: `Already a built-in mount: ${normalized} (${existing.mode})` };
+      if (existing.mode === mode) {
+        return { ok: false, message: `Already a built-in mount: ${normalized} (${existing.mode})` };
+      }
+      // Allow upgrading implicit mounts (e.g., ro → rw)
+      existing.originalMode ??= existing.mode;
+      existing.mode = mode;
+      if (expiresAt !== undefined) existing.expiresAt = expiresAt;
+      if (durationMinutes !== undefined) existing.durationMinutes = durationMinutes;
+      return { ok: true, message: `Upgraded ${normalized} from ${existing.originalMode} to ${mode}.` };
     }
     if (existing.mode === mode) {
       return { ok: false, message: `Already mounted: ${normalized} (${mode})` };
@@ -246,6 +255,14 @@ function removeMount(hostPath: string): { ok: boolean; message: string } {
     return { ok: false, message: `Not mounted: ${normalized}` };
   }
   if (mounts[idx]!.implicit) {
+    if (mounts[idx]!.originalMode) {
+      // Revert upgraded implicit mount to its original mode
+      mounts[idx]!.mode = mounts[idx]!.originalMode!;
+      delete mounts[idx]!.originalMode;
+      delete mounts[idx]!.expiresAt;
+      delete mounts[idx]!.durationMinutes;
+      return { ok: true, message: `Reverted ${normalized} to ${mounts[idx]!.mode}.` };
+    }
     return { ok: false, message: `Cannot unmount built-in mount: ${normalized}` };
   }
   mounts.splice(idx, 1);
@@ -255,7 +272,9 @@ function removeMount(hostPath: string): { ok: boolean; message: string } {
 function listMounts(): string {
   if (mounts.length === 0) return 'No active mounts.';
   const lines = mounts.map((m) => {
-    const tag = m.implicit ? ' [built-in]' : '';
+    const tag = m.implicit
+      ? (m.originalMode ? ` [built-in, upgraded ${m.originalMode}→${m.mode}]` : ' [built-in]')
+      : '';
     const expiry = m.expiresAt ? ` (expires ${new Date(m.expiresAt).toLocaleTimeString()})` : '';
     return `  ${m.hostPath} → ${m.containerPath} (${m.mode})${tag}${expiry}`;
   });
@@ -301,6 +320,7 @@ function emitHostState(): void {
       mode: m.mode,
       ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
       ...(m.durationMinutes !== undefined ? { durationMinutes: m.durationMinutes } : {}),
+      ...(m.originalMode !== undefined ? { originalMode: m.originalMode } : {}),
     })),
     readCapabilities(),
   );
@@ -319,7 +339,7 @@ function buildDockerArgs(): string[] {
 
   // Dynamic mounts (skip implicit ones — those come from docker-compose.yml)
   for (const mount of mounts) {
-    if (mount.implicit) continue;
+    if (mount.implicit && !mount.originalMode) continue;  // unchanged implicit — from compose
     args.push('-v', `${mount.hostPath}:${mount.containerPath}:${mount.mode}`);
   }
 
@@ -1524,6 +1544,36 @@ log.info('LLM proxy ready');
 const { AgentClient } = await import('./client.js');
 client = new AgentClient();
 
+// Intercept commands BEFORE starting the web server. The web UI sends /grant, /approve,
+// etc. as commands via WebSocket → web-bridge → client.sendCommand(). If we apply
+// overrides after startContainer(), there's a race: commands that arrive while the
+// container is starting bypass the gatekeeper and reach the worker as "Unknown command".
+const originalSendMessage = client.sendMessage.bind(client);
+client.sendMessage = (content: string) => {
+  if (isGatekeeperCommand(content)) {
+    handleGatekeeperCommand(content).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error('Gatekeeper command error', { error: msg });
+      injectSystemMessage(`Error: ${msg}`);
+    });
+    return;
+  }
+  originalSendMessage(content);
+};
+
+const originalSendCommand = client.sendCommand.bind(client);
+client.sendCommand = (cmd: string) => {
+  if (isGatekeeperCommand(cmd)) {
+    handleGatekeeperCommand(cmd).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error('Gatekeeper command error', { error: msg });
+      injectSystemMessage(`Error: ${msg}`);
+    });
+    return;
+  }
+  originalSendCommand(cmd);
+};
+
 // Start web UI server before the container so it's available during startup/restarts.
 // This prevents "connection refused" when tsx watch restarts the process.
 const { startWebServer } = await import('./web-bridge.js');
@@ -1546,34 +1596,6 @@ try {
 client.on('connected', () => {
   setTimeout(() => emitHostState(), 100);
 });
-
-// Intercept commands: wrap the client's sendMessage to catch gatekeeper commands
-const originalSendMessage = client.sendMessage.bind(client);
-client.sendMessage = (content: string) => {
-  if (isGatekeeperCommand(content)) {
-    handleGatekeeperCommand(content).catch((err) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error('Gatekeeper command error', { error: msg });
-      injectSystemMessage(`Error: ${msg}`);
-    });
-    return;
-  }
-  originalSendMessage(content);
-};
-
-// Also intercept sendCommand — the web UI sends /grant, /approve, etc. as commands
-const originalSendCommand = client.sendCommand.bind(client);
-client.sendCommand = (cmd: string) => {
-  if (isGatekeeperCommand(cmd)) {
-    handleGatekeeperCommand(cmd).catch((err) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error('Gatekeeper command error', { error: msg });
-      injectSystemMessage(`Error: ${msg}`);
-    });
-    return;
-  }
-  originalSendCommand(cmd);
-};
 
 // Handle mount requests from the worker (agent requests a folder)
 client.on('mount_request', (id: string, path: string, mode: 'ro' | 'rw', reason?: string, durationMinutes?: number) => {
@@ -1604,13 +1626,24 @@ client.on('fetch_request', (id: string, url: string, method?: string) => {
 let expiryRestartInProgress = false;
 setInterval(() => {
   const now = Date.now();
-  const expired = mounts.filter((m) => !m.implicit && m.expiresAt !== undefined && m.expiresAt <= now);
+  const expired = mounts.filter((m) =>
+    m.expiresAt !== undefined && m.expiresAt <= now && (!m.implicit || m.originalMode),
+  );
   if (expired.length === 0 || expiryRestartInProgress) return;
 
   expiryRestartInProgress = true;
   for (const m of expired) {
-    removeMount(m.hostPath);
-    injectSystemMessage(`Mount expired and removed: ${m.hostPath}`);
+    if (m.implicit && m.originalMode) {
+      // Revert upgraded implicit mount to its original mode
+      m.mode = m.originalMode;
+      delete m.originalMode;
+      delete m.expiresAt;
+      delete m.durationMinutes;
+      injectSystemMessage(`Mount upgrade expired, reverted to ${m.mode}: ${m.hostPath}`);
+    } else {
+      removeMount(m.hostPath);
+      injectSystemMessage(`Mount expired and removed: ${m.hostPath}`);
+    }
   }
   injectSystemMessage('Sandbox restarting to apply expired mount removal...');
   restartContainer()

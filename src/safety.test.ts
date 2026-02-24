@@ -16,6 +16,7 @@ import {
   DEFAULT_EXEC_PERMISSIONS,
   checkFetchPermission,
   DEFAULT_FETCH_PERMISSIONS,
+  parseCommandPipeline,
 } from './safety.js';
 
 // ---------------------------------------------------------------------------
@@ -352,5 +353,309 @@ describe('checkFetchPermission (custom permissions)', () => {
     const perms = { alwaysAllow: ['api.example.com'], deny: [] };
     assert.equal(checkFetchPermission('https://api.example.com/anything', perms), 'allow');
     assert.equal(checkFetchPermission('https://evil.com/anything', perms), 'prompt');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseCommandPipeline — quote-aware shell command tokenization for UI display
+// ---------------------------------------------------------------------------
+
+describe('parseCommandPipeline', () => {
+  // --- simple commands (no operators) ---
+  it('parses a single command with no pipes', () => {
+    const segs = parseCommandPipeline('ls -la');
+    assert.equal(segs.length, 1);
+    assert.equal(segs[0]!.executable, 'ls');
+    assert.equal(segs[0]!.operator, null);
+    assert.equal(segs[0]!.raw, 'ls -la');
+  });
+
+  it('parses a bare command with no arguments', () => {
+    const segs = parseCommandPipeline('pwd');
+    assert.equal(segs.length, 1);
+    assert.equal(segs[0]!.executable, 'pwd');
+  });
+
+  it('handles empty string gracefully', () => {
+    const segs = parseCommandPipeline('');
+    assert.equal(segs.length, 1);
+    assert.equal(segs[0]!.executable, null);
+    assert.equal(segs[0]!.raw, '');
+  });
+
+  // --- simple pipes ---
+  it('splits a simple two-command pipe', () => {
+    const segs = parseCommandPipeline('ls -la | grep foo');
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'ls');
+    assert.equal(segs[0]!.operator, '|');
+    assert.equal(segs[1]!.executable, 'grep');
+    assert.equal(segs[1]!.operator, null);
+  });
+
+  it('splits a three-command pipe', () => {
+    const segs = parseCommandPipeline('cat file.txt | grep pattern | wc -l');
+    assert.equal(segs.length, 3);
+    assert.equal(segs[0]!.executable, 'cat');
+    assert.equal(segs[0]!.operator, '|');
+    assert.equal(segs[1]!.executable, 'grep');
+    assert.equal(segs[1]!.operator, '|');
+    assert.equal(segs[2]!.executable, 'wc');
+    assert.equal(segs[2]!.operator, null);
+  });
+
+  // --- && and ; operators ---
+  it('splits on &&', () => {
+    const segs = parseCommandPipeline('make build && npm test');
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'make');
+    assert.equal(segs[0]!.operator, '&&');
+    assert.equal(segs[1]!.executable, 'npm');
+  });
+
+  it('splits on ;', () => {
+    const segs = parseCommandPipeline('echo hello; echo world');
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'echo');
+    assert.equal(segs[0]!.operator, ';');
+    assert.equal(segs[1]!.executable, 'echo');
+  });
+
+  it('splits on mixed operators: && ; |', () => {
+    const segs = parseCommandPipeline('make build && npm test; echo done | tee log.txt');
+    assert.equal(segs.length, 4);
+    assert.equal(segs[0]!.operator, '&&');
+    assert.equal(segs[1]!.operator, ';');
+    assert.equal(segs[2]!.operator, '|');
+    assert.equal(segs[3]!.operator, null);
+  });
+
+  it('distinguishes || from |', () => {
+    const segs = parseCommandPipeline('false || echo fallback');
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'false');
+    assert.equal(segs[0]!.operator, '||');
+    assert.equal(segs[1]!.executable, 'echo');
+  });
+
+  // --- double-quoted strings (the bug that prompted this) ---
+  it('does NOT split on | inside double quotes', () => {
+    const segs = parseCommandPipeline('grep -n "input-highlight\\|#input\\b\\|input-wrap\\|10px\\|14px" /app/web/src/index.css | head -60');
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'grep');
+    assert.equal(segs[0]!.operator, '|');
+    assert.equal(segs[1]!.executable, 'head');
+  });
+
+  it('does NOT split on ; inside double quotes', () => {
+    const segs = parseCommandPipeline('echo "hello; world"');
+    assert.equal(segs.length, 1);
+    assert.equal(segs[0]!.executable, 'echo');
+    assert.equal(segs[0]!.raw, 'echo "hello; world"');
+  });
+
+  it('does NOT split on && inside double quotes', () => {
+    const segs = parseCommandPipeline('echo "foo && bar" | wc');
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'echo');
+    assert.equal(segs[1]!.executable, 'wc');
+  });
+
+  it('does NOT split on || inside double quotes', () => {
+    const segs = parseCommandPipeline('echo "a || b"');
+    assert.equal(segs.length, 1);
+    assert.equal(segs[0]!.executable, 'echo');
+  });
+
+  it('handles multiple double-quoted arguments', () => {
+    const segs = parseCommandPipeline('grep "foo|bar" "baz|qux" | sort');
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'grep');
+    assert.equal(segs[1]!.executable, 'sort');
+  });
+
+  // --- single-quoted strings ---
+  it('does NOT split on | inside single quotes', () => {
+    const segs = parseCommandPipeline("echo 'a|b' | wc -l");
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'echo');
+    assert.equal(segs[1]!.executable, 'wc');
+  });
+
+  it('does NOT split on ; inside single quotes', () => {
+    const segs = parseCommandPipeline("echo 'hello; world'");
+    assert.equal(segs.length, 1);
+    assert.equal(segs[0]!.executable, 'echo');
+  });
+
+  it('does NOT split on && inside single quotes', () => {
+    const segs = parseCommandPipeline("echo 'a && b' && echo done");
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'echo');
+    assert.equal(segs[0]!.operator, '&&');
+    assert.equal(segs[1]!.executable, 'echo');
+  });
+
+  it('single quote inside double quote does not start quote mode', () => {
+    const segs = parseCommandPipeline(`echo "it's a pipe | here" | wc`);
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'echo');
+    assert.equal(segs[1]!.executable, 'wc');
+  });
+
+  it('double quote inside single quote does not start quote mode', () => {
+    const segs = parseCommandPipeline(`echo '"hello | world"' | wc`);
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'echo');
+    assert.equal(segs[1]!.executable, 'wc');
+  });
+
+  // --- backslash escapes ---
+  it('backslash-escaped pipe is not treated as operator', () => {
+    const segs = parseCommandPipeline('echo hello\\|world');
+    assert.equal(segs.length, 1);
+    assert.equal(segs[0]!.executable, 'echo');
+  });
+
+  it('backslash-escaped semicolon is not treated as operator', () => {
+    const segs = parseCommandPipeline('echo hello\\; echo world');
+    // The \\; escapes the semicolon, so this is one segment
+    assert.equal(segs.length, 1);
+  });
+
+  it('backslash does not escape inside single quotes (but irrelevant — single quotes already protect)', () => {
+    const segs = parseCommandPipeline("echo '\\|' | wc");
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'echo');
+    assert.equal(segs[1]!.executable, 'wc');
+  });
+
+  // --- executable extraction ---
+  it('extracts basename from a path executable', () => {
+    const segs = parseCommandPipeline('/usr/bin/grep foo');
+    assert.equal(segs[0]!.executable, 'grep');
+  });
+
+  it('skips env var assignments to find executable', () => {
+    const segs = parseCommandPipeline('FOO=bar BAZ=qux node script.js');
+    assert.equal(segs[0]!.executable, 'node');
+  });
+
+  it('returns null executable for variable-only command', () => {
+    const segs = parseCommandPipeline('$DYNAMIC_CMD args');
+    assert.equal(segs[0]!.executable, null);
+  });
+
+  // --- subshell detection ---
+  it('detects $() subshell', () => {
+    const segs = parseCommandPipeline('echo $(date)');
+    assert.equal(segs[0]!.isSubshell, true);
+  });
+
+  it('detects backtick subshell', () => {
+    const segs = parseCommandPipeline('echo `date`');
+    assert.equal(segs[0]!.isSubshell, true);
+  });
+
+  it('detects bash -c subshell', () => {
+    const segs = parseCommandPipeline('bash -c "echo hello"');
+    assert.equal(segs[0]!.isSubshell, true);
+  });
+
+  it('detects sh -c subshell', () => {
+    const segs = parseCommandPipeline('sh -c "echo hello"');
+    assert.equal(segs[0]!.isSubshell, true);
+  });
+
+  it('non-subshell command is not marked as subshell', () => {
+    const segs = parseCommandPipeline('ls -la | grep foo');
+    assert.equal(segs[0]!.isSubshell, false);
+    assert.equal(segs[1]!.isSubshell, false);
+  });
+
+  // --- realistic complex commands ---
+  it('handles grep with regex alternation piped to head (the original bug)', () => {
+    const cmd = 'grep -n "input-highlight\\|#input\\b\\|input-wrap\\|10px\\|14px" /app/web/src/index.css | head -60';
+    const segs = parseCommandPipeline(cmd);
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'grep');
+    assert.equal(segs[1]!.executable, 'head');
+  });
+
+  it('handles sed with pipes in the pattern', () => {
+    const segs = parseCommandPipeline("sed 's/foo|bar/baz/' file.txt | sort");
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'sed');
+    assert.equal(segs[1]!.executable, 'sort');
+  });
+
+  it('handles awk with pipes in the program', () => {
+    const segs = parseCommandPipeline(`awk '/foo|bar/ { print $1 }' data.txt | head`);
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'awk');
+    assert.equal(segs[1]!.executable, 'head');
+  });
+
+  it('handles find with -exec and semicolon', () => {
+    const segs = parseCommandPipeline('find . -name "*.ts" -exec grep "pattern" {} \\;');
+    assert.equal(segs.length, 1);
+    assert.equal(segs[0]!.executable, 'find');
+  });
+
+  it('handles curl piped to jq', () => {
+    const segs = parseCommandPipeline('curl -s "https://api.example.com/data?a=1&b=2" | jq ".items"');
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'curl');
+    assert.equal(segs[1]!.executable, 'jq');
+  });
+
+  it('handles chained commands with mixed quoting', () => {
+    const segs = parseCommandPipeline(`cd /tmp && grep -r 'TODO|FIXME' src/ | wc -l; echo "done"`);
+    assert.equal(segs.length, 4);
+    assert.equal(segs[0]!.executable, 'cd');
+    assert.equal(segs[0]!.operator, '&&');
+    assert.equal(segs[1]!.executable, 'grep');
+    assert.equal(segs[1]!.operator, '|');
+    assert.equal(segs[2]!.executable, 'wc');
+    assert.equal(segs[2]!.operator, ';');
+    assert.equal(segs[3]!.executable, 'echo');
+    assert.equal(segs[3]!.operator, null);
+  });
+
+  it('preserves raw text in each segment', () => {
+    const segs = parseCommandPipeline('echo "hello world" | wc -c');
+    assert.equal(segs[0]!.raw, 'echo "hello world"');
+    assert.equal(segs[1]!.raw, 'wc -c');
+  });
+
+  it('handles nested quotes: double inside single', () => {
+    const segs = parseCommandPipeline(`echo '"a|b"' | cat`);
+    assert.equal(segs.length, 2);
+  });
+
+  it('handles nested quotes: single inside double', () => {
+    const segs = parseCommandPipeline(`echo "it's|tricky" | cat`);
+    assert.equal(segs.length, 2);
+  });
+
+  it('handles empty segments between operators gracefully', () => {
+    // Degenerate case: "| | " — no text between pipes
+    const segs = parseCommandPipeline('ls |  | wc');
+    // Middle segment is empty, so only ls and wc should appear
+    assert.equal(segs.length, 2);
+    assert.equal(segs[0]!.executable, 'ls');
+    assert.equal(segs[1]!.executable, 'wc');
+  });
+
+  it('handles unclosed double quote gracefully (no crash)', () => {
+    // Malformed input — should not throw
+    const segs = parseCommandPipeline('echo "unclosed | grep foo');
+    // The quote is never closed, so | stays inside the "quoted" region
+    assert.equal(segs.length, 1);
+  });
+
+  it('handles unclosed single quote gracefully (no crash)', () => {
+    const segs = parseCommandPipeline("echo 'unclosed | grep foo");
+    assert.equal(segs.length, 1);
   });
 });

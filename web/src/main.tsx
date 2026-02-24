@@ -18,6 +18,7 @@ import '../style.css';
   ui.setError(null);
   ui.setLoading(false);
   ui.setSettingsOpen(false);
+  ui.setShortcutsOpen(false);
   ui.setCtxInspectorOpen(false);
   ui.setModelPickerOpen(false);
   ui.setTaskResultTask(null);
@@ -39,6 +40,9 @@ import '../style.css';
 (window as Record<string, unknown>).__testSetCtxInspectorOpen = (open: boolean) => {
   useUIStore.getState().setCtxInspectorOpen(open);
 };
+
+// Expose UI store for attachment preview tests
+(window as Record<string, unknown>).__zustand_ui = useUIStore;
 
 const rootEl = document.getElementById('root')!;
 createRoot(rootEl).render(

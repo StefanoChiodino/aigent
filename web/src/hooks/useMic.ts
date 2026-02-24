@@ -5,7 +5,7 @@ import { encodeWav, playMicSound } from '../lib/audio';
 import { useConnectionStore } from '../stores/connection';
 
 export interface MicControls {
-  startMic: (silent?: boolean) => Promise<void>;
+  startMic: (silent?: boolean, baseText?: string) => Promise<void>;
   stopMic: (silent?: boolean) => Promise<void>;
   abortMic: () => void;
   micRecording: boolean;
@@ -105,7 +105,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     }
   }, [onTranscript]);
 
-  const startMic = useCallback(async (silent = false): Promise<void> => {
+  const startMic = useCallback(async (silent = false, baseText = ''): Promise<void> => {
     if (useVoiceStore.getState().micState !== 'idle') return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
@@ -116,7 +116,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
       micLastText.current = '';
       micReqSeq.current = 0;
       micDisplayedSeq.current = 0;
-      micBaseText.current = '';
+      micBaseText.current = baseText.trimEnd();
       vadLoudFrames.current = 0;
       vadSpeaking.current = false;
       micLastSpeechTime.current = 0;

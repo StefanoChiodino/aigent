@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useConnectionStore } from '../stores/connection';
+import { isDemo } from '../demo/useDemoMode';
 import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
 import { useMic } from '../hooks/useMic';
@@ -17,24 +18,63 @@ function esc(s: string): string {
 }
 
 /**
- * Highlight input text for the overlay: style `backtick spans` and @mentions.
+ * Highlight input text for the overlay: style markdown syntax and @mentions.
  * Returns HTML — must only be used with dangerouslySetInnerHTML.
+ *
+ * Supported: `code`, **bold**, __bold__, *italic*, _italic_, ~~strike~~,
+ *            # headings, @mentions, /file/paths
  */
 function highlightInputText(text: string): string {
-  // Split on backtick spans: `...`
-  const parts = text.split(/(`[^`\n]*`)/g);
+  // Process line by line so heading detection is per-line
+  const lines = text.split('\n');
+  const processedLines = lines.map(line => highlightLine(line));
+  return processedLines.join('\n') + '\n'; // trailing newline prevents height collapse
+}
+
+function highlightLine(line: string): string {
+  // Heading: # / ## / ### at start of line
+  const headingMatch = line.match(/^(#{1,3})(\s.*)$/);
+  if (headingMatch) {
+    const level = headingMatch[1]!.length;
+    const rest = headingMatch[2]!;
+    return `<span class="input-hl-h${level}">${esc(headingMatch[1]!)}${highlightInline(rest)}</span>`;
+  }
+  return highlightInline(line);
+}
+
+/** Apply inline markdown highlighting to a string that contains no newlines. */
+function highlightInline(text: string): string {
+  // Tokenise: extract backtick spans first (they're opaque — no inner parsing)
+  // Then apply other patterns to the non-code segments.
+  const parts = text.split(/(`[^`]*`)/g);
   return parts.map((part, i) => {
     if (i % 2 === 1) {
-      // backtick span
+      // backtick code span
       return `<span class="input-hl-code">${esc(part)}</span>`;
     }
-    // Outside backtick spans: highlight @mentions and bare file paths
-    // File @mentions with '/' and bare absolute paths get code-style chip
-    return esc(part).replace(/(@[\w./\-]+|(?<![.\w])\/[\w./\-]+)/g, (m) =>
+    // Plain segment — apply remaining patterns in order
+    return applyInlinePatterns(esc(part));
+  }).join('');
+}
+
+/** Apply bold / italic / strike / @mention patterns to an already-escaped segment. */
+function applyInlinePatterns(html: string): string {
+  // Note: input is already HTML-escaped, so we only match on safe chars.
+  // Order matters: bold before italic so ** isn't parsed as two *.
+  return html
+    // ~~strikethrough~~
+    .replace(/~~([^~\n]+)~~/g, '<span class="input-hl-strike">~~$1~~</span>')
+    // **bold** or __bold__
+    .replace(/\*\*([^*\n]+)\*\*/g, '<span class="input-hl-bold">**$1**</span>')
+    .replace(/(?<![\w])__([^_\n]+)__(?![\w])/g, '<span class="input-hl-bold">__$1__</span>')
+    // *italic* or _italic_ (not inside words)
+    .replace(/(?<![\w*])\*([^*\n]+)\*(?![\w*])/g, '<span class="input-hl-italic">*$1*</span>')
+    .replace(/(?<![\w_])_([^_\n]+)_(?![\w_])/g, '<span class="input-hl-italic">_$1_</span>')
+    // @mentions and /file/paths
+    .replace(/(@[\w./\-]+|(?<![.\w])\/[\w./\-]+)/g, (m) =>
       (m.startsWith('@') && !m.includes('/'))
         ? `<span class="input-hl-at">${m}</span>`
         : `<span class="input-hl-at input-hl-at-file">${m}</span>`);
-  }).join('') + '\n'; // trailing newline prevents overlay height collapse at end
 }
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
@@ -163,10 +203,9 @@ export function InputArea() {
     const text = inputValue.trim();
     if (!text && pendingAttachments.length === 0) return;
 
-    // Handle /context locally
+    // Handle /context locally — ContextInspector sends the request via its own effect
     if (text === '/context') {
       setCtxInspectorOpen(true);
-      send({ type: 'context_breakdown_request' });
       setInputValue('');
       return;
     }
@@ -195,6 +234,23 @@ export function InputArea() {
     inputValue, pendingAttachments, micState, thinkingLevel, micSticky,
     send, abortMic, clearAttachments, startMic, setCtxInspectorOpen,
   ]);
+
+  // Demo mode: allow playback engine to control input via custom DOM events
+  useEffect(() => {
+    if (!isDemo()) return;
+    const onSet = (e: Event) => {
+      setInputValue((e as CustomEvent<string>).detail);
+    };
+    const onSubmit = () => {
+      setTimeout(() => submitMessage(), 0);
+    };
+    window.addEventListener('__demo_set_input', onSet);
+    window.addEventListener('__demo_submit_input', onSubmit);
+    return () => {
+      window.removeEventListener('__demo_set_input', onSet);
+      window.removeEventListener('__demo_submit_input', onSubmit);
+    };
+  }, [submitMessage]);
 
   const addFile = useCallback((file: File) => {
     if (pendingAttachments.length >= MAX_ATTACHMENTS) return;
@@ -246,7 +302,7 @@ export function InputArea() {
   const toggleMicSticky = useCallback(() => {
     const newSticky = !micSticky;
     setMicSticky(newSticky);
-    if (newSticky && micState === 'idle') void startMic();
+    if (newSticky && micState === 'idle') void startMic(false, inputRef.current?.value ?? '');
     else if (!newSticky && micState === 'recording') void stopMic();
   }, [micSticky, micState, setMicSticky, startMic, stopMic]);
 
@@ -254,6 +310,12 @@ export function InputArea() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Control') setCtrlHeld(true);
+      if ((e.key === '?' || (e.key === '/' && e.shiftKey)) && e.ctrlKey) {
+        e.preventDefault();
+        const { shortcutsOpen, setShortcutsOpen } = useUIStore.getState();
+        setShortcutsOpen(!shortcutsOpen);
+        return;
+      }
       if (e.code === 'Backquote' && e.ctrlKey && e.shiftKey) {
         e.preventDefault();
         toggleMicSticky();
@@ -262,14 +324,18 @@ export function InputArea() {
       if (e.code === 'Backquote' && e.ctrlKey && !e.shiftKey) {
         e.preventDefault();
         if (micState === 'recording') { setMicSticky(false); void stopMic(); }
-        else void startMic();
+        else void startMic(false, inputRef.current?.value ?? '');
         return;
       }
-      const inputFocused = document.activeElement === inputRef.current;
-      if (!inputFocused && (e.code === 'Backquote' || e.key === 'm' || e.key === 'M')) {
+      const active = document.activeElement;
+      const anyInputFocused = active instanceof HTMLInputElement
+        || active instanceof HTMLTextAreaElement
+        || active instanceof HTMLSelectElement
+        || (active as HTMLElement)?.isContentEditable;
+      if (!anyInputFocused && (e.code === 'Backquote' || e.key === 'm' || e.key === 'M')) {
         e.preventDefault();
         if (micState === 'recording') { setMicSticky(false); void stopMic(); }
-        else void startMic();
+        else void startMic(false, inputRef.current?.value ?? '');
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -539,7 +605,7 @@ export function InputArea() {
             title={micState === 'recording' ? 'Stop mic' : 'Start mic'}
             onClick={() => {
               if (micState === 'recording') { setMicSticky(false); void stopMic(); }
-              else void startMic();
+              else void startMic(false, inputRef.current?.value ?? '');
               inputRef.current?.focus();
             }}
           >

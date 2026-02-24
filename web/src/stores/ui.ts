@@ -8,6 +8,7 @@ interface UIState {
   permShowing: boolean;
   modelPickerOpen: boolean;
   settingsOpen: boolean;
+  shortcutsOpen: boolean;
   ctxInspectorOpen: boolean;
   mountsList: MountInfo[];
   capsList: Record<string, string>;
@@ -27,6 +28,7 @@ interface UIState {
   resolvePermRequest: (send: (data: Record<string, unknown>) => void, approve: boolean, alwaysAllow?: boolean, alwaysDomain?: boolean) => void;
   setModelPickerOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
+  setShortcutsOpen: (open: boolean) => void;
   setCtxInspectorOpen: (open: boolean) => void;
   setMounts: (mounts: MountInfo[]) => void;
   setCaps: (caps: Record<string, string>) => void;
@@ -49,6 +51,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   permShowing: false,
   modelPickerOpen: false,
   settingsOpen: false,
+  shortcutsOpen: false,
   ctxInspectorOpen: false,
   mountsList: [],
   capsList: {},
@@ -90,6 +93,7 @@ export const useUIStore = create<UIState>((set, get) => ({
 
   setModelPickerOpen: (open) => set({ modelPickerOpen: open }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setCtxInspectorOpen: (open) => set({ ctxInspectorOpen: open }),
   setMounts: (mounts) => set({ mountsList: mounts }),
   setCaps: (caps) => set({ capsList: caps }),

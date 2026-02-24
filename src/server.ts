@@ -1547,7 +1547,16 @@ function handleClient(socket: Socket): void {
             resolveScreenShareRequest(cmd.id, { ok: cmd.ok, message: cmd.message });
             break;
           case 'context_breakdown_request':
-            send(socket, { type: 'context_breakdown', breakdown: agent.getContextBreakdown() });
+            try {
+              send(socket, { type: 'context_breakdown', breakdown: agent.getContextBreakdown() });
+            } catch (err) {
+              log.error('Failed to generate context breakdown', { error: String(err) });
+              // Send an empty breakdown so the client doesn't hang on "Loading..."
+              send(socket, { type: 'context_breakdown', breakdown: {
+                systemBase: 0, workspaceContext: 0, toolDefs: 0,
+                messages: [], messagesTotal: 0, total: 0,
+              } });
+            }
             break;
           case 'ping':
             send(socket, { type: 'pong' });

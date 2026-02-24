@@ -225,10 +225,37 @@ export function ContextInspector() {
   const setCtxInspectorOpen = useUIStore(s => s.setCtxInspectorOpen);
   const contextBreakdown = useUIStore(s => s.contextBreakdown);
   const send = useConnectionStore(s => s.send);
+  const [retries, setRetries] = useState(0);
+  const MAX_RETRIES = 3;
+  const RETRY_INTERVAL = 2_000;
 
+  // Send context_breakdown_request when inspector opens.
+  // Retry periodically if no data arrives (handles dropped requests,
+  // WS not yet open, server restarts, etc.)
   useEffect(() => {
-    if (!ctxInspectorOpen) return;
+    if (!ctxInspectorOpen) {
+      setRetries(0);
+      return;
+    }
     send({ type: 'context_breakdown_request' });
+
+    const timer = setInterval(() => {
+      const bd = useUIStore.getState().contextBreakdown;
+      if (bd) {
+        clearInterval(timer);
+        return;
+      }
+      setRetries(r => {
+        if (r >= MAX_RETRIES) {
+          clearInterval(timer);
+          return r;
+        }
+        send({ type: 'context_breakdown_request' });
+        return r + 1;
+      });
+    }, RETRY_INTERVAL);
+
+    return () => clearInterval(timer);
   }, [ctxInspectorOpen, send]);
 
   useEffect(() => {
@@ -238,6 +265,8 @@ export function ContextInspector() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [ctxInspectorOpen, setCtxInspectorOpen]);
+
+  const timedOut = !contextBreakdown && retries >= MAX_RETRIES;
 
   return (
     <div
@@ -253,7 +282,17 @@ export function ContextInspector() {
         <div id="ctx-inspector-body">
           {contextBreakdown
             ? <InspectorBody bd={contextBreakdown} />
-            : <div style={{ color: 'var(--text-dim)' }}>Loading…</div>
+            : timedOut
+              ? <div id="ctx-inspector-error" style={{ color: 'var(--error)' }}>
+                  Failed to load context data. The server may be unavailable.
+                  <button
+                    style={{ marginLeft: '1rem', cursor: 'pointer' }}
+                    onClick={() => { setRetries(0); send({ type: 'context_breakdown_request' }); }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              : <div id="ctx-inspector-loading" style={{ color: 'var(--text-dim)' }}>Loading…</div>
           }
         </div>
       </div>

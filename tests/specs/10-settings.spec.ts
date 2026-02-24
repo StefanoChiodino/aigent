@@ -163,6 +163,65 @@ test.describe('Settings modal', () => {
     await expect(page.locator('#settings-body')).toContainText(/summariz/i);
   });
 
+  // ── Text input reactivity ────────────────────────────────────────────────
+
+  test('typing in a text input reflects every keystroke immediately', async () => {
+    const page = getPage();
+    await openSettings(page);
+
+    // Navigate to Model tab which has a text input ("Default model")
+    const modelNav = page.locator('#settings-nav .settings-nav-item', { hasText: 'Model' });
+    await modelNav.click();
+
+    const textInput = page.locator('#settings-body .settings-group:not(.hidden) input.settings-text[type="text"]').first();
+    await expect(textInput).toBeVisible({ timeout: 2_000 });
+
+    // Clear and type a test string character by character
+    await textInput.fill('');
+    await textInput.pressSequentially('test-model', { delay: 30 });
+
+    // All characters must be present immediately — no waiting for a toast timeout
+    await expect(textInput).toHaveValue('test-model', { timeout: 500 });
+
+    // Restore a reasonable default so we don't break other tests
+    await textInput.fill('claude-opus-4-6');
+  });
+
+  // ── String-list textarea (onBlur commit) ─────────────────────────────────────
+
+  test('string-list textarea accepts typed text and commits on blur', async () => {
+    const page = getPage();
+    await openSettings(page);
+
+    // Navigate to Permissions tab which has string-list textareas
+    const permNav = page.locator('#settings-nav .settings-nav-item', { hasText: /^Permissions$/ });
+    if (await permNav.count() === 0) return;
+    await permNav.click();
+
+    const textarea = page.locator('#settings-body .settings-group:not(.hidden) .settings-string-list').first();
+    await expect(textarea).toBeVisible({ timeout: 2_000 });
+
+    // Type a pattern — local state should update immediately
+    await textarea.fill('');
+    await textarea.pressSequentially('echo *', { delay: 30 });
+    await expect(textarea).toHaveValue('echo *', { timeout: 500 });
+
+    // Blur to commit the value to the store
+    await textarea.blur();
+
+    // Re-open settings and navigate back to verify the value persisted
+    await page.locator('#settings-close').click();
+    await openSettings(page);
+    const permNav2 = page.locator('#settings-nav .settings-nav-item', { hasText: /^Permissions$/ });
+    await permNav2.click();
+    const textarea2 = page.locator('#settings-body .settings-group:not(.hidden) .settings-string-list').first();
+    await expect(textarea2).toHaveValue(/echo \*/, { timeout: 2_000 });
+
+    // Clean up: clear the value
+    await textarea2.fill('');
+    await textarea2.blur();
+  });
+
   // ── Saved toast ───────────────────────────────────────────────────────────────
 
   test('settings toast appears after saving a client setting', async () => {

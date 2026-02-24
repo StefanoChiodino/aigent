@@ -42,7 +42,7 @@ export const useVoiceStore = create<VoiceState>()(
     }),
     {
       name: 'aigent-voice',
-      partialize: (s) => ({ ttsAutoSpeak: s.ttsAutoSpeak, ttsRatePct: s.ttsRatePct, micSticky: s.micSticky }),
+      partialize: (s) => ({ ttsAutoSpeak: s.ttsAutoSpeak, ttsRatePct: s.ttsRatePct }),
     }
   )
 );

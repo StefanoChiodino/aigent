@@ -73,8 +73,28 @@ export async function startWebServer(
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
+  // These listeners run ONCE (not per-connection) to avoid duplicate appends
+  // when multiple browser tabs are connected simultaneously.
   let cachedState: ServerState | null = null;
   client.on('connected', (state) => { cachedState = state; });
+  client.on('message', (message: ServerState['messages'][number]) => {
+    if (cachedState) cachedState = { ...cachedState, messages: [...cachedState.messages, message] };
+  });
+  client.on('system', (content: string) => {
+    if (cachedState) {
+      const sysMsg: ServerState['messages'][number] = { role: 'system', content, timestamp: new Date().toISOString() };
+      cachedState = { ...cachedState, messages: [...cachedState.messages, sysMsg] };
+    }
+  });
+  client.on('usage', (usage: ServerState['usage']) => {
+    if (cachedState) cachedState = { ...cachedState, usage };
+  });
+  client.on('loading', (isLoading: boolean) => {
+    if (cachedState) cachedState = { ...cachedState, isLoading };
+  });
+  client.on('state', (partial: { thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string }) => {
+    if (cachedState) cachedState = { ...cachedState, ...partial };
+  });
 
   // Cache latest host state from gatekeeper (mounts + capabilities).
   let cachedMounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] = [];
@@ -319,10 +339,7 @@ export async function startWebServer(
     // --- Relay AgentClient events → WebSocket ---
 
     const handlers = {
-      connected: (state: ServerState) => {
-        cachedState = state;
-        send({ type: 'connected', state });
-      },
+      connected: (state: ServerState) => send({ type: 'connected', state }),
       text: (content: string) => send({ type: 'text', content }),
       thinking: (content: string) => send({ type: 'thinking', content }),
       tool_start: (name: string, input: string, summary: string) =>
@@ -331,31 +348,15 @@ export async function startWebServer(
       tool_end: () => send({ type: 'tool_end' }),
       task_update: (task: ServerEvent extends { type: 'task_update'; task: infer T } ? T : never) =>
         send({ type: 'task_update', task }),
-      message: (message: ServerState['messages'][number]) => {
-        if (cachedState) cachedState = { ...cachedState, messages: [...cachedState.messages, message] };
-        send({ type: 'message', message });
+      message: (_message: ServerState['messages'][number]) => {
+        send({ type: 'message', message: _message });
       },
-      system: (content: string) => {
-        if (cachedState) {
-          const sysMsg: ServerState['messages'][number] = { role: 'system', content, timestamp: new Date().toISOString() };
-          cachedState = { ...cachedState, messages: [...cachedState.messages, sysMsg] };
-        }
-        send({ type: 'system', content });
-      },
-      usage: (usage: ServerState['usage']) => {
-        // Update cached state with latest usage
-        if (cachedState) cachedState = { ...cachedState, usage };
-        send({ type: 'usage', usage });
-      },
-      loading: (isLoading: boolean) => {
-        if (cachedState) cachedState = { ...cachedState, isLoading };
-        send({ type: 'loading', isLoading });
-      },
+      system: (content: string) => send({ type: 'system', content }),
+      usage: (usage: ServerState['usage']) => send({ type: 'usage', usage }),
+      loading: (isLoading: boolean) => send({ type: 'loading', isLoading }),
       error: (message: string) => send({ type: 'error', message }),
-      state: (partial: { thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string }) => {
-        if (cachedState) cachedState = { ...cachedState, ...partial };
-        send({ type: 'state', ...partial });
-      },
+      state: (partial: { thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string }) =>
+        send({ type: 'state', ...partial }),
       mount_request: (id: string, path: string, mode: 'ro' | 'rw', reason?: string, durationMinutes?: number) =>
         send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}), ...(durationMinutes !== undefined ? { durationMinutes } : {}) }),
       config_write_request: (id: string, file: string, content: string, reason: string) =>

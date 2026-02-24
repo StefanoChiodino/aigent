@@ -1,10 +1,34 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import type { SettingDef } from '../../lib/settings-schema';
 
 interface SettingControlProps {
   def: SettingDef;
   value: boolean | number | string;
   onChange: (v: boolean | number | string) => void;
+}
+
+function StringListTextarea({ value, onChange }: { value: boolean | number | string; onChange: (v: string) => void }) {
+  const toText = (v: typeof value) => {
+    try { return (JSON.parse(String(v)) as string[]).join('\n'); } catch { return ''; }
+  };
+  const [text, setText] = useState(() => toText(value));
+
+  // Sync from parent when external value changes (e.g. reset)
+  useEffect(() => { setText(toText(value)); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <textarea
+      className="settings-string-list"
+      rows={8}
+      spellCheck={false}
+      value={text}
+      onChange={e => setText(e.target.value)}
+      onBlur={() => {
+        const arr = text.split('\n').map(s => s.trim()).filter(Boolean);
+        onChange(JSON.stringify(arr));
+      }}
+    />
+  );
 }
 
 export function SettingControl({ def, value, onChange }: SettingControlProps) {
@@ -87,22 +111,8 @@ export function SettingControl({ def, value, onChange }: SettingControlProps) {
         </span>
       );
 
-    case 'string-list': {
-      let lines: string[] = [];
-      try { lines = JSON.parse(String(value)) as string[]; } catch { /* empty */ }
-      return (
-        <textarea
-          className="settings-string-list"
-          rows={8}
-          spellCheck={false}
-          value={lines.join('\n')}
-          onChange={e => {
-            const arr = e.target.value.split('\n').map(s => s.trim()).filter(Boolean);
-            onChange(JSON.stringify(arr));
-          }}
-        />
-      );
-    }
+    case 'string-list':
+      return <StringListTextarea value={value} onChange={onChange} />;
 
     default:
       return (

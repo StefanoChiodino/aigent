@@ -148,7 +148,6 @@ export function Sidebar() {
 
   const openCtxInspector = () => {
     setCtxInspectorOpen(true);
-    send({ type: 'context_breakdown_request' });
   };
 
   return (

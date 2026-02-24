@@ -7,6 +7,7 @@ import { useVoiceStore } from '../stores/voice';
 import { parseDiffIntoFiles } from '../lib/diff';
 import { captureScreenshot, startScreenShare } from '../lib/screen';
 import { playPermissionSound } from '../lib/audio';
+import { isDemo, getDemoWebSocket } from '../demo/useDemoMode';
 import type { ServerEvent, MountInfo } from '../types';
 
 export function useWebSocket(): void {
@@ -20,7 +21,11 @@ export function useWebSocket(): void {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
-  const mountedRef = useRef(false);
+  // Track WebSockets that were intentionally closed (by cleanup).
+  // We can't use a simple "mounted" boolean because WebSocket close is async —
+  // by the time onclose fires for the old WS, React StrictMode has already
+  // re-mounted the hook and set mounted=true, causing a phantom reconnect.
+  const closedIntentionally = useRef(new WeakSet<WebSocket>());
 
   useEffect(() => {
     function send(data: Record<string, unknown>): void {
@@ -279,7 +284,9 @@ export function useWebSocket(): void {
       // In dev mode (Vite on :5173), connect directly to the backend
       // to avoid Vite proxy errors during tsx-watch restarts.
       const wsHost = import.meta.env.DEV ? 'localhost:3141' : location.host;
-      const ws = new WebSocket(`${proto}//${wsHost}/ws`);
+      const ws = isDemo()
+        ? getDemoWebSocket() as unknown as WebSocket
+        : new WebSocket(`${proto}//${wsHost}/ws`);
       wsRef.current = ws;
       conn().setWs(ws);
       conn().setStatus('connecting');
@@ -287,11 +294,13 @@ export function useWebSocket(): void {
       ws.onopen = () => {
         conn().setStatus('connected');
         reconnectAttempt.current = 0;
-        // Start ping interval
-        if (pingTimer.current) clearInterval(pingTimer.current);
-        pingTimer.current = setInterval(() => {
-          conn().send({ type: 'ping' });
-        }, 25_000);
+        // Start ping interval (skip in demo mode — no server to ping)
+        if (!isDemo()) {
+          if (pingTimer.current) clearInterval(pingTimer.current);
+          pingTimer.current = setInterval(() => {
+            conn().send({ type: 'ping' });
+          }, 25_000);
+        }
       };
 
       ws.onmessage = (ev: MessageEvent) => {
@@ -306,7 +315,8 @@ export function useWebSocket(): void {
         conn().setWs(null);
         wsRef.current = null;
         chat().endStream();
-        if (mountedRef.current) {
+        // Only reconnect if this WebSocket wasn't intentionally closed by cleanup.
+        if (!closedIntentionally.current.has(ws)) {
           conn().setStatus('reconnecting');
           scheduleReconnect();
         }
@@ -316,6 +326,7 @@ export function useWebSocket(): void {
     }
 
     function scheduleReconnect(): void {
+      if (isDemo()) return;
       if (reconnectTimer.current) return;
       reconnectAttempt.current++;
       const delay = reconnectAttempt.current <= 1 ? 200 : reconnectAttempt.current <= 3 ? 500 : 1000;
@@ -325,14 +336,15 @@ export function useWebSocket(): void {
       }, delay);
     }
 
-    mountedRef.current = true;
     connect();
 
     return () => {
-      mountedRef.current = false;
       if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
       if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
-      wsRef.current?.close();
+      if (wsRef.current) {
+        closedIntentionally.current.add(wsRef.current);
+        wsRef.current.close();
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

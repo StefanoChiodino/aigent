@@ -149,6 +149,72 @@ test.describe('Input area', () => {
     await expect(area).not.toHaveClass(/drag-over/);
   });
 
+  // ── Markdown highlight overlay ─────────────────────────────────────────────────
+
+  test('backtick code spans are highlighted', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('hello `code` world');
+    const hl = page.locator('#input-highlight .input-hl-code');
+    await expect(hl).toHaveCount(1);
+    await expect(hl).toContainText('`code`');
+  });
+
+  test('**bold** text is highlighted', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('some **bold** text');
+    const hl = page.locator('#input-highlight .input-hl-bold');
+    await expect(hl).toHaveCount(1);
+    await expect(hl).toContainText('**bold**');
+  });
+
+  test('*italic* text is highlighted', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('some *italic* text');
+    const hl = page.locator('#input-highlight .input-hl-italic');
+    await expect(hl).toHaveCount(1);
+    await expect(hl).toContainText('*italic*');
+  });
+
+  test('~~strikethrough~~ text is highlighted', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('some ~~strike~~ text');
+    const hl = page.locator('#input-highlight .input-hl-strike');
+    await expect(hl).toHaveCount(1);
+    await expect(hl).toContainText('~~strike~~');
+  });
+
+  test('# heading is highlighted', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('# My Heading');
+    const hl = page.locator('#input-highlight .input-hl-h1');
+    await expect(hl).toHaveCount(1);
+    await expect(hl).toContainText('# My Heading');
+  });
+
+  test('@mention is highlighted', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('hello @user');
+    const hl = page.locator('#input-highlight .input-hl-at');
+    await expect(hl).toHaveCount(1);
+    await expect(hl).toContainText('@user');
+  });
+
+  test('/file/path is highlighted as file chip', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('edit /src/app.ts');
+    const hl = page.locator('#input-highlight .input-hl-at-file');
+    await expect(hl).toHaveCount(1);
+    await expect(hl).toContainText('/src/app.ts');
+  });
+
+  test('code spans are opaque — inner markdown is not parsed', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('`**not bold**`');
+    // Should have one code span and zero bold spans
+    await expect(page.locator('#input-highlight .input-hl-code')).toHaveCount(1);
+    await expect(page.locator('#input-highlight .input-hl-bold')).toHaveCount(0);
+  });
+
   // ── Input row structure ───────────────────────────────────────────────────────
 
   test('input row contains expected buttons', async () => {

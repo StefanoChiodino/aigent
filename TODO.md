@@ -2,6 +2,7 @@
 
 attached images should persist in the chat. Now thyew just look like [x image]
 
+When spawning agents I should be able to see everything on the details and uh I should also be able to see what model and reasoning is using.
 
 ---
 

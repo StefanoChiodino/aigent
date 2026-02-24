@@ -421,23 +421,51 @@ export interface CommandSegment {
  * Does not attempt full shell parsing — this is for display only.
  */
 export function parseCommandPipeline(command: string): CommandSegment[] {
-  // Match shell operators, splitting the command into segments + their joining operators.
-  // We walk the string left-to-right, being careful to handle || before |.
+  // Walk the string character-by-character, respecting shell quoting (single quotes,
+  // double quotes, backslash escapes) so that operators inside quoted strings are not
+  // treated as pipeline separators.
   const segments: CommandSegment[] = [];
-  const operatorRe = /(\|\||&&|[|;])/g;
-
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
   const parts: Array<{ text: string; operator: CommandSegment['operator'] }> = [];
 
-  while ((match = operatorRe.exec(command)) !== null) {
-    const op = match[1]!;
-    const text = command.slice(lastIndex, match.index).trim();
-    if (text) parts.push({ text, operator: op as CommandSegment['operator'] });
-    lastIndex = match.index + op.length;
+  let i = 0;
+  let segStart = 0;
+  let inSingle = false;
+  let inDouble = false;
+
+  while (i < command.length) {
+    const ch = command[i]!;
+
+    // Backslash escape — skip next character (works in double quotes and unquoted)
+    if (ch === '\\' && !inSingle) {
+      i += 2;
+      continue;
+    }
+
+    // Toggle quote state
+    if (ch === "'" && !inDouble) { inSingle = !inSingle; i++; continue; }
+    if (ch === '"' && !inSingle) { inDouble = !inDouble; i++; continue; }
+
+    // Only match operators when outside quotes
+    if (!inSingle && !inDouble) {
+      let op: CommandSegment['operator'] = null;
+      if (command[i] === '|' && command[i + 1] === '|') { op = '||'; }
+      else if (command[i] === '&' && command[i + 1] === '&') { op = '&&'; }
+      else if (command[i] === '|') { op = '|'; }
+      else if (command[i] === ';') { op = ';'; }
+
+      if (op) {
+        const text = command.slice(segStart, i).trim();
+        if (text) parts.push({ text, operator: op });
+        i += op.length;
+        segStart = i;
+        continue;
+      }
+    }
+
+    i++;
   }
   // Last segment (no trailing operator)
-  const tail = command.slice(lastIndex).trim();
+  const tail = command.slice(segStart).trim();
   if (tail) parts.push({ text: tail, operator: null });
 
   for (const { text, operator } of parts) {
