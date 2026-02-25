@@ -15,3 +15,17 @@ repos:
         args: ["src/**/*.test.ts"]
         pass_filenames: false
         types: [ts]
+
+      - id: web-tests
+        name: Web component tests
+        language: system
+        entry: npx vitest run --config web/vite.config.ts
+        pass_filenames: false
+        types_or: [ts, tsx, css]
+
+      - id: web-build
+        name: Web UI build
+        language: system
+        entry: npx vite build --config web/vite.config.ts
+        pass_filenames: false
+        types_or: [ts, tsx, css]

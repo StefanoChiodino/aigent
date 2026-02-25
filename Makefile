@@ -1,4 +1,4 @@
-.PHONY: dev dev-ts serve web web-dev build rebuild typecheck test test-e2e test-e2e-spec test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup kill-ports
+.PHONY: dev dev-ts serve web web-dev build rebuild typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup kill-ports
 
 # --- Development ---
 
@@ -64,6 +64,10 @@ test-e2e:
 # Run a single spec or glob, e.g. make test-e2e-spec SPEC=tests/specs/10-settings.spec.ts
 test-e2e-spec:
 	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts $(SPEC) --reporter=line
+
+# Fast subset — inject-based tests only (~10s), great for quick feedback
+test-e2e-fast:
+	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep @fast --reporter=line
 
 test-e2e-live:
 	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep @live

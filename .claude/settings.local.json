@@ -37,7 +37,8 @@
       "WebFetch(domain:docs.anthropic.com)",
       "Read(//home/draga/repos/openclaw/**)",
       "Bash(pgrep:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(/home/draga/repos/aigent/tts/.venv/bin/pre-commit run:*)"
     ],
     "additionalDirectories": [
       "/tmp"

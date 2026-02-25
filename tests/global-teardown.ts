@@ -1,13 +1,25 @@
 /**
  * Playwright global teardown — kills the test gatekeeper and its Docker container.
+ *
+ * Wrapped in a 15-second timeout to prevent the teardown from hanging forever
+ * (e.g. if fuser or docker blocks on a stuck process).
  */
 
 import { readFileSync, existsSync, unlinkSync } from 'node:fs';
-import { execSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 
 const PID_FILE = '/tmp/aigent-test-gatekeeper.pid';
 
 export default async function globalTeardown() {
+  const timeout = new Promise<void>((_, reject) =>
+    setTimeout(() => reject(new Error('Teardown timed out after 15s')), 15_000),
+  );
+  await Promise.race([doTeardown(), timeout]).catch(err => {
+    console.warn(`[test-teardown] Warning: ${err.message}`);
+  });
+}
+
+async function doTeardown() {
   // Kill via in-process reference
   const proc = (globalThis as Record<string, unknown>).__AIGENT_TEST_PROC__;
   if (proc && typeof (proc as { kill?: (sig: string) => void }).kill === 'function') {
@@ -18,7 +30,6 @@ export default async function globalTeardown() {
   if (existsSync(PID_FILE)) {
     try {
       const pid = parseInt(readFileSync(PID_FILE, 'utf-8').trim(), 10);
-      // Kill the process group so child Docker processes also die
       try { process.kill(-pid, 'SIGTERM'); } catch { /* not a group leader */ }
       try { process.kill(pid, 'SIGTERM'); } catch { /* already dead */ }
     } catch { /* ignore */ }
@@ -30,7 +41,6 @@ export default async function globalTeardown() {
   killPort(PORT);
 
   // Clean up stale Unix sockets left by the test gatekeeper.
-  // Uses the test-specific socket dir so we never touch dev sockets.
   const TEST_SOCKET_DIR = '/tmp/aigent-test';
   for (const sock of ['worker.sock', 'host.sock', 'llm-proxy.sock', 'host-daemon.pid']) {
     const sockPath = `${TEST_SOCKET_DIR}/${sock}`;
@@ -40,18 +50,16 @@ export default async function globalTeardown() {
   }
 
   // Clean up any orphaned aigent-test Docker containers from this test run.
-  // Only targets aigent-test-worker containers — never touches dev containers.
   cleanupDockerContainers();
 
-  // Brief wait for OS cleanup
-  await new Promise((r) => setTimeout(r, 800));
+  // Brief wait for OS cleanup (reduced from 800ms)
+  await new Promise((r) => setTimeout(r, 300));
   console.log('[test-teardown] Done');
 }
 
 /** Remove aigent-test-worker Docker containers that may have been orphaned. */
 function cleanupDockerContainers(): void {
   try {
-    // Only target test containers (aigent-test-worker) — never dev containers (aigent-worker).
     spawnSync('sh', ['-c', 'docker ps -q --filter name=aigent-test-worker | xargs -r docker rm -f'], {
       stdio: 'ignore',
       timeout: 10_000,
@@ -59,18 +67,22 @@ function cleanupDockerContainers(): void {
   } catch { /* ignore */ }
 }
 
-/** Kill any process listening on the given port using fuser or lsof. */
+/** Kill any process listening on the given port. Retries up to 3 times on WSL2/Linux. */
 function killPort(port: number): void {
-  // Try fuser first (Linux), fall back to lsof (macOS/Linux)
-  try {
-    spawnSync('fuser', ['-k', `${port}/tcp`], { stdio: 'ignore' });
-  } catch {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf-8' });
+      spawnSync('fuser', ['-k', `${port}/tcp`], { stdio: 'ignore', timeout: 5_000 });
+      return;
+    } catch { /* fuser not available or failed */ }
+    try {
+      const result = spawnSync('lsof', ['-ti', `:${port}`], { encoding: 'utf-8', timeout: 5_000 });
       const pids = (result.stdout ?? '').trim().split('\n').filter(Boolean);
       for (const p of pids) {
-        try { process.kill(parseInt(p, 10), 'SIGTERM'); } catch { /* ignore */ }
+        // Use SIGKILL on retry attempts to force-kill stuck processes
+        const signal = attempt === 0 ? 'SIGTERM' : 'SIGKILL';
+        try { process.kill(parseInt(p, 10), signal); } catch { /* ignore */ }
       }
+      if (pids.length > 0) return;
     } catch { /* ignore */ }
   }
 }
