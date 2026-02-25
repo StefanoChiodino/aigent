@@ -9,7 +9,7 @@ import { useSharedPage } from '../helpers/shared-page.js';
 
 const TEST_PATH = '/tmp/aigent-test-mount';
 
-test.describe('Mount Permission Modal', () => {
+test.describe('@fast Mount Permission Modal', () => {
   const getPage = useSharedPage();
 
   test('mount_request shows permission modal', async () => {

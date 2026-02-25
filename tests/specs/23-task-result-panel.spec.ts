@@ -11,7 +11,7 @@ import { injectEvent } from '../helpers/ws-client.js';
 
 const NOW = new Date().toISOString();
 
-test.describe('Task Result Panel', () => {
+test.describe('@fast Task Result Panel', () => {
   const getPage = useSharedPage();
 
   async function openResultPanel(page: import('@playwright/test').Page, id: string, description: string, result: string) {

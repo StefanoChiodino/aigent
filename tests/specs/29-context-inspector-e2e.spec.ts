@@ -50,10 +50,13 @@ async function openWithData(
     if (typeof fn === 'function') (fn as (open: boolean) => void)(true);
   });
   await expect(page.locator('#ctx-inspector-overlay')).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
-  // Wait for server response, then re-inject our fake data
-  await page.waitForTimeout(500);
+  // Wait for the store to receive context breakdown data (server may respond first),
+  // then re-inject our fake data to ensure we control the content.
+  await page.waitForFunction(() => {
+    const store = (window as Record<string, unknown>).__zustand_ui as { getState: () => { contextBreakdown: unknown } } | undefined;
+    return store?.getState()?.contextBreakdown != null;
+  }, undefined, { timeout: 3_000 });
   await injectEvent({ type: 'context_breakdown', breakdown });
-  await page.waitForTimeout(50);
 }
 
 async function closeInspector(page: import('@playwright/test').Page): Promise<void> {
@@ -61,7 +64,7 @@ async function closeInspector(page: import('@playwright/test').Page): Promise<vo
   await expect(page.locator('#ctx-inspector-overlay')).toHaveClass(/\bhidden\b/, { timeout: 2_000 });
 }
 
-test.describe('Context Inspector E2E', () => {
+test.describe('@fast Context Inspector E2E', () => {
   const getPage = useSharedPage();
 
   // ── Open / Close ────────────────────────────────────────────────────────────

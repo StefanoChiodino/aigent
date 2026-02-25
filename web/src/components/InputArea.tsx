@@ -201,6 +201,10 @@ export function InputArea() {
   // Test helper: reset local component state between shared-page tests
   useEffect(() => {
     const handler = () => {
+      // Abort any running mic to clean up timers, in-flight requests, and refs
+      // (the zustand store reset sets micState to 'idle' but doesn't stop the
+      // actual mic infrastructure managed by useMic's refs)
+      abortMic();
       setMicCapped(false);
       setHasMicText(false);
       setScreenCapActive(false);
@@ -212,7 +216,7 @@ export function InputArea() {
     };
     window.addEventListener('__test_reset_input', handler);
     return () => window.removeEventListener('__test_reset_input', handler);
-  }, []);
+  }, [abortMic]);
 
   // Auto-grow textarea
   const autoGrow = useCallback(() => {
@@ -522,7 +526,12 @@ export function InputArea() {
     const newVal = item.argHint ? item.name + ' ' : item.name;
     setInputValue(newVal);
     setPaletteSelected(0);
-    if (!item.argHint) setTimeout(() => submitMessage(), 0);
+    if (!item.argHint) {
+      // Send directly with the completed value to avoid stale-closure issue
+      // (submitMessage captures the pre-completion inputValue)
+      send({ type: 'message', content: newVal });
+      setInputValue('');
+    }
     inputRef.current?.focus();
   };
 
@@ -696,9 +705,9 @@ export function InputArea() {
 
           <button
             id="mic-sticky"
-            className={[micSticky ? 'active' : '', vadActive ? 'vad-active' : ''].filter(Boolean).join(' ')}
+            className={[micSticky ? 'active' : '', micSticky && vadActive ? 'vad-active' : ''].filter(Boolean).join(' ')}
             title="Always-on mic"
-            onClick={toggleMicSticky}
+            onClick={() => { toggleMicSticky(); inputRef.current?.focus(); }}
             style={{ fontSize: 18, lineHeight: 1 }}
           >
             ∞

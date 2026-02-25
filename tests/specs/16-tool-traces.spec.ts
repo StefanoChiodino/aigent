@@ -36,7 +36,7 @@ async function injectToolTurn(
   await injectEvent({ type: 'loading', isLoading: false });
 }
 
-test.describe('Tool Traces', () => {
+test.describe('@fast Tool Traces', () => {
   const getPage = useSharedPage();
 
   test('tool_start creates a tool block in the message', async () => {

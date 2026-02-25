@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import type { DisplayMessage } from '../types';
 import { renderMarkdown, extractSpeakContent, stripSpeakTag } from '../lib/markdown';
+import { useVoiceStore } from '../stores/voice';
+import { useTTS } from '../hooks/useTTS';
 import { TraceBlock } from './TraceBlock';
 
 interface Props {
@@ -12,10 +14,19 @@ const STOP_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="current
 
 function TTSButton({ text }: { text: string }) {
   const [speaking, setSpeaking] = useState(false);
+  const ttsPlaying = useVoiceStore(s => s.ttsPlaying);
+  const { stopAll: ttsStopAll } = useTTS();
   const abortRef = React.useRef<AbortController | null>(null);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
+  const showStop = speaking || ttsPlaying;
+
   const handleClick = useCallback(() => {
+    // Global TTS (auto-speak) is playing — stop it
+    if (ttsPlaying && !speaking) {
+      ttsStopAll();
+      return;
+    }
     if (speaking) {
       abortRef.current?.abort();
       audioRef.current?.pause();
@@ -44,12 +55,12 @@ function TTSButton({ text }: { text: string }) {
       audio.onerror = () => { setSpeaking(false); };
       void audio.play();
     }).catch(() => setSpeaking(false));
-  }, [speaking, text]);
+  }, [speaking, text, ttsPlaying, ttsStopAll]);
 
   return (
-    <button className={`tts-btn${speaking ? ' speaking' : ''}`} title={speaking ? 'Stop' : 'Speak'} onClick={handleClick}>
-      <span className={`icon-speak${speaking ? ' hidden' : ''}`} dangerouslySetInnerHTML={{ __html: SPEAK_ICON }} />
-      <span className={`icon-stop-tts${speaking ? '' : ' hidden'}`} dangerouslySetInnerHTML={{ __html: STOP_ICON }} />
+    <button className={`tts-btn${showStop ? ' speaking' : ''}`} title={showStop ? 'Stop' : 'Speak'} onClick={handleClick}>
+      <span className={`icon-speak${showStop ? ' hidden' : ''}`} dangerouslySetInnerHTML={{ __html: SPEAK_ICON }} />
+      <span className={`icon-stop-tts${showStop ? '' : ' hidden'}`} dangerouslySetInnerHTML={{ __html: STOP_ICON }} />
     </button>
   );
 }

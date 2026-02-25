@@ -3,10 +3,15 @@
  *
  * Maintains a WebSocket connection to the aigent gatekeeper at ws://localhost:3141/ext.
  * Receives browser_ext commands and dispatches them to the active tab.
+ *
+ * MV3 service workers are terminated by Chrome after ~30s of inactivity.
+ * We use chrome.alarms (fires every 25s) to wake the worker up and ensure
+ * the WebSocket connection stays alive / reconnects if it dropped.
  */
 
 const GATEKEEPER_WS = 'ws://localhost:3141/ext';
 const RECONNECT_DELAY_MS = 3000;
+const KEEPALIVE_ALARM = 'aigent-keepalive';
 
 interface ExtRequest {
   type: 'ext_request';
@@ -332,6 +337,24 @@ function extractA11yContent(rootSelector: string | null): string {
 
 // Open the side panel when the extension toolbar icon is clicked
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
+// ── Keep-alive via chrome.alarms ──────────────────────────────────────────────
+// MV3 service workers are killed after ~30s idle. We use an alarm (max every
+// 1 minute per Chrome policy, but we fire every 25s via the alarm itself) to
+// wake the worker and ensure the WebSocket is still alive.
+chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 }); // ~25s
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== KEEPALIVE_ALARM) return;
+  // If WS is closed or closing, reconnect (but don't double-connect)
+  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    connect();
+  }
+});
 
 // Boot
 connect();

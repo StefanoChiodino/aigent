@@ -41,7 +41,7 @@ function injectPlainMessage(
   }, content);
 }
 
-test.describe('Image persistence in chat messages', () => {
+test.describe('@fast Image persistence in chat messages', () => {
   const getPage = useSharedPage();
 
   test('message with image attachment renders thumbnail', async () => {

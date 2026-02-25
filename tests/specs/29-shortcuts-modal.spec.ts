@@ -8,7 +8,7 @@
 import { test, expect } from '@playwright/test';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Keyboard Shortcuts Modal', () => {
+test.describe('@fast Keyboard Shortcuts Modal', () => {
   const getPage = useSharedPage();
 
   async function openShortcuts(page: import('@playwright/test').Page): Promise<void> {

@@ -283,10 +283,17 @@ function resolveExecRequest(id: string, response: { ok: boolean; alwaysAllow: bo
   }
 }
 
+// --- Browser extension request handling ---
+
+const pendingBrowserExtRequests = new Map<string, {
+  resolve: (response: { ok: boolean; treeText?: string; dataUrl?: string; error?: string }) => void;
+}>();
+let browserExtCounter = 0;
+
 /**
  * Request the browser extension to perform an observe action (extract_a11y or screenshot).
- * Routed through the gatekeeper's ExtensionBridge, which holds the WebSocket connection.
- * Returns a tool result string suitable for the LLM.
+ * Sends browser_ext_request over the Unix socket to the gatekeeper, which relays it to
+ * the Chrome extension via ExtensionBridge. Returns a tool result for the LLM.
  */
 export async function requestBrowserExt(
   action: 'extract_a11y' | 'screenshot',
@@ -295,35 +302,51 @@ export async function requestBrowserExt(
 ): Promise<string | import('./provider.js').ToolContentBlock[]> {
   if (signal?.aborted) return 'Aborted by user';
 
-  // The ExtensionBridge lives in web-bridge.ts (gatekeeper-side).
-  // We import it lazily so it's only required when the tool is actually called.
-  const { extensionBridge } = await import('./ext-bridge.js');
+  const id = `bext_${++browserExtCounter}`;
 
-  if (!extensionBridge.isConnected()) {
-    return 'Browser extension is not connected. Install the aigent extension in Chrome (load unpacked from aigent-extension/dist/), then make sure the aigent gatekeeper is running. The extension popup will show green when connected.';
-  }
+  return new Promise((resolve) => {
+    const finish = (response: { ok: boolean; treeText?: string; dataUrl?: string; error?: string }) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      pendingBrowserExtRequests.delete(id);
 
-  try {
-    const result = await extensionBridge.request(action, params);
-    if (!result.ok) {
-      return `Browser extension error: ${result.error ?? 'unknown error'}`;
-    }
+      if (!response.ok) {
+        resolve(`Browser extension error: ${response.error ?? 'unknown error'}`);
+        return;
+      }
 
-    if (action === 'screenshot' && result.dataUrl) {
-      // Return as an image block so the model can see it
-      const [header, b64] = result.dataUrl.split(',');
-      const rawType = header?.replace('data:', '').replace(';base64', '') ?? 'image/png';
-      const mediaType: import('./provider.js').ImageMediaType =
-        (rawType === 'image/png' || rawType === 'image/jpeg' || rawType === 'image/gif' || rawType === 'image/webp')
-          ? rawType
-          : 'image/png';
-      return [{ type: 'image' as const, mediaType, data: b64 ?? '' }];
-    }
+      if (action === 'screenshot' && response.dataUrl) {
+        const [header, b64] = response.dataUrl.split(',');
+        const rawType = header?.replace('data:', '').replace(';base64', '') ?? 'image/png';
+        const mediaType: import('./provider.js').ImageMediaType =
+          (rawType === 'image/png' || rawType === 'image/jpeg' || rawType === 'image/gif' || rawType === 'image/webp')
+            ? rawType
+            : 'image/png';
+        resolve([{ type: 'image' as const, mediaType, data: b64 ?? '' }]);
+        return;
+      }
 
-    return result.treeText ?? '(no content)';
-  } catch (err: unknown) {
-    const e = err as { message?: string };
-    return `Browser extension error: ${e.message ?? 'unknown'}`;
+      resolve(response.treeText ?? '(no content)');
+    };
+
+    const onAbort = () => finish({ ok: false, error: 'Aborted by user' });
+
+    const timer = setTimeout(() => {
+      finish({ ok: false, error: 'Browser extension request timed out (30s). Is the extension connected?' });
+    }, 30_000);
+
+    pendingBrowserExtRequests.set(id, { resolve: finish });
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    broadcast({ type: 'browser_ext_request', id, action, ...params });
+  });
+}
+
+function resolveBrowserExtRequest(id: string, response: { ok: boolean; treeText?: string; dataUrl?: string; error?: string }): void {
+  const pending = pendingBrowserExtRequests.get(id);
+  if (pending) {
+    pendingBrowserExtRequests.delete(id);
+    pending.resolve(response);
   }
 }
 
@@ -1072,6 +1095,7 @@ function handleCommand(cmd: string): boolean {
     messages = [];
     usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
     clearAutoSave(workspacePath);
+    broadcast({ type: 'reset' });
     addSystemMessage('Conversation reset.');
     broadcast({ type: 'usage', usage });
     return true;
@@ -1617,6 +1641,9 @@ function handleClient(socket: Socket): void {
             break;
           case 'screen_share_response':
             resolveScreenShareRequest(cmd.id, { ok: cmd.ok, message: cmd.message });
+            break;
+          case 'browser_ext_result':
+            resolveBrowserExtRequest(cmd.id, cmd);
             break;
           case 'context_breakdown_request':
             try {

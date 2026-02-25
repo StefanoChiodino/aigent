@@ -32,6 +32,7 @@ export interface AgentClientEvents {
   patch_request: (id: string, diff: string, reason: string) => void;
   exec_request: (id: string, command: string) => void;
   fetch_request: (id: string, url: string, method?: string) => void;
+  browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot', tabId?: number, rootSelector?: string) => void;
   disconnected: () => void;
   reconnecting: (attempt: number) => void;
 }
@@ -174,6 +175,9 @@ export class AgentClient extends EventEmitter {
       case 'fetch_request':
         this.emit('fetch_request', event.id, event.url, event.method);
         break;
+      case 'browser_ext_request':
+        this.emit('browser_ext_request', event.id, event.action, event.tabId, event.rootSelector);
+        break;
       case 'screenshot_request':
         this.emit('screenshot_request', event.id);
         break;
@@ -182,6 +186,9 @@ export class AgentClient extends EventEmitter {
         break;
       case 'context_breakdown':
         this.emit('context_breakdown', event.breakdown);
+        break;
+      case 'reset':
+        this.emit('reset');
         break;
       case 'pong':
         break;

@@ -42,6 +42,11 @@ build:
 rebuild:
 	docker compose build --no-cache aigent
 
+# --- Quality gate (run before every commit) ---
+
+check: typecheck test test-web web
+	@echo "\n✅ All checks passed."
+
 # --- Utilities ---
 
 typecheck:
@@ -50,18 +55,21 @@ typecheck:
 test:
 	node --import tsx/esm --test src/**/*.test.ts
 
+test-web:
+	npx vitest run --config web/vite.config.ts
+
 test-e2e:
-	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts --grep-invert @live
+	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep-invert @live
 
 # Run a single spec or glob, e.g. make test-e2e-spec SPEC=tests/specs/10-settings.spec.ts
 test-e2e-spec:
-	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts $(SPEC) --reporter=line
+	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts $(SPEC) --reporter=line
 
 test-e2e-live:
-	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts --grep @live
+	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep @live
 
 test-e2e-ui:
-	AIGENT_TEST_MODE=1 AIGENT_WEB_PORT=3142 npx playwright test --config tests/playwright.config.ts --ui
+	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --ui
 
 clean:
 	rm -rf dist/ web/dist/

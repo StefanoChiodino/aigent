@@ -33,7 +33,7 @@ const MULTI_FILE_DIFF = `--- a/src/foo.ts
 +// added comment
 `;
 
-test.describe('Patch Permission Modal', () => {
+test.describe('@fast Patch Permission Modal', () => {
   const getPage = useSharedPage();
 
   test('patch_request shows permission modal', async () => {

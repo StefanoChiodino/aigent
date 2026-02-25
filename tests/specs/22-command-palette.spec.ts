@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
 import { expectVisible, expectHidden } from '../helpers/ui.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Command palette interactions', () => {
+test.describe('@fast Command palette interactions', () => {
   const getPage = useSharedPage();
 
   // ── Mouse interactions ─────────────────────────────────────────────────────────

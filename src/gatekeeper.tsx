@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * Gatekeeper — runs on the host, manages the Docker sandbox and web UI.
- * (Touched to restart tsx watcher after web-bridge.ts changes — 2026-02-24)
+ * (Touched to restart tsx watcher — 2026-02-24, browser_ext socket wiring)
  *
  * Responsibilities:
  *   - Container lifecycle (start, stop, restart with updated mounts)
@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
 import { checkExecPermission, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions } from './safety.js';
+import { extensionBridge } from './ext-bridge.js';
 
 const log = createLogger('gatekeeper');
 
@@ -1132,6 +1133,18 @@ function readExecPermissions(): ExecPermissions {
   }
 }
 
+function broadcastUpdatedPermissions(): void {
+  if (!client) return;
+  const execPerms = readExecPermissions();
+  const fetchPerms = readFetchPermissions();
+  client.emit('permissions_updated', {
+    exec_perm_alwaysAllow: JSON.stringify(execPerms.alwaysAllow),
+    exec_perm_deny: JSON.stringify(execPerms.deny),
+    fetch_perm_alwaysAllow: JSON.stringify(fetchPerms.alwaysAllow),
+    fetch_perm_deny: JSON.stringify(fetchPerms.deny),
+  });
+}
+
 function addCommandToAlwaysAllow(command: string): void {
   try {
     const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
@@ -1144,6 +1157,7 @@ function addCommandToAlwaysAllow(command: string): void {
     settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current };
     writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
     log.info('Added command to always-allow', { command });
+    broadcastUpdatedPermissions();
   } catch (err) {
     log.error('Failed to update exec permissions', { error: String(err) });
   }
@@ -1277,6 +1291,7 @@ function addToFetchAlwaysAllow(pattern: string): void {
     settings['fetch_permissions'] = { ...DEFAULT_FETCH_PERMISSIONS, ...perms, alwaysAllow: current };
     writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
     log.info('Added pattern to fetch always-allow', { pattern });
+    broadcastUpdatedPermissions();
   } catch (err) {
     log.error('Failed to update fetch permissions', { error: String(err) });
   }
@@ -1620,6 +1635,22 @@ client.on('exec_request', (id: string, command: string) => {
 // Handle fetch approval requests from the worker
 client.on('fetch_request', (id: string, url: string, method?: string) => {
   handleAgentFetchRequest(id, url, method);
+});
+
+// Handle browser extension requests from the host daemon — relay to the Chrome extension
+client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot', tabId?: number, rootSelector?: string) => {
+  const params: { tabId?: number; rootSelector?: string } = {};
+  if (tabId !== undefined) params.tabId = tabId;
+  if (rootSelector !== undefined) params.rootSelector = rootSelector;
+  void extensionBridge.request(action, params).then((result) => {
+    const msg: Extract<import('./protocol.js').ClientCommand, { type: 'browser_ext_result' }> = { type: 'browser_ext_result', id, ok: result.ok };
+    if (result.treeText !== undefined) msg.treeText = result.treeText;
+    if (result.dataUrl !== undefined) msg.dataUrl = result.dataUrl;
+    if (result.error !== undefined) msg.error = result.error;
+    client.send(msg);
+  }).catch((err: Error) => {
+    client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
+  });
 });
 
 // Expiry timer — check every 30s for mounts that have timed out

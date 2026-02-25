@@ -7,7 +7,7 @@ import { useSharedPage } from '../helpers/shared-page.js';
 import { expectVisible, expectHidden } from '../helpers/ui.js';
 import { injectEvent } from '../helpers/ws-client.js';
 
-test.describe('At Mention Palette', () => {
+test.describe('@fast At Mention Palette', () => {
   const getPage = useSharedPage();
 
   test('typing @ shows at-palette', async () => {

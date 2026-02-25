@@ -8,6 +8,27 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a1a; }
     #frame { width: 100%; height: 100%; border: none; }
+    #popout {
+      position: fixed;
+      top: 6px;
+      right: 6px;
+      z-index: 9999;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid #444;
+      background: rgba(30, 30, 30, 0.85);
+      color: #aaa;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    body:hover #popout { opacity: 1; }
+    #popout:hover { background: #333; color: #fff; border-color: #666; }
     #offline {
       display: none;
       flex-direction: column;
@@ -38,9 +59,10 @@
   </style>
 </head>
 <body>
-  <iframe id="frame" src="http://localhost:3141" allow="microphone; camera"></iframe>
+  <button id="popout" title="Open in window (for mic & screen sharing)">&#8599;</button>
+  <iframe id="frame" src="http://localhost:3141" allow="microphone *; camera *; display-capture *; autoplay *"></iframe>
   <div id="offline">
-    <div class="icon">🤖</div>
+    <div class="icon">&#129302;</div>
     <div class="title">aigent is not running</div>
     <div class="hint">Start the gatekeeper with<br><code>make start</code> or <code>npm run dev</code></div>
     <button onclick="retry()">Retry</button>
@@ -48,6 +70,16 @@
   <script>
     const frame = document.getElementById('frame');
     const offline = document.getElementById('offline');
+
+    // Pop out into a real browser window where mic & screen sharing work
+    document.getElementById('popout').addEventListener('click', () => {
+      chrome.windows.create({
+        url: 'http://localhost:3141',
+        type: 'popup',
+        width: 420,
+        height: 720
+      });
+    });
 
     frame.onerror = () => showOffline();
 

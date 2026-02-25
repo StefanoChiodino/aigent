@@ -14,7 +14,7 @@ import { useSharedPage } from '../helpers/shared-page.js';
 
 const NOW = new Date().toISOString();
 
-test.describe('Sidebar layout', () => {
+test.describe('@fast Sidebar layout', () => {
   const getPage = useSharedPage();
 
   // ── Ordering ───────────────────────────────────────────────────────────────────

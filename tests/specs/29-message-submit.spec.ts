@@ -12,7 +12,7 @@
 import { test, expect } from '@playwright/test';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Message submission', () => {
+test.describe('@fast Message submission', () => {
   const getPage = useSharedPage();
 
   test('Enter sends a WebSocket message with the input text', async () => {
@@ -43,23 +43,18 @@ test.describe('Message submission', () => {
     await input.fill('hello from e2e test');
     await input.press('Enter');
 
-    // Wait a moment for the WS frame to be captured
-    await page.waitForTimeout(200);
+    // Wait for the message frame to appear in captured WS sends
+    const msgFrame = await page.waitForFunction(() => {
+      const collected = (window as Record<string, unknown>).__wsSentCollected as string[] | undefined;
+      if (!collected) return null;
+      const found = collected.find(f => {
+        try { const p = JSON.parse(f); return p.type === 'message' && p.content === 'hello from e2e test'; }
+        catch { return false; }
+      });
+      return found ?? null;
+    }, undefined, { timeout: 3_000 });
 
-    // Read captured frames
-    const frames = await page.evaluate(() => {
-      return (window as Record<string, unknown>).__wsSentCollected as string[];
-    });
-
-    // Find our message in the captured frames
-    const msgFrame = frames.find(f => {
-      try {
-        const parsed = JSON.parse(f);
-        return parsed.type === 'message' && parsed.content === 'hello from e2e test';
-      } catch { return false; }
-    });
-
-    expect(msgFrame).toBeDefined();
+    expect(msgFrame).toBeTruthy();
   });
 
   test('input clears after Enter submit', async () => {
@@ -90,20 +85,18 @@ test.describe('Message submission', () => {
     await input.fill('click submit');
     await page.locator('#send').click();
 
-    await page.waitForTimeout(200);
+    // Wait for the message frame to appear in captured WS sends
+    const msgFrame = await page.waitForFunction(() => {
+      const collected = (window as Record<string, unknown>).__wsSentCollected2 as string[] | undefined;
+      if (!collected) return null;
+      const found = collected.find(f => {
+        try { const p = JSON.parse(f); return p.type === 'message' && p.content === 'click submit'; }
+        catch { return false; }
+      });
+      return found ?? null;
+    }, undefined, { timeout: 3_000 });
 
-    const frames = await page.evaluate(() => {
-      return (window as Record<string, unknown>).__wsSentCollected2 as string[];
-    });
-
-    const msgFrame = frames.find(f => {
-      try {
-        const parsed = JSON.parse(f);
-        return parsed.type === 'message' && parsed.content === 'click submit';
-      } catch { return false; }
-    });
-
-    expect(msgFrame).toBeDefined();
+    expect(msgFrame).toBeTruthy();
   });
 
   test('empty input does NOT send on Enter', async () => {
@@ -125,6 +118,7 @@ test.describe('Message submission', () => {
     await input.fill('');
     await input.press('Enter');
 
+    // Negative assertion: wait to ensure no message frame is sent
     await page.waitForTimeout(200);
 
     const frames = await page.evaluate(() => {
@@ -159,6 +153,7 @@ test.describe('Message submission', () => {
     await input.fill('not yet');
     await input.press('Shift+Enter');
 
+    // Negative assertion: wait to ensure no message frame is sent
     await page.waitForTimeout(200);
 
     const frames = await page.evaluate(() => {

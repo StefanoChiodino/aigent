@@ -31,8 +31,8 @@ export function useSharedPage(): () => Page {
   test.beforeEach(async () => {
     // Unroute any page.route() mocks from previous tests
     await page.unrouteAll({ behavior: 'ignoreErrors' });
-    // Reset all Zustand stores (chat, UI, voice) and dispatch __test_reset_input
-    // for local React component state (micCapped, hasMicText, palette state, etc.)
+    // Reset all Zustand stores (chat, UI, voice, connection, settings) and
+    // dispatch __test_reset_input for local React component state.
     await page.evaluate(() => {
       const reset = (window as Record<string, unknown>).__testResetStores;
       if (typeof reset === 'function') reset();
@@ -40,14 +40,22 @@ export function useSharedPage(): () => Page {
     // Clear input field using Playwright's fill() to trigger proper React
     // onChange events (the textarea is a controlled component).
     await page.locator('#input').fill('');
-    // Wait for React re-renders and any pending async callbacks (e.g. STT
-    // responses from mic tests) to settle, then re-dispatch the local state
-    // reset to catch any callbacks that fired after the initial reset.
-    await page.waitForTimeout(100);
+    // Wait for stores to reach clean state instead of arbitrary timeouts.
+    await page.waitForFunction(() => {
+      const chat = (window as Record<string, unknown>).__zustand_chat as { getState: () => { messages: unknown[] } } | undefined;
+      const ui = (window as Record<string, unknown>).__zustand_ui as { getState: () => { error: unknown; loading: boolean } } | undefined;
+      const voice = (window as Record<string, unknown>).__zustand_voice as { getState: () => { micState: string } } | undefined;
+      if (!chat || !ui || !voice) return false;
+      const c = chat.getState();
+      const u = ui.getState();
+      const v = voice.getState();
+      return c.messages.length === 0 && u.error === null && !u.loading && v.micState === 'idle';
+    }, undefined, { timeout: 5_000 });
+    // Re-dispatch the local state reset to catch any async callbacks
+    // (e.g. STT responses) that fired after the initial reset.
     await page.evaluate(() => {
       window.dispatchEvent(new Event('__test_reset_input'));
     });
-    await page.waitForTimeout(50);
   });
 
   return () => page;

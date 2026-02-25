@@ -11,150 +11,11 @@
 import { test, expect } from '@playwright/test';
 import { useSharedPage } from '../helpers/shared-page.js';
 import { dismissPermModal } from '../helpers/ui.js';
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Inject a mock implementation of getUserMedia, AudioContext, and
- * ScriptProcessorNode into the page. Identical to the mock in
- * 25-microphone.spec.ts — duplicated here so each test file is
- * self-contained.
- */
-async function installMicMock(page: import('@playwright/test').Page) {
-  await page.evaluate(() => {
-    const mockState = {
-      processorCreated: false,
-      sourceConnected: false,
-      processorConnected: false,
-      processorDisconnected: false,
-      streamStopped: false,
-      contextClosed: false,
-      onAudioProcess: null as ((e: { inputBuffer: { getChannelData: (ch: number) => Float32Array } }) => void) | null,
-      sampleRate: 16000,
-    };
-
-    const mockTrack = {
-      stop: () => { mockState.streamStopped = true; },
-      kind: 'audio',
-      enabled: true,
-    };
-    const mockStream = {
-      getTracks: () => [mockTrack],
-      getAudioTracks: () => [mockTrack],
-    };
-
-    const mockProcessor = {
-      onaudioprocess: null as ((e: unknown) => void) | null,
-      connect: () => { mockState.processorConnected = true; },
-      disconnect: () => { mockState.processorDisconnected = true; },
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    };
-
-    const mockSource = {
-      connect: () => { mockState.sourceConnected = true; },
-      disconnect: () => {},
-    };
-
-    // @ts-expect-error override for testing
-    window.AudioContext = class MockAudioContext {
-      sampleRate = mockState.sampleRate;
-      destination = {};
-      currentTime = 0;
-      state = 'running';
-
-      createMediaStreamSource() { return mockSource; }
-      createScriptProcessor() {
-        mockState.processorCreated = true;
-        return mockProcessor;
-      }
-      createOscillator() {
-        return {
-          connect: () => {},
-          frequency: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} },
-          start: () => {},
-          stop: () => {},
-          onended: null,
-        };
-      }
-      createGain() {
-        return {
-          connect: () => {},
-          gain: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} },
-        };
-      }
-      close() {
-        mockState.contextClosed = true;
-        return Promise.resolve();
-      }
-    };
-
-    // @ts-expect-error override for testing
-    navigator.mediaDevices.getUserMedia = async () => mockStream;
-
-    // @ts-expect-error test mock
-    window.__micMock = {
-      state: mockState,
-      mockProcessor,
-      fireAudioFrame(rms: number) {
-        const handler = mockProcessor.onaudioprocess;
-        if (!handler) return;
-        const bufferSize = 4096;
-        const data = new Float32Array(bufferSize);
-        for (let i = 0; i < bufferSize; i++) data[i] = rms;
-        handler({ inputBuffer: { getChannelData: () => data } });
-      },
-      getState() { return { ...mockState }; },
-    };
-  });
-}
-
-/** Fire `n` loud audio frames (RMS 0.1) in the browser mock. */
-async function fireLoudFrames(page: import('@playwright/test').Page, n: number) {
-  await page.evaluate((count) => {
-    const mock = (window as unknown as { __micMock: { fireAudioFrame: (rms: number) => void } }).__micMock;
-    for (let i = 0; i < count; i++) mock.fireAudioFrame(0.1);
-  }, n);
-}
-
-/** Mock the /stt endpoint to return a canned transcription. */
-async function mockSTT(page: import('@playwright/test').Page, text: string) {
-  await page.route('**/stt', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ text }),
-  }));
-}
-
-/**
- * Start recording, generate speech, and wait for transcription to appear.
- * Returns after the input field shows the expected text.
- */
-async function startRecordingWithText(page: import('@playwright/test').Page, text: string) {
-  await installMicMock(page);
-  await mockSTT(page, text);
-  const mic = page.locator('#mic');
-
-  await mic.click();
-  await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3000 });
-
-  // Generate speech to build up samples
-  await fireLoudFrames(page, 5);
-
-  // Wait for the live chunk to be sent and transcription to appear
-  await expect(page.locator('#input')).toHaveValue(text, { timeout: 5000 });
-}
-
-/**
- * Number of loud mock audio frames needed to exceed MIC_WINDOW_SAMPLES.
- * Each frame is 4 096 samples at 16 kHz.
- * 48 * 4 096 = 196 608 > 192 000.
- */
-const FRAMES_TO_EXCEED_WINDOW = 48;
+import { installMicMock, mockSTT, fireLoudFrames, startRecordingWithText, FRAMES_TO_EXCEED_WINDOW } from '../helpers/mic-mock.js';
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-test.describe('Mic-clear button: clearing transcribed text', () => {
+test.describe('@mic Mic-clear button: clearing transcribed text', () => {
   const getPage = useSharedPage();
 
   test.beforeEach(async () => {
@@ -308,9 +169,6 @@ test.describe('Mic-clear button: clearing transcribed text', () => {
     await page.locator('#mic-clear').click();
     await expect(input).toHaveValue('');
 
-    // Wait for cleared state to settle
-    await page.waitForTimeout(200);
-
     // Change STT response and produce new speech
     sttText = 'brand new text';
     await fireLoudFrames(page, 5);
@@ -397,8 +255,7 @@ test.describe('Mic-clear button: clearing transcribed text', () => {
     await page.locator('#mic-clear').click();
     await expect(input).toHaveValue('');
 
-    // Wait, then produce new speech
-    await page.waitForTimeout(200);
+    // Produce new speech with different text
     sttText = 'totally fresh';
     await fireLoudFrames(page, 5);
 
@@ -432,7 +289,6 @@ test.describe('Mic-clear button: clearing transcribed text', () => {
     await expect(input).toHaveValue('');
 
     // Round 2: speak again → clear again
-    await page.waitForTimeout(200);
     sttText = 'round two';
     await fireLoudFrames(page, 5);
     await expect(input).toHaveValue('round two', { timeout: 5000 });
@@ -440,7 +296,6 @@ test.describe('Mic-clear button: clearing transcribed text', () => {
     await expect(input).toHaveValue('');
 
     // Round 3: speak a third time
-    await page.waitForTimeout(200);
     sttText = 'round three';
     await fireLoudFrames(page, 5);
     await expect(input).toHaveValue('round three', { timeout: 5000 });
@@ -574,7 +429,6 @@ test.describe('Mic-clear button: clearing transcribed text', () => {
     await expect(clearBtn).toHaveClass(/\bdisabled\b/);
 
     // New text → enabled again
-    await page.waitForTimeout(200);
     sttText = 'second';
     await fireLoudFrames(page, 5);
     await expect(input).toHaveValue('second', { timeout: 5000 });

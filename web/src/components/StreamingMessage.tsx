@@ -1,6 +1,7 @@
 import React from 'react';
 import { useChatStore } from '../stores/chat';
 import { useVoiceStore } from '../stores/voice';
+import { useTTS } from '../hooks/useTTS';
 import { stripSpeakTag } from '../lib/markdown';
 import { TraceBlock } from './TraceBlock';
 
@@ -10,10 +11,10 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
   const text = useChatStore(s => s.streaming.text);
   const traces = useChatStore(s => s.streaming.traces);
   const ttsPlaying = useVoiceStore(s => s.ttsPlaying);
+  const { stopAll } = useTTS();
 
   const handleStopTTS = () => {
-    // Stopping TTS during stream — signal via store
-    useVoiceStore.getState().setTtsPlaying(false);
+    stopAll();
   };
 
   const displayText = stripSpeakTag(text);

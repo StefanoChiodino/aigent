@@ -53,11 +53,11 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 /** Serve a static file with proper MIME type. */
-async function serveFile(res: ServerResponse, filePath: string): Promise<void> {
+async function serveFile(res: ServerResponse, filePath: string, extraHeaders?: Record<string, string>): Promise<void> {
   try {
     const data = await readFile(filePath);
     const ext = extname(filePath);
-    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] ?? 'application/octet-stream' });
+    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] ?? 'application/octet-stream', ...extraHeaders });
     res.end(data);
   } catch {
     res.writeHead(404);
@@ -87,6 +87,9 @@ export async function startWebServer(
       cachedState = { ...cachedState, messages: [...cachedState.messages, sysMsg] };
     }
   });
+  client.on('reset', () => {
+    if (cachedState) cachedState = { ...cachedState, messages: [] };
+  });
   client.on('usage', (usage: ServerState['usage']) => {
     if (cachedState) cachedState = { ...cachedState, usage };
   });
@@ -112,6 +115,13 @@ export async function startWebServer(
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '/';
+
+    // Health check for test infrastructure (and general use).
+    if (req.method === 'GET' && url === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"status":"ok"}');
+      return;
+    }
 
     // TTS proxy — forwards plain text to local edge-tts server, returns MP3 audio.
     // Passes through ?rate= query param so the browser can set per-request speed.
@@ -269,15 +279,20 @@ export async function startWebServer(
     // Static files from web/
     const safePath = url === '/' ? '/index.html' : url.replace(/\.\./g, '');
 
+    // When serving HTML, add Permissions-Policy to allow microphone/camera access
+    // from cross-origin embedders (e.g. Chrome extension side panel iframe).
+    const isHtml = safePath.endsWith('.html') || safePath === '/index.html';
+    const htmlHeaders = isHtml ? { 'Permissions-Policy': 'microphone=*, camera=*' } : undefined;
+
     // Try web/dist/ first (built app.js), then web/ root (index.html, style.css)
     const distPath = join(WEB_DIR, 'dist', safePath);
     const rootPath = join(WEB_DIR, safePath);
 
     try {
       await readFile(distPath);
-      return serveFile(res, distPath);
+      return serveFile(res, distPath, htmlHeaders);
     } catch {
-      return serveFile(res, rootPath);
+      return serveFile(res, rootPath, htmlHeaders);
     }
   });
 
@@ -411,6 +426,7 @@ export async function startWebServer(
         send({ type: 'host_state', mounts, ...(capabilities ? { capabilities } : {}) }),
       context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) =>
         send({ type: 'context_breakdown', breakdown }),
+      reset: () => send({ type: 'reset' }),
     };
 
     function send(event: ServerEvent): void {
@@ -486,6 +502,17 @@ export async function startWebServer(
         client.removeListener(event, handler as (...args: unknown[]) => void);
       }
     });
+  });
+
+  // --- Broadcast permission updates to all connected clients ---
+  // When the gatekeeper updates always-allow lists (exec or fetch), it emits
+  // 'permissions_updated' on the shared client.  Re-broadcast as a
+  // client_settings event so every browser tab refreshes its settings store.
+  client.on('permissions_updated', (settings: Record<string, string>) => {
+    const payload = JSON.stringify({ type: 'client_settings', settings });
+    for (const ws of wss.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
   });
 
   // --- Start listening ---

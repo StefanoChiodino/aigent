@@ -8,115 +8,11 @@
 import { test, expect } from '@playwright/test';
 import { useSharedPage } from '../helpers/shared-page.js';
 import { waitForConnected } from '../helpers/ui.js';
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-async function installMicMock(page: import('@playwright/test').Page) {
-  await page.evaluate(() => {
-    const mockState = {
-      processorCreated: false,
-      sourceConnected: false,
-      processorConnected: false,
-      processorDisconnected: false,
-      streamStopped: false,
-      contextClosed: false,
-      sampleRate: 16000,
-    };
-
-    const mockTrack = {
-      stop: () => { mockState.streamStopped = true; },
-      kind: 'audio',
-      enabled: true,
-    };
-    const mockStream = {
-      getTracks: () => [mockTrack],
-      getAudioTracks: () => [mockTrack],
-    };
-
-    const mockProcessor = {
-      onaudioprocess: null as ((e: unknown) => void) | null,
-      connect: () => { mockState.processorConnected = true; },
-      disconnect: () => { mockState.processorDisconnected = true; },
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    };
-
-    const mockSource = {
-      connect: () => { mockState.sourceConnected = true; },
-      disconnect: () => {},
-    };
-
-    // @ts-expect-error override for testing
-    window.AudioContext = class MockAudioContext {
-      sampleRate = mockState.sampleRate;
-      destination = {};
-      currentTime = 0;
-      state = 'running';
-
-      createMediaStreamSource() { return mockSource; }
-      createScriptProcessor() {
-        mockState.processorCreated = true;
-        return mockProcessor;
-      }
-      createOscillator() {
-        return {
-          connect: () => {},
-          frequency: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} },
-          start: () => {},
-          stop: () => {},
-          onended: null,
-        };
-      }
-      createGain() {
-        return {
-          connect: () => {},
-          gain: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} },
-        };
-      }
-      close() {
-        mockState.contextClosed = true;
-        return Promise.resolve();
-      }
-    };
-
-    // @ts-expect-error override for testing
-    navigator.mediaDevices.getUserMedia = async () => mockStream;
-
-    // @ts-expect-error test mock
-    window.__micMock = {
-      state: mockState,
-      mockProcessor,
-      fireAudioFrame(rms: number) {
-        const handler = mockProcessor.onaudioprocess;
-        if (!handler) return;
-        const bufferSize = 4096;
-        const data = new Float32Array(bufferSize);
-        for (let i = 0; i < bufferSize; i++) data[i] = rms;
-        handler({ inputBuffer: { getChannelData: () => data } });
-      },
-      getState() { return { ...mockState }; },
-    };
-  });
-}
-
-async function mockSTT(page: import('@playwright/test').Page, text: string) {
-  await page.route('**/stt', route => route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({ text }),
-  }));
-}
-
-async function fireLoudFrames(page: import('@playwright/test').Page, n: number) {
-  await page.evaluate((count) => {
-    const mock = (window as unknown as { __micMock: { fireAudioFrame: (rms: number) => void } }).__micMock;
-    for (let i = 0; i < count; i++) mock.fireAudioFrame(0.1);
-  }, n);
-}
+import { installMicMock, mockSTT, fireLoudFrames } from '../helpers/mic-mock.js';
 
 // ── Bug 1: Sticky mic must preserve existing text ─────────────────────────
 
-test.describe('Always-on mic preserves existing input text', () => {
+test.describe('@mic Always-on mic preserves existing input text', () => {
   const getPage = useSharedPage();
 
   test('clicking sticky button does not delete existing text', async () => {
@@ -214,9 +110,34 @@ test.describe('Always-on mic preserves existing input text', () => {
   });
 });
 
+// ── Bug 3: Clicking sticky button must return focus to input ──────────────
+
+test.describe('@mic Always-on mic returns focus to input after click', () => {
+  const getPage = useSharedPage();
+
+  test('clicking sticky button returns focus to textarea', async () => {
+    const page = getPage();
+    await installMicMock(page);
+    const input = page.locator('#input');
+    const sticky = page.locator('#mic-sticky');
+
+    // Click sticky button (this steals focus from textarea)
+    await sticky.click();
+    await expect(sticky).toHaveClass(/\bactive\b/, { timeout: 3000 });
+
+    // Focus must be back on the textarea so Enter sends the message
+    await expect(input).toBeFocused({ timeout: 1000 });
+
+    // Disable sticky — focus must still return to input
+    await sticky.click();
+    await expect(sticky).not.toHaveClass(/\bactive\b/, { timeout: 3000 });
+    await expect(input).toBeFocused({ timeout: 1000 });
+  });
+});
+
 // ── Bug 2: Sticky mic must not persist across page reload ─────────────────
 
-test.describe('Always-on mic resets on page reload', () => {
+test.describe('@mic Always-on mic resets on page reload', () => {
   // Cannot use shared page for reload tests — need fresh page lifecycle control
   test('micSticky and mic are both off after page reload', async ({ browser }) => {
     const page = await browser.newPage();
@@ -266,5 +187,55 @@ test.describe('Always-on mic resets on page reload', () => {
     expect(stored).toBeNull();
 
     await page.close();
+  });
+});
+
+// ── Bug 4: VAD indicator must not leak to sticky button in regular mic mode ──
+
+test.describe('@mic VAD active only shows on the correct mic button', () => {
+  const getPage = useSharedPage();
+
+  test('sticky button does NOT get vad-active when regular mic is recording', async () => {
+    const page = getPage();
+    await installMicMock(page);
+    await mockSTT(page, 'hello');
+
+    const mic = page.locator('#mic');
+    const sticky = page.locator('#mic-sticky');
+
+    // Start regular mic (not sticky)
+    await mic.click();
+    await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3000 });
+    // Sticky should NOT be active
+    await expect(sticky).not.toHaveClass(/\bactive\b/);
+
+    // Fire loud frames to trigger VAD
+    await fireLoudFrames(page, 5);
+
+    // Mic button should show vad-active
+    await expect(mic).toHaveClass(/\bvad-active\b/, { timeout: 3000 });
+    // Sticky button must NOT show vad-active
+    await expect(sticky).not.toHaveClass(/\bvad-active\b/);
+  });
+
+  test('sticky button shows vad-active only when sticky mode is enabled', async () => {
+    const page = getPage();
+    await installMicMock(page);
+    await mockSTT(page, 'hello');
+
+    const mic = page.locator('#mic');
+    const sticky = page.locator('#mic-sticky');
+
+    // Enable sticky mic
+    await sticky.click();
+    await expect(sticky).toHaveClass(/\bactive\b/, { timeout: 3000 });
+    await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3000 });
+
+    // Fire loud frames to trigger VAD
+    await fireLoudFrames(page, 5);
+
+    // Both should show vad-active when sticky is enabled
+    await expect(mic).toHaveClass(/\bvad-active\b/, { timeout: 3000 });
+    await expect(sticky).toHaveClass(/\bvad-active\b/, { timeout: 3000 });
   });
 });

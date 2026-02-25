@@ -8,7 +8,7 @@
 import { test, expect } from '@playwright/test';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Input area', () => {
+test.describe('@fast Input area', () => {
   const getPage = useSharedPage();
 
   // ── Basic structure ────────────────────────────────────────────────────────────

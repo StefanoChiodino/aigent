@@ -9,7 +9,7 @@ import { test, expect } from '@playwright/test';
 import { cancelIfLoading } from '../helpers/ui.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Keyboard shortcuts', () => {
+test.describe('@fast Keyboard shortcuts', () => {
   const getPage = useSharedPage();
 
   test.beforeEach(async () => {

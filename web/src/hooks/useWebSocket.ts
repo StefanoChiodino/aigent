@@ -274,6 +274,10 @@ export function useWebSocket(): void {
           ui().setContextBreakdown(event.breakdown);
           break;
 
+        case 'reset':
+          chat().clearMessages();
+          break;
+
         case 'pong':
           break;
       }

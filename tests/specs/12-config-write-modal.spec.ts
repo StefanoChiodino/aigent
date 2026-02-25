@@ -11,7 +11,7 @@ import { expectVisible, expectHidden } from '../helpers/ui.js';
 import { injectEvent } from '../helpers/ws-client.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Config Write Permission Modal', () => {
+test.describe('@fast Config Write Permission Modal', () => {
   const getPage = useSharedPage();
 
   test('config_write_request shows permission modal', async () => {

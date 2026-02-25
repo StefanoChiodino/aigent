@@ -29,7 +29,7 @@ function injectAttachment(opts: {
     }, opts);
 }
 
-test.describe('Attachment preview', () => {
+test.describe('@fast Attachment preview', () => {
   const getPage = useSharedPage();
 
   test('attachment preview is hidden when no attachments', async () => {

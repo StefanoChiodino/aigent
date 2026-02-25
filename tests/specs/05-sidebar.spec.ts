@@ -8,7 +8,7 @@ import { expectVisible, expectHidden } from '../helpers/ui.js';
 import { injectEvent } from '../helpers/ws-client.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Sidebar controls', () => {
+test.describe('@fast Sidebar controls', () => {
   const getPage = useSharedPage();
 
   // ── Context meter ─────────────────────────────────────────────────────────────

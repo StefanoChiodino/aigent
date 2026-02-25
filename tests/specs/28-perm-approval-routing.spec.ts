@@ -29,7 +29,7 @@ async function getNewSystemMessages(
   }, sinceMs);
 }
 
-test.describe('Permission Approval Routing', () => {
+test.describe('@fast Permission Approval Routing', () => {
   const getPage = useSharedPage();
 
   test('approving a mount request does not produce "Unknown command"', async () => {
@@ -45,7 +45,9 @@ test.describe('Permission Approval Routing', () => {
     await expectHidden(page.locator('#perm-overlay'));
 
     // Wait for any system message to arrive from the server
-    await page.waitForTimeout(1_000);
+    // Negative assertion: wait for any error message to arrive (500ms is enough
+    // for a server round-trip; we're checking that nothing bad happened).
+    await page.waitForTimeout(500);
 
     // Only check system messages that arrived after the button click
     const msgs = await getNewSystemMessages(page, before);
@@ -65,7 +67,9 @@ test.describe('Permission Approval Routing', () => {
     await page.locator('#perm-deny-btn').click();
     await expectHidden(page.locator('#perm-overlay'));
 
-    await page.waitForTimeout(1_000);
+    // Negative assertion: wait for any error message to arrive (500ms is enough
+    // for a server round-trip; we're checking that nothing bad happened).
+    await page.waitForTimeout(500);
 
     const msgs = await getNewSystemMessages(page, before);
     for (const text of msgs) {
@@ -84,7 +88,9 @@ test.describe('Permission Approval Routing', () => {
     await page.locator('#perm-approve-btn').click();
     await expectHidden(page.locator('#perm-overlay'));
 
-    await page.waitForTimeout(1_000);
+    // Negative assertion: wait for any error message to arrive (500ms is enough
+    // for a server round-trip; we're checking that nothing bad happened).
+    await page.waitForTimeout(500);
 
     const msgs = await getNewSystemMessages(page, before);
     for (const text of msgs) {
@@ -103,7 +109,9 @@ test.describe('Permission Approval Routing', () => {
     await page.locator('#perm-approve-btn').click();
     await expectHidden(page.locator('#perm-overlay'));
 
-    await page.waitForTimeout(1_000);
+    // Negative assertion: wait for any error message to arrive (500ms is enough
+    // for a server round-trip; we're checking that nothing bad happened).
+    await page.waitForTimeout(500);
 
     const msgs = await getNewSystemMessages(page, before);
     for (const text of msgs) {

@@ -129,6 +129,7 @@ export type ServerEvent =
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
+  | { type: 'reset' }
   | { type: 'pong' };
 
 export interface CommandDef {

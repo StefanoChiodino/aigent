@@ -36,8 +36,11 @@ test.beforeEach(async ({ page }) => {
   await page.waitForFunction(() => !document.body.hasAttribute('data-working'), { timeout: 60_000 }).catch(() => {});
   await page.locator('#input').fill('/reset');
   await page.locator('#input').press('Enter');
-  // Brief settle after reset
-  await page.waitForTimeout(300);
+  // Wait for the reset confirmation system message
+  await page.waitForFunction(
+    () => document.querySelector('.message.system:last-child')?.textContent?.includes('reset'),
+    { timeout: 5_000 },
+  ).catch(() => {});
 });
 
 // ── Basic response ─────────────────────────────────────────────────────────────

@@ -25,8 +25,9 @@ export default async function globalTeardown() {
     try { unlinkSync(PID_FILE); } catch { /* ignore */ }
   }
 
-  // Kill anything still holding port 3142 (catches stray Docker processes)
-  killPort(3142);
+  // Kill anything still holding the test port (catches stray Docker processes)
+  const PORT = Number(process.env['AIGENT_WEB_PORT'] ?? 3142);
+  killPort(PORT);
 
   // Clean up stale Unix sockets left by the test gatekeeper.
   // Uses the test-specific socket dir so we never touch dev sockets.

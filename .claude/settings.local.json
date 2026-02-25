@@ -36,7 +36,8 @@
       "Bash(VITE_DEMO=true npx vite build:*)",
       "WebFetch(domain:docs.anthropic.com)",
       "Read(//home/draga/repos/openclaw/**)",
-      "Bash(pgrep:*)"
+      "Bash(pgrep:*)",
+      "Bash(npm test:*)"
     ],
     "additionalDirectories": [
       "/tmp"

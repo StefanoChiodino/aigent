@@ -8,11 +8,12 @@
     "scripting",
     "tabs",
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "alarms"
   ],
   "host_permissions": [
-    "ws://localhost:3141/*",
-    "http://localhost:3141/*"
+    "http://localhost:3141/*",
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background/worker.js",

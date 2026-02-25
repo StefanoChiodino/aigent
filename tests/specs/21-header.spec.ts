@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { injectEvent } from '../helpers/ws-client.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Header', () => {
+test.describe('@fast Header', () => {
   const getPage = useSharedPage();
 
   // ── Static structure ──────────────────────────────────────────────────────────

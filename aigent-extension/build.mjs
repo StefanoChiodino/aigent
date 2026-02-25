@@ -12,6 +12,9 @@ import { mkdirSync, copyFileSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes('--watch');
@@ -24,13 +27,41 @@ mkdirSync(resolve(outdir, 'icons'), { recursive: true });
 mkdirSync(resolve(outdir, 'sidepanel'), { recursive: true });
 
 // --- Icon generation ---
-// Generates a minimal PNG filled with the aigent brand colour (#1a1a1a dark bg)
-// with a white robot emoji-inspired shape. Good enough for the toolbar icon.
-// Chrome requires PNG for action icons (SVG not supported).
+// Renders the same SVG as the web favicon (🤖 emoji, transparent bg) to PNG.
+// Uses rsvg-convert (librsvg, available on host). Chrome requires PNG for icons.
 
-function generatePNG(size) {
+function generateIconSVG(size) {
+  // Identical to web/index.html favicon: transparent bg, full-size emoji
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 100 100">
+  <text y=".9em" font-size="90">&#x1F916;</text>
+</svg>`;
+}
+
+function svgToPng(svgStr, size) {
+  // rsvg-convert on this system doesn't support stdin ('-'), so write to a temp file
+  const tmpSvg = resolve(tmpdir(), `aigent-icon-${size}-${randomBytes(4).toString('hex')}.svg`);
+  writeFileSync(tmpSvg, svgStr);
+  try {
+    const result = spawnSync('rsvg-convert', [
+      '--width', String(size),
+      '--height', String(size),
+      '--format', 'png',
+      tmpSvg,
+    ]);
+    if (result.status !== 0 || !result.stdout?.length) {
+      throw new Error(result.stderr?.toString() ?? 'rsvg-convert failed');
+    }
+    return result.stdout;
+  } catch (e) {
+    console.warn(`rsvg-convert failed for size ${size} (${e.message}) — using plain dark PNG fallback`);
+    return generateFallbackPNG(size);
+  } finally {
+    try { execFileSync('rm', ['-f', tmpSvg]); } catch {}
+  }
+}
+
+function generateFallbackPNG(size) {
   const PNG_HEADER = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-
   const crcTable = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
     let c = n;
@@ -43,70 +74,24 @@ function generatePNG(size) {
     return (c ^ 0xFFFFFFFF) >>> 0;
   }
   function chunk(type, data) {
-    const typeBytes = Buffer.from(type);
+    const tb = Buffer.from(type);
     const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-    const crcInput = Buffer.concat([typeBytes, data]);
-    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(crcInput));
-    return Buffer.concat([len, typeBytes, data, crc]);
+    const ci = Buffer.concat([tb, data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(ci));
+    return Buffer.concat([len, tb, data, crc]);
   }
-
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8; ihdr[9] = 2; // bit depth 8, RGB
-
-  // Draw a simple robot face: dark bg, rounded head, eyes, antenna
-  // Pixel art scaled to 'size' using normalised coordinates [0,1]
-  function pixel(x, y) {
-    const nx = x / size, ny = y / size;
-    // Background: #1a1a1a
-    let pr = 26, pg = 26, pb = 26;
-
-    // Head: rounded rect ~0.15..0.85 x, 0.2..0.85 y
-    const inHead = nx > 0.15 && nx < 0.85 && ny > 0.2 && ny < 0.85;
-    // Round corners (simple check)
-    const corner =
-      (nx < 0.22 && ny < 0.27) || (nx > 0.78 && ny < 0.27) ||
-      (nx < 0.22 && ny > 0.78) || (nx > 0.78 && ny > 0.78);
-    if (inHead && !corner) { pr = 255; pg = 255; pb = 255; }
-
-    // Eyes: two small squares
-    const leftEye  = nx > 0.27 && nx < 0.42 && ny > 0.38 && ny < 0.55;
-    const rightEye = nx > 0.58 && nx < 0.73 && ny > 0.38 && ny < 0.55;
-    if (leftEye || rightEye) { pr = 26; pg = 26; pb = 26; }
-
-    // Mouth: bar
-    const mouth = nx > 0.3 && nx < 0.7 && ny > 0.63 && ny < 0.72;
-    if (mouth && inHead && !corner) { pr = 26; pg = 26; pb = 26; }
-
-    // Antenna: thin vertical line + dot on top
-    const antenna = nx > 0.47 && nx < 0.53 && ny > 0.08 && ny < 0.22;
-    const antennaDot = nx > 0.42 && nx < 0.58 && ny > 0.04 && ny < 0.12;
-    if (antenna || antennaDot) { pr = 255; pg = 255; pb = 255; }
-
-    return [pr, pg, pb];
-  }
-
-  const raw = Buffer.alloc(size * (1 + size * 3));
-  for (let y = 0; y < size; y++) {
-    raw[y * (1 + size * 3)] = 0; // filter none
-    for (let x = 0; x < size; x++) {
-      const [r, g, b] = pixel(x, y);
-      const i = y * (1 + size * 3) + 1 + x * 3;
-      raw[i] = r; raw[i + 1] = g; raw[i + 2] = b;
-    }
-  }
-
-  const compressed = deflateSync(raw);
-  return Buffer.concat([
-    PNG_HEADER,
-    chunk('IHDR', ihdr),
-    chunk('IDAT', compressed),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
+  ihdr[8] = 8; ihdr[9] = 2;
+  const raw = Buffer.alloc(size * (1 + size * 3), 26); // fill #1a1a1a
+  for (let y = 0; y < size; y++) raw[y * (1 + size * 3)] = 0;
+  return Buffer.concat([PNG_HEADER, chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
 for (const size of [16, 48, 128]) {
-  writeFileSync(resolve(outdir, `icons/icon${size}.png`), generatePNG(size));
+  const svg = generateIconSVG(size);
+  const png = svgToPng(svg, size);
+  writeFileSync(resolve(outdir, `icons/icon${size}.png`), png);
 }
 console.log('Icons generated');
 

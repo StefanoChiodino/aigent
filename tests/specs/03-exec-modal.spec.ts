@@ -9,7 +9,7 @@ import { expectVisible, expectHidden } from '../helpers/ui.js';
 import { injectEvent } from '../helpers/ws-client.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Exec Permission Modal', () => {
+test.describe('@fast Exec Permission Modal', () => {
   const getPage = useSharedPage();
 
   test('exec_request shows permission modal', async () => {

@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: node --import tsx/esm --test src/**/*.test.ts
+
+      - name: Web component tests
+        run: npx vitest run --config web/vite.config.ts
+
+      - name: Web UI build
+        run: npx vite build --config web/vite.config.ts

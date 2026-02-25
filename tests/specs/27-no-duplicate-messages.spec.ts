@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test';
 import { useSharedPage } from '../helpers/shared-page.js';
 import { injectEvent } from '../helpers/ws-client.js';
 
-test.describe('No duplicate messages', () => {
+test.describe('@fast No duplicate messages', () => {
   const getPage = useSharedPage();
 
   test('injected system message appears exactly once', async () => {

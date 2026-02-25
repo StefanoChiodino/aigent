@@ -10,7 +10,7 @@ import { useSharedPage } from '../helpers/shared-page.js';
 
 const SETTINGS_GROUPS = ['Provider', 'Model', 'Tools', 'Prompt', 'Services', 'Microphone', 'Context', 'Permissions', 'Fetch Permissions'];
 
-test.describe('Settings modal', () => {
+test.describe('@fast Settings modal', () => {
   const getPage = useSharedPage();
 
   async function openSettings(page: import('@playwright/test').Page): Promise<void> {

@@ -1,6 +1,7 @@
 import { useRef, useCallback } from 'react';
 import { useVoiceStore } from '../stores/voice';
 import { useSettingsStore } from '../stores/settings';
+import { useUIStore } from '../stores/ui';
 import { encodeWav, playMicSound } from '../lib/audio';
 import { useConnectionStore } from '../stores/connection';
 
@@ -108,7 +109,19 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
 
   const startMic = useCallback(async (silent = false, baseText = ''): Promise<void> => {
     if (useVoiceStore.getState().micState !== 'idle') return;
+
+    // Clean up any leftover infrastructure from a previous session that was
+    // externally reset (e.g. test cleanup setting micState to 'idle' without
+    // going through stopMic/abortMic).
+    if (micChunkTimer.current) { clearInterval(micChunkTimer.current); micChunkTimer.current = null; }
+    if (micSilenceTimer.current) { clearTimeout(micSilenceTimer.current); micSilenceTimer.current = null; }
+    for (const c of micLiveAbortCtrls.current) c.abort();
+
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        useUIStore.getState().setError('Microphone not available (secure context required)');
+        return;
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
       micStream.current = stream;
       const ctx = new AudioContext({ sampleRate: 16000 });
@@ -194,7 +207,10 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
 
       if (!silent) playMicSound('start');
       setMicState('recording');
-    } catch { /* permission denied */ }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      useUIStore.getState().setError(`Microphone error: ${msg}`);
+    }
   }, [sendLiveChunk, send, setMicState, setVadActive]);
 
   const stopMic = useCallback(async (silent = false): Promise<void> => {

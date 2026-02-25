@@ -40,7 +40,7 @@ async function injectAgentTurn(
   await injectEvent({ type: 'loading', isLoading: false });
 }
 
-test.describe('Agent Spawn Details', () => {
+test.describe('@fast Agent Spawn Details', () => {
   const getPage = useSharedPage();
 
   test('spawn_agent shows model and reasoning in expanded body', async () => {

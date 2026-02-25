@@ -1,6 +1,19 @@
 import { defineConfig, devices } from '@playwright/test';
+import { createServer } from 'node:net';
 
-const PORT = Number(process.env['AIGENT_WEB_PORT'] ?? 3142);
+/** Bind to port 0 to get an OS-assigned free port, then release it. */
+function findFreePort(): number {
+  const srv = createServer();
+  srv.listen(0, '127.0.0.1');
+  const port = (srv.address() as { port: number }).port;
+  srv.close();
+  return port;
+}
+
+// Use explicit port if set (e.g. AIGENT_WEB_PORT=3142), otherwise pick a random free port.
+// Store in process.env so global-setup and ws-client inherit it.
+const PORT = Number(process.env['AIGENT_WEB_PORT']) || findFreePort();
+process.env['AIGENT_WEB_PORT'] = String(PORT);
 const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({

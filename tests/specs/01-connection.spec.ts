@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { waitForConnected } from '../helpers/ui.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Connection & initial UI state', () => {
+test.describe('@fast Connection & initial UI state', () => {
   const getPage = useSharedPage();
 
   test('page loads without critical JS errors', async () => {

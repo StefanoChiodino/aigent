@@ -14,7 +14,7 @@ import { expectVisible, expectHidden } from '../helpers/ui.js';
 import { injectEvent } from '../helpers/ws-client.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Cancel button', () => {
+test.describe('@fast Cancel button', () => {
   const getPage = useSharedPage();
 
   test('cancel button is hidden when not loading', async () => {
@@ -123,7 +123,7 @@ test.describe('Cancel button', () => {
   });
 });
 
-test.describe('Concise mode', () => {
+test.describe('@fast Concise mode', () => {
   const getPage = useSharedPage();
 
   test('concise toggle sends /concise command and updates state', async () => {

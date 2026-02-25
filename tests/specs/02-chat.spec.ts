@@ -7,7 +7,7 @@
 import { test, expect } from '@playwright/test';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Basic chat interaction', () => {
+test.describe('@fast Basic chat interaction', () => {
   const getPage = useSharedPage();
 
   test('/reset clears localStorage and sends system message', async () => {

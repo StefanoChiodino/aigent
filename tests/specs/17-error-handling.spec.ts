@@ -12,7 +12,7 @@ import { injectEvent } from '../helpers/ws-client.js';
 
 const NOW = new Date().toISOString();
 
-test.describe('Error Handling', () => {
+test.describe('@fast Error Handling', () => {
   const getPage = useSharedPage();
 
   // ── Error bar ──────────────────────────────────────────────────────────────────

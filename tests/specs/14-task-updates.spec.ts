@@ -15,7 +15,7 @@ import { injectEvent } from '../helpers/ws-client.js';
 
 const NOW = new Date().toISOString();
 
-test.describe('Task Updates', () => {
+test.describe('@fast Task Updates', () => {
   const getPage = useSharedPage();
 
   // ── Header task badge ──────────────────────────────────────────────────────────

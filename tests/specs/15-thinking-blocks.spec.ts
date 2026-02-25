@@ -28,7 +28,7 @@ async function injectThinkingTurn(id: string, thinkContent: string, textContent:
   await injectEvent({ type: 'loading', isLoading: false });
 }
 
-test.describe('Thinking Blocks', () => {
+test.describe('@fast Thinking Blocks', () => {
   const getPage = useSharedPage();
 
   test('thinking event creates a thinking block in the message', async () => {

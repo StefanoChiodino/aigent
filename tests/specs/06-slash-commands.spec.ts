@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { expectVisible, expectHidden } from '../helpers/ui.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
-test.describe('Slash command palette & commands', () => {
+test.describe('@fast Slash command palette & commands', () => {
   const getPage = useSharedPage();
 
   test('typing / shows command palette', async () => {
