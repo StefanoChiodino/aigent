@@ -1,26 +1,28 @@
-.PHONY: dev dev-ts serve web web-dev build rebuild typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup kill-ports
+.PHONY: dev dev-ts serve web web-dev build rebuild typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup kill-ports plugin plugin-dev plugin-typecheck
 
 # --- Development ---
 
-# Run gatekeeper + vite dev server (HMR on :5173, backend on :3141)
+# Run gatekeeper + vite dev server (HMR on :5173, backend on :3141) + Chrome plugin watch
 dev-ts:
 	@npx concurrently \
-		--names "gate,web" \
-		--prefix-colors "cyan,blue" \
+		--names "gate,web,plugin" \
+		--prefix-colors "cyan,blue,green" \
 		--kill-others-on-fail \
 		"npx tsx watch src/gatekeeper.tsx --headless $(ARGS)" \
-		"npx vite dev --config web/vite.config.ts"
+		"npx vite dev --config web/vite.config.ts" \
+		"cd aigent-extension && npm run dev"
 
-# Run everything: gatekeeper + vite dev server + TTS + STT
+# Run everything: gatekeeper + vite dev server + TTS + STT + Chrome plugin watch
 dev: kill-ports
 	@npx concurrently \
-		--names "gate,web,tts,stt" \
-		--prefix-colors "cyan,blue,yellow,magenta" \
+		--names "gate,web,tts,stt,plugin" \
+		--prefix-colors "cyan,blue,yellow,magenta,green" \
 		--kill-others-on-fail \
 		"npx tsx watch src/gatekeeper.tsx --headless $(ARGS)" \
 		"npx vite dev --config web/vite.config.ts" \
 		"$(TTS_PYTHON) tts/main.py" \
-		"$(STT_PYTHON) stt/main.py --eager"
+		"$(STT_PYTHON) stt/main.py --eager" \
+		"cd aigent-extension && npm run dev"
 
 # Server only (no frontend rebuild)
 serve:
@@ -44,7 +46,7 @@ rebuild:
 
 # --- Quality gate (run before every commit) ---
 
-check: typecheck test test-web web
+check: typecheck test test-web web plugin
 	@echo "\n✅ All checks passed."
 
 # --- Utilities ---
@@ -75,8 +77,19 @@ test-e2e-live:
 test-e2e-ui:
 	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --ui
 
+# --- Chrome Plugin ---
+
+plugin:
+	cd aigent-extension && npm run build
+
+plugin-dev:
+	cd aigent-extension && npm run dev
+
+plugin-typecheck:
+	cd aigent-extension && npx tsc --noEmit
+
 clean:
-	rm -rf dist/ web/dist/
+	rm -rf dist/ web/dist/ aigent-extension/dist/
 
 # Kill any lingering processes on dev ports and stale worker containers before starting
 kill-ports:

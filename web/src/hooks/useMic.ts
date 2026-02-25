@@ -209,6 +209,15 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
       setMicState('recording');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      // Chrome extension side panels can't grant mic permission — auto-pop-out
+      if (msg.includes('Permission dismissed')) {
+        const extId = new URLSearchParams(window.location.search).get('extId');
+        if (extId && typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          chrome.runtime.sendMessage(extId, { type: 'aigent-popout' });
+          useUIStore.getState().setError('Opening in a window for mic access…');
+          return;
+        }
+      }
       useUIStore.getState().setError(`Microphone error: ${msg}`);
     }
   }, [sendLiveChunk, send, setMicState, setVadActive]);

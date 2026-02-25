@@ -12,15 +12,24 @@ import { spawn } from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { writeFileSync, openSync, readFileSync, existsSync } from 'node:fs';
+import { writeFileSync, openSync, readFileSync, existsSync, renameSync } from 'node:fs';
 import { createConnection } from 'node:net';
 
 const PORT = Number(process.env['AIGENT_WEB_PORT'] ?? 3142);
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PID_FILE = '/tmp/aigent-test-gatekeeper.pid';
 const LOG_FILE = '/tmp/aigent-test-gatekeeper.log';
+const AUTOSAVE = resolve(ROOT, 'workspace/.autosave.json');
+const AUTOSAVE_BACKUP = `${AUTOSAVE}.test-backup`;
 
 export default async function globalSetup() {
+  // Temporarily move the autosave file so the test worker starts with a clean
+  // conversation (otherwise it replays the production session's messages).
+  if (existsSync(AUTOSAVE)) {
+    renameSync(AUTOSAVE, AUTOSAVE_BACKUP);
+    console.log('[test-setup] Moved .autosave.json aside');
+  }
+
   // Kill any previous test gatekeeper by saved PID first (more reliable than by port).
   await killByPidFile();
 

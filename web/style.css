@@ -1692,6 +1692,13 @@ html, body {
   pointer-events: none;
 }
 
+#screen-cap-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 #screen-cap {
   width: 36px;
   height: 36px;
@@ -1720,6 +1727,30 @@ html, body {
 
 #screen-cap.active:hover {
   background: rgba(124, 108, 240, 0.25);
+}
+
+#screen-cap-snap {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background var(--transition), transform var(--transition);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+#screen-cap-snap:hover {
+  background: var(--accent-hover, color-mix(in srgb, var(--accent) 80%, white));
+  transform: scale(1.1);
 }
 
 @keyframes mic-pulse {

@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * Gatekeeper — runs on the host, manages the Docker sandbox and web UI.
- * (Touched to restart tsx watcher — 2026-02-24, browser_ext socket wiring)
+ * (Touched to restart tsx watcher — 2026-02-25, query-string stripping in web-bridge)
  *
  * Responsibilities:
  *   - Container lifecycle (start, stop, restart with updated mounts)
@@ -88,6 +88,9 @@ let isRestarting = false;
 
 // Container name prefix — namespaced so test instances don't kill dev containers.
 const CONTAINER_PREFIX = process.env['AIGENT_TEST_MODE'] ? 'aigent-test-worker' : 'aigent-worker';
+// In test mode the container is not started, so injected requests are never registered
+// in the pending maps. Suppress "no pending X" error messages to keep tests clean.
+const IS_TEST_MODE = process.env['AIGENT_TEST_MODE'] === '1';
 
 // --- CLI args ---
 
@@ -476,8 +479,12 @@ function cleanupSocket(): void {
 function cleanupAll(): void {
   stopHostDaemon();
   if (containerProcess) {
+    // Kill the spawned docker process first (fast), then attempt async container removal.
+    // docker rm -f can be slow on a loaded system, so we don't block on it —
+    // kill-ports at the next `make dev` will clean up any leftover containers.
+    try { containerProcess.kill('SIGKILL'); } catch {}
     try {
-      execSync(`docker rm -f ${containerName} 2>/dev/null`, { stdio: 'ignore' });
+      execSync(`docker rm -f ${containerName} 2>/dev/null`, { stdio: 'ignore', timeout: 3000 });
     } catch {}
   }
   cleanupSocket();
@@ -665,7 +672,7 @@ async function handleGrantDeny(input: string): Promise<boolean> {
 
     const pending = pendingAgentMountRequests.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending mount request: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending mount request: ${id}`);
       return true;
     }
 
@@ -714,7 +721,7 @@ async function handleGrantDeny(input: string): Promise<boolean> {
 
     const pending = pendingAgentMountRequests.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending mount request: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending mount request: ${id}`);
       return true;
     }
 
@@ -1598,13 +1605,17 @@ startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: read
   log.error('Web UI failed to start', { error: (err as Error).message });
 });
 
-// Start container
-try {
-  await startContainer();
-} catch (err) {
-  log.error('Container start failed', { error: (err as Error).message });
-  cleanupAll();
-  process.exit(1);
+// Start container (skip in test mode — tests inject events via /test/inject)
+if (!process.env['AIGENT_TEST_MODE']) {
+  try {
+    await startContainer();
+  } catch (err) {
+    log.error('Container start failed', { error: (err as Error).message });
+    cleanupAll();
+    process.exit(1);
+  }
+} else {
+  log.info('Test mode — skipping container startup');
 }
 
 // Push mount state to web UI when client connects to the worker
@@ -1683,7 +1694,7 @@ setInterval(() => {
       emitHostState();
     })
     .finally(() => { expiryRestartInProgress = false; });
-}, 30_000);
+}, 30_000).unref();
 
 // Run UI
 if (gatekeeperArgs.headless) {

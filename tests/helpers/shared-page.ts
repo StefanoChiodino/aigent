@@ -43,13 +43,13 @@ export function useSharedPage(): () => Page {
     // Wait for stores to reach clean state instead of arbitrary timeouts.
     await page.waitForFunction(() => {
       const chat = (window as Record<string, unknown>).__zustand_chat as { getState: () => { messages: unknown[] } } | undefined;
-      const ui = (window as Record<string, unknown>).__zustand_ui as { getState: () => { error: unknown; loading: boolean } } | undefined;
+      const ui = (window as Record<string, unknown>).__zustand_ui as { getState: () => { errorMsg: unknown; isLoading: boolean } } | undefined;
       const voice = (window as Record<string, unknown>).__zustand_voice as { getState: () => { micState: string } } | undefined;
       if (!chat || !ui || !voice) return false;
       const c = chat.getState();
       const u = ui.getState();
       const v = voice.getState();
-      return c.messages.length === 0 && u.error === null && !u.loading && v.micState === 'idle';
+      return c.messages.length === 0 && u.errorMsg === null && !u.isLoading && v.micState === 'idle';
     }, undefined, { timeout: 5_000 });
     // Re-dispatch the local state reset to catch any async callbacks
     // (e.g. STT responses) that fired after the initial reset.

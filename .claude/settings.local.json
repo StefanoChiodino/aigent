@@ -38,7 +38,13 @@
       "Read(//home/draga/repos/openclaw/**)",
       "Bash(pgrep:*)",
       "Bash(npm test:*)",
-      "Bash(/home/draga/repos/aigent/tts/.venv/bin/pre-commit run:*)"
+      "Bash(/home/draga/repos/aigent/tts/.venv/bin/pre-commit run:*)",
+      "Bash(make test-e2e-fast:*)",
+      "WebFetch(domain:developer.chrome.com)",
+      "Bash(curl -s \"http://localhost:3141/?extId=testid123\" -o /dev/null -w \"Status: %{http_code}\\\\n\")",
+      "Bash(curl -s \"http://localhost:3141/assets/index-C1tWRHF4.css\" -o /dev/null -w \"Status: %{http_code}\\\\n\")",
+      "Bash(curl -s \"http://localhost:3141/assets/index-gYGSMR8D.js\" -o /dev/null -w \"Status: %{http_code}\\\\n\")",
+      "Bash(*)"
     ],
     "additionalDirectories": [
       "/tmp"

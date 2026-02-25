@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useConnectionStore } from '../stores/connection';
 import { isDemo } from '../demo/useDemoMode';
 import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
 import { useMic } from '../hooks/useMic';
 import { useTTS } from '../hooks/useTTS';
-import { captureScreenshot, registerScreenCapCallback, startScreenShare } from '../lib/screen';
+import { captureScreenshot, registerScreenCapCallback, startScreenShare, stopScreenShare } from '../lib/screen';
 import { COMMANDS } from '../lib/settings-schema';
 import { CommandPalette } from './CommandPalette';
 import { AtPalette, getAtStaticMatches } from './AtPalette';
@@ -137,6 +137,9 @@ function guessMime(name: string): string | null {
   return map[ext ?? ''] ?? null;
 }
 
+// Shared BroadcastChannel for syncing mic state between main tab and sidepanel iframe
+const MIC_CHANNEL = 'aigent-mic';
+
 export function InputArea() {
   const send = useConnectionStore(s => s.send);
   const isLoading = useUIStore(s => s.isLoading);
@@ -154,6 +157,10 @@ export function InputArea() {
   const ttsPlaying = useVoiceStore(s => s.ttsPlaying);
   const micSticky = useVoiceStore(s => s.micSticky);
   const setMicSticky = useVoiceStore(s => s.setMicSticky);
+
+  // Set when running inside the Chrome extension sidepanel iframe
+  const extId = useMemo(() => new URLSearchParams(window.location.search).get('extId'), []);
+  const isSidepanel = !!extId;
 
   const [inputValue, setInputValue] = useState('');
   const [paletteSelected, setPaletteSelected] = useState(0);
@@ -187,16 +194,71 @@ export function InputArea() {
   const [micCapped, setMicCapped] = useState(false);
 
   const { stopAll: ttsStopAll } = useTTS();
+  const micBroadcast = useRef<BroadcastChannel | null>(null);
+  if (!micBroadcast.current) micBroadcast.current = new BroadcastChannel(MIC_CHANNEL);
+
   const { startMic, stopMic, abortMic, clearTranscript } = useMic(useCallback((text: string, windowCapped: boolean) => {
     lastMicTextRef.current = text;
     setHasMicText(!!text);
     setMicCapped(windowCapped);
     setInputValue(text);
+    // Broadcast transcript to sidepanel (only from main tab)
+    micBroadcast.current?.postMessage({ type: 'mic-transcript', text, windowCapped });
   }, []));
 
   useEffect(() => {
     registerScreenCapCallback(setScreenCapActive);
   }, []);
+
+  // Main tab: broadcast mic state changes to the sidepanel
+  useEffect(() => {
+    if (isSidepanel) return;
+    micBroadcast.current?.postMessage({ type: 'mic-state', micState, vadActive, micSticky });
+  }, [isSidepanel, micState, vadActive, micSticky]);
+
+  // Sidepanel: receive mic state + transcript from main tab; send commands back
+  useEffect(() => {
+    if (!isSidepanel) return;
+    const ch = micBroadcast.current!;
+    const handler = (e: MessageEvent<{ type: string; micState?: string; vadActive?: boolean; micSticky?: boolean; text?: string; windowCapped?: boolean }>) => {
+      if (e.data.type === 'mic-state') {
+        const { setMicState, setVadActive, setMicSticky: setStickyStore } = useVoiceStore.getState();
+        if (e.data.micState) setMicState(e.data.micState as 'idle' | 'recording' | 'transcribing');
+        if (e.data.vadActive !== undefined) setVadActive(e.data.vadActive);
+        if (e.data.micSticky !== undefined) setStickyStore(e.data.micSticky);
+      } else if (e.data.type === 'mic-transcript') {
+        const text = e.data.text ?? '';
+        lastMicTextRef.current = text;
+        setHasMicText(!!text);
+        setMicCapped(e.data.windowCapped ?? false);
+        setInputValue(text);
+      }
+    };
+    ch.addEventListener('message', handler);
+    return () => ch.removeEventListener('message', handler);
+  }, [isSidepanel]);
+
+  // Main tab: receive mic commands injected by the extension background via executeScript
+  useEffect(() => {
+    if (isSidepanel) return;
+    const onStart = () => { void startMic(); };
+    const onStop = () => { setMicSticky(false); void stopMic(); };
+    const onStickyToggle = () => {
+      const { micSticky: sticky, micState: state } = useVoiceStore.getState();
+      const newSticky = !sticky;
+      setMicSticky(newSticky);
+      if (newSticky && state === 'idle') void startMic(false, inputRef.current?.value ?? '');
+      else if (!newSticky && state === 'recording') void stopMic();
+    };
+    window.addEventListener('aigent-mic-activate', onStart);
+    window.addEventListener('aigent-mic-stop', onStop);
+    window.addEventListener('aigent-mic-sticky-toggle', onStickyToggle);
+    return () => {
+      window.removeEventListener('aigent-mic-activate', onStart);
+      window.removeEventListener('aigent-mic-stop', onStop);
+      window.removeEventListener('aigent-mic-sticky-toggle', onStickyToggle);
+    };
+  }, [isSidepanel, startMic, stopMic, setMicSticky]);
 
   // Test helper: reset local component state between shared-page tests
   useEffect(() => {
@@ -345,39 +407,54 @@ export function InputArea() {
     reader.readAsDataURL(file);
   }, [pendingAttachments.length, addAttachment]);
 
-  const handleScreenCap = useCallback(async () => {
-    if (pendingAttachments.length >= MAX_ATTACHMENTS) return;
+  const handleScreenCapToggle = useCallback(async () => {
+    if (screenCapActive) {
+      stopScreenShare();
+      return;
+    }
     try {
-      if (!screenCapActive) await startScreenShare();
-      const base64 = captureScreenshot();
-      if (!base64) return;
-      const dataUrl = `data:image/png;base64,${base64}`;
-      const att: PendingAttachment = {
-        id: `att_${++attachIdCounter}`,
-        name: 'screenshot.png',
-        mediaType: 'image/png',
-        data: base64,
-        dataUrl,
-        size: Math.round(base64.length * 0.75),
-      };
-      try {
-        att.thumbnail = await generateThumbnail(dataUrl);
-      } catch { /* proceed without thumbnail */ }
-      addAttachment(att);
+      await startScreenShare();
     } catch (err) {
       const name = (err as Error).name;
       if (name !== 'NotAllowedError' && name !== 'AbortError') {
         setError('Screen capture failed');
       }
     }
-  }, [pendingAttachments.length, screenCapActive, addAttachment, setError]);
+  }, [screenCapActive, setError]);
+
+  const handleAttachScreenshot = useCallback(async () => {
+    if (pendingAttachments.length >= MAX_ATTACHMENTS) return;
+    const base64 = captureScreenshot();
+    if (!base64) return;
+    const dataUrl = `data:image/png;base64,${base64}`;
+    const att: PendingAttachment = {
+      id: `att_${++attachIdCounter}`,
+      name: 'screenshot.png',
+      mediaType: 'image/png',
+      data: base64,
+      dataUrl,
+      size: Math.round(base64.length * 0.75),
+    };
+    try {
+      att.thumbnail = await generateThumbnail(dataUrl);
+    } catch { /* proceed without thumbnail */ }
+    addAttachment(att);
+  }, [pendingAttachments.length, addAttachment]);
+
+  // Send a mic command from the iframe to the sidepanel page via postMessage.
+  // The sidepanel page (extension context) then forwards it to the background worker,
+  // which uses executeScript — bypassing the user-gesture restriction on getUserMedia.
+  const sendExtMicCmd = useCallback((type: string) => {
+    if (isSidepanel) window.parent.postMessage({ type }, '*');
+  }, [isSidepanel]);
 
   const toggleMicSticky = useCallback(() => {
+    if (isSidepanel) { sendExtMicCmd('aigent-mic-sticky-toggle'); return; }
     const newSticky = !micSticky;
     setMicSticky(newSticky);
     if (newSticky && micState === 'idle') void startMic(false, inputRef.current?.value ?? '');
     else if (!newSticky && micState === 'recording') void stopMic();
-  }, [micSticky, micState, setMicSticky, startMic, stopMic]);
+  }, [isSidepanel, sendExtMicCmd, micSticky, micState, setMicSticky, startMic, stopMic]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -396,6 +473,7 @@ export function InputArea() {
       }
       if (e.code === 'Backquote' && e.ctrlKey && !e.shiftKey) {
         e.preventDefault();
+        if (isSidepanel) { sendExtMicCmd(micState === 'recording' ? 'aigent-mic-stop' : 'aigent-mic-activate'); return; }
         if (micState === 'recording') { setMicSticky(false); void stopMic(); }
         else void startMic(false, inputRef.current?.value ?? '');
         return;
@@ -407,6 +485,7 @@ export function InputArea() {
         || (active as HTMLElement)?.isContentEditable;
       if (!anyInputFocused && (e.code === 'Backquote' || e.key === 'm' || e.key === 'M')) {
         e.preventDefault();
+        if (isSidepanel) { sendExtMicCmd(micState === 'recording' ? 'aigent-mic-stop' : 'aigent-mic-activate'); return; }
         if (micState === 'recording') { setMicSticky(false); void stopMic(); }
         else void startMic(false, inputRef.current?.value ?? '');
       }
@@ -678,6 +757,7 @@ export function InputArea() {
             ].filter(Boolean).join(' ')}
             title={micState === 'recording' ? 'Stop mic' : 'Start mic'}
             onClick={() => {
+              if (isSidepanel) { sendExtMicCmd(micState === 'recording' ? 'aigent-mic-stop' : 'aigent-mic-activate'); return; }
               if (micState === 'recording') { setMicSticky(false); void stopMic(); }
               else void startMic(false, inputRef.current?.value ?? '');
               inputRef.current?.focus();
@@ -731,18 +811,32 @@ export function InputArea() {
         </div>
 
         {/* Screen cap */}
-        <button
-          id="screen-cap"
-          className={screenCapActive ? 'active' : ''}
-          title={screenCapActive ? 'Take screenshot' : 'Share screen & take screenshot'}
-          onClick={() => void handleScreenCap()}
-        >
-          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="1" y="3" width="18" height="12" rx="2"/>
-            <line x1="7" y1="19" x2="13" y2="19"/>
-            <line x1="10" y1="15" x2="10" y2="19"/>
-          </svg>
-        </button>
+        <div id="screen-cap-wrap" className={screenCapActive ? 'active' : ''}>
+          <button
+            id="screen-cap"
+            className={screenCapActive ? 'active' : ''}
+            title={screenCapActive ? 'Stop screen sharing' : 'Share screen'}
+            onClick={() => void handleScreenCapToggle()}
+          >
+            <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="1" y="3" width="18" height="12" rx="2"/>
+              <line x1="7" y1="19" x2="13" y2="19"/>
+              <line x1="10" y1="15" x2="10" y2="19"/>
+            </svg>
+          </button>
+          {screenCapActive && (
+            <button
+              id="screen-cap-snap"
+              title="Attach screenshot"
+              onClick={() => void handleAttachScreenshot()}
+            >
+              <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="10" cy="11" r="3"/>
+                <path d="M7.5 4h5l1.5 2h2a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h2L6.5 4z"/>
+              </svg>
+            </button>
+          )}
+        </div>
 
         {/* Send / Cancel — both always in DOM, toggled via hidden class */}
         <button

@@ -8,14 +8,15 @@
  */
 
 import { defineConfig, devices } from '@playwright/test';
-import { createServer } from 'node:net';
+import { execSync } from 'node:child_process';
 
+/** Spawn a short-lived child to get an OS-assigned free port (listen is async). */
 function findFreePort(): number {
-  const srv = createServer();
-  srv.listen(0, '127.0.0.1');
-  const port = (srv.address() as { port: number }).port;
-  srv.close();
-  return port;
+  const port = execSync(
+    `node -e "const s=require('net').createServer();s.listen(0,'127.0.0.1',()=>{process.stdout.write(String(s.address().port));s.close()})"`,
+    { encoding: 'utf-8' },
+  ).trim();
+  return parseInt(port, 10);
 }
 
 const PORT = Number(process.env['AIGENT_WEB_PORT']) || findFreePort();

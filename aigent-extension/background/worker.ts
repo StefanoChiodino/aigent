@@ -356,5 +356,36 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
+// Handle mic/pop-out requests from the sidepanel page (relayed from the iframe via postMessage).
+// Uses executeScript to dispatch custom events into the main tab — this bypasses
+// the user-gesture restriction on getUserMedia that BroadcastChannel messages can't.
+const MIC_EVENTS = ['aigent-mic-activate', 'aigent-mic-stop', 'aigent-mic-sticky-toggle'] as const;
+
+function handleMicMessage(type: string | undefined): void {
+  if (!type) return;
+  if (type !== 'aigent-popout' && !(MIC_EVENTS as readonly string[]).includes(type)) return;
+  const eventName = type === 'aigent-popout' ? 'aigent-mic-activate' : type;
+  chrome.tabs.query({ url: 'http://localhost:3141/*' }, (tabs) => {
+    const tab = tabs.find(t => t.id !== undefined && !t.url?.includes('extId='));
+    if (tab?.id !== undefined) {
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (ev: string) => { window.dispatchEvent(new CustomEvent(ev)); },
+        args: [eventName],
+      }).catch(() => {});
+    }
+  });
+}
+
+// From sidepanel page (extension context) — relayed from iframe via postMessage
+chrome.runtime.onMessage.addListener((message: { type?: string }) => {
+  handleMicMessage(message.type);
+});
+
+// From iframe directly, if externally_connectable happens to work for it
+chrome.runtime.onMessageExternal.addListener((message: { type?: string }) => {
+  handleMicMessage(message.type);
+});
+
 // Boot
 connect();

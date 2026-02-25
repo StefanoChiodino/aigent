@@ -5,10 +5,15 @@
  * (e.g. if fuser or docker blocks on a stuck process).
  */
 
-import { readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync, renameSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 
 const PID_FILE = '/tmp/aigent-test-gatekeeper.pid';
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const AUTOSAVE = resolve(ROOT, 'workspace/.autosave.json');
+const AUTOSAVE_BACKUP = `${AUTOSAVE}.test-backup`;
 
 export default async function globalTeardown() {
   const timeout = new Promise<void>((_, reject) =>
@@ -51,6 +56,12 @@ async function doTeardown() {
 
   // Clean up any orphaned aigent-test Docker containers from this test run.
   cleanupDockerContainers();
+
+  // Restore the production autosave that was moved aside during setup.
+  if (existsSync(AUTOSAVE_BACKUP)) {
+    try { renameSync(AUTOSAVE_BACKUP, AUTOSAVE); } catch { /* ignore */ }
+    console.log('[test-teardown] Restored .autosave.json');
+  }
 
   // Brief wait for OS cleanup (reduced from 800ms)
   await new Promise((r) => setTimeout(r, 300));

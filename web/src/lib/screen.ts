@@ -21,6 +21,13 @@ export function isScreenCapActive(): boolean {
   return screenStream !== null && screenVideo !== null;
 }
 
+export function stopScreenShare(): void {
+  if (screenStream) {
+    for (const track of screenStream.getTracks()) track.stop();
+  }
+  setScreenCapState(false);
+}
+
 export async function startScreenShare(): Promise<void> {
   if (screenStream && screenVideo) return; // already active
   screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });

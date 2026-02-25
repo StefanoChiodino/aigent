@@ -100,6 +100,7 @@ const staticFiles = [
   ['manifest.json', 'manifest.json'],
   ['popup/popup.html', 'popup/popup.html'],
   ['sidepanel/sidepanel.html', 'sidepanel/sidepanel.html'],
+  ['sidepanel/sidepanel.js', 'sidepanel/sidepanel.js'],
 ];
 
 for (const [src, dest] of staticFiles) {

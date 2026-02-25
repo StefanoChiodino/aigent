@@ -76,7 +76,27 @@ export async function startWebServer(
   // Cache the latest server state so new connections get immediate state.
   // These listeners run ONCE (not per-connection) to avoid duplicate appends
   // when multiple browser tabs are connected simultaneously.
-  let cachedState: ServerState | null = null;
+
+  // In test mode (no container), seed cachedState with defaults so the browser
+  // gets a valid connected event and the sidebar populates immediately.
+  const TEST_MODE = process.env['AIGENT_TEST_MODE'] === '1';
+  const DEFAULT_MODELS = ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'];
+  let cachedState: ServerState | null = TEST_MODE
+    ? {
+        messages: [],
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        thinking: 'high' as ThinkingLevel,
+        concise: false,
+        profile: 'default',
+        sessionId: 'test',
+        model: DEFAULT_MODELS[0]!,
+        availableModels: DEFAULT_MODELS,
+        availableTools: [],
+        isLoading: false,
+        tasks: [],
+        pendingResults: 0,
+      }
+    : null;
   client.on('connected', (state) => { cachedState = state; });
   client.on('message', (message: ServerState['messages'][number]) => {
     if (cachedState) cachedState = { ...cachedState, messages: [...cachedState.messages, message] };
@@ -276,8 +296,9 @@ export async function startWebServer(
       return;
     }
 
-    // Static files from web/
-    const safePath = url === '/' ? '/index.html' : url.replace(/\.\./g, '');
+    // Static files from web/ — strip query string before resolving path
+    const pathname = url.split('?')[0]!;
+    const safePath = pathname === '/' ? '/index.html' : pathname.replace(/\.\./g, '');
 
     // When serving HTML, add Permissions-Policy to allow microphone/camera access
     // from cross-origin embedders (e.g. Chrome extension side panel iframe).
@@ -320,6 +341,69 @@ export async function startWebServer(
 
   // Extension bridge WebSocket — Chrome extension connects here
   extWss.on('connection', (ws: WebSocket) => extensionBridge.onConnection(ws));
+
+  /** Broadcast a ServerEvent to all connected browser clients. */
+  function broadcastToClients(event: ServerEvent): void {
+    const msg = JSON.stringify(event);
+    for (const ws of wss.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    }
+  }
+
+  /**
+   * In test mode (no container / server), handle slash commands locally
+   * so toggle round-trips, /reset, etc. work without a running worker.
+   * Returns true if the command was handled (caller should skip forwarding).
+   */
+  function handleTestModeCommand(content: string): boolean {
+    const trimmed = content.trim();
+
+    // /reasoning on|off
+    if (trimmed === '/reasoning off' || trimmed === '/reasoning on') {
+      const level = trimmed === '/reasoning off' ? 'off' : 'high';
+      if (cachedState) cachedState = { ...cachedState, thinking: level as ThinkingLevel };
+      broadcastToClients({ type: 'state', thinking: level as ThinkingLevel });
+      return true;
+    }
+
+    // /effort <level>
+    const effortMatch = trimmed.match(/^\/effort\s+(low|medium|high|max)$/);
+    if (effortMatch) {
+      const level = effortMatch[1] as ThinkingLevel;
+      if (cachedState) cachedState = { ...cachedState, thinking: level };
+      broadcastToClients({ type: 'state', thinking: level });
+      return true;
+    }
+
+    // /concise on|off
+    if (trimmed === '/concise on' || trimmed === '/concise off') {
+      const concise = trimmed === '/concise on';
+      if (cachedState) cachedState = { ...cachedState, concise };
+      broadcastToClients({ type: 'state', concise });
+      return true;
+    }
+
+    // /model <id>
+    const modelMatch = trimmed.match(/^\/model\s+(\S+)$/);
+    if (modelMatch) {
+      const model = modelMatch[1]!;
+      if (cachedState && cachedState.availableModels.includes(model)) {
+        cachedState = { ...cachedState, model };
+        broadcastToClients({ type: 'state', model });
+      }
+      return true;
+    }
+
+    // /reset
+    if (trimmed === '/reset') {
+      if (cachedState) cachedState = { ...cachedState, messages: [] };
+      broadcastToClients({ type: 'reset' });
+      broadcastToClients({ type: 'system', content: 'Conversation reset.' });
+      return true;
+    }
+
+    return false;
+  }
 
   wss.on('connection', (ws: WebSocket) => {
     log.info('Web client connected');
@@ -447,6 +531,11 @@ export async function startWebServer(
         const cmd = JSON.parse(data.toString());
         switch (cmd.type) {
           case 'message':
+            // In test mode there is no container, so handle slash commands locally
+            // by broadcasting the appropriate state events back to all clients.
+            if (TEST_MODE && typeof cmd.content === 'string' && !cmd.images && !cmd.attachments) {
+              if (handleTestModeCommand(cmd.content as string)) break;
+            }
             if ((cmd.images && cmd.images.length > 0) || (cmd.attachments && cmd.attachments.length > 0)) {
               // Attachments present — send full command directly (slash commands never have attachments)
               client.send({
@@ -483,7 +572,25 @@ export async function startWebServer(
             client.send(cmd);
             break;
           case 'context_breakdown_request':
-            client.send({ type: 'context_breakdown_request' });
+            if (TEST_MODE) {
+              // Return mock breakdown data so context inspector tests pass without a server.
+              ws.send(JSON.stringify({
+                type: 'context_breakdown',
+                breakdown: {
+                  systemBase: 4200, systemBaseContent: '# System Prompt\n\nYou are aigent.',
+                  workspaceContext: 2800, workspaceContent: '# AGENTS.md\n\naigent — a self-authoring AI agent.',
+                  toolDefs: 1900, toolDefsContent: '[]',
+                  messages: [
+                    { role: 'user', tokens: 320, preview: 'Test user message' },
+                    { role: 'assistant', tokens: 1847, preview: 'Test assistant reply' },
+                  ],
+                  messagesTotal: 2167,
+                  total: 11067,
+                },
+              }));
+            } else {
+              client.send({ type: 'context_breakdown_request' });
+            }
             break;
           case 'ping':
             ws.send(JSON.stringify({ type: 'pong' }));

@@ -15,6 +15,9 @@
     "http://localhost:3141/*",
     "<all_urls>"
   ],
+  "externally_connectable": {
+    "matches": ["http://localhost:3141/*"]
+  },
   "background": {
     "service_worker": "background/worker.js",
     "type": "module"
