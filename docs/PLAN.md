@@ -156,6 +156,25 @@ Docker container (worker.ts → server.ts)
 - [x] Pre-restart typecheck: tsc --noEmit before server restart in file watcher
 - [ ] Test with OpenAI-compatible endpoint (e.g., Ollama)
 
+### Web UI & Extension (see docs/web-ui-architecture.md)
+> Extension sidepanel replaced with popup window (`chrome.windows.create`).
+> This eliminates the iframe, mic relay chain, BroadcastChannel sync, and all
+> `isSidepanel` branches. The popup window is a normal browser context with
+> full getUserMedia access — identical to opening localhost:3141 in a tab.
+
+**Done (2026-02-25)**
+- [x] Replace sidepanel iframe with `chrome.windows.create({ type: 'popup' })`
+- [x] Delete mic relay chain (postMessage → chrome.runtime → executeScript → BroadcastChannel)
+- [x] Delete all `isSidepanel` branches from InputArea.tsx (~100 lines removed)
+- [x] Delete sidepanel files (sidepanel.html, sidepanel.js)
+- [x] Remove Permissions-Policy header from web-bridge.ts (was for iframe embed)
+- [x] Update popup with "Open aigent" button + connection status
+
+**Future — PWA for mobile**
+- [ ] Add PWA manifest + service worker for installable mobile app
+- [ ] Test mic/TTS on iOS Safari and Android Chrome
+- [ ] Offline mode: cache static assets, show "server unavailable" gracefully
+
 ### Browser Automation (primary OS presence track)
 > Strategy: Chrome extension over the user's live session — not headless Playwright.
 > See `docs/os-automation-strategy.md` (strategy) and `docs/design-browser-extension.md` (full design).

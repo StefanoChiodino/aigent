@@ -9,6 +9,11 @@
 - [ ] **Reasoning toggle on incompatible models** — UI allows enabling reasoning on models that don't support it (e.g. Haiku); disable the toggle or warn.
 - [ ] **Duplicate mount suppression** — agent sometimes re-requests an already-active mount; gatekeeper should auto-approve redundant requests silently.
 
+### Extension Sidepanel Bugs — RESOLVED
+> Sidepanel replaced with popup window (`chrome.windows.create`). All sidepanel
+> bugs eliminated — no iframe, no mic relay, no BroadcastChannel, no `isSidepanel`
+> branches. See `docs/web-ui-architecture.md`. (2026-02-25)
+
 ---
 
 ## 🔒 Security & Safety

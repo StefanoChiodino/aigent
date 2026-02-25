@@ -1,69 +1,106 @@
-# Voice Interface — Design Notes
+# Voice Interface — Architecture & Status
 
-## Goal
-Talk to the agent naturally — voice in, voice out. No typing, no external STT app.
+> Voice in (STT) and voice out (TTS) for the web UI.
+> Updated 2026-02-25. See `docs/web-ui-architecture.md` for full web UI architecture.
 
-## Architecture: Web Audio Bridge
+## Current Implementation
 
-Preferred approach: thin web UI handles audio I/O, container handles everything else.
+Voice is fully working in the main web UI (`localhost:3141`). The Chrome
+extension sidepanel has known bugs — see `docs/web-ui-architecture.md` §4-5.
+
+### Architecture
 
 ```
-Browser (localhost:3000)
-  ├─ Mic capture (Web Audio API)
-  ├─ WebSocket ──► Container
-  │                 ├─ Whisper.cpp (STT) → text
-  │                 ├─ Agent processes text
-  │                 ├─ Piper / Edge TTS → audio
-  │                 └─ WebSocket ◄── audio back
-  └─ Plays audio response
+Browser (localhost:3141)
+  ├─ Mic capture (Web Audio API, 16 kHz mono)
+  ├─ VAD (RMS-based voice activity detection)
+  ├─ Live chunked STT (12s rolling window, every 1.2s)
+  │   └─ POST /stt (WAV) ──► Gatekeeper ──► Parakeet (localhost:8765)
+  ├─ TTS playback (MP3 audio)
+  │   └─ POST /tts (text) ──► Gatekeeper ──► Edge TTS (localhost:8766)
+  └─ Auto-send on silence (sticky mode)
 ```
 
-- Works on any OS, no audio driver issues
-- Accessible from phone/tablet too
-- TUI still works in parallel for text interaction
+### STT Pipeline
 
-## STT Options
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `useMic.ts` | `web/src/hooks/` | Web Audio capture, VAD, chunked send |
+| `/stt` endpoint | `src/web-bridge.ts` | Proxy to Parakeet STT service |
+| Parakeet | `localhost:8765` | NVIDIA GPU STT (local) |
 
-| Option | Local? | Size | Quality | Notes |
-|--------|--------|------|---------|-------|
-| Whisper.cpp | Yes | ~1GB | Excellent | Best local option, C++ with Node bindings |
-| NVIDIA Parakeet | Yes | ~600MB | Very good | Needs NVIDIA GPU |
-| OpenAI Whisper API | No | — | Excellent | Simple but cloud, costs money |
-| Deepgram | No | — | Excellent | Cloud, fast streaming |
+**How it works:**
+1. `startMic()` opens `getUserMedia({ audio: { channelCount: 1 } })`.
+2. `AudioContext` at 16 kHz, `ScriptProcessorNode` (4096 samples/frame).
+3. VAD: RMS threshold → detects speech vs silence.
+4. Every 1.2s, sends accumulated audio as WAV to `/stt`.
+5. Maintains 12s rolling window — when exceeded, commits base text and starts fresh.
+6. Sequence counter ensures only the latest STT response is displayed.
+7. `stopMic()` sends final chunk for best-effort full transcription.
 
-**Recommendation**: Whisper.cpp — runs locally, no API key, accurate enough.
+**Settings (configurable in web UI):**
+- `mic_silence_threshold` — RMS threshold for speech detection
+- `mic_loud_frames` — consecutive loud frames before VAD activates
+- `mic_silence_tail_ms` — silence tail before VAD deactivates
+- `mic_auto_send` — auto-submit after silence in sticky mode
+- `mic_auto_send_ms` — silence duration before auto-submit
 
-## TTS Options
+### TTS Pipeline
 
-| Option | Local? | Quality | Speed | Notes |
-|--------|--------|---------|-------|-------|
-| Piper | Yes | Good | Very fast | Lightweight, many voices |
-| Edge TTS | No* | Very good | Fast | Free Microsoft API, needs internet |
-| ElevenLabs | No | Excellent | Medium | Best quality, paid |
-| OpenAI TTS | No | Very good | Medium | Cloud, costs money |
-| Coqui TTS | Yes | Good | Slow | Heavier than Piper |
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| `useTTS.ts` | `web/src/hooks/` | Streams text events to TTS, plays MP3 |
+| `/tts` endpoint | `src/web-bridge.ts` | Proxy to Edge TTS service |
+| Edge TTS | `localhost:8766` | Microsoft Edge TTS (free, needs internet) |
 
-*Edge TTS is free with no API key, just needs network.
+**How it works:**
+1. `useTTS` listens for streaming `text` events from the agent.
+2. Periodically flushes accumulated text to `/tts?rate=<speed>`.
+3. Receives MP3 audio, plays via `HTMLAudioElement`.
+4. Auto-speak toggle: when enabled, speaks every assistant response.
+5. Speed control: 0-100% rate adjustment.
 
-**Recommendation**: Piper for fully local, Edge TTS if internet is acceptable.
+### Sticky Mode (always-on mic)
 
-## Alternative: PulseAudio Passthrough
+When `micSticky` is true:
+1. Mic stays recording after submission.
+2. Auto-send: after N ms of silence, auto-submits the transcript.
+3. Enables hands-free conversation loop: speak → agent responds → speak again.
 
-Mount host PulseAudio socket into Docker for direct mic/speaker access.
-More native but fragile on WSL2, needs host-side config.
-Only consider if web approach isn't good enough.
+### Key Files
 
-## Implementation Steps (when ready)
+| File | Lines | Purpose |
+|------|-------|---------|
+| `web/src/hooks/useMic.ts` | ~316 | Core mic capture, VAD, STT |
+| `web/src/hooks/useTTS.ts` | ~150 | TTS streaming, playback |
+| `web/src/components/InputArea.tsx` | ~900 | Mic UI, BroadcastChannel sync |
+| `web/src/stores/voice.ts` | ~50 | Mic/TTS state (Zustand) |
+| `web/src/lib/audio.ts` | ~100 | WAV encoding, mic sounds |
+| `src/web-bridge.ts` | — | /stt and /tts proxy endpoints |
 
-1. Add Whisper.cpp and Piper to Dockerfile
-2. WebSocket server in the container (ws library)
-3. Simple HTML page served from container (express or static)
-4. Audio pipeline: mic → Whisper → agent → TTS → playback
-5. Voice activation / push-to-talk toggle
-6. Streaming TTS (start speaking before full response is ready)
+## Extension Sidepanel Status
 
-## Open Questions
+**Problem**: `getUserMedia` fails in Chrome extension sidepanel iframes
+(user gesture restriction). Workaround: 4-hop relay chain that routes
+mic commands to the main tab.
 
-- Push-to-talk vs voice activity detection?
-- Should the agent's "personality" include a voice? (voice selection per profile)
-- Interrupt support? (stop speaking when user starts talking)
+**Impact**: Mic buttons feel sluggish, state sync is fragile, conversation
+doesn't reset cleanly.
+
+**Fix strategy**: Test if Chrome now allows direct `getUserMedia` in
+sidepanel iframes (the `allow="microphone *"` attribute is already set).
+If yes, delete the relay. If no, harden the sync or move mic state to
+server-mediated WebSocket events.
+
+See `docs/web-ui-architecture.md` §4-6 for detailed analysis.
+
+## Future Considerations
+
+- **PWA for mobile**: Add manifest + service worker. Mic works natively in
+  PWA context on both iOS and Android. No extension needed.
+- **Local STT alternative**: Whisper.cpp for environments without NVIDIA GPU.
+  Currently using Parakeet which requires CUDA.
+- **Local TTS alternative**: Piper for fully offline TTS. Currently using
+  Edge TTS which needs internet.
+- **Voice profiles**: Per-profile TTS voice selection (personality).
+- **Interrupt support**: Stop TTS when user starts speaking.

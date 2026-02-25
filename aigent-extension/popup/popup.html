@@ -18,7 +18,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
     }
     .logo {
       font-weight: 600;
@@ -29,6 +29,7 @@
       display: flex;
       align-items: center;
       gap: 6px;
+      margin-bottom: 12px;
     }
     .dot {
       width: 8px;
@@ -44,6 +45,19 @@
     }
     .label.connected { color: #4ade80; }
     .label.disconnected { color: #f87171; }
+    #open-btn {
+      display: block;
+      width: 100%;
+      padding: 8px 0;
+      background: #2563eb;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    #open-btn:hover { background: #1d4ed8; }
   </style>
 </head>
 <body>
@@ -54,6 +68,7 @@
     <div class="dot" id="dot"></div>
     <span class="label" id="label">Checking...</span>
   </div>
+  <button id="open-btn">Open aigent</button>
   <script src="popup.js" type="module"></script>
 </body>
 </html>

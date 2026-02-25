@@ -798,7 +798,7 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingConfigWriteRequests.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending config write: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending config write: ${id}`);
       return true;
     }
 
@@ -838,7 +838,7 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingConfigWriteRequests.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending config write: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending config write: ${id}`);
       return true;
     }
 
@@ -863,7 +863,7 @@ async function handleConfigApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingConfigWriteRequests.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending config write: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending config write: ${id}`);
       return true;
     }
 
@@ -1051,7 +1051,7 @@ async function handleEditFileApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingEditFileRequests.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending edit request: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending edit request: ${id}`);
       return true;
     }
 
@@ -1101,7 +1101,7 @@ async function handleEditFileApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingEditFileRequests.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending edit request: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending edit request: ${id}`);
       return true;
     }
 
@@ -1219,7 +1219,7 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingExecApprovals.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending exec request: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending exec request: ${id}`);
       return true;
     }
 
@@ -1251,7 +1251,7 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingExecApprovals.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending exec request: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending exec request: ${id}`);
       return true;
     }
 
@@ -1353,7 +1353,7 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingFetchApprovals.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending fetch request: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending fetch request: ${id}`);
       return true;
     }
 
@@ -1391,7 +1391,7 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingFetchApprovals.get(id);
     if (!pending) {
-      injectSystemMessage(`No pending fetch request: ${id}`);
+      if (!IS_TEST_MODE) injectSystemMessage(`No pending fetch request: ${id}`);
       return true;
     }
 

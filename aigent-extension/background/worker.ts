@@ -10,6 +10,7 @@
  */
 
 const GATEKEEPER_WS = 'ws://localhost:3141/ext';
+const GATEKEEPER_URL = 'http://localhost:3141';
 const RECONNECT_DELAY_MS = 3000;
 const KEEPALIVE_ALARM = 'aigent-keepalive';
 
@@ -34,6 +35,9 @@ let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let connected = false;
 
+// Track the aigent popup window so we can focus it instead of opening duplicates
+let aigentWindowId: number | null = null;
+
 function setConnected(value: boolean): void {
   connected = value;
   chrome.storage.session.set({ connected }).catch(() => {});
@@ -56,7 +60,7 @@ function connect(): void {
   ws.onopen = () => {
     console.log('[aigent] Connected to gatekeeper');
     setConnected(true);
-    send({ type: 'ext_hello', version: '0.1.0', browser: navigator.userAgent });
+    send({ type: 'ext_hello', version: '0.2.0', browser: navigator.userAgent });
   };
 
   ws.onmessage = async (event: MessageEvent) => {
@@ -335,8 +339,46 @@ function extractA11yContent(rootSelector: string | null): string {
   ].join('\n');
 }
 
-// Open the side panel when the extension toolbar icon is clicked
-chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+// ── Popup window management ────────────────────────────────────────────────────
+// Clicking the extension toolbar icon opens (or focuses) a popup window
+// showing the aigent web UI. This is a normal Chrome window with full
+// getUserMedia access — no iframe restrictions.
+
+async function openOrFocusWindow(): Promise<void> {
+  // If we already have a window, try to focus it
+  if (aigentWindowId !== null) {
+    try {
+      const existing = await chrome.windows.get(aigentWindowId);
+      if (existing) {
+        await chrome.windows.update(aigentWindowId, { focused: true });
+        return;
+      }
+    } catch {
+      // Window was closed — fall through to create
+      aigentWindowId = null;
+    }
+  }
+
+  const win = await chrome.windows.create({
+    url: GATEKEEPER_URL,
+    type: 'popup',
+    width: 420,
+    height: 720,
+  });
+  aigentWindowId = win.id ?? null;
+}
+
+// Clear tracked window ID when it's closed
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === aigentWindowId) aigentWindowId = null;
+});
+
+// Handle "open-window" messages from the popup page
+chrome.runtime.onMessage.addListener((message: { type?: string }) => {
+  if (message.type === 'open-window') {
+    openOrFocusWindow().catch(console.error);
+  }
+});
 
 // ── Keep-alive via chrome.alarms ──────────────────────────────────────────────
 // MV3 service workers are killed after ~30s idle. We use an alarm (max every
@@ -354,37 +396,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     }
     connect();
   }
-});
-
-// Handle mic/pop-out requests from the sidepanel page (relayed from the iframe via postMessage).
-// Uses executeScript to dispatch custom events into the main tab — this bypasses
-// the user-gesture restriction on getUserMedia that BroadcastChannel messages can't.
-const MIC_EVENTS = ['aigent-mic-activate', 'aigent-mic-stop', 'aigent-mic-sticky-toggle'] as const;
-
-function handleMicMessage(type: string | undefined): void {
-  if (!type) return;
-  if (type !== 'aigent-popout' && !(MIC_EVENTS as readonly string[]).includes(type)) return;
-  const eventName = type === 'aigent-popout' ? 'aigent-mic-activate' : type;
-  chrome.tabs.query({ url: 'http://localhost:3141/*' }, (tabs) => {
-    const tab = tabs.find(t => t.id !== undefined && !t.url?.includes('extId='));
-    if (tab?.id !== undefined) {
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: (ev: string) => { window.dispatchEvent(new CustomEvent(ev)); },
-        args: [eventName],
-      }).catch(() => {});
-    }
-  });
-}
-
-// From sidepanel page (extension context) — relayed from iframe via postMessage
-chrome.runtime.onMessage.addListener((message: { type?: string }) => {
-  handleMicMessage(message.type);
-});
-
-// From iframe directly, if externally_connectable happens to work for it
-chrome.runtime.onMessageExternal.addListener((message: { type?: string }) => {
-  handleMicMessage(message.type);
 });
 
 // Boot

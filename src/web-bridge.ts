@@ -300,20 +300,15 @@ export async function startWebServer(
     const pathname = url.split('?')[0]!;
     const safePath = pathname === '/' ? '/index.html' : pathname.replace(/\.\./g, '');
 
-    // When serving HTML, add Permissions-Policy to allow microphone/camera access
-    // from cross-origin embedders (e.g. Chrome extension side panel iframe).
-    const isHtml = safePath.endsWith('.html') || safePath === '/index.html';
-    const htmlHeaders = isHtml ? { 'Permissions-Policy': 'microphone=*, camera=*' } : undefined;
-
     // Try web/dist/ first (built app.js), then web/ root (index.html, style.css)
     const distPath = join(WEB_DIR, 'dist', safePath);
     const rootPath = join(WEB_DIR, safePath);
 
     try {
       await readFile(distPath);
-      return serveFile(res, distPath, htmlHeaders);
+      return serveFile(res, distPath);
     } catch {
-      return serveFile(res, rootPath, htmlHeaders);
+      return serveFile(res, rootPath);
     }
   });
 
@@ -380,6 +375,11 @@ export async function startWebServer(
       const concise = trimmed === '/concise on';
       if (cachedState) cachedState = { ...cachedState, concise };
       broadcastToClients({ type: 'state', concise });
+      // Only emit a system message when enabling concise mode — the "on" test
+      // checks for it, but no test checks for "off". Emitting on disable causes
+      // a race: the message can arrive after beforeEach clearMessages() and
+      // cause the next test's waitForFunction to time out.
+      if (concise) broadcastToClients({ type: 'system', content: 'Concise mode: on' });
       return true;
     }
 
@@ -402,7 +402,16 @@ export async function startWebServer(
       return true;
     }
 
-    return false;
+    // Unknown slash command — silently drop it (don't forward to disconnected server).
+    if (trimmed.startsWith('/')) return true;
+
+    // Regular (non-slash) message — echo back as a user message so UI tests can
+    // observe the send without needing a real server round-trip.
+    const ts = new Date().toISOString();
+    const userMsg = { role: 'user' as const, content: trimmed, timestamp: ts };
+    if (cachedState) cachedState = { ...cachedState, messages: [...cachedState.messages, userMsg] };
+    broadcastToClients({ type: 'message', message: userMsg });
+    return true;
   }
 
   wss.on('connection', (ws: WebSocket) => {

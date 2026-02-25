@@ -1,14 +1,13 @@
 {
   "manifest_version": 3,
   "name": "aigent Browser Bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Connects your browser to the aigent agent.",
   "permissions": [
     "activeTab",
     "scripting",
     "tabs",
     "storage",
-    "sidePanel",
     "alarms"
   ],
   "host_permissions": [
@@ -27,10 +26,8 @@
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "side_panel": {
-    "default_path": "sidepanel/sidepanel.html"
-  },
   "action": {
+    "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useConnectionStore } from '../stores/connection';
 import { isDemo } from '../demo/useDemoMode';
 import { useUIStore } from '../stores/ui';
@@ -137,9 +137,6 @@ function guessMime(name: string): string | null {
   return map[ext ?? ''] ?? null;
 }
 
-// Shared BroadcastChannel for syncing mic state between main tab and sidepanel iframe
-const MIC_CHANNEL = 'aigent-mic';
-
 export function InputArea() {
   const send = useConnectionStore(s => s.send);
   const isLoading = useUIStore(s => s.isLoading);
@@ -157,10 +154,6 @@ export function InputArea() {
   const ttsPlaying = useVoiceStore(s => s.ttsPlaying);
   const micSticky = useVoiceStore(s => s.micSticky);
   const setMicSticky = useVoiceStore(s => s.setMicSticky);
-
-  // Set when running inside the Chrome extension sidepanel iframe
-  const extId = useMemo(() => new URLSearchParams(window.location.search).get('extId'), []);
-  const isSidepanel = !!extId;
 
   const [inputValue, setInputValue] = useState('');
   const [paletteSelected, setPaletteSelected] = useState(0);
@@ -194,71 +187,17 @@ export function InputArea() {
   const [micCapped, setMicCapped] = useState(false);
 
   const { stopAll: ttsStopAll } = useTTS();
-  const micBroadcast = useRef<BroadcastChannel | null>(null);
-  if (!micBroadcast.current) micBroadcast.current = new BroadcastChannel(MIC_CHANNEL);
 
   const { startMic, stopMic, abortMic, clearTranscript } = useMic(useCallback((text: string, windowCapped: boolean) => {
     lastMicTextRef.current = text;
     setHasMicText(!!text);
     setMicCapped(windowCapped);
     setInputValue(text);
-    // Broadcast transcript to sidepanel (only from main tab)
-    micBroadcast.current?.postMessage({ type: 'mic-transcript', text, windowCapped });
   }, []));
 
   useEffect(() => {
     registerScreenCapCallback(setScreenCapActive);
   }, []);
-
-  // Main tab: broadcast mic state changes to the sidepanel
-  useEffect(() => {
-    if (isSidepanel) return;
-    micBroadcast.current?.postMessage({ type: 'mic-state', micState, vadActive, micSticky });
-  }, [isSidepanel, micState, vadActive, micSticky]);
-
-  // Sidepanel: receive mic state + transcript from main tab; send commands back
-  useEffect(() => {
-    if (!isSidepanel) return;
-    const ch = micBroadcast.current!;
-    const handler = (e: MessageEvent<{ type: string; micState?: string; vadActive?: boolean; micSticky?: boolean; text?: string; windowCapped?: boolean }>) => {
-      if (e.data.type === 'mic-state') {
-        const { setMicState, setVadActive, setMicSticky: setStickyStore } = useVoiceStore.getState();
-        if (e.data.micState) setMicState(e.data.micState as 'idle' | 'recording' | 'transcribing');
-        if (e.data.vadActive !== undefined) setVadActive(e.data.vadActive);
-        if (e.data.micSticky !== undefined) setStickyStore(e.data.micSticky);
-      } else if (e.data.type === 'mic-transcript') {
-        const text = e.data.text ?? '';
-        lastMicTextRef.current = text;
-        setHasMicText(!!text);
-        setMicCapped(e.data.windowCapped ?? false);
-        setInputValue(text);
-      }
-    };
-    ch.addEventListener('message', handler);
-    return () => ch.removeEventListener('message', handler);
-  }, [isSidepanel]);
-
-  // Main tab: receive mic commands injected by the extension background via executeScript
-  useEffect(() => {
-    if (isSidepanel) return;
-    const onStart = () => { void startMic(); };
-    const onStop = () => { setMicSticky(false); void stopMic(); };
-    const onStickyToggle = () => {
-      const { micSticky: sticky, micState: state } = useVoiceStore.getState();
-      const newSticky = !sticky;
-      setMicSticky(newSticky);
-      if (newSticky && state === 'idle') void startMic(false, inputRef.current?.value ?? '');
-      else if (!newSticky && state === 'recording') void stopMic();
-    };
-    window.addEventListener('aigent-mic-activate', onStart);
-    window.addEventListener('aigent-mic-stop', onStop);
-    window.addEventListener('aigent-mic-sticky-toggle', onStickyToggle);
-    return () => {
-      window.removeEventListener('aigent-mic-activate', onStart);
-      window.removeEventListener('aigent-mic-stop', onStop);
-      window.removeEventListener('aigent-mic-sticky-toggle', onStickyToggle);
-    };
-  }, [isSidepanel, startMic, stopMic, setMicSticky]);
 
   // Test helper: reset local component state between shared-page tests
   useEffect(() => {
@@ -441,20 +380,12 @@ export function InputArea() {
     addAttachment(att);
   }, [pendingAttachments.length, addAttachment]);
 
-  // Send a mic command from the iframe to the sidepanel page via postMessage.
-  // The sidepanel page (extension context) then forwards it to the background worker,
-  // which uses executeScript — bypassing the user-gesture restriction on getUserMedia.
-  const sendExtMicCmd = useCallback((type: string) => {
-    if (isSidepanel) window.parent.postMessage({ type }, '*');
-  }, [isSidepanel]);
-
   const toggleMicSticky = useCallback(() => {
-    if (isSidepanel) { sendExtMicCmd('aigent-mic-sticky-toggle'); return; }
     const newSticky = !micSticky;
     setMicSticky(newSticky);
     if (newSticky && micState === 'idle') void startMic(false, inputRef.current?.value ?? '');
     else if (!newSticky && micState === 'recording') void stopMic();
-  }, [isSidepanel, sendExtMicCmd, micSticky, micState, setMicSticky, startMic, stopMic]);
+  }, [micSticky, micState, setMicSticky, startMic, stopMic]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -473,7 +404,6 @@ export function InputArea() {
       }
       if (e.code === 'Backquote' && e.ctrlKey && !e.shiftKey) {
         e.preventDefault();
-        if (isSidepanel) { sendExtMicCmd(micState === 'recording' ? 'aigent-mic-stop' : 'aigent-mic-activate'); return; }
         if (micState === 'recording') { setMicSticky(false); void stopMic(); }
         else void startMic(false, inputRef.current?.value ?? '');
         return;
@@ -485,7 +415,6 @@ export function InputArea() {
         || (active as HTMLElement)?.isContentEditable;
       if (!anyInputFocused && (e.code === 'Backquote' || e.key === 'm' || e.key === 'M')) {
         e.preventDefault();
-        if (isSidepanel) { sendExtMicCmd(micState === 'recording' ? 'aigent-mic-stop' : 'aigent-mic-activate'); return; }
         if (micState === 'recording') { setMicSticky(false); void stopMic(); }
         else void startMic(false, inputRef.current?.value ?? '');
       }
@@ -757,7 +686,6 @@ export function InputArea() {
             ].filter(Boolean).join(' ')}
             title={micState === 'recording' ? 'Stop mic' : 'Start mic'}
             onClick={() => {
-              if (isSidepanel) { sendExtMicCmd(micState === 'recording' ? 'aigent-mic-stop' : 'aigent-mic-activate'); return; }
               if (micState === 'recording') { setMicSticky(false); void stopMic(); }
               else void startMic(false, inputRef.current?.value ?? '');
               inputRef.current?.focus();

@@ -24,7 +24,6 @@ mkdirSync(outdir, { recursive: true });
 mkdirSync(resolve(outdir, 'background'), { recursive: true });
 mkdirSync(resolve(outdir, 'popup'), { recursive: true });
 mkdirSync(resolve(outdir, 'icons'), { recursive: true });
-mkdirSync(resolve(outdir, 'sidepanel'), { recursive: true });
 
 // --- Icon generation ---
 // Renders the same SVG as the web favicon (🤖 emoji, transparent bg) to PNG.
@@ -99,8 +98,6 @@ console.log('Icons generated');
 const staticFiles = [
   ['manifest.json', 'manifest.json'],
   ['popup/popup.html', 'popup/popup.html'],
-  ['sidepanel/sidepanel.html', 'sidepanel/sidepanel.html'],
-  ['sidepanel/sidepanel.js', 'sidepanel/sidepanel.js'],
 ];
 
 for (const [src, dest] of staticFiles) {
