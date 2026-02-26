@@ -263,7 +263,11 @@ export function InputArea() {
   const submitMessage = useCallback((useThinkingOverride = false) => {
     if (micState === 'recording') abortMic();
     const text = inputValue.trim();
-    if (!text && pendingAttachments.length === 0) return;
+    if (!text && pendingAttachments.length === 0) {
+      // Nothing to send — but if sticky mode is on, restart the mic
+      if (micSticky) setTimeout(() => { void startMic(true); }, 100);
+      return;
+    }
 
     // Handle /context locally — ContextInspector sends the request via its own effect
     if (text === '/context') {

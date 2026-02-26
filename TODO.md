@@ -4,6 +4,21 @@
 
 coincise mode seems to start often saying literally " slash speech"
 
+~~If there is nothing in the text box and I start the microphone and then send the the message which is empty, it will disable the microphone but keep the always on turn on.~~ **Fixed** — empty submit now restarts mic when sticky mode is on.
+
+If I queue a message and then I cancel the agent's running, my message looks queued, but it doesn't uh get picked up at all. I'm finding a lot of these type of bugs and to be honest it is getting pretty annoying to the point where I wanted to have a look at the whole chain of events where it should be a straightforward type of cue that allows to send these things and then can cancel them, etcetera. This seems very, very brittle.
+
+Queued messages should look a little bit prettier, just putting Q'd in brackets, it doesn't look terribly pretty, and also they should stick to the bottom uh just above the bar where I type instead of going inside the chat because they haven't been picked up yet. A little bit like it works in cursor, for example.
+
+I keep feeling finding over and over and over again that the models, the coin size mode, and various other things seems to change. They should persist very hard. I really don't know why this is a problem.
+
+~~In the div2 HTML we should probably when a patch model is presented uh show up something to wrap the text instead of having it progress horizontally.~~ **Fixed** — diff2html code lines now use `pre-wrap` so long lines wrap instead of scrolling horizontally.
+
+Despite having a folder mounted the agent just uh um proceeded to present me with a patch. Is the order of priority clear, do you think, to the agent? I'm not sure why they're getting confused with presenting me with a patch rather than writing directly to the disc.
+
+~~After reply, I looked and there was no stop button to make the agent stop talking. Also I had the always a microphone on and as I started talking it didn't stop talking.~~ **Fixed** — (1) per-message TTSButton and `speakText` now set global `ttsPlaying` so the cancel button shows; (2) `startMic` now calls `ttsStopAll()` to interrupt TTS when user starts speaking.
+
+
 ## Bugs / Quick Fixes
 
 - [ ] **Reasoning toggle on incompatible models** — UI allows enabling reasoning on models that don't support it (e.g. Haiku); disable the toggle or warn.

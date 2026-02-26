@@ -18,11 +18,17 @@ import { InputArea } from '../components/InputArea';
 
 // --- Mock heavy dependencies that InputArea imports but we don't need ---
 
+const mockStartMic = vi.fn();
+const mockStopMic = vi.fn().mockResolvedValue(undefined);
+const mockAbortMic = vi.fn();
+const mockClearTranscript = vi.fn();
+
 vi.mock('../hooks/useMic', () => ({
   useMic: () => ({
-    startMic: vi.fn(),
-    stopMic: vi.fn().mockResolvedValue(undefined),
-    abortMic: vi.fn(),
+    startMic: mockStartMic,
+    stopMic: mockStopMic,
+    abortMic: mockAbortMic,
+    clearTranscript: mockClearTranscript,
   }),
 }));
 
@@ -89,6 +95,11 @@ describe('InputArea submission', () => {
       ttsPlaying: false,
       micSticky: false,
     });
+    // Reset mic mocks
+    mockStartMic.mockReset();
+    mockStopMic.mockReset().mockResolvedValue(undefined);
+    mockAbortMic.mockReset();
+    mockClearTranscript.mockReset();
   });
 
   afterEach(() => {
@@ -276,5 +287,53 @@ describe('InputArea submission', () => {
 
     const payloads = sentPayloads(ws);
     expect(payloads).toContainEqual({ type: 'cancel' });
+  });
+
+  // ── Cancel button visible when TTS is playing (not loading) ───────────────
+
+  it('cancel button is visible when ttsPlaying is true even if not loading', async () => {
+    useUIStore.setState({ isLoading: false });
+    useVoiceStore.setState({ ttsPlaying: true });
+
+    renderInputArea();
+    const cancelBtn = document.getElementById('cancel')!;
+    expect(cancelBtn.classList.contains('hidden')).toBe(false);
+  });
+
+  it('cancel button is hidden when neither loading nor ttsPlaying', async () => {
+    useUIStore.setState({ isLoading: false });
+    useVoiceStore.setState({ ttsPlaying: false });
+
+    renderInputArea();
+    const cancelBtn = document.getElementById('cancel')!;
+    expect(cancelBtn.classList.contains('hidden')).toBe(true);
+  });
+
+  // ── Mic sticky + empty submit restarts mic ────────────────────────────────
+
+  it('empty submit with mic recording + sticky restarts mic via send button', async () => {
+    vi.useFakeTimers();
+    try {
+      // Mic is recording and sticky mode is on
+      useVoiceStore.setState({ micState: 'recording', micSticky: true });
+
+      renderInputArea();
+
+      // Click the send button with empty input (bypasses the "while dictating" Enter path)
+      const sendBtn = document.getElementById('send')!;
+      await act(async () => {
+        fireEvent.click(sendBtn);
+      });
+
+      // abortMic should have been called (mic was recording)
+      expect(mockAbortMic).toHaveBeenCalled();
+      // No message should have been sent (empty input)
+      expect(ws.send).not.toHaveBeenCalled();
+      // startMic should be called after the 100ms timeout to restart in sticky mode
+      await act(async () => { vi.advanceTimersByTime(150); });
+      expect(mockStartMic).toHaveBeenCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
