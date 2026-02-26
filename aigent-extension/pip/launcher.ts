@@ -13,7 +13,7 @@
  */
 
 const AIGENT_URL = 'http://localhost:3141';
-const PIP_WIDTH = 420;
+const PIP_WIDTH = 520;
 const PIP_HEIGHT = 720;
 
 const floatBtn = document.getElementById('float-btn')!;
