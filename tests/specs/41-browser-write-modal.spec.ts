@@ -152,7 +152,7 @@ test.describe('@fast Browser Write Permission Modal', () => {
     await expectHidden(page.locator('#perm-overlay'));
   });
 
-  test('Always Allow buttons are hidden for browser write requests', async () => {
+  test('Always Allow button is visible for browser write requests', async () => {
     const page = getPage();
     await injectEvent({
       type: 'browser_write_request',
@@ -161,7 +161,8 @@ test.describe('@fast Browser Write Permission Modal', () => {
       stepSummary: 'Navigate to https://example.com',
     });
     await expectVisible(page.locator('#perm-overlay'));
-    await expect(page.locator('#perm-always-allow-btn')).toHaveClass(/\bhidden\b/);
+    await expect(page.locator('#perm-always-allow-btn')).not.toHaveClass(/\bhidden\b/);
+    // "Always Allow Domain" is still hidden (not applicable to browser writes)
     await expect(page.locator('#perm-always-allow-domain-btn')).toHaveClass(/\bhidden\b/);
     await page.locator('#perm-deny-btn').click();
   });

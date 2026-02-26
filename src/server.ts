@@ -1850,9 +1850,11 @@ You have the aigent Chrome extension connected. Use the \`browser_ext\` tool to 
 - \`list_tabs\` — returns all open browser tabs with their IDs, titles, and URLs. Use this first when the user asks about tabs, or to discover which pages are open before targeting a specific one.
 - \`extract_a11y\` — returns a structured accessibility tree of a page (fast, token-efficient — preferred for content questions). Omit tabId to target the active tab, or pass a tabId from list_tabs.
 - \`screenshot\` — returns a PNG image of the visible tab (only for visual/appearance/layout questions).
+- \`activate_tab\` — switch focus to a specific tab by tabId (also brings its window to front). Use after list_tabs to switch between tabs.
 
 **Write actions (require user approval):**
 - \`navigate\` — navigate the active tab (or a specific tabId) to a URL. Pass \`url\`. The user will see an approval prompt before the navigation happens.
+- \`open_tab\` — open a URL in a new browser tab. Pass \`url\`. Returns the new tab's ID so you can target it with other actions.
 - \`run_script\` — execute a batch of browser actions as an array of steps. Pass \`steps\`. Each step is an object with exactly one key. Available step types:
   - \`{ navigate: "https://..." }\` — navigate the page
   - \`{ click: "#selector" }\` or \`{ click: { selector, nth } }\` — click an element
@@ -1869,6 +1871,8 @@ You have the aigent Chrome extension connected. Use the \`browser_ext\` tool to 
 
 **When to use which action:**
 Use \`extract_a11y\` before writing — inspect the page to find selectors, then issue \`run_script\` with the steps. Chain read → plan → write for reliable automation.
+
+**Multi-tab workflow:** Use \`list_tabs\` to discover open tabs → \`activate_tab\` to switch to one → \`extract_a11y\` to read it → \`run_script\` to interact with it. Use \`open_tab\` when the user wants a new tab rather than navigating away from their current page. Pass \`tabId\` to any action to target a specific tab without switching focus.
 
 When the user asks what tabs they have open, what they're browsing, or anything about multiple pages, use \`list_tabs\`. When they ask about page content, use \`extract_a11y\`. You can also target your own UI at localhost:3141 — this is useful for self-inspection and self-improvement.
 
