@@ -29,7 +29,7 @@ export type ClientCommand =
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] }
   | { type: 'context_breakdown_request' }
-  | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; error?: string }
+  | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; error?: string }
   | { type: 'ping' };
 
 // --- Server → Client ---
@@ -117,7 +117,7 @@ export type ServerEvent =
   | { type: 'error'; message: string }
   | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string; concise?: boolean; availableModels?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
-  | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number }
+  | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number; fallbackHint?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'edit_file_request'; id: string; path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
@@ -128,14 +128,14 @@ export type ServerEvent =
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
-  | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot'; tabId?: number; rootSelector?: string }
+  | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot' | 'list_tabs'; tabId?: number; rootSelector?: string }
   | { type: 'reset' }
   | { type: 'pong' };
 
 // --- Worker → Gatekeeper (capability/mount requests) ---
 
 export type WorkerRequest =
-  | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number }
+  | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number; fallbackHint?: string }
   | { type: 'capability_request'; id: string; capability: string; params: Record<string, unknown>; reason?: string };
 
 // --- Gatekeeper → Worker (responses to requests) ---

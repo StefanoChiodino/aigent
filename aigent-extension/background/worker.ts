@@ -17,9 +17,17 @@ const KEEPALIVE_ALARM = 'aigent-keepalive';
 interface ExtRequest {
   type: 'ext_request';
   id: string;
-  action: 'extract_a11y' | 'screenshot';
+  action: 'extract_a11y' | 'screenshot' | 'list_tabs';
   tabId?: number;
   rootSelector?: string;
+}
+
+interface TabInfo {
+  id: number;
+  title: string;
+  url: string;
+  active: boolean;
+  windowId: number;
 }
 
 interface ExtResponse {
@@ -28,6 +36,7 @@ interface ExtResponse {
   ok: boolean;
   treeText?: string;
   dataUrl?: string;
+  tabs?: TabInfo[];
   error?: string;
 }
 
@@ -35,8 +44,6 @@ let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let connected = false;
 
-// Track the aigent popup window so we can focus it instead of opening duplicates
-let aigentWindowId: number | null = null;
 
 function setConnected(value: boolean): void {
   connected = value;
@@ -97,6 +104,8 @@ async function handleRequest(req: ExtRequest): Promise<ExtResponse> {
         return await extractA11y(req.id, req.tabId, req.rootSelector);
       case 'screenshot':
         return await captureScreenshot(req.id, req.tabId);
+      case 'list_tabs':
+        return await listTabs(req.id);
       default:
         return { type: 'ext_response', id: req.id, ok: false, error: `Unknown action: ${String((req as { action: string }).action)}` };
     }
@@ -105,10 +114,54 @@ async function handleRequest(req: ExtRequest): Promise<ExtResponse> {
   }
 }
 
+// No infrastructure windows to exclude — aigent opens in a regular tab now.
+// This function is kept as a no-op for forward compatibility.
+function isInfrastructureTab(_t: chrome.tabs.Tab): boolean {
+  return false;
+}
+
 async function getActiveTabId(): Promise<number> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  function isUserTab(t: chrome.tabs.Tab): boolean {
+    if (!t.id || t.windowId === undefined) return false;
+    return !isInfrastructureTab(t);
+  }
+
+  // Try last-focused window first
+  let tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  let tab = tabs.find(isUserTab);
+
+  if (!tab) {
+    // Fallback: any active tab in a normal window (not popup/panel)
+    tabs = await chrome.tabs.query({ active: true, windowType: 'normal' });
+    tab = tabs.find(isUserTab);
+  }
+
+  if (!tab) {
+    // Last resort: any active tab not in infrastructure windows
+    tabs = await chrome.tabs.query({ active: true });
+    tab = tabs.find(isUserTab);
+  }
+
   if (!tab?.id) throw new Error('No active tab found');
   return tab.id;
+}
+
+async function listTabs(id: string): Promise<ExtResponse> {
+  try {
+    const allTabs = await chrome.tabs.query({});
+    const userTabs: TabInfo[] = allTabs
+      .filter(t => t.id !== undefined && !isInfrastructureTab(t))
+      .map(t => ({
+        id: t.id!,
+        title: t.title ?? '(untitled)',
+        url: t.url ?? '',
+        active: t.active ?? false,
+        windowId: t.windowId ?? 0,
+      }));
+    return { type: 'ext_response', id, ok: true, tabs: userTabs };
+  } catch (err) {
+    return { type: 'ext_response', id, ok: false, error: String(err) };
+  }
 }
 
 async function extractA11y(id: string, tabId?: number, rootSelector?: string): Promise<ExtResponse> {
@@ -339,44 +392,36 @@ function extractA11yContent(rootSelector: string | null): string {
   ].join('\n');
 }
 
-// ── Popup window management ────────────────────────────────────────────────────
-// Clicking the extension toolbar icon opens (or focuses) a popup window
-// showing the aigent web UI. This is a normal Chrome window with full
-// getUserMedia access — no iframe restrictions.
+// ── Window management ─────────────────────────────────────────────────────────
+// Clicking the extension icon opens aigent in a regular browser tab (or focuses
+// an existing one). PiP is handled by the web UI via the Media Session API —
+// when the user has mic active and switches tabs, Chrome auto-opens a floating
+// always-on-top PiP window.
 
-async function openOrFocusWindow(): Promise<void> {
-  // If we already have a window, try to focus it
-  if (aigentWindowId !== null) {
-    try {
-      const existing = await chrome.windows.get(aigentWindowId);
-      if (existing) {
-        await chrome.windows.update(aigentWindowId, { focused: true });
-        return;
-      }
-    } catch {
-      // Window was closed — fall through to create
-      aigentWindowId = null;
+async function openOrFocusTab(): Promise<void> {
+  // Find an existing aigent tab
+  const tabs = await chrome.tabs.query({ url: `${GATEKEEPER_URL}/*` });
+  if (tabs.length > 0 && tabs[0]?.id) {
+    await chrome.tabs.update(tabs[0].id, { active: true });
+    if (tabs[0].windowId) {
+      await chrome.windows.update(tabs[0].windowId, { focused: true });
     }
+    return;
   }
 
-  const win = await chrome.windows.create({
-    url: GATEKEEPER_URL,
-    type: 'popup',
-    width: 420,
-    height: 720,
-  });
-  aigentWindowId = win.id ?? null;
+  // Open a new tab
+  await chrome.tabs.create({ url: GATEKEEPER_URL });
 }
 
-// Clear tracked window ID when it's closed
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (windowId === aigentWindowId) aigentWindowId = null;
+// Open aigent when extension icon is clicked (no popup — direct action)
+chrome.action.onClicked.addListener(() => {
+  openOrFocusTab().catch(console.error);
 });
 
-// Handle "open-window" messages from the popup page
+// Handle messages (backward compat with popup.ts)
 chrome.runtime.onMessage.addListener((message: { type?: string }) => {
   if (message.type === 'open-window') {
-    openOrFocusWindow().catch(console.error);
+    openOrFocusTab().catch(console.error);
   }
 });
 

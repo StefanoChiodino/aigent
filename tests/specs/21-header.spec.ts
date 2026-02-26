@@ -74,30 +74,41 @@ test.describe('@fast Header', () => {
     await expect(page.locator('#task-badge')).toContainText('2 tasks', { timeout: 3_000 });
   });
 
-  // ── Cost badge (mobile-only — hidden on desktop by CSS media query) ──────────
+  // ── Cost display (narrow: in overflow menu, not header badge) ────────────────
 
-  test('cost badge appears when usage event has a positive cost', async () => {
+  test('cost appears in overflow menu at narrow viewport', async () => {
     const page = getPage();
-    await page.setViewportSize({ width: 500, height: 720 });
+    await page.setViewportSize({ width: 420, height: 720 });
     await injectEvent({
       type: 'usage',
       usage: { input: 100_000, output: 10_000, cacheRead: 0, cacheWrite: 0, cost: 9.99 },
     });
-    const badge = page.locator('#cost-badge');
-    await expect(badge).toBeVisible({ timeout: 3_000 });
-    await expect(badge).toContainText('$9.99');
+    // Cost badge should be hidden at narrow viewport
+    await expect(page.locator('#cost-badge')).not.toBeVisible({ timeout: 2_000 });
+    // Open overflow menu — cost should appear inside
+    await page.locator('#hdr-overflow-btn').click();
+    const menu = page.locator('#hdr-overflow-menu');
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+    await expect(menu).toContainText('$9.99');
   });
 
   test('cost badge is formatted as $X.XX for costs >= $0.01', async () => {
     const page = getPage();
-    await page.setViewportSize({ width: 500, height: 720 });
+    await page.setViewportSize({ width: 420, height: 720 });
     await injectEvent({
       type: 'usage',
       usage: { input: 50_000, output: 5_000, cacheRead: 0, cacheWrite: 0, cost: 1.23 },
     });
-    const badge = page.locator('#cost-badge');
-    await expect(badge).toBeVisible({ timeout: 3_000 });
-    await expect(badge).toContainText('$1.23');
+    // Open overflow menu to see cost
+    const btn = page.locator('#hdr-overflow-btn');
+    const menu = page.locator('#hdr-overflow-menu');
+    if (await menu.isVisible().catch(() => false)) {
+      await btn.click();
+      await expect(menu).not.toBeVisible({ timeout: 1_000 });
+    }
+    await btn.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+    await expect(menu).toContainText('$1.23');
   });
 
   // ── Header context meter (mobile-only — hidden on desktop by CSS media query) ─
@@ -175,5 +186,108 @@ test.describe('@fast Header', () => {
     await page.waitForTimeout(600);
     await page.screenshot({ path: 'test-results/header-glass-fullpage.png' });
     await page.locator('#header-wrap').screenshot({ path: 'test-results/header-glass-crop.png' });
+  });
+
+  test('header stays single-line at PiP width', async () => {
+    const page = getPage();
+    await page.setViewportSize({ width: 420, height: 720 });
+    await injectEvent({
+      type: 'usage',
+      usage: { input: 50_000, output: 5_000, cacheRead: 0, cacheWrite: 0, cost: 2.50, contextTokens: 55_000 },
+    });
+    await page.waitForTimeout(300);
+    const headerBox = await page.locator('#header').boundingBox();
+    expect(headerBox).toBeTruthy();
+    // Header should be a single line — height under 50px
+    expect(headerBox!.height).toBeLessThan(50);
+    await page.locator('#header-wrap').screenshot({ path: 'test-results/header-narrow-pip.png' });
+  });
+
+  // ── Narrow viewport: overflow dropdown ─────────────────────────────────────
+
+  test('overflow menu button visible at narrow viewport', async () => {
+    const page = getPage();
+    await page.setViewportSize({ width: 420, height: 720 });
+    await expect(page.locator('#hdr-overflow-btn')).toBeVisible();
+  });
+
+  test('overflow menu opens on click at narrow viewport', async () => {
+    const page = getPage();
+    await page.setViewportSize({ width: 420, height: 720 });
+    await page.locator('#hdr-overflow-btn').click();
+    await expect(page.locator('#hdr-overflow-menu')).toBeVisible({ timeout: 2_000 });
+  });
+
+  test('overflow dropdown renders above chat area (not clipped behind)', async () => {
+    const page = getPage();
+    await page.setViewportSize({ width: 420, height: 720 });
+    const btn = page.locator('#hdr-overflow-btn');
+    const menu = page.locator('#hdr-overflow-menu');
+
+    // Ensure menu is closed first, then open it
+    if (await menu.isVisible().catch(() => false)) {
+      await btn.click(); // close
+      await expect(menu).not.toBeVisible({ timeout: 1_000 });
+    }
+    await btn.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+
+    // The dropdown must be fully visible — not hidden behind the chat area.
+    const menuBox = await menu.boundingBox();
+    expect(menuBox).toBeTruthy();
+    expect(menuBox!.y).toBeGreaterThan(0);
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(720);
+
+    // Verify the dropdown is interactable (Playwright can click items inside it)
+    const firstSection = menu.locator('.hdr-overflow-section').first();
+    await expect(firstSection).toBeVisible();
+  });
+
+  test('overflow dropdown closes on click outside', async () => {
+    const page = getPage();
+    await page.setViewportSize({ width: 420, height: 720 });
+    const btn = page.locator('#hdr-overflow-btn');
+    const menu = page.locator('#hdr-overflow-menu');
+
+    // Ensure menu is closed first, then open it
+    if (await menu.isVisible().catch(() => false)) {
+      await btn.click();
+      await expect(menu).not.toBeVisible({ timeout: 1_000 });
+    }
+    await btn.click();
+    await expect(menu).toBeVisible({ timeout: 2_000 });
+    // Click on the chat area (below the header)
+    await page.locator('#messages').click({ position: { x: 100, y: 100 } });
+    await expect(menu).not.toBeVisible({ timeout: 2_000 });
+  });
+
+  test('model picker dropdown renders above chat area at narrow viewport', async () => {
+    const page = getPage();
+    await page.setViewportSize({ width: 420, height: 720 });
+    // Inject available models so the picker has content
+    await page.evaluate(() => {
+      const ui = (window as Record<string, unknown>).__zustand_ui as {
+        getState: () => { availableModels: string[]; modelName: string };
+        setState: (s: Partial<{ availableModels: string[]; modelName: string }>) => void;
+      };
+      ui.setState({ availableModels: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001'], modelName: 'claude-sonnet-4-6' });
+    });
+    await page.locator('#hdr-model-btn').click();
+    const picker = page.locator('#hdr-model-picker');
+    await expect(picker).toBeVisible({ timeout: 2_000 });
+
+    // Verify dropdown renders below header, not clipped
+    const box = await picker.boundingBox();
+    expect(box).toBeTruthy();
+    expect(box!.y).toBeGreaterThan(0);
+
+    // Verify a dropdown option is visible and clickable (not obscured)
+    const option = picker.locator('.hdr-dropdown-option').last();
+    await expect(option).toBeVisible();
+    // Playwright click() will fail with "element is not visible" or
+    // "intercept" error if the option is behind another layer
+    await option.click();
+    // After clicking the non-active option, the picker should close
+    await expect(picker).not.toBeVisible({ timeout: 2_000 });
   });
 });

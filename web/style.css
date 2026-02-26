@@ -150,7 +150,7 @@ html, body {
 }
 
 #header-right {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
 }
 
@@ -187,6 +187,187 @@ html, body {
   margin-left: 2px;
   letter-spacing: 0.2px;
   white-space: nowrap;
+}
+
+#float-btn svg rect:last-child {
+  fill: currentColor;
+  fill-opacity: 0.15;
+}
+
+/* ── Narrow-only header controls ─────────────────────────── */
+/* Hidden by default — shown at max-width: 600px */
+
+.hdr-narrow-ctrl { display: none; }
+
+#hdr-model-wrap {
+  position: relative;
+}
+
+#hdr-model-btn {
+  font-size: 11px;
+  gap: 2px;
+}
+
+.hdr-model-label {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hdr-chevron {
+  font-size: 9px;
+  opacity: 0.6;
+}
+
+.hdr-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+/* Override: reasoning button uses hdr-narrow-ctrl visibility */
+#hdr-reasoning-btn {
+  display: none;
+}
+.hdr-pill:hover {
+  color: var(--text);
+  border-color: var(--text-secondary);
+}
+.hdr-pill.on {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(124, 108, 240, 0.1);
+}
+
+#hdr-overflow-wrap {
+  position: relative;
+}
+
+.icon-btn.active {
+  color: var(--accent);
+  background: rgba(124, 108, 240, 0.15);
+}
+
+/* Shared dropdown for header narrow controls */
+.hdr-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 180px;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+
+.hdr-dropdown-option {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), color var(--transition);
+}
+.hdr-dropdown-option:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.hdr-dropdown-option.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Overflow menu sections */
+#hdr-overflow-menu {
+  min-width: 220px;
+  padding: 6px;
+}
+
+.hdr-overflow-section {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.hdr-overflow-section:last-child {
+  border-bottom: none;
+}
+
+.hdr-overflow-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+  padding: 0 4px;
+}
+
+.hdr-overflow-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.hdr-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  color: var(--text-secondary);
+}
+
+.hdr-effort-pills {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.hdr-overflow-actions {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.hdr-overflow-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), color var(--transition);
+}
+.hdr-overflow-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
 }
 
 .badge {
@@ -2667,11 +2848,13 @@ html, body {
   margin-top: 2px;
 }
 
-#perm-overlay.fetch-mode #perm-card-detail {
+#perm-overlay.fetch-mode #perm-card-detail,
+#perm-overlay.fetch-mode #perm-card-detail > div {
   white-space: normal;
   word-break: break-all;
   overflow-wrap: break-word;
   text-overflow: clip;
+  overflow: visible;
 }
 
 #perm-card-detail > div:not(:first-child) {
@@ -2773,113 +2956,16 @@ html, body {
   overflow-x: auto;
 }
 
-.diff-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: auto;
+/* diff2html overrides for dark theme integration */
+.diff2html-wrapper {
+  font-size: 12px;
+  line-height: 1.5;
 }
-
-/* Line number columns — shrink to fit their content */
-.diff-ln {
-  width: 1px; /* collapses to min-content */
-  padding: 0 6px;
-  text-align: right;
-  user-select: none;
-  color: var(--text-dim);
-  border-right: 1px solid var(--border);
-  white-space: nowrap;
-  vertical-align: top;
+.diff2html-wrapper .d2h-wrapper {
+  border: none;
 }
-.diff-ln-old { background: var(--bg-elevated); }
-.diff-ln-new { background: var(--bg-elevated); }
-
-/* +/- marker column — fixed narrow */
-.diff-mark {
-  width: 1px;
-  padding: 0 4px;
-  text-align: center;
-  font-weight: 700;
-  user-select: none;
-  white-space: nowrap;
-  vertical-align: top;
-}
-
-/* Code content column — takes all remaining space */
-.diff-code {
-  padding: 0 12px 0 6px;
-  white-space: pre;
-  word-break: normal;
-  overflow: visible;
-  vertical-align: top;
-  width: 100%;
-}
-
-/* Added lines */
-tr.diff-add .diff-ln-old  { background: #0d2a13; }
-tr.diff-add .diff-ln-new  { background: #0d2a13; color: #7ec98b; }
-tr.diff-add .diff-mark    { background: #0d2a13; color: #7ec98b; }
-tr.diff-add .diff-code    { background: rgba(46, 160, 67, 0.15); color: #aff0b0; }
-
-/* Removed lines */
-tr.diff-remove .diff-ln-old  { background: #2d1117; color: #e06c75; }
-tr.diff-remove .diff-ln-new  { background: #2d1117; }
-tr.diff-remove .diff-mark    { background: #2d1117; color: #e06c75; }
-tr.diff-remove .diff-code    { background: rgba(248, 81, 73, 0.15); color: #f8aba8; }
-
-/* Hunk header (@@ ... @@) */
-tr.diff-hunk td {
-  background: rgba(88, 166, 255, 0.08);
-  color: #58a6ff;
-  border-top: 1px solid rgba(88, 166, 255, 0.2);
-  border-bottom: 1px solid rgba(88, 166, 255, 0.2);
-  padding: 1px 10px;
-  font-style: italic;
-  white-space: pre;
-}
-
-/* File header (--- / +++) */
-tr.diff-header td {
-  background: var(--bg-elevated);
-  color: var(--text-dim);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  padding: 2px 10px;
-  font-style: italic;
-  white-space: pre;
-}
-
-/* Inline char-level change highlight within add/remove lines */
-tr.diff-add .diff-inline-change {
-  background: rgba(46, 160, 67, 0.45);
-  border-radius: 2px;
-}
-tr.diff-remove .diff-inline-change {
-  background: rgba(248, 81, 73, 0.45);
-  border-radius: 2px;
-}
-
-/* Collapsed context lines placeholder */
-tr.diff-collapsed td {
-  background: var(--bg-elevated);
-  color: var(--text-dim);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  padding: 2px 10px;
-  text-align: center;
-}
-.diff-collapsed-toggle {
-  cursor: pointer;
-  font-size: 10px;
-  letter-spacing: 0.02em;
-  user-select: none;
-}
-.diff-collapsed-toggle:hover {
-  color: var(--text);
-}
-
-/* Hidden context lines (inside a collapsed group) */
-tr.diff-context-hidden {
-  display: none;
+.diff2html-wrapper .d2h-file-header {
+  display: none; /* file header already shown in patch-file-list */
 }
 
 #perm-card-duration {
@@ -3108,6 +3194,15 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   z-index: 1;
 }
 
+/* Header must stack above #body so narrow-viewport dropdowns
+   (overflow menu, model picker) aren't clipped behind the chat area.
+   backdrop-filter on #header-wrap creates its own stacking context,
+   trapping z-index:1000 dropdowns inside — this lifts the whole context.
+   Uses #app > to match specificity of the generic #app > *:not(.bokeh) rule. */
+#app > #header-wrap {
+  z-index: 2;
+}
+
 /* ── Utility ──────────────────────────────────────────────── */
 
 .hidden { display: none !important; }
@@ -3117,7 +3212,19 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 @media (max-width: 600px) {
   #sidebar { display: none; }
 
-  #header { padding: 8px 12px; }
+  #header { padding: 8px 12px; gap: 6px; }
+
+  /* Show narrow-only header controls */
+  .hdr-narrow-ctrl { display: flex; }
+  #hdr-reasoning-btn { display: inline-flex; }
+
+  /* Hide items that move into the overflow menu */
+  .hdr-wide-ctrl { display: none !important; }
+  #cost-badge { display: none !important; }
+
+  /* Compact context meter for narrow viewport */
+  #ctx-meter { width: 40px; height: 12px; }
+  #ctx-label { font-size: 9px; }
 
   #messages { padding: 12px 10px 6px; }
 
@@ -3125,6 +3232,8 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   .message.assistant { margin-right: 4%; }
 
   #input-area { padding: 8px 10px 6px; }
+
+  #input-row { gap: 4px; }
 
   #send, #cancel {
     width: 44px;
@@ -3890,6 +3999,16 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   background: var(--bg-raised);
   border-radius: var(--radius-sm);
   margin-bottom: 8px;
+}
+
+.perm-fallback-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-raised);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  text-align: center;
+  margin-bottom: 4px;
 }
 
 /* ── Keyboard shortcuts modal ────────────────────────────── */

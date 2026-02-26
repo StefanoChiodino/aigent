@@ -344,4 +344,17 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     default: '[]',
     scope: 'client',
   },
+  {
+    key: 'AIGENT_PIP_MODE',
+    label: 'Picture-in-Picture',
+    desc: 'Auto: enters PiP when you switch tabs (uses a silent audio stream — no mic needed). Manual: Float button only.',
+    group: 'Other',
+    type: 'select',
+    default: 'manual',
+    options: [
+      { value: 'auto', label: 'Auto' },
+      { value: 'manual', label: 'Manual' },
+    ],
+    scope: 'client',
+  },
 ];

@@ -99,6 +99,10 @@ export function PermissionModal() {
             {req.durationMinutes != null && <>⏱ {req.durationMinutes} min (auto-expires)</>}
           </div>
 
+          {req.fallbackHint && (
+            <div className="perm-fallback-hint">{req.fallbackHint}</div>
+          )}
+
           {isPatch && activeFile && (
             <div id="patch-viewer">
               {diffFiles.length >= 1 && (

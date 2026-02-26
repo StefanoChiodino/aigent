@@ -4,6 +4,7 @@ import { useChatStore } from '../stores/chat';
 import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
 import { useSettingsStore } from '../stores/settings';
+import { usePiP } from '../hooks/usePiP';
 import type { MountInfo, BackgroundTaskInfo } from '../types';
 
 function modelDisplayName(id: string): string {
@@ -115,6 +116,9 @@ export function Sidebar() {
   const setModelPickerOpen = useUIStore(s => s.setModelPickerOpen);
 
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
+
+  const pipMode = useSettingsStore(s => s.getClientSetting('AIGENT_PIP_MODE')) as string;
+  const { openPiP, pipSupported } = usePiP();
 
   const ttsAutoSpeak = useVoiceStore(s => s.ttsAutoSpeak);
   const ttsRatePct = useVoiceStore(s => s.ttsRatePct);
@@ -277,6 +281,39 @@ export function Sidebar() {
             <span id="sb-tts-rate-label">{ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`}</span>
           </div>
         </div>
+
+        {/* PiP */}
+        {pipSupported && (
+          <div className="sidebar-section">
+            <div className="sidebar-row">
+              <span className="sidebar-label" style={{ marginBottom: 0 }}>PiP</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button className="icon-btn" title="Float (PiP)" onClick={() => openPiP()}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" />
+                    <rect x="12" y="9" width="8" height="6" rx="1" />
+                  </svg>
+                </button>
+                <div className="sb-pills">
+                  {(['auto', 'manual'] as const).map(mode => (
+                    <button
+                      key={mode}
+                      className={`sb-pill${pipMode === mode ? ' active' : ''}`}
+                      onClick={() => setClientSetting('AIGENT_PIP_MODE', mode)}
+                    >
+                      {mode === 'auto' ? 'Auto' : 'Manual'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {pipMode === 'auto' && (
+              <p style={{ fontSize: 10, color: 'var(--text-secondary)', margin: '2px 0 0', lineHeight: 1.3 }}>
+                Auto-opens PiP when you switch tabs. Uses a silent audio stream — no mic needed.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Concise */}
         <div className="sidebar-section">

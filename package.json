@@ -36,6 +36,7 @@
     "@anthropic-ai/sdk": "^0.75.0",
     "@types/ws": "^8.18.1",
     "chalk": "^5.6.0",
+    "diff2html": "^3.4.56",
     "dotenv": "^17.3.1",
     "ink": "^6.7.0",
     "ink-spinner": "^5.0.0",

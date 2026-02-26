@@ -487,8 +487,8 @@ export async function startWebServer(
       error: (message: string) => send({ type: 'error', message }),
       state: (partial: { thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string }) =>
         send({ type: 'state', ...partial }),
-      mount_request: (id: string, path: string, mode: 'ro' | 'rw', reason?: string, durationMinutes?: number) =>
-        send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}), ...(durationMinutes !== undefined ? { durationMinutes } : {}) }),
+      mount_request: (id: string, path: string, mode: 'ro' | 'rw', reason?: string, durationMinutes?: number, fallbackHint?: string) =>
+        send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}), ...(durationMinutes !== undefined ? { durationMinutes } : {}), ...(fallbackHint !== undefined ? { fallbackHint } : {}) }),
       config_write_request: (id: string, file: string, content: string, reason: string) =>
         send({ type: 'config_write_request', id, file, content, reason }),
       edit_file_request: (id: string, path: string, edits: Array<{ old_str: string; new_str: string; index?: number }>, reason: string) =>

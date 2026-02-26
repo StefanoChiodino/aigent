@@ -119,7 +119,7 @@ export type ServerEvent =
   | { type: 'error'; message: string }
   | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string; concise?: boolean; availableModels?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
-  | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string; durationMinutes?: number }
+  | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string; durationMinutes?: number; fallbackHint?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'exec_request'; id: string; command: string; segments?: CommandSegment[] }
@@ -156,6 +156,7 @@ export interface PermRequest {
   alwaysAllowCmd?: string;
   alwaysAllowDomainCmd?: string;
   durationMinutes?: number;
+  fallbackHint?: string;
   diff?: string;
   diffFiles?: DiffFile[];
 }

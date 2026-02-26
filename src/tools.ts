@@ -528,7 +528,10 @@ const requestMountTool: ToolDef = {
     'on a project or access files outside the current sandbox. Always explain why you need access.\n\n' +
     'Default to "ro" (read-only). To propose file edits, use the apply_patch tool — it shows the user ' +
     'a diff to review and approve without needing write access. Request "rw" only when the task ' +
-    'genuinely requires it (e.g. running build tools that write outputs, or when the user explicitly grants it).',
+    'genuinely requires it (e.g. running build tools that write outputs, or when the user explicitly grants it).\n\n' +
+    'When you plan to make changes to 3 or more files, request a temporary rw mount with a ' +
+    'durationMinutes estimate and a fallbackHint explaining the alternative. If the mount is denied, ' +
+    'fall back to host_edit_file for each change individually.',
   input_schema: {
     type: 'object' as const,
     properties: {
@@ -547,6 +550,10 @@ const requestMountTool: ToolDef = {
       durationMinutes: {
         type: 'number',
         description: 'How many minutes you need access. Estimate based on the task. Default is 30. The mount will be automatically removed after this time.',
+      },
+      fallbackHint: {
+        type: 'string',
+        description: 'Message shown to the user explaining what happens if they deny. E.g. "If denied, I\'ll send 7 individual file edits for review instead."',
       },
     },
     required: ['path', 'reason'],
@@ -583,7 +590,8 @@ const hostEditFileTool: ToolDef = {
   name: 'host_edit_file',
   description:
     'Make targeted str_replace edits to a file on the host filesystem. The user sees a diff ' +
-    'and approves or denies before anything is written. Use this instead of requesting a full rw mount. ' +
+    'and approves or denies before anything is written. Use this instead of requesting a full rw mount ' +
+    'for single-file changes, or as the fallback when a temporary rw mount request is denied. ' +
     'Each edit finds old_str verbatim in the file and replaces it with new_str. ' +
     'If old_str appears more than once and no index is given, the call fails immediately with the ' +
     'line numbers of all matches so you can retry with the correct index (0-based). ' +
@@ -687,8 +695,9 @@ const browserExtTool: ToolDef = {
   name: 'browser_ext',
   description:
     'Observe the user\'s live Chrome browser via the aigent extension. ' +
-    'Returns a structured accessibility tree or screenshot of the active tab. ' +
+    'Returns a structured accessibility tree, screenshot, or list of open tabs. ' +
     'The extension must be installed and connected (check the popup indicator). ' +
+    'Use `list_tabs` first to discover which tabs are open and get their tab IDs. ' +
     'PREFER `extract_a11y` for any question about page content, text, links, articles, headings, or interactive elements — ' +
     'it is fast, token-efficient, and returns structured text. ' +
     'Only use `screenshot` when the user explicitly asks about visual appearance, layout, colours, or images. ' +
@@ -699,12 +708,12 @@ const browserExtTool: ToolDef = {
     properties: {
       action: {
         type: 'string',
-        enum: ['extract_a11y', 'screenshot'],
-        description: '`extract_a11y` returns a structured text tree of page content and interactive elements (fast, token-efficient — use this by default). `screenshot` returns a base64 PNG image of the visible tab (only for visual/appearance questions).',
+        enum: ['extract_a11y', 'screenshot', 'list_tabs'],
+        description: '`list_tabs` returns all open browser tabs with their IDs, titles, and URLs — use this to discover tabs. `extract_a11y` returns a structured text tree of page content and interactive elements (fast, token-efficient — use this by default). `screenshot` returns a base64 PNG image of the visible tab (only for visual/appearance questions).',
       },
       tabId: {
         type: 'number',
-        description: 'Chrome tab ID to target. Omit to use the currently active tab.',
+        description: 'Chrome tab ID to target. Omit to use the currently active tab. Use `list_tabs` to discover tab IDs.',
       },
       rootSelector: {
         type: 'string',
@@ -752,11 +761,11 @@ interface ScreenshotInput { region?: string }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
 interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number; delivery?: 'agent-review' | 'user-pull' }
 interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
-interface RequestMountInput { path: string; mode?: string; reason: string; durationMinutes?: number }
+interface RequestMountInput { path: string; mode?: string; reason: string; durationMinutes?: number; fallbackHint?: string }
 interface RequestConfigWriteInput { file: string; content: string; reason: string }
 interface HostEditFileInput { path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
 interface SwitchModelInput { model: string; reason?: string }
-interface BrowserExtInput { action: 'extract_a11y' | 'screenshot'; tabId?: number; rootSelector?: string }
+interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs'; tabId?: number; rootSelector?: string }
 
 type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput;
 
@@ -1304,15 +1313,15 @@ export async function executeTool(
     }
 
     case 'request_mount': {
-      const { path, mode = 'ro', reason, durationMinutes } = input as RequestMountInput;
+      const { path, mode = 'ro', reason, durationMinutes, fallbackHint } = input as RequestMountInput;
       const { requestMount } = await import('./server.js');
       const mountMode = mode === 'rw' ? 'rw' as const : 'ro' as const;
-      const res = await requestMount(path, mountMode, reason, durationMinutes);
+      const res = await requestMount(path, mountMode, reason, durationMinutes, fallbackHint);
 
       if (res.ok) {
         return `Mount approved: ${path} (${mountMode}) → ${res.containerPath ?? 'pending restart'}\n${res.message}\nThe sandbox will restart. Your conversation will continue automatically.`;
       }
-      return `Mount denied: ${res.message}`;
+      return `Mount denied: ${res.message}\nYou should now fall back to host_edit_file for individual edits.`;
     }
 
     case 'host': {

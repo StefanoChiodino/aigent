@@ -32,7 +32,7 @@ export interface AgentClientEvents {
   patch_request: (id: string, diff: string, reason: string) => void;
   exec_request: (id: string, command: string) => void;
   fetch_request: (id: string, url: string, method?: string) => void;
-  browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot', tabId?: number, rootSelector?: string) => void;
+  browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs', tabId?: number, rootSelector?: string) => void;
   disconnected: () => void;
   reconnecting: (attempt: number) => void;
 }
@@ -161,7 +161,7 @@ export class AgentClient extends EventEmitter {
         this.emit('state', event);
         break;
       case 'mount_request':
-        this.emit('mount_request', event.id, event.path, event.mode, event.reason, event.durationMinutes);
+        this.emit('mount_request', event.id, event.path, event.mode, event.reason, event.durationMinutes, event.fallbackHint);
         break;
       case 'config_write_request':
         this.emit('config_write_request', event.id, event.file, event.content, event.reason);

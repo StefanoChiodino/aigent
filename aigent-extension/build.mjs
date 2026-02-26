@@ -23,6 +23,7 @@ const outdir = resolve(__dirname, 'dist');
 mkdirSync(outdir, { recursive: true });
 mkdirSync(resolve(outdir, 'background'), { recursive: true });
 mkdirSync(resolve(outdir, 'popup'), { recursive: true });
+mkdirSync(resolve(outdir, 'pip'), { recursive: true });
 mkdirSync(resolve(outdir, 'icons'), { recursive: true });
 
 // --- Icon generation ---

@@ -1649,7 +1649,7 @@ client.on('fetch_request', (id: string, url: string, method?: string) => {
 });
 
 // Handle browser extension requests from the host daemon — relay to the Chrome extension
-client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot', tabId?: number, rootSelector?: string) => {
+client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs', tabId?: number, rootSelector?: string) => {
   const params: { tabId?: number; rootSelector?: string } = {};
   if (tabId !== undefined) params.tabId = tabId;
   if (rootSelector !== undefined) params.rootSelector = rootSelector;
@@ -1657,6 +1657,7 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
     const msg: Extract<import('./protocol.js').ClientCommand, { type: 'browser_ext_result' }> = { type: 'browser_ext_result', id, ok: result.ok };
     if (result.treeText !== undefined) msg.treeText = result.treeText;
     if (result.dataUrl !== undefined) msg.dataUrl = result.dataUrl;
+    if (result.tabs !== undefined) msg.tabs = result.tabs;
     if (result.error !== undefined) msg.error = result.error;
     client.send(msg);
   }).catch((err: Error) => {

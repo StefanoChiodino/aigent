@@ -184,6 +184,7 @@ export function useWebSocket(): void {
             approveCmd: `/grant ${event.id}`,
             denyCmd: `/deny ${event.id}`,
             ...(event.durationMinutes !== undefined ? { durationMinutes: event.durationMinutes } : {}),
+            ...(event.fallbackHint ? { fallbackHint: event.fallbackHint } : {}),
           });
           playPermissionSound();
           break;

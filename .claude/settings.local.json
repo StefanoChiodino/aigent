@@ -44,7 +44,9 @@
       "Bash(curl -s \"http://localhost:3141/?extId=testid123\" -o /dev/null -w \"Status: %{http_code}\\\\n\")",
       "Bash(curl -s \"http://localhost:3141/assets/index-C1tWRHF4.css\" -o /dev/null -w \"Status: %{http_code}\\\\n\")",
       "Bash(curl -s \"http://localhost:3141/assets/index-gYGSMR8D.js\" -o /dev/null -w \"Status: %{http_code}\\\\n\")",
-      "Bash(*)"
+      "Bash(*)",
+      "WebSearch",
+      "WebFetch(domain:hackernoon.com)"
     ],
     "additionalDirectories": [
       "/tmp"

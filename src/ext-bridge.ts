@@ -28,6 +28,7 @@ interface ExtResponse {
   ok: boolean;
   treeText?: string;
   dataUrl?: string;
+  tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[];
   error?: string;
 }
 
@@ -103,7 +104,7 @@ class ExtensionBridge extends EventEmitter {
   }
 
   async request(
-    action: 'extract_a11y' | 'screenshot',
+    action: 'extract_a11y' | 'screenshot' | 'list_tabs',
     params: { tabId?: number; rootSelector?: string } = {},
     timeoutMs = 15_000,
   ): Promise<ExtResponse> {
