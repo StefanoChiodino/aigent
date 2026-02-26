@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import type { DisplayMessage } from '../types';
 import { renderMarkdown, extractSpeakContent, stripSpeakTag } from '../lib/markdown';
+import { useVoiceStore } from '../stores/voice';
+import { useTTS } from '../hooks/useTTS';
 import { TraceBlock } from './TraceBlock';
 
 interface Props {
@@ -11,47 +13,21 @@ const SPEAK_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" 
 const STOP_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`;
 
 function TTSButton({ text }: { text: string }) {
-  const [speaking, setSpeaking] = useState(false);
-  const abortRef = React.useRef<AbortController | null>(null);
-  const audioRef = React.useRef<HTMLAudioElement | null>(null);
-
-  const showStop = speaking;
+  const ttsPlaying = useVoiceStore(s => s.ttsPlaying);
+  const { speakText, stopAll } = useTTS();
 
   const handleClick = useCallback(() => {
-    if (speaking) {
-      abortRef.current?.abort();
-      audioRef.current?.pause();
-      setSpeaking(false);
+    if (ttsPlaying) {
+      stopAll();
       return;
     }
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setSpeaking(true);
-
-    // Strip markdown for TTS
-    const stripped = text.replace(/```[\s\S]*?```/g, ' code block. ').replace(/`([^`]+)`/g, '$1').replace(/^#+\s+/gm, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1').trim();
-
-    fetch('/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: stripped,
-      signal: ctrl.signal,
-    }).then(async r => {
-      if (!r.ok) throw new Error('tts error');
-      const blobUrl = URL.createObjectURL(await r.blob());
-      if (abortRef.current !== ctrl) { URL.revokeObjectURL(blobUrl); return; }
-      const audio = new Audio(blobUrl);
-      audioRef.current = audio;
-      audio.onended = () => { URL.revokeObjectURL(blobUrl); setSpeaking(false); };
-      audio.onerror = () => { setSpeaking(false); };
-      void audio.play();
-    }).catch(() => setSpeaking(false));
-  }, [speaking, text]);
+    speakText(text);
+  }, [ttsPlaying, text, speakText, stopAll]);
 
   return (
-    <button className={`tts-btn${showStop ? ' speaking' : ''}`} title={showStop ? 'Stop' : 'Speak'} onClick={handleClick}>
-      <span className={`icon-speak${showStop ? ' hidden' : ''}`} dangerouslySetInnerHTML={{ __html: SPEAK_ICON }} />
-      <span className={`icon-stop-tts${showStop ? '' : ' hidden'}`} dangerouslySetInnerHTML={{ __html: STOP_ICON }} />
+    <button className={`tts-btn${ttsPlaying ? ' speaking' : ''}`} title={ttsPlaying ? 'Stop' : 'Speak'} onClick={handleClick}>
+      <span className={`icon-speak${ttsPlaying ? ' hidden' : ''}`} dangerouslySetInnerHTML={{ __html: SPEAK_ICON }} />
+      <span className={`icon-stop-tts${ttsPlaying ? '' : ' hidden'}`} dangerouslySetInnerHTML={{ __html: STOP_ICON }} />
     </button>
   );
 }

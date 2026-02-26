@@ -4,6 +4,7 @@ import { useSettingsStore } from '../stores/settings';
 import { useUIStore } from '../stores/ui';
 import { encodeWav, playMicSound } from '../lib/audio';
 import { useConnectionStore } from '../stores/connection';
+import { ttsStopAll } from './useTTS';
 
 export interface MicControls {
   startMic: (silent?: boolean, baseText?: string) => Promise<void>;
@@ -109,6 +110,9 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
 
   const startMic = useCallback(async (silent = false, baseText = ''): Promise<void> => {
     if (useVoiceStore.getState().micState !== 'idle') return;
+
+    // Stop any active TTS so the agent doesn't talk over the user
+    ttsStopAll();
 
     // Clean up any leftover infrastructure from a previous session that was
     // externally reset (e.g. test cleanup setting micState to 'idle' without

@@ -28,6 +28,20 @@ let ttsChunkPlaying = false;
 let ttsStreamFetchCtrls: AbortController[] = [];
 const ttsStreamLastLen = { current: 0 };
 
+/** Stop all TTS playback — callable outside of React (e.g. from useMic). */
+export function ttsStopAll(): void {
+  for (const ctrl of ttsStreamFetchCtrls) ctrl.abort();
+  ttsStreamFetchCtrls = [];
+  ttsChunkQueue = [];
+  ttsChunkPlaying = false;
+  ttsStreamLastLen.current = 0;
+  ttsAbortCtrl?.abort();
+  ttsAbortCtrl = null;
+  if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+  if (isDemo()) speechSynthesis.cancel();
+  useVoiceStore.getState().setTtsPlaying(false);
+}
+
 export function useTTS(): TTSControls {
   const getRatePct = () => useVoiceStore.getState().ttsRatePct;
   const getAutoSpeak = () => useVoiceStore.getState().ttsAutoSpeak;
@@ -174,6 +188,7 @@ export function useTTS(): TTSControls {
     const ctrl = new AbortController();
     ttsAbortCtrl = ctrl;
 
+    useVoiceStore.getState().setTtsPlaying(true);
     fetch(`/tts?rate=${encodeURIComponent(rateStr)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
@@ -190,12 +205,14 @@ export function useTTS(): TTSControls {
         URL.revokeObjectURL(blobUrl);
         ttsAudio = null;
         if (ttsAbortCtrl === ctrl) ttsAbortCtrl = null;
+        useVoiceStore.getState().setTtsPlaying(false);
         onDone?.();
       };
       void audio.play();
     }).catch((err: unknown) => {
       if (err instanceof Error && err.name === 'AbortError') return;
       if (ttsAbortCtrl === ctrl) ttsAbortCtrl = null;
+      useVoiceStore.getState().setTtsPlaying(false);
     });
   }, [stopAll]);
 
