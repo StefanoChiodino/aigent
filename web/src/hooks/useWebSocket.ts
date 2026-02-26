@@ -256,12 +256,14 @@ export function useWebSocket(): void {
             id: event.id,
             title: event.action === 'navigate' ? 'Browser: Navigate'
               : event.action === 'open_tab' ? 'Browser: Open Tab'
+              : event.action === 'close_tab' ? 'Browser: Close Tab'
               : 'Browser: Run Script',
             detail: event.stepSummary,
             ...(event.tabUrl ? { body: `On: ${event.tabUrl}` } : {}),
             approveCmd: `/approve-browser-write ${event.id}`,
             denyCmd: `/deny-browser-write ${event.id}`,
             alwaysAllowCmd: `/approve-browser-write ${event.id} --always`,
+            ...(event.autonomousCmd ? { autonomousCmd: event.autonomousCmd } : {}),
           });
           playPermissionSound();
           break;

@@ -302,7 +302,7 @@ let browserExtCounter = 0;
  * the Chrome extension via ExtensionBridge. Returns a tool result for the LLM.
  */
 export async function requestBrowserExt(
-  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab',
+  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab',
   params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string } = {},
   signal?: AbortSignal,
 ): Promise<string | import('./provider.js').ToolContentBlock[]> {

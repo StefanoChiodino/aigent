@@ -696,11 +696,12 @@ const browserExtTool: ToolDef = {
   description:
     'Interact with the user\'s live Chrome browser via the aigent extension. ' +
     'Read actions (extract_a11y, screenshot, list_tabs, activate_tab) are auto-allowed. ' +
-    'Write actions (run_script, navigate, open_tab) show an approval prompt before execution. ' +
+    'Write actions (run_script, navigate, open_tab, close_tab) show an approval prompt before execution. ' +
     'The extension must be installed and connected. ' +
     'Use `list_tabs` first to discover which tabs are open and get their tab IDs. ' +
     'Use `activate_tab` with a tabId to switch to a specific tab. ' +
     'Use `open_tab` with a url to open a new browser tab. ' +
+    'Use `close_tab` with a tabId to close a browser tab. ' +
     'PREFER `extract_a11y` for any question about page content — it is fast and token-efficient. ' +
     'Only use `screenshot` when the user explicitly asks about visual appearance. ' +
     'Use `navigate` to go to a URL in the current tab. ' +
@@ -713,8 +714,8 @@ const browserExtTool: ToolDef = {
     properties: {
       action: {
         type: 'string',
-        enum: ['extract_a11y', 'screenshot', 'list_tabs', 'run_script', 'navigate', 'activate_tab', 'open_tab'],
-        description: '`list_tabs`: all open tabs with IDs, titles, URLs. `extract_a11y`: structured a11y tree (use by default for page content). `screenshot`: base64 PNG (visual questions only). `navigate`: navigate the active tab to a URL (requires approval). `run_script`: execute an array of browser steps — fill, click, scroll, wait, etc. (requires approval). `activate_tab`: bring a tab to the foreground by tabId (auto-allowed). `open_tab`: open a URL in a new tab (requires approval).',
+        enum: ['extract_a11y', 'screenshot', 'list_tabs', 'run_script', 'navigate', 'activate_tab', 'open_tab', 'close_tab'],
+        description: '`list_tabs`: all open tabs with IDs, titles, URLs. `extract_a11y`: structured a11y tree (use by default for page content). `screenshot`: base64 PNG (visual questions only). `navigate`: navigate the active tab to a URL (requires approval). `run_script`: execute an array of browser steps — fill, click, scroll, wait, etc. (requires approval). `activate_tab`: bring a tab to the foreground by tabId (auto-allowed). `open_tab`: open a URL in a new tab (requires approval). `close_tab`: close a tab by tabId (requires approval).',
       },
       tabId: {
         type: 'number',
@@ -779,7 +780,7 @@ interface RequestMountInput { path: string; mode?: string; reason: string; durat
 interface RequestConfigWriteInput { file: string; content: string; reason: string }
 interface HostEditFileInput { path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
 interface SwitchModelInput { model: string; reason?: string }
-interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab'; tabId?: number; rootSelector?: string; steps?: Record<string, unknown>[]; url?: string }
+interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: Record<string, unknown>[]; url?: string }
 
 type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput;
 
@@ -869,6 +870,7 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
     case 'browser_ext': {
       const { action, rootSelector, url, steps, tabId } = input as BrowserExtInput;
       if (action === 'activate_tab') return `browser: activate tab ${tabId ?? '?'}`;
+      if (action === 'close_tab') return `browser: close tab ${tabId ?? '?'}`;
       if (action === 'open_tab') return `browser: open tab → ${url ?? ''}`;
       if (action === 'navigate') return `browser: navigate → ${url ?? ''}`;
       if (action === 'run_script') {

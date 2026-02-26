@@ -2,23 +2,14 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
-Plugin: write phase. Clicks, typing, navigating, etc
-
 ![alt text](image.png) text box is a bit broken in the PiP
 
 coincise mode seems to start often saying literally " slash speech"
 
 ## Bugs / Quick Fixes
 
-- [x] **Attached images should persist in chat** — thumbnails generated client-side, stored in `DisplayMessage.attachments`, rendered in `Message.tsx`, persisted via Zustand localStorage. See `docs/image-handling.md` and `docs/implementation/2026-02-24-image-persistence.md`.
-- [x] **Agent spawn details** — model name and reasoning level shown in the expandable details panel of `spawn_agent` and `dispatch_task` tool traces. Model shortened (e.g. `sonnet 4.6`), reasoning hidden when `off`. See `tests/specs/34-agent-spawn-details.spec.ts`.
 - [ ] **Reasoning toggle on incompatible models** — UI allows enabling reasoning on models that don't support it (e.g. Haiku); disable the toggle or warn.
 - [ ] **Duplicate mount suppression** — agent sometimes re-requests an already-active mount; gatekeeper should auto-approve redundant requests silently.
-
-### Extension Sidepanel Bugs — RESOLVED
-> Sidepanel replaced with popup window (`chrome.windows.create`). All sidepanel
-> bugs eliminated — no iframe, no mic relay, no BroadcastChannel, no `isSidepanel`
-> branches. See `docs/web-ui-architecture.md`. (2026-02-25)
 
 ---
 
@@ -56,7 +47,6 @@ coincise mode seems to start often saying literally " slash speech"
 
 ## 🪙 Token / Cost Optimisation
 
-- [x] **MCP tool name shortening** — investigated, closed as won't-fix. Savings <0.3% of context, prompt caching already mitigates cost, LLM semantic degradation risk outweighs benefit. See `docs/mcp-tool-shortening.md`.
 - [ ] **Tool description audit** — trim descriptions in `tools.ts` longer than ~100 tokens.
 - [ ] **Prompt cache warm-up on startup** — send a minimal no-op message to pre-warm the Anthropic cache.
 - [ ] **Compaction prompt refinement** — ensure summaries preserve file paths, bug IDs, code references.
@@ -77,10 +67,8 @@ coincise mode seems to start often saying literally " slash speech"
 > Strategy decided — see `docs/os-automation-strategy.md`. Browser-first, a11y-tree-driven, screenshot on demand.
 > Native OS APIs (AT-SPI, UIA, NSAccessibility) deferred — too platform-fragmented, broken in WSL2.
 
-- [x] **Phase 1 — Observe (shipped)** — `browser_ext` tool with `extract_a11y` + `screenshot`. Extension in `aigent-extension/`, bridge in `src/ext-bridge.ts`, gatekeeper `/ext` WebSocket in `src/web-bridge.ts`. Build: `npm run ext:build`. Load from `aigent-extension/dist/` in Chrome.
-- [x] **Phase 2 — Write** — `run_script` + `navigate` actions with batched steps (fill, click, scroll, wait, pressKey, etc.); gatekeeper approval gate + web UI permission modal (`browser_write_request`). Same pattern as exec/mount approval. (2026-02-26)
-- [x] **Phase 3a — Multi-tab + grants** — `activate_tab` (switch tab focus), `open_tab` (new tab), session-level `browser.write` grant via `--always` flag and "Always Allow" button in permission modal. (2026-02-26)
-- [ ] **Phase 3b — Autonomous mode** — `browser.autonomous` grant (distinct from `browser.write`), destructive action heuristics
+- [x] **Phase 3b — Autonomous mode + close_tab** — `browser.autonomous` grant (distinct from `browser.write`), `close_tab` action, "Go Autonomous" button in permission modal. Destructive action heuristics deferred. (2026-02-26)
+- [ ] **Phase 3c — Destructive action heuristics** — detect and confirm destructive click targets (submit, delete, purchase, etc.) even when `browser.write` is granted; only skipped by `browser.autonomous`
 - [ ] **Headless browser (deferred)** — Playwright fallback for unattended/CI runs. See `docs/design-headless-browser.md`.
 - [ ] **Computer-use loop (deferred)** — screenshot + Anthropic computer-use API for non-browser desktop apps; expensive fallback only
 

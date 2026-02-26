@@ -153,6 +153,18 @@ export function PermissionModal() {
             >
               Always Allow Domain
             </button>
+            <button
+              id="perm-autonomous-btn"
+              className={`perm-btn perm-autonomous${req.autonomousCmd ? '' : ' hidden'}`}
+              onClick={() => {
+                if (req.autonomousCmd) {
+                  send({ type: 'command', cmd: req.autonomousCmd });
+                  resolvePermRequest(send, true, true, false);
+                }
+              }}
+            >
+              Go Autonomous
+            </button>
           </div>
         </div>
       )}

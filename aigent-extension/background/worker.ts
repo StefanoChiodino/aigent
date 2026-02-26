@@ -44,7 +44,7 @@ interface ScriptRunResult {
 interface ExtRequest {
   type: 'ext_request';
   id: string;
-  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab';
+  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab';
   tabId?: number;
   rootSelector?: string;
   steps?: BrowserStep[];
@@ -148,6 +148,8 @@ async function handleRequest(req: ExtRequest): Promise<ExtResponse> {
         return await activateTab(req.id, req.tabId);
       case 'open_tab':
         return await openTab(req.id, req.url ?? '');
+      case 'close_tab':
+        return await closeTab(req.id, req.tabId);
       default:
         return { type: 'ext_response', id: req.id, ok: false, error: `Unknown action: ${String((req as { action: string }).action)}` };
     }
@@ -324,6 +326,18 @@ async function openTab(id: string, url: string): Promise<ExtResponse> {
       finalUrl: finalTab?.url ?? url,
       finalTitle: finalTab?.title ?? '',
     };
+  } catch (err) {
+    return { type: 'ext_response', id, ok: false, error: String(err) };
+  }
+}
+
+async function closeTab(id: string, tabId?: number): Promise<ExtResponse> {
+  if (tabId === undefined) {
+    return { type: 'ext_response', id, ok: false, error: 'tabId is required for close_tab' };
+  }
+  try {
+    await chrome.tabs.remove(tabId);
+    return { type: 'ext_response', id, ok: true };
   } catch (err) {
     return { type: 'ext_response', id, ok: false, error: String(err) };
   }

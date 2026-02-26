@@ -35,3 +35,12 @@ Completed items moved here to keep `TODO.md` focused on active work.
 - Full MCP client support
 - Formal Threat Model documentation (`docs/threat-model.md`)
 - Adversarial Red Team analysis (`docs/red-team.md`)
+
+## Browser Extension / Plugin
+
+- [x] **Phase 1 — Observe** — `browser_ext` tool with `extract_a11y` + `screenshot`. Extension in `aigent-extension/`, bridge in `src/ext-bridge.ts`, gatekeeper `/ext` WebSocket in `src/web-bridge.ts`.
+- [x] **Phase 2 — Write** — `run_script` + `navigate` actions with batched steps (fill, click, scroll, wait, pressKey, etc.); gatekeeper approval gate + web UI permission modal (`browser_write_request`). (2026-02-26)
+- [x] **Phase 3a — Multi-tab + grants** — `activate_tab` (switch tab focus), `open_tab` (new tab), session-level `browser.write` grant via `--always` flag and "Always Allow" button in permission modal. (2026-02-26)
+- [x] **MCP tool name shortening** — investigated, closed as won't-fix. Savings <0.3% of context, prompt caching already mitigates cost, LLM semantic degradation risk outweighs benefit. See `docs/mcp-tool-shortening.md`.
+- [x] **Attached images persist in chat** — thumbnails generated client-side, stored in `DisplayMessage.attachments`, rendered in `Message.tsx`, persisted via Zustand localStorage. See `docs/image-handling.md`.
+- [x] **Agent spawn details** — model name and reasoning level shown in the expandable details panel of `spawn_agent` and `dispatch_task` tool traces.

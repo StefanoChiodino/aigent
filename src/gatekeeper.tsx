@@ -494,7 +494,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-browser-write', '/deny-browser-write', '/set-env']);
+const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-browser-write', '/deny-browser-write', '/grant-browser-autonomous', '/revoke-browser-autonomous', '/set-env']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -558,6 +558,7 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   if (await handleExecApproveReject(input)) return;
   if (await handleFetchApproveReject(input)) return;
   if (await handleBrowserWriteApproveReject(input)) return;
+  if (handleBrowserAutonomousGrant(input)) return;
 
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
@@ -1390,7 +1391,7 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
 // --- Browser write approval ---
 
 interface PendingBrowserWrite {
-  action: 'run_script' | 'navigate' | 'open_tab';
+  action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab';
   tabId?: number;
   steps?: unknown[];
   url?: string;
@@ -1399,12 +1400,15 @@ interface PendingBrowserWrite {
 const pendingBrowserWriteApprovals = new Map<string, PendingBrowserWrite>();
 // Session-scoped grant: when true, all browser write actions skip the approval queue
 const browserWriteGranted = { value: false };
+// Session-scoped grant: when true, all browser actions (including destructive) skip approval
+const browserAutonomousGranted = { value: false };
 // IDs auto-handled (grant active) before web-bridge listener fires — web-bridge skips these
 const autoHandledBrowserWriteIds = new Set<string>();
 
-function summariseBrowserWriteAction(action: 'run_script' | 'navigate' | 'open_tab', steps?: unknown[], url?: string): string {
+function summariseBrowserWriteAction(action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab', steps?: unknown[], url?: string, tabId?: number): string {
   if (action === 'navigate') return `Navigate to ${url ?? '(no url)'}`;
   if (action === 'open_tab') return `Open new tab: ${url ?? '(no url)'}`;
+  if (action === 'close_tab') return `Close tab ${tabId ?? '(unknown)'}`;
   if (!steps || steps.length === 0) return 'run_script (no steps)';
 
   const verbs: string[] = [];
@@ -1511,6 +1515,22 @@ function sendBrowserExtResult(id: string, result: { ok: boolean; treeText?: stri
   if (result.newTabId !== undefined) msg.newTabId = result.newTabId;
   if (result.error !== undefined) msg.error = result.error;
   client!.send(msg);
+}
+
+function handleBrowserAutonomousGrant(input: string): boolean {
+  const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
+  if (cmd === '/grant-browser-autonomous') {
+    browserAutonomousGranted.value = true;
+    browserWriteGranted.value = true;
+    injectSystemMessage('Browser autonomous mode enabled — all browser write actions will be auto-approved for this session.');
+    return true;
+  }
+  if (cmd === '/revoke-browser-autonomous') {
+    browserAutonomousGranted.value = false;
+    injectSystemMessage('Browser autonomous mode revoked — browser write actions will require approval again (session write grant still active).');
+    return true;
+  }
+  return false;
 }
 
 // --- Host Daemon ---
@@ -1758,8 +1778,8 @@ client.on('fetch_request', (id: string, url: string, method?: string) => {
 });
 
 // Handle browser extension requests from the host daemon — relay to the Chrome extension
-client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab', tabId?: number, rootSelector?: string, steps?: unknown[], url?: string) => {
-  const isWriteAction = action === 'run_script' || action === 'navigate' || action === 'open_tab';
+client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab', tabId?: number, rootSelector?: string, steps?: unknown[], url?: string) => {
+  const isWriteAction = action === 'run_script' || action === 'navigate' || action === 'open_tab' || action === 'close_tab';
 
   if (isWriteAction) {
     // Check session-level browser write grant — auto-approve if granted
@@ -1779,7 +1799,7 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
     }
 
     // Not granted — queue for user approval
-    const stepSummary = summariseBrowserWriteAction(action, steps, url);
+    const stepSummary = summariseBrowserWriteAction(action, steps, url, tabId);
     pendingBrowserWriteApprovals.set(id, {
       action,
       ...(tabId !== undefined ? { tabId } : {}),
@@ -1789,6 +1809,7 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
     log.info('Browser write approval requested', { id, action });
     const actionDesc = action === 'navigate' ? `navigate to: ${url ?? '?'}`
       : action === 'open_tab' ? `open new tab: ${url ?? '?'}`
+      : action === 'close_tab' ? `close tab ${tabId ?? '?'}`
       : `run browser script: ${stepSummary}`;
     injectSystemMessage(
       `Agent wants to ${actionDesc}\n` +

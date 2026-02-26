@@ -127,7 +127,7 @@ class ExtensionBridge extends EventEmitter {
   }
 
   async request(
-    action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab',
+    action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab',
     params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string } = {},
     timeoutMs = 30_000,
   ): Promise<ExtResponse> {

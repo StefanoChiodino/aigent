@@ -514,10 +514,10 @@ export async function startWebServer(
         }
         send({ type: 'fetch_request', id, url, ...(method ? { method } : {}) });
       },
-      browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab', _tabId?: number, _rootSelector?: string, steps?: unknown[], url?: string) => {
+      browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab', _tabId?: number, _rootSelector?: string, steps?: unknown[], url?: string) => {
         // Read-only actions are handled entirely by the gatekeeper — no relay needed.
         // Write actions need user approval: send browser_write_request to the web UI.
-        if (action === 'run_script' || action === 'navigate' || action === 'open_tab') {
+        if (action === 'run_script' || action === 'navigate' || action === 'open_tab' || action === 'close_tab') {
           // Skip if gatekeeper already handled this (browser write grant active)
           if (autoHandledBrowserWriteIds?.has(id)) {
             autoHandledBrowserWriteIds.delete(id);
@@ -527,6 +527,8 @@ export async function startWebServer(
             ? `Navigate to ${url ?? '?'}`
             : action === 'open_tab'
             ? `Open new tab: ${url ?? '?'}`
+            : action === 'close_tab'
+            ? `Close tab ${_tabId ?? '?'}`
             : (() => {
                 if (!steps || steps.length === 0) return 'run_script (no steps)';
                 const verbs: string[] = [];
@@ -551,7 +553,7 @@ export async function startWebServer(
                 return summary.length > 80 ? summary.slice(0, 77) + '...' : summary;
               })();
           const tabUrl = extensionBridge.getActiveTabUrl();
-          send({ type: 'browser_write_request', id, action, stepSummary, ...(tabUrl ? { tabUrl } : {}) });
+          send({ type: 'browser_write_request', id, action, stepSummary, ...(tabUrl ? { tabUrl } : {}), autonomousCmd: `/grant-browser-autonomous` });
         }
       },
       screenshot_request: (id: string) =>

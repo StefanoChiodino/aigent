@@ -129,7 +129,7 @@ export type ServerEvent =
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
-  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab'; stepSummary: string; tabUrl?: string }
+  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; autonomousCmd?: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'reset' }
   | { type: 'pong' };
@@ -157,6 +157,7 @@ export interface PermRequest {
   denyCmd: string;
   alwaysAllowCmd?: string;
   alwaysAllowDomainCmd?: string;
+  autonomousCmd?: string;
   durationMinutes?: number;
   fallbackHint?: string;
   diff?: string;
