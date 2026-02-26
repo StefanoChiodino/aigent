@@ -57,7 +57,10 @@ async function serveFile(res: ServerResponse, filePath: string, extraHeaders?: R
   try {
     const data = await readFile(filePath);
     const ext = extname(filePath);
-    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] ?? 'application/octet-stream', ...extraHeaders });
+    res.writeHead(200, {
+      'Content-Type': MIME_TYPES[ext] ?? 'application/octet-stream',
+      ...extraHeaders,
+    });
     res.end(data);
   } catch {
     res.writeHead(404);
@@ -68,9 +71,9 @@ async function serveFile(res: ServerResponse, filePath: string, extraHeaders?: R
 export async function startWebServer(
   client: AgentClient,
   port?: number,
-  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions },
+  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string> },
 ): Promise<{ port: number }> {
-  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions } = options ?? {};
+  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -511,6 +514,46 @@ export async function startWebServer(
         }
         send({ type: 'fetch_request', id, url, ...(method ? { method } : {}) });
       },
+      browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab', _tabId?: number, _rootSelector?: string, steps?: unknown[], url?: string) => {
+        // Read-only actions are handled entirely by the gatekeeper — no relay needed.
+        // Write actions need user approval: send browser_write_request to the web UI.
+        if (action === 'run_script' || action === 'navigate' || action === 'open_tab') {
+          // Skip if gatekeeper already handled this (browser write grant active)
+          if (autoHandledBrowserWriteIds?.has(id)) {
+            autoHandledBrowserWriteIds.delete(id);
+            return;
+          }
+          const stepSummary = action === 'navigate'
+            ? `Navigate to ${url ?? '?'}`
+            : action === 'open_tab'
+            ? `Open new tab: ${url ?? '?'}`
+            : (() => {
+                if (!steps || steps.length === 0) return 'run_script (no steps)';
+                const verbs: string[] = [];
+                for (const step of steps) {
+                  const s = step as Record<string, unknown>;
+                  if ('navigate' in s) verbs.push(`navigate ${s['navigate']}`);
+                  else if ('fill' in s) verbs.push(`fill ${s['fill']}`);
+                  else if ('click' in s) verbs.push(`click ${s['click']}`);
+                  else if ('clear' in s) verbs.push(`clear ${s['clear']}`);
+                  else if ('select' in s) verbs.push(`select ${s['select']}`);
+                  else if ('check' in s) verbs.push(`check ${s['check']}`);
+                  else if ('scroll' in s) verbs.push(`scroll ${s['scroll']}`);
+                  else if ('wait' in s) verbs.push(`wait ${s['wait']}ms`);
+                  else if ('waitFor' in s) verbs.push(`waitFor ${s['waitFor']}`);
+                  else if ('pressKey' in s) verbs.push(`pressKey ${s['pressKey']}`);
+                  else if ('hover' in s) verbs.push(`hover ${s['hover']}`);
+                  else if ('extractA11y' in s) verbs.push('extractA11y');
+                }
+                let summary = verbs.slice(0, 5).join(', ');
+                const extra = verbs.length - 5;
+                if (extra > 0) summary += ` + ${extra} more`;
+                return summary.length > 80 ? summary.slice(0, 77) + '...' : summary;
+              })();
+          const tabUrl = extensionBridge.getActiveTabUrl();
+          send({ type: 'browser_write_request', id, action, stepSummary, ...(tabUrl ? { tabUrl } : {}) });
+        }
+      },
       screenshot_request: (id: string) =>
         send({ type: 'screenshot_request', id }),
       screen_share_request: (id: string) =>
@@ -604,6 +647,14 @@ export async function startWebServer(
           case 'ping':
             ws.send(JSON.stringify({ type: 'pong' }));
             break;
+          case 'browser_error': {
+            const level = cmd.level === 'warn' ? 'warn' : 'error';
+            const msg = String(cmd.message ?? '');
+            const src = cmd.source ? ` (${String(cmd.source)})` : '';
+            process.stdout.write(`[browser:${level}]${src} ${msg}\n`);
+            broadcastToClients({ type: 'browser_error', level, message: msg, ...(cmd.source ? { source: String(cmd.source) } : {}) });
+            break;
+          }
         }
       } catch {
         // Malformed message, ignore

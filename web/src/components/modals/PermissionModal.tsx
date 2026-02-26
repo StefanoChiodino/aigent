@@ -11,6 +11,7 @@ const TYPE_ICONS: Record<string, string> = {
   exec: '⚡',
   fetch: '🌐',
   config_write: '✏️',
+  browser_write: '🖱️',
 };
 
 export function PermissionModal() {

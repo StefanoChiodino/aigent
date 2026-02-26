@@ -94,10 +94,15 @@ function messagesToSummaryInput(messages: ProviderMessage[]): ProviderMessage[] 
  * Walks backward from the target split to find a clean user message boundary.
  */
 function findCleanSplitPoint(messages: ProviderMessage[], targetSplit: number): number {
-  // Walk backward from target to find a 'user' message (not a tool_result)
-  for (let i = targetSplit; i >= 0; i--) {
+  // Walk backward from target to find a message that starts a clean boundary.
+  // Valid split points: before a 'user' message or before an 'assistant' message.
+  // Splitting before assistant is safe because old messages end at a user/tool_result
+  // boundary, and the recent section picks up from the assistant's response.
+  // We must NOT split between an assistant (with toolCalls) and its tool_result.
+  for (let i = targetSplit; i >= 1; i--) {
     const msg = messages[i];
-    if (msg && msg.role === 'user') {
+    if (!msg) continue;
+    if (msg.role === 'user' || msg.role === 'assistant') {
       return i;
     }
   }
@@ -123,15 +128,20 @@ export async function compactConversation(
   _workspacePath?: string,
   keepRecentTurns: number = 4,
 ): Promise<{ messages: ProviderMessage[]; summary: string }> {
-  // Count user turns (not counting tool_results as turns)
-  let userTurnCount = 0;
+  // Count "turns" — a turn is either a real user message OR a tool_result
+  // (which the API sends as role:'user'). During long tool-use loops there may
+  // be only 1 real user message but dozens of assistant+tool_result pairs.
+  // We must count tool_results as turns so compaction can actually split
+  // the history; otherwise splitIdx stays at messages.length and compaction
+  // silently does nothing — the agent stalls.
+  let turnCount = 0;
   let splitIdx = messages.length;
 
-  // Walk backward to find where to split, keeping `keepRecentTurns` user messages
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]!.role === 'user') {
-      userTurnCount++;
-      if (userTurnCount > keepRecentTurns) {
+    const role = messages[i]!.role;
+    if (role === 'user' || role === 'tool_result') {
+      turnCount++;
+      if (turnCount > keepRecentTurns) {
         splitIdx = i + 1; // keep from i+1 onward
         break;
       }
@@ -141,8 +151,8 @@ export async function compactConversation(
   // Need a clean split that doesn't orphan tool results
   splitIdx = findCleanSplitPoint(messages, splitIdx);
 
-  // Don't compact if conversation is too short
-  if (splitIdx <= 2) {
+  // Don't compact if there aren't enough old messages to summarize
+  if (splitIdx < 2) {
     return { messages, summary: '' };
   }
 

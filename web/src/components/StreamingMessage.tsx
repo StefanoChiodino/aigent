@@ -7,9 +7,20 @@ import { TraceBlock } from './TraceBlock';
 
 const STOP_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`;
 
+function activityLabel(
+  isThinking: boolean,
+  traces: { type: string; toolName?: string; running?: boolean }[],
+): string | null {
+  if (isThinking) return 'reasoning…';
+  const runningTool = traces.findLast(t => t.type === 'tool' && t.running);
+  if (runningTool) return `${runningTool.toolName ?? 'tool'}…`;
+  return null;
+}
+
 export const StreamingMessage = React.memo(function StreamingMessage() {
   const text = useChatStore(s => s.streaming.text);
   const traces = useChatStore(s => s.streaming.traces);
+  const isThinking = useChatStore(s => s.streaming.isThinking);
   const ttsPlaying = useVoiceStore(s => s.ttsPlaying);
   const { stopAll } = useTTS();
 
@@ -18,6 +29,7 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
   };
 
   const displayText = stripSpeakTag(text);
+  const activity = !displayText ? activityLabel(isThinking, traces) : null;
 
   return (
     <div className="message assistant streaming">
@@ -41,7 +53,13 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
           </div>
         </div>
       )}
-      <div className="message-content">{displayText}</div>
+      <div className="message-content">
+        {displayText || (
+          activity
+            ? <span className="streaming-activity">{activity}</span>
+            : null
+        )}
+      </div>
     </div>
   );
 });

@@ -87,7 +87,6 @@ export function Header() {
   const { setSettingsOpen, setShortcutsOpen, setCtxInspectorOpen } = useUIStore.getState();
 
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
-  const pipMode = useSettingsStore(s => s.getClientSetting('AIGENT_PIP_MODE')) as string;
 
   const { openPiP, pipSupported } = usePiP();
 
@@ -295,43 +294,6 @@ export function Header() {
                   </div>
                 </div>
 
-                {/* PiP float + mode */}
-                {pipSupported && (
-                  <div className="hdr-overflow-section">
-                    <div className="hdr-overflow-row">
-                      <span>PiP</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <button
-                          className="icon-btn"
-                          title="Float (PiP)"
-                          onClick={() => { setOverflowOpen(false); openPiP(); }}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="2" y="3" width="20" height="14" rx="2" />
-                            <rect x="12" y="9" width="8" height="6" rx="1" />
-                          </svg>
-                        </button>
-                        <div className="hdr-effort-pills">
-                          {(['auto', 'manual'] as const).map(mode => (
-                            <button
-                              key={mode}
-                              className={`sb-pill${pipMode === mode ? ' active' : ''}`}
-                              onClick={() => setClientSetting('AIGENT_PIP_MODE', mode)}
-                            >
-                              {mode === 'auto' ? 'Auto' : 'Manual'}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                    {pipMode === 'auto' && (
-                      <p style={{ fontSize: 10, color: 'var(--text-secondary)', margin: '2px 0 0', padding: '0 8px', lineHeight: 1.3 }}>
-                        Auto-opens PiP when you switch tabs. Uses a silent audio stream — no mic needed.
-                      </p>
-                    )}
-                  </div>
-                )}
-
                 {/* Tasks */}
                 {tasks.length > 0 && (
                   <div className="hdr-overflow-section">
@@ -405,6 +367,19 @@ export function Header() {
             </svg>
             <span className="shortcut-hint">Ctrl+Shift+?</span>
           </button>
+          {pipSupported && (
+            <button
+              className="icon-btn has-tip hdr-wide-ctrl"
+              data-tip="Float"
+              onClick={() => openPiP()}
+              title="Float (PiP)"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <rect x="12" y="9" width="8" height="6" rx="1" />
+              </svg>
+            </button>
+          )}
           <button
             id="settings-btn"
             className="icon-btn has-tip hdr-wide-ctrl"

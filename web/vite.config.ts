@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5173,
+      clearScreen: false,
       proxy: isDemo ? undefined : {
         // /ws is NOT proxied — the frontend connects directly to the backend
         // WebSocket to avoid ECONNREFUSED noise during tsx-watch restarts.

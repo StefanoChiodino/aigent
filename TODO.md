@@ -2,6 +2,12 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
+Plugin: write phase. Clicks, typing, navigating, etc
+
+![alt text](image.png) text box is a bit broken in the PiP
+
+coincise mode seems to start often saying literally " slash speech"
+
 ## Bugs / Quick Fixes
 
 - [x] **Attached images should persist in chat** — thumbnails generated client-side, stored in `DisplayMessage.attachments`, rendered in `Message.tsx`, persisted via Zustand localStorage. See `docs/image-handling.md` and `docs/implementation/2026-02-24-image-persistence.md`.
@@ -72,8 +78,9 @@
 > Native OS APIs (AT-SPI, UIA, NSAccessibility) deferred — too platform-fragmented, broken in WSL2.
 
 - [x] **Phase 1 — Observe (shipped)** — `browser_ext` tool with `extract_a11y` + `screenshot`. Extension in `aigent-extension/`, bridge in `src/ext-bridge.ts`, gatekeeper `/ext` WebSocket in `src/web-bridge.ts`. Build: `npm run ext:build`. Load from `aigent-extension/dist/` in Chrome.
-- [ ] **Phase 2 — Write** — `run_script` action with batched steps (fill, click, navigate, scroll, wait); write permission grant UI in web UI (same pattern as exec/mount approval)
-- [ ] **Phase 3 — Multi-tab/navigation** — tab enumeration, cross-page flows, `browser.autonomous` grant
+- [x] **Phase 2 — Write** — `run_script` + `navigate` actions with batched steps (fill, click, scroll, wait, pressKey, etc.); gatekeeper approval gate + web UI permission modal (`browser_write_request`). Same pattern as exec/mount approval. (2026-02-26)
+- [x] **Phase 3a — Multi-tab + grants** — `activate_tab` (switch tab focus), `open_tab` (new tab), session-level `browser.write` grant via `--always` flag and "Always Allow" button in permission modal. (2026-02-26)
+- [ ] **Phase 3b — Autonomous mode** — `browser.autonomous` grant (distinct from `browser.write`), destructive action heuristics
 - [ ] **Headless browser (deferred)** — Playwright fallback for unattended/CI runs. See `docs/design-headless-browser.md`.
 - [ ] **Computer-use loop (deferred)** — screenshot + Anthropic computer-use API for non-browser desktop apps; expensive fallback only
 

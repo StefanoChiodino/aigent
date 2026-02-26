@@ -181,13 +181,6 @@ test.describe('@fast Header', () => {
     expect(parts[3]).toBeGreaterThan(0); // alpha > 0
   });
 
-  test('header glass fullpage screenshot', async () => {
-    const page = getPage();
-    await page.waitForTimeout(600);
-    await page.screenshot({ path: 'test-results/header-glass-fullpage.png' });
-    await page.locator('#header-wrap').screenshot({ path: 'test-results/header-glass-crop.png' });
-  });
-
   test('header stays single-line at PiP width', async () => {
     const page = getPage();
     await page.setViewportSize({ width: 420, height: 720 });

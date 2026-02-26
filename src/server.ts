@@ -287,7 +287,7 @@ function resolveExecRequest(id: string, response: { ok: boolean; alwaysAllow: bo
 
 // --- Browser extension request handling ---
 
-type BrowserExtResponse = { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; error?: string };
+type BrowserExtResponse = { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string };
 
 const pendingBrowserExtRequests = new Map<string, {
   resolve: (response: BrowserExtResponse) => void;
@@ -295,13 +295,15 @@ const pendingBrowserExtRequests = new Map<string, {
 let browserExtCounter = 0;
 
 /**
- * Request the browser extension to perform an observe action (extract_a11y or screenshot).
+ * Request the browser extension to perform an action (observe or write).
+ * Read actions are relayed directly; write actions (run_script, navigate) require
+ * gatekeeper approval before the extension executes them.
  * Sends browser_ext_request over the Unix socket to the gatekeeper, which relays it to
  * the Chrome extension via ExtensionBridge. Returns a tool result for the LLM.
  */
 export async function requestBrowserExt(
-  action: 'extract_a11y' | 'screenshot' | 'list_tabs',
-  params: { tabId?: number; rootSelector?: string } = {},
+  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab',
+  params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string } = {},
   signal?: AbortSignal,
 ): Promise<string | import('./provider.js').ToolContentBlock[]> {
   if (signal?.aborted) return 'Aborted by user';
@@ -335,6 +337,29 @@ export async function requestBrowserExt(
           `[${t.active ? '*' : ' '}] tab:${t.id}  ${t.title}  (${t.url})`
         );
         resolve(`Open browser tabs (${response.tabs.length}):\n${lines.join('\n')}\n\nUse tabId parameter with extract_a11y or screenshot to target a specific tab. Active tab is marked with [*].`);
+        return;
+      }
+
+      if (action === 'navigate') {
+        resolve(`Navigated to: ${response.finalUrl ?? params.url ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`);
+        return;
+      }
+
+      if (action === 'run_script') {
+        const parts: string[] = [`Script completed: ${response.stepsCompleted ?? '?'}/${response.totalSteps ?? '?'} steps`];
+        if (response.finalUrl) parts.push(`Final URL: ${response.finalUrl}`);
+        if (response.finalTitle) parts.push(`Final title: ${response.finalTitle}`);
+        resolve(parts.join('\n'));
+        return;
+      }
+
+      if (action === 'activate_tab') {
+        resolve(`Switched to tab: ${response.finalUrl ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`);
+        return;
+      }
+
+      if (action === 'open_tab') {
+        resolve(`Opened new tab (id: ${response.newTabId ?? '?'}): ${response.finalUrl ?? params.url ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`);
         return;
       }
 
@@ -1819,12 +1844,31 @@ let browserExtConnected = false;
 function buildBrowserExtSystemPrompt(): string {
   if (!browserExtConnected) return '';
   return `\n\n## Browser Extension (connected)
-You have the aigent Chrome extension connected. Use the \`browser_ext\` tool to observe the user's browser.
+You have the aigent Chrome extension connected. Use the \`browser_ext\` tool to observe and interact with the user's live browser session.
 
-Available actions:
+**Read-only actions (no approval required):**
 - \`list_tabs\` — returns all open browser tabs with their IDs, titles, and URLs. Use this first when the user asks about tabs, or to discover which pages are open before targeting a specific one.
 - \`extract_a11y\` — returns a structured accessibility tree of a page (fast, token-efficient — preferred for content questions). Omit tabId to target the active tab, or pass a tabId from list_tabs.
 - \`screenshot\` — returns a PNG image of the visible tab (only for visual/appearance/layout questions).
+
+**Write actions (require user approval):**
+- \`navigate\` — navigate the active tab (or a specific tabId) to a URL. Pass \`url\`. The user will see an approval prompt before the navigation happens.
+- \`run_script\` — execute a batch of browser actions as an array of steps. Pass \`steps\`. Each step is an object with exactly one key. Available step types:
+  - \`{ navigate: "https://..." }\` — navigate the page
+  - \`{ click: "#selector" }\` or \`{ click: { selector, nth } }\` — click an element
+  - \`{ fill: { selector, value } }\` — type into an input field (clears first)
+  - \`{ clear: "#selector" }\` — clear an input
+  - \`{ select: { selector, value } }\` — choose a \`<select>\` option by value
+  - \`{ check: { selector, checked } }\` — set a checkbox
+  - \`{ scroll: { selector?, deltaY } }\` — scroll the page or an element
+  - \`{ wait: 500 }\` — pause for N milliseconds
+  - \`{ waitFor: "#selector" }\` or \`{ waitFor: { selector, timeout } }\` — wait for element to appear
+  - \`{ pressKey: "Enter" }\` or \`{ pressKey: { key, selector } }\` — press a keyboard key
+  - \`{ hover: "#selector" }\` — hover over an element
+  - \`{ extractA11y: { rootSelector? } }\` — capture a11y snapshot mid-script (returned in result)
+
+**When to use which action:**
+Use \`extract_a11y\` before writing — inspect the page to find selectors, then issue \`run_script\` with the steps. Chain read → plan → write for reliable automation.
 
 When the user asks what tabs they have open, what they're browsing, or anything about multiple pages, use \`list_tabs\`. When they ask about page content, use \`extract_a11y\`. You can also target your own UI at localhost:3141 — this is useful for self-inspection and self-improvement.
 

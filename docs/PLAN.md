@@ -186,8 +186,9 @@ Docker container (worker.ts → server.ts)
 **Permission model:** read-only default, write requires explicit grant, destructive actions need confirmation
 
 - [x] Phase 1 — Observe: extension + WebSocket bridge + `extract_a11y` + `screenshot` (read-only, no permissions). `aigent-extension/`, `src/ext-bridge.ts`, `src/web-bridge.ts` `/ext` path. `npm run ext:build` → load from `aigent-extension/dist/`.
-- [ ] Phase 2 — Write: `run_script` action with batched steps (fill, click, navigate, scroll, wait); write permission grant UI in web UI
-- [ ] Phase 3 — Multi-tab/navigation: tab enumeration, cross-page flows, `browser.autonomous` grant mode
+- [x] Phase 2 — Write: `run_script` (batched steps: fill, click, scroll, wait, pressKey, etc.) + `navigate` action. Gatekeeper approval gate (`pendingBrowserWriteApprovals`, `/approve-browser-write`, `/deny-browser-write`). Web UI `browser_write_request` permission modal — same pattern as exec/fetch. (2026-02-26)
+- [x] Phase 3a — Multi-tab + grants: `activate_tab` (switch tab focus, auto-allowed), `open_tab` (new tab, write-gated), session-level `browser.write` grant via `--always` flag and "Always Allow" button. (2026-02-26)
+- [ ] Phase 3b — Autonomous mode: `browser.autonomous` grant (distinct from `browser.write`), destructive action heuristics, `close_tab`
 - [x] Prompt injection defense: page content wrapped in `=== BROWSER PAGE CONTENT (UNTRUSTED) ===`, system prompt hardening when extension connected
 
 ### Memory System (see docs/memory-architecture.md for full design)

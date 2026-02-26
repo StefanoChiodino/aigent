@@ -25,6 +25,7 @@ import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
 import { checkExecPermission, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions } from './safety.js';
 import { extensionBridge } from './ext-bridge.js';
+import { buildDisplayDiff } from './diff.js';
 
 const log = createLogger('gatekeeper');
 
@@ -493,7 +494,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/set-env']);
+const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-browser-write', '/deny-browser-write', '/set-env']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -556,6 +557,7 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   if (await handleEditFileApproveReject(input)) return;
   if (await handleExecApproveReject(input)) return;
   if (await handleFetchApproveReject(input)) return;
+  if (await handleBrowserWriteApproveReject(input)) return;
 
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
@@ -916,25 +918,6 @@ function findAllOccurrences(haystack: string, needle: string): number[] {
 /** Return the 1-based line number for a char offset in text. */
 function lineOfOffset(text: string, offset: number): number {
   return text.slice(0, offset).split('\n').length;
-}
-
-/** Build a simple unified-diff-style string for display (no need for exact unified format, just readable). */
-function buildDisplayDiff(original: string, updated: string, label: string): string {
-  const origLines = original.split('\n');
-  const updLines = updated.split('\n');
-  const maxLen = Math.max(origLines.length, updLines.length);
-  const hunks: string[] = [`--- ${label} (original)`, `+++ ${label} (proposed)`];
-  for (let i = 0; i < maxLen; i++) {
-    const o = origLines[i];
-    const u = updLines[i];
-    if (o === u) {
-      if (o !== undefined) hunks.push(`  ${o}`);
-    } else {
-      if (o !== undefined) hunks.push(`- ${o}`);
-      if (u !== undefined) hunks.push(`+ ${u}`);
-    }
-  }
-  return hunks.join('\n');
 }
 
 function handleEditFileRequest(
@@ -1404,6 +1387,132 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
   return false;
 }
 
+// --- Browser write approval ---
+
+interface PendingBrowserWrite {
+  action: 'run_script' | 'navigate' | 'open_tab';
+  tabId?: number;
+  steps?: unknown[];
+  url?: string;
+}
+
+const pendingBrowserWriteApprovals = new Map<string, PendingBrowserWrite>();
+// Session-scoped grant: when true, all browser write actions skip the approval queue
+const browserWriteGranted = { value: false };
+// IDs auto-handled (grant active) before web-bridge listener fires — web-bridge skips these
+const autoHandledBrowserWriteIds = new Set<string>();
+
+function summariseBrowserWriteAction(action: 'run_script' | 'navigate' | 'open_tab', steps?: unknown[], url?: string): string {
+  if (action === 'navigate') return `Navigate to ${url ?? '(no url)'}`;
+  if (action === 'open_tab') return `Open new tab: ${url ?? '(no url)'}`;
+  if (!steps || steps.length === 0) return 'run_script (no steps)';
+
+  const verbs: string[] = [];
+  for (const step of steps) {
+    const s = step as Record<string, unknown>;
+    if ('navigate' in s) verbs.push(`navigate ${s['navigate']}`);
+    else if ('fill' in s) verbs.push(`fill ${s['fill']}`);
+    else if ('click' in s) verbs.push(`click ${s['click']}`);
+    else if ('clear' in s) verbs.push(`clear ${s['clear']}`);
+    else if ('select' in s) verbs.push(`select ${s['select']}`);
+    else if ('check' in s) verbs.push(`check ${s['check']}`);
+    else if ('scroll' in s) verbs.push(`scroll ${s['scroll']}`);
+    else if ('wait' in s) verbs.push(`wait ${s['wait']}ms`);
+    else if ('waitFor' in s) verbs.push(`waitFor ${s['waitFor']}`);
+    else if ('pressKey' in s) verbs.push(`pressKey ${s['pressKey']}`);
+    else if ('hover' in s) verbs.push(`hover ${s['hover']}`);
+    else if ('extractA11y' in s) verbs.push('extractA11y');
+  }
+
+  const MAX_LEN = 80;
+  let summary = verbs.slice(0, 5).join(', ');
+  const extra = verbs.length - 5;
+  if (extra > 0) summary += ` + ${extra} more`;
+  return summary.length > MAX_LEN ? summary.slice(0, MAX_LEN - 3) + '...' : summary;
+}
+
+async function handleBrowserWriteApproveReject(input: string): Promise<boolean> {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  if (cmd !== '/approve-browser-write' && cmd !== '/deny-browser-write') return false;
+
+  let id = parts[1];
+  if (!id && pendingBrowserWriteApprovals.size === 1) {
+    id = pendingBrowserWriteApprovals.keys().next().value as string;
+  }
+  if (!id) {
+    injectSystemMessage(pendingBrowserWriteApprovals.size === 0
+      ? 'No pending browser write requests.'
+      : `Multiple pending — specify ID: ${[...pendingBrowserWriteApprovals.keys()].join(', ')}`);
+    return true;
+  }
+
+  const pending = pendingBrowserWriteApprovals.get(id);
+  if (!pending) {
+    if (!IS_TEST_MODE) injectSystemMessage(`No pending browser write request: ${id}`);
+    return true;
+  }
+
+  pendingBrowserWriteApprovals.delete(id);
+
+  if (cmd === '/deny-browser-write') {
+    injectSystemMessage(`Browser write denied: ${id}`);
+    client!.send({ type: 'browser_ext_result', id, ok: false, error: 'User denied browser write action' });
+    return true;
+  }
+
+  // Approve — relay to extension
+  const alwaysAllow = parts.includes('--always');
+  if (alwaysAllow) {
+    browserWriteGranted.value = true;
+    injectSystemMessage(`Browser write approved and auto-allowed for this session: ${pending.action}`);
+  } else {
+    injectSystemMessage(`Browser write approved: ${pending.action}`);
+  }
+  const params: { tabId?: number; steps?: unknown[]; url?: string } = {};
+  if (pending.tabId !== undefined) params.tabId = pending.tabId;
+  if (pending.steps !== undefined) params.steps = pending.steps;
+  if (pending.url !== undefined) params.url = pending.url;
+
+  extensionBridge.request(pending.action, params).then((result) => {
+    const msg: Extract<import('./protocol.js').ClientCommand, { type: 'browser_ext_result' }> = {
+      type: 'browser_ext_result', id, ok: result.ok,
+    };
+    if (result.treeText !== undefined) msg.treeText = result.treeText;
+    if (result.dataUrl !== undefined) msg.dataUrl = result.dataUrl;
+    if (result.tabs !== undefined) msg.tabs = result.tabs;
+    if (result.stepsCompleted !== undefined) msg.stepsCompleted = result.stepsCompleted;
+    if (result.totalSteps !== undefined) msg.totalSteps = result.totalSteps;
+    if (result.finalUrl !== undefined) msg.finalUrl = result.finalUrl;
+    if (result.finalTitle !== undefined) msg.finalTitle = result.finalTitle;
+    if (result.newTabId !== undefined) msg.newTabId = result.newTabId;
+    if (result.error !== undefined) msg.error = result.error;
+    client!.send(msg);
+  }).catch((err: Error) => {
+    client!.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
+  });
+
+  return true;
+}
+
+/** Relay a browser extension result (used by both approval handler and auto-approval path). */
+function sendBrowserExtResult(id: string, result: { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string }): void {
+  const msg: Extract<import('./protocol.js').ClientCommand, { type: 'browser_ext_result' }> = {
+    type: 'browser_ext_result', id, ok: result.ok,
+  };
+  if (result.treeText !== undefined) msg.treeText = result.treeText;
+  if (result.dataUrl !== undefined) msg.dataUrl = result.dataUrl;
+  if (result.tabs !== undefined) msg.tabs = result.tabs;
+  if (result.stepsCompleted !== undefined) msg.stepsCompleted = result.stepsCompleted;
+  if (result.totalSteps !== undefined) msg.totalSteps = result.totalSteps;
+  if (result.finalUrl !== undefined) msg.finalUrl = result.finalUrl;
+  if (result.finalTitle !== undefined) msg.finalTitle = result.finalTitle;
+  if (result.newTabId !== undefined) msg.newTabId = result.newTabId;
+  if (result.error !== undefined) msg.error = result.error;
+  client!.send(msg);
+}
+
 // --- Host Daemon ---
 
 let hostDaemonProcess: ChildProcess | null = null;
@@ -1599,7 +1708,7 @@ client.sendCommand = (cmd: string) => {
 // Start web UI server before the container so it's available during startup/restarts.
 // This prevents "connection refused" when tsx watch restarts the process.
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions }).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });
@@ -1649,17 +1758,54 @@ client.on('fetch_request', (id: string, url: string, method?: string) => {
 });
 
 // Handle browser extension requests from the host daemon — relay to the Chrome extension
-client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs', tabId?: number, rootSelector?: string) => {
-  const params: { tabId?: number; rootSelector?: string } = {};
+client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab', tabId?: number, rootSelector?: string, steps?: unknown[], url?: string) => {
+  const isWriteAction = action === 'run_script' || action === 'navigate' || action === 'open_tab';
+
+  if (isWriteAction) {
+    // Check session-level browser write grant — auto-approve if granted
+    if (browserWriteGranted.value) {
+      log.info('Browser write auto-approved by session grant', { id, action });
+      autoHandledBrowserWriteIds.add(id);
+      const params: Record<string, unknown> = {};
+      if (tabId !== undefined) params.tabId = tabId;
+      if (steps !== undefined) params.steps = steps;
+      if (url !== undefined) params.url = url;
+      void extensionBridge.request(action, params).then((result) => {
+        sendBrowserExtResult(id, result);
+      }).catch((err: Error) => {
+        client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
+      });
+      return;
+    }
+
+    // Not granted — queue for user approval
+    const stepSummary = summariseBrowserWriteAction(action, steps, url);
+    pendingBrowserWriteApprovals.set(id, {
+      action,
+      ...(tabId !== undefined ? { tabId } : {}),
+      ...(steps !== undefined ? { steps } : {}),
+      ...(url !== undefined ? { url } : {}),
+    });
+    log.info('Browser write approval requested', { id, action });
+    const actionDesc = action === 'navigate' ? `navigate to: ${url ?? '?'}`
+      : action === 'open_tab' ? `open new tab: ${url ?? '?'}`
+      : `run browser script: ${stepSummary}`;
+    injectSystemMessage(
+      `Agent wants to ${actionDesc}\n` +
+      `  Reply: /approve-browser-write ${id} or /deny-browser-write ${id}\n` +
+      `  To auto-approve all browser writes: /approve-browser-write ${id} --always`
+    );
+    // The web-bridge event handler sends browser_write_request to web UI clients
+    // (see browser_ext_request handler in web-bridge.ts)
+    return;
+  }
+
+  // Read-only actions (extract_a11y, screenshot, list_tabs, activate_tab): relay directly
+  const params: Record<string, unknown> = {};
   if (tabId !== undefined) params.tabId = tabId;
   if (rootSelector !== undefined) params.rootSelector = rootSelector;
   void extensionBridge.request(action, params).then((result) => {
-    const msg: Extract<import('./protocol.js').ClientCommand, { type: 'browser_ext_result' }> = { type: 'browser_ext_result', id, ok: result.ok };
-    if (result.treeText !== undefined) msg.treeText = result.treeText;
-    if (result.dataUrl !== undefined) msg.dataUrl = result.dataUrl;
-    if (result.tabs !== undefined) msg.tabs = result.tabs;
-    if (result.error !== undefined) msg.error = result.error;
-    client.send(msg);
+    sendBrowserExtResult(id, result);
   }).catch((err: Error) => {
     client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
   });

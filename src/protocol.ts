@@ -29,7 +29,9 @@ export type ClientCommand =
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] }
   | { type: 'context_breakdown_request' }
-  | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; error?: string }
+  | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string }
+  | { type: 'browser_write_response'; id: string; ok: boolean; message: string }
+  | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'ping' };
 
 // --- Server → Client ---
@@ -128,7 +130,9 @@ export type ServerEvent =
   | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
-  | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot' | 'list_tabs'; tabId?: number; rootSelector?: string }
+  | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab'; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string }
+  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab'; stepSummary: string; tabUrl?: string; steps?: unknown[]; url?: string }
+  | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'reset' }
   | { type: 'pong' };
 

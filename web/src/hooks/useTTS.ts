@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useVoiceStore } from '../stores/voice';
 import { isDemo } from '../demo/useDemoMode';
-import { stripMarkdownForTTS } from '../lib/markdown';
+import { stripMarkdownForTTS, extractSpeakContent } from '../lib/markdown';
 import { useChatStore } from '../stores/chat';
 
 interface TTSControls {
@@ -12,6 +12,11 @@ interface TTSControls {
   flushStream: (final?: boolean) => void;
   ttsStreamLastLen: { current: number };
 }
+
+// When the page is embedded in an iframe (i.e., inside the PiP window), suppress
+// all TTS so the user doesn't hear responses twice — once from the main tab and
+// once from the PiP iframe.
+const IS_IFRAME = window !== window.top;
 
 // Module-level singletons so all useTTS() instances share the same audio state.
 // Without this, App.tsx's flushStream starts audio on one set of refs while
@@ -69,6 +74,7 @@ export function useTTS(): TTSControls {
   }, []);
 
   const enqueueChunk = useCallback((text: string): void => {
+    if (IS_IFRAME) return;
     const stripped = stripMarkdownForTTS(text);
     if (!stripped.trim()) return;
 
@@ -104,6 +110,27 @@ export function useTTS(): TTSControls {
     if (!getAutoSpeak()) return;
     const streamText = useChatStore.getState().streaming.text;
 
+    // Concise mode: responses wrap the TTS summary in <speak>...</speak>.
+    // Speak only that block (once), then ignore the rest of the stream.
+    if (streamText.includes('<speak>')) {
+      const speakContent = extractSpeakContent(streamText);
+      if (!speakContent) {
+        // <speak> opened but </speak> not yet arrived — wait for it.
+        return;
+      }
+      if (!useVoiceStore.getState().speakBlockSpoken) {
+        useVoiceStore.getState().setSpeakBlockSpoken(true);
+        // Advance the pointer past the closing </speak> tag so we never
+        // re-process this region, then speak the extracted content.
+        const closeTag = '</speak>';
+        const closeIdx = streamText.indexOf(closeTag);
+        ttsStreamLastLen.current = closeIdx + closeTag.length;
+        enqueueChunk(speakContent);
+      }
+      // Don't speak the markdown body that follows the <speak> block.
+      return;
+    }
+
     const unspoken = streamText.slice(ttsStreamLastLen.current);
     if (!unspoken) return;
 
@@ -126,6 +153,7 @@ export function useTTS(): TTSControls {
   }, [enqueueChunk]);
 
   const speakText = useCallback((text: string, onDone?: () => void): void => {
+    if (IS_IFRAME) { onDone?.(); return; }
     stopAll();
 
     const stripped = stripMarkdownForTTS(text);

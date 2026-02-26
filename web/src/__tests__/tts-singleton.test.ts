@@ -12,6 +12,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useVoiceStore } from '../stores/voice';
+import { useChatStore } from '../stores/chat';
+import * as markdownLib from '../lib/markdown';
 
 // Mock demo mode off
 vi.mock('../demo/useDemoMode', () => ({
@@ -20,10 +22,10 @@ vi.mock('../demo/useDemoMode', () => ({
   useDemoMode: () => {},
 }));
 
-// Mock markdown helpers
+// Mock markdown helpers — extractSpeakContent is overridden per-test below
 vi.mock('../lib/markdown', () => ({
   stripMarkdownForTTS: (t: string) => t,
-  extractSpeakContent: (t: string) => null,
+  extractSpeakContent: vi.fn((_t: string) => null),
 }));
 
 // Mock fetch for TTS requests
@@ -108,5 +110,98 @@ describe('TTS singleton state', () => {
     const hookB = renderHook(() => useTTS());
 
     expect(hookA.result.current.ttsStreamLastLen).toBe(hookB.result.current.ttsStreamLastLen);
+  });
+});
+
+describe('flushStream — <speak> block handling (concise mode)', () => {
+  const extractSpeakMock = vi.mocked(markdownLib.extractSpeakContent);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    extractSpeakMock.mockReturnValue(null);
+    useVoiceStore.setState({
+      ttsAutoSpeak: true,
+      ttsPlaying: false,
+      ttsRatePct: 0,
+      speakBlockSpoken: false,
+    });
+    // Reset streaming text
+    useChatStore.setState(s => ({ streaming: { ...s.streaming, text: '', active: true } }));
+  });
+
+  it('speaks only the <speak> content when the block is complete', async () => {
+    const { useTTS } = await import('../hooks/useTTS');
+    const hook = renderHook(() => useTTS());
+    // Reset the stream pointer
+    act(() => { hook.result.current.stopStream(); });
+
+    // Set streaming text with a complete <speak> block
+    const speakText = 'This is the spoken summary.';
+    useChatStore.getState().setStreamText(`<speak>${speakText}</speak>\n\nFull markdown body here.`);
+    extractSpeakMock.mockReturnValue(speakText);
+
+    // Flush should POST to /tts with the speak content (not the raw tags)
+    mockFetch.mockResolvedValueOnce({ ok: true, blob: () => Promise.resolve(new Blob(['audio'])) });
+    act(() => { hook.result.current.flushStream(); });
+
+    await vi.waitFor(() => { expect(mockFetch).toHaveBeenCalledTimes(1); });
+
+    const [url, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/tts');
+    expect(opts.body).toBe(speakText);
+    // speakBlockSpoken should now be true
+    expect(useVoiceStore.getState().speakBlockSpoken).toBe(true);
+  });
+
+  it('does not speak when <speak> is open but </speak> has not arrived yet', async () => {
+    const { useTTS } = await import('../hooks/useTTS');
+    const hook = renderHook(() => useTTS());
+    act(() => { hook.result.current.stopStream(); });
+
+    // Partial: opening tag present but closing tag missing
+    useChatStore.getState().setStreamText('<speak>Still streaming...');
+    // extractSpeakContent returns null (no closing tag yet)
+    extractSpeakMock.mockReturnValue(null);
+
+    act(() => { hook.result.current.flushStream(); });
+
+    // Nothing should have been sent to TTS
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not speak a second time if speakBlockSpoken is already true', async () => {
+    const { useTTS } = await import('../hooks/useTTS');
+    const hook = renderHook(() => useTTS());
+    act(() => { hook.result.current.stopStream(); });
+
+    useVoiceStore.setState({ speakBlockSpoken: true });
+    useChatStore.getState().setStreamText('<speak>Summary.</speak>\n\nMore text.');
+    extractSpeakMock.mockReturnValue('Summary.');
+
+    act(() => { hook.result.current.flushStream(); });
+    act(() => { hook.result.current.flushStream(); });
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('falls back to normal sentence chunking when no <speak> tag is present', async () => {
+    const { useTTS } = await import('../hooks/useTTS');
+    const hook = renderHook(() => useTTS());
+    act(() => { hook.result.current.stopStream(); });
+
+    // Plain response — no concise mode tags
+    useChatStore.getState().setStreamText('Hello there. How can I help you today? ');
+    extractSpeakMock.mockReturnValue(null);
+
+    mockFetch.mockResolvedValueOnce({ ok: true, blob: () => Promise.resolve(new Blob(['audio'])) });
+    act(() => { hook.result.current.flushStream(); });
+
+    await vi.waitFor(() => { expect(mockFetch).toHaveBeenCalledTimes(1); });
+    const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+    // Should have spoken the text up to a sentence boundary
+    expect(typeof opts.body).toBe('string');
+    expect((opts.body as string).length).toBeGreaterThan(0);
+    // Should NOT contain any <speak> tag
+    expect(opts.body as string).not.toContain('<speak>');
   });
 });

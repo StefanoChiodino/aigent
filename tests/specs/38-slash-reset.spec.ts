@@ -3,6 +3,9 @@
  *
  * Injects fake messages, then sends /reset and verifies old messages
  * are removed and only "Conversation reset." remains.
+ *
+ * Also tests the server-initiated `reset` event which clears messages
+ * without a /reset command round-trip.
  */
 
 import { test, expect } from '@playwright/test';
@@ -67,6 +70,31 @@ test.describe('@fast /reset clears conversation', () => {
     await expect(page.locator('#messages')).toContainText('Conversation reset.', { timeout: 5_000 });
 
     // No user or assistant messages should remain
+    await expect(page.locator('#messages .message.user')).toHaveCount(0, { timeout: 3_000 });
+    await expect(page.locator('#messages .message.assistant')).toHaveCount(0, { timeout: 3_000 });
+  });
+
+  test('injected reset event clears messages without /reset command', async () => {
+    const page = getPage();
+    const marker = `INJECT_RESET_${Date.now()}`;
+
+    // Inject messages so the UI has content
+    await injectEvent({
+      type: 'message',
+      message: { role: 'user', content: marker, timestamp: new Date().toISOString() },
+    });
+    await injectEvent({
+      type: 'message',
+      message: { role: 'assistant', content: `Reply to ${marker}`, timestamp: new Date().toISOString() },
+    });
+
+    // Verify the messages are visible
+    await expect(page.locator('#messages')).toContainText(marker, { timeout: 3_000 });
+
+    // Inject a raw reset event (server-initiated reset)
+    await injectEvent({ type: 'reset' });
+
+    // Messages should be cleared
     await expect(page.locator('#messages .message.user')).toHaveCount(0, { timeout: 3_000 });
     await expect(page.locator('#messages .message.assistant')).toHaveCount(0, { timeout: 3_000 });
   });

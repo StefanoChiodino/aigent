@@ -29,10 +29,22 @@ interface ExtResponse {
   treeText?: string;
   dataUrl?: string;
   tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[];
+  stepsCompleted?: number;
+  totalSteps?: number;
+  finalUrl?: string;
+  finalTitle?: string;
+  newTabId?: number;
   error?: string;
 }
 
-type ExtMessage = ExtHello | ExtResponse;
+interface ExtTabChanged {
+  type: 'ext_tab_changed';
+  tabId: number;
+  url: string;
+  title: string;
+}
+
+type ExtMessage = ExtHello | ExtResponse | ExtTabChanged;
 
 interface PendingRequest {
   resolve: (r: ExtResponse) => void;
@@ -45,6 +57,7 @@ let requestCounter = 0;
 class ExtensionBridge extends EventEmitter {
   private ws: WebSocket | null = null;
   private pending = new Map<string, PendingRequest>();
+  private lastTabUrl = '';
 
   onConnection(ws: WebSocket): void {
     if (this.ws) {
@@ -67,6 +80,11 @@ class ExtensionBridge extends EventEmitter {
 
       if (msg.type === 'ext_hello') {
         log.info('Extension hello', { version: msg.version, browser: msg.browser });
+        return;
+      }
+
+      if (msg.type === 'ext_tab_changed') {
+        this.lastTabUrl = msg.url;
         return;
       }
 
@@ -103,10 +121,15 @@ class ExtensionBridge extends EventEmitter {
     return this.ws !== null;
   }
 
+  /** Returns the last known active tab URL (from ext_tab_changed events), or empty string. */
+  getActiveTabUrl(): string {
+    return this.lastTabUrl;
+  }
+
   async request(
-    action: 'extract_a11y' | 'screenshot' | 'list_tabs',
-    params: { tabId?: number; rootSelector?: string } = {},
-    timeoutMs = 15_000,
+    action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab',
+    params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string } = {},
+    timeoutMs = 30_000,
   ): Promise<ExtResponse> {
     if (!this.ws || !this.isConnected()) {
       throw new Error('Browser extension is not connected. Install the aigent extension in Chrome and make sure the gatekeeper is running.');

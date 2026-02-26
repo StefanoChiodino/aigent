@@ -13,10 +13,11 @@ test.describe('@fast Connection & initial UI state', () => {
     const page = getPage();
     // Listen for errors during a reload to catch runtime issues
     const errors: string[] = [];
-    page.on('pageerror', (err) => errors.push(err.message));
+    const onError = (err: Error) => errors.push(err.message);
+    page.on('pageerror', onError);
     await page.reload();
     await waitForConnected(page);
-    page.removeListener('pageerror', () => {});
+    page.removeListener('pageerror', onError);
     expect(errors).toHaveLength(0);
   });
 

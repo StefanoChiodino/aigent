@@ -8,6 +8,7 @@ import { parseDiffIntoFiles } from '../lib/diff';
 import { captureScreenshot, startScreenShare } from '../lib/screen';
 import { playPermissionSound } from '../lib/audio';
 import { isDemo, getDemoWebSocket } from '../demo/useDemoMode';
+import { setupErrorRelay, teardownErrorRelay } from '../lib/errorRelay';
 import type { ServerEvent, MountInfo } from '../types';
 
 export function useWebSocket(): void {
@@ -249,6 +250,22 @@ export function useWebSocket(): void {
           playPermissionSound();
           break;
 
+        case 'browser_write_request':
+          ui().enqueuePermRequest({
+            type: 'browser_write',
+            id: event.id,
+            title: event.action === 'navigate' ? 'Browser: Navigate'
+              : event.action === 'open_tab' ? 'Browser: Open Tab'
+              : 'Browser: Run Script',
+            detail: event.stepSummary,
+            ...(event.tabUrl ? { body: `On: ${event.tabUrl}` } : {}),
+            approveCmd: `/approve-browser-write ${event.id}`,
+            denyCmd: `/deny-browser-write ${event.id}`,
+            alwaysAllowCmd: `/approve-browser-write ${event.id} --always`,
+          });
+          playPermissionSound();
+          break;
+
         case 'screenshot_request': {
           const base64 = captureScreenshot();
           if (!base64) {
@@ -281,6 +298,14 @@ export function useWebSocket(): void {
 
         case 'pong':
           break;
+
+        case 'browser_error':
+          chat().appendMessage({
+            role: 'system',
+            content: `[browser:${event.level}]${event.source ? ` (${event.source})` : ''} ${event.message}`,
+            timestamp: new Date().toISOString(),
+          });
+          break;
       }
     }
 
@@ -306,6 +331,10 @@ export function useWebSocket(): void {
             conn().send({ type: 'ping' });
           }, 25_000);
         }
+        // Start error relay if the debug setting is on
+        if (settings().getClientSetting('debug_browser_errors') === true) {
+          setupErrorRelay((data) => conn().send(data));
+        }
       };
 
       ws.onmessage = (ev: MessageEvent) => {
@@ -316,6 +345,7 @@ export function useWebSocket(): void {
       };
 
       ws.onclose = () => {
+        teardownErrorRelay();
         if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
         // Only clear the store if THIS ws is still the active connection.
         // In React StrictMode, the old ws's onclose fires AFTER the remount
@@ -351,6 +381,7 @@ export function useWebSocket(): void {
     connect();
 
     return () => {
+      teardownErrorRelay();
       if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null; }
       if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
       if (wsRef.current) {

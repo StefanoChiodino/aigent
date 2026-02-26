@@ -345,6 +345,15 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
+    key: 'debug_browser_errors',
+    label: 'Relay browser errors to server',
+    desc: 'Capture console.warn/error, uncaught exceptions and unhandled rejections — send them to the server log and show in chat.',
+    group: 'Debug',
+    type: 'toggle',
+    default: false,
+    scope: 'client',
+  },
+  {
     key: 'AIGENT_PIP_MODE',
     label: 'Picture-in-Picture',
     desc: 'Auto: enters PiP when you switch tabs (uses a silent audio stream — no mic needed). Manual: Float button only.',
