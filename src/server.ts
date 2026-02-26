@@ -229,6 +229,12 @@ function resolveMountRequest(id: string, response: { ok: boolean; containerPath?
   const pending = pendingMountRequests.get(id);
   if (pending) {
     pendingMountRequests.delete(id);
+    // When a mount is approved, a container restart is imminent.
+    // Auto-save now so conversation state survives the restart.
+    if (response.ok) {
+      isMountRestart = true;
+      doAutoSave();
+    }
     pending.resolve(response);
   }
 }
@@ -1735,71 +1741,79 @@ function startServer(): Server {
   return server;
 }
 
-function restoreSession(): void {
+/** Restore session and return true if the session was interrupted mid-turn (needs auto-resume). */
+function restoreSession(): boolean {
   const saved = autoLoadSession(workspacePath);
-  if (saved) {
-    const agentMessages = saved.agentMessages as ProviderMessage[];
+  if (!saved) return false;
 
-    // Fix orphaned tool_use blocks — assistant messages with toolCalls but no
-    // following tool_result. This can happen if the previous session was
-    // interrupted during tool execution. Strip the toolCalls to prevent
-    // 400 errors from the API.
-    for (let i = 0; i < agentMessages.length; i++) {
-      const msg = agentMessages[i]!;
-      if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
-        const next = agentMessages[i + 1];
-        if (!next || next.role !== 'tool_result') {
-          log.warn('Session restore: stripping orphaned tool_use', { index: i });
-          msg.toolCalls = undefined;
-        }
+  const agentMessages = saved.agentMessages as ProviderMessage[];
+
+  // Fix orphaned tool_use blocks — assistant messages with toolCalls but no
+  // following tool_result. This can happen if the previous session was
+  // interrupted during tool execution. Strip the toolCalls to prevent
+  // 400 errors from the API.
+  for (let i = 0; i < agentMessages.length; i++) {
+    const msg = agentMessages[i]!;
+    if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+      const next = agentMessages[i + 1];
+      if (!next || next.role !== 'tool_result') {
+        log.warn('Session restore: stripping orphaned tool_use', { index: i });
+        msg.toolCalls = undefined;
       }
     }
-
-    // If the conversation ends mid-tool-loop (last message is a tool_result),
-    // the model will try to continue the previous work instead of handling new
-    // user input. Cap it with a synthetic assistant message so the model knows
-    // the previous turn is complete.
-    if (agentMessages.length > 0 && agentMessages[agentMessages.length - 1]!.role === 'tool_result') {
-      agentMessages.push({
-        role: 'assistant',
-        content: '[Previous session ended. Awaiting new instructions.]',
-      });
-    }
-
-    agent.setMessages(agentMessages);
-    messages = saved.uiMessages as DisplayMessage[];
-    // Restore saved usage so token counts are continuous across restarts
-    if (saved.usage) {
-      usage = saved.usage;
-      agent.setUsage(saved.usage);
-    }
-    // Restore thinking level so it persists across restarts (env var is just the default)
-    if (saved.thinking) {
-      const level = saved.thinking.current as ThinkingLevel;
-      const effort = saved.thinking.savedEffort as ThinkingLevel;
-      if (VALID_THINKING_LEVELS.includes(level)) {
-        currentThinking = level;
-        agent.thinkingLevel = level;
-      }
-      if (VALID_THINKING_LEVELS.includes(effort)) {
-        savedEffortLevel = effort;
-      }
-      log.info('Thinking restored', { current: currentThinking, savedEffort: savedEffortLevel });
-    }
-    // Restore model so it persists across restarts
-    if (saved.model && AVAILABLE_MODELS.includes(saved.model)) {
-      model = saved.model;
-      agent.currentModel = saved.model;
-      log.info('Model restored', { model });
-    }
-    // Restore concise mode so it persists across restarts
-    if (saved.concise !== undefined) {
-      currentConcise = saved.concise;
-      agent.setExtraSystemPrompt(buildExtraSystemPrompt());
-      log.info('Concise mode restored', { concise: currentConcise });
-    }
-    log.info('Session restored', { messages: messages.length, tokens: usage.input + usage.output });
   }
+
+  // Check if the session was interrupted mid-turn: last non-system UI message
+  // is from the user, meaning the agent never completed its response.
+  const uiMessages = saved.uiMessages as DisplayMessage[];
+  const lastNonSystem = [...uiMessages].reverse().find(m => m.role !== 'system');
+  const wasInterrupted = lastNonSystem?.role === 'user';
+
+  // If the conversation ends mid-tool-loop (last message is a tool_result),
+  // the model will try to continue the previous work instead of handling new
+  // user input. Cap it with a synthetic assistant message so the model knows
+  // the previous turn is complete — unless we're about to auto-resume.
+  if (!wasInterrupted && agentMessages.length > 0 && agentMessages[agentMessages.length - 1]!.role === 'tool_result') {
+    agentMessages.push({
+      role: 'assistant',
+      content: '[Previous session ended. Awaiting new instructions.]',
+    });
+  }
+
+  agent.setMessages(agentMessages);
+  messages = uiMessages;
+  // Restore saved usage so token counts are continuous across restarts
+  if (saved.usage) {
+    usage = saved.usage;
+    agent.setUsage(saved.usage);
+  }
+  // Restore thinking level so it persists across restarts (env var is just the default)
+  if (saved.thinking) {
+    const level = saved.thinking.current as ThinkingLevel;
+    const effort = saved.thinking.savedEffort as ThinkingLevel;
+    if (VALID_THINKING_LEVELS.includes(level)) {
+      currentThinking = level;
+      agent.thinkingLevel = level;
+    }
+    if (VALID_THINKING_LEVELS.includes(effort)) {
+      savedEffortLevel = effort;
+    }
+    log.info('Thinking restored', { current: currentThinking, savedEffort: savedEffortLevel });
+  }
+  // Restore model so it persists across restarts
+  if (saved.model && AVAILABLE_MODELS.includes(saved.model)) {
+    model = saved.model;
+    agent.currentModel = saved.model;
+    log.info('Model restored', { model });
+  }
+  // Restore concise mode so it persists across restarts
+  if (saved.concise !== undefined) {
+    currentConcise = saved.concise;
+    agent.setExtraSystemPrompt(buildExtraSystemPrompt());
+    log.info('Concise mode restored', { concise: currentConcise });
+  }
+  log.info('Session restored', { messages: messages.length, tokens: usage.input + usage.output, wasInterrupted });
+  return wasInterrupted;
 }
 
 // --- Main ---
@@ -1993,9 +2007,19 @@ try {
   process.exit(1);
 }
 
-restoreSession();
+const needsResume = restoreSession();
 const server = startServer();
 log.info('Listening', { socket: SOCKET_PATH });
+
+// If the session was interrupted mid-turn (e.g. by a mount restart), auto-resume
+// the agent so it continues its work without the user having to re-send their message.
+if (needsResume) {
+  // Small delay to let the client reconnect and receive restored state first.
+  setTimeout(() => {
+    addSystemMessage('Sandbox restarted (mount applied). Resuming...');
+    void processAgentTurn('[System: The sandbox restarted to apply a new mount. Your previous work was interrupted — continue where you left off.]', { isTaskResult: true });
+  }, 500);
+}
 
 // --- End-of-session summary ---
 
@@ -2042,6 +2066,7 @@ function writeEndOfSessionSummary(): void {
 
 // Graceful shutdown
 let restartRequested = false;
+let isMountRestart = false;
 let isShuttingDown = false;
 
 async function shutdown(): Promise<void> {
@@ -2057,24 +2082,32 @@ async function shutdown(): Promise<void> {
     isLoading = false;
   }
 
-  // Distill conversation to MEMORY.md — give it up to 30s before forcing exit
-  const agentMessages = agent?.getMessages() ?? [];
-  if (agentMessages.length >= 4 && agent) {
-    try {
-      await Promise.race([
-        distillToMemory(agent.underlyingProvider, agent.currentModel, agentMessages, workspacePath),
-        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 30_000)),
-      ]);
-    } catch {
-      // Non-critical — write a minimal fallback entry
-      writeEndOfSessionSummary();
-    }
-  } else {
-    writeEndOfSessionSummary();
-  }
-
+  // Save conversation state FIRST — this is synchronous and fast.
+  // Must run before distillToMemory (which makes an API call) to ensure
+  // state is preserved even if docker SIGKILL arrives during distillation.
   saveLifetimeUsage(usage);
   doAutoSave();
+
+  // Distill conversation to MEMORY.md — give it up to 30s before forcing exit.
+  // Skip during mount restarts: the session continues after restart, so
+  // distillation is unnecessary and wastes the docker stop grace period.
+  if (!isMountRestart) {
+    const agentMessages = agent?.getMessages() ?? [];
+    if (agentMessages.length >= 4 && agent) {
+      try {
+        await Promise.race([
+          distillToMemory(agent.underlyingProvider, agent.currentModel, agentMessages, workspacePath),
+          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 30_000)),
+        ]);
+      } catch {
+        // Non-critical — write a minimal fallback entry
+        writeEndOfSessionSummary();
+      }
+    } else {
+      writeEndOfSessionSummary();
+    }
+  }
+
   if (mcpManager) mcpManager.shutdown();
   server.close();
   if (existsSync(SOCKET_PATH)) {

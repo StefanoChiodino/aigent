@@ -2,8 +2,6 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
-![alt text](image.png) text box is a bit broken in the PiP
-
 coincise mode seems to start often saying literally " slash speech"
 
 ## Bugs / Quick Fixes
