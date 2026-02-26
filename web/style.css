@@ -2980,6 +2980,38 @@ html, body {
 .diff2html-wrapper .d2h-file-header {
   display: none; /* file header already shown in patch-file-list */
 }
+#perm-card-diff.wrap-on .d2h-code-line-ctn {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Word-wrap toggle button inside diff panel */
+#diff-wrap-toggle {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  float: right;
+  margin: 4px 6px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+#diff-wrap-toggle:hover {
+  background: var(--bg-surface);
+  color: var(--text);
+}
+#diff-wrap-toggle.active {
+  background: rgba(100, 160, 255, 0.15);
+  color: #7ab4ff;
+  border-color: rgba(100, 160, 255, 0.4);
+}
 
 #perm-card-duration {
   margin-top: 6px;

@@ -19,6 +19,7 @@ export function PermissionModal() {
   const resolvePermRequest = useUIStore(s => s.resolvePermRequest);
   const send = useConnectionStore(s => s.send);
   const [activeFileIdx, setActiveFileIdx] = useState(0);
+  const [wordWrap, setWordWrap] = useState(true);
 
   const req = permQueue[0] ?? null;
 
@@ -126,7 +127,15 @@ export function PermissionModal() {
                   })}
                 </div>
               )}
-              <div id="perm-card-diff">
+              <div id="perm-card-diff" className={wordWrap ? 'wrap-on' : ''}>
+                <button
+                  id="diff-wrap-toggle"
+                  className={wordWrap ? 'active' : ''}
+                  title={wordWrap ? 'Disable word wrap' : 'Enable word wrap'}
+                  onClick={() => setWordWrap(w => !w)}
+                >
+                  Word Wrap
+                </button>
                 <DiffViewer diffText={activeFile.content} />
               </div>
             </div>

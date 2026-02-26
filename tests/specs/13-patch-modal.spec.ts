@@ -133,6 +133,33 @@ test.describe('@fast Patch Permission Modal', () => {
     await page.locator('#perm-deny-btn').click();
   });
 
+
+  test('word-wrap toggle starts active and toggles class', async () => {
+    const page = getPage();
+    await injectEvent({ type: 'patch_request', id: 'pw1', diff: SINGLE_FILE_DIFF, reason: 'Wrap toggle test' });
+    await expectVisible(page.locator('#perm-overlay'));
+
+    const diffPanel = page.locator('#perm-card-diff');
+    const wrapBtn = page.locator('#diff-wrap-toggle');
+
+    // Toggle visible and active by default (wrap on)
+    await expect(wrapBtn).toBeVisible();
+    await expect(wrapBtn).toHaveClass(/\bactive\b/);
+    await expect(diffPanel).toHaveClass(/\bwrap-on\b/);
+
+    // Click to disable wrap
+    await wrapBtn.click();
+    await expect(wrapBtn).not.toHaveClass(/\bactive\b/);
+    await expect(diffPanel).not.toHaveClass(/\bwrap-on\b/);
+
+    // Click again to re-enable
+    await wrapBtn.click();
+    await expect(wrapBtn).toHaveClass(/\bactive\b/);
+    await expect(diffPanel).toHaveClass(/\bwrap-on\b/);
+
+    await page.locator('#perm-deny-btn').click();
+  });
+
   test('patch and exec requests queue correctly', async () => {
     const page = getPage();
     await injectEvent({ type: 'patch_request', id: 'pq1', diff: SINGLE_FILE_DIFF, reason: 'queue' });
