@@ -12,7 +12,7 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { existsSync, unlinkSync, appendFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
-import { listProfiles, getProfilePath, listSessions, saveSession, loadSession, generateSessionId, autoSaveSession, autoLoadSession, clearAutoSave } from './profiles.js';
+import { generateSessionId, autoSaveSession, autoLoadSession } from './profiles.js';
 import type { ProviderMessage, UserContent, TextContent, ImageContent, DocumentContent, ImageMediaType, ToolResult } from './provider.js';
 import type { ClientCommand, ServerEvent, DisplayMessage, DisplayAttachment, ServerState, TokenUsage } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
@@ -23,14 +23,15 @@ import { createLogger } from './logger.js';
 import { execReadonlyTool, fetchReadonlyTool, getToolDefinitions } from './tools.js';
 import type { ProviderToolDef } from './provider.js';
 import { PendingRequestBroker } from './pending-request.js';
-import { parseImagesInMessage, readImageBase64, IMAGE_TYPES_SET, isTextMime, MAX_TEXT_FILE_SIZE } from './image-support.js';
-import { saveLifetimeUsage, formatLifetimeUsage } from './usage-tracking.js';
+import { parseImagesInMessage, IMAGE_TYPES_SET, isTextMime, MAX_TEXT_FILE_SIZE } from './image-support.js';
+import { saveLifetimeUsage } from './usage-tracking.js';
 import {
   buildHostSystemPrompt as _buildHostSystemPrompt,
   buildBrowserExtSystemPrompt as _buildBrowserExtSystemPrompt,
   SHORT_MODE_PROMPT,
   ensureSpeakTag as _ensureSpeakTag,
 } from './system-prompts.js';
+import { handleCommand as _handleCommand, type CommandContext } from './commands.js';
 
 const log = createLogger('server');
 
@@ -711,332 +712,36 @@ function doAutoSave(): void {
 // --- Command handling ---
 
 function handleCommand(cmd: string): boolean {
-  const trimmed = cmd.trim();
-
-  if (trimmed === '/reset') {
-    // Distill to memory before wiping — best effort, non-blocking
-    const messagesToDistill = agent.getMessages();
-    if (messagesToDistill.length >= 4) {
-      addSystemMessage('Distilling session to memory...');
-      void distillToMemory(agent.underlyingProvider, agent.currentModel, messagesToDistill, workspacePath)
-        .then(() => addSystemMessage('Memory updated.'))
-        .catch(() => {}); // already logged inside distillToMemory
-    }
-    agent.reset();
-    messages = [];
-    usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    clearAutoSave(workspacePath);
-    broadcast({ type: 'reset' });
-    addSystemMessage('Conversation reset.');
-    broadcast({ type: 'usage', usage });
-    return true;
-  }
-
-  if (trimmed === '/refresh') {
-    agent.reloadSystemPrompt();
-    addSystemMessage('Workspace files reloaded.');
-    return true;
-  }
-
-  if (trimmed === '/restart') {
-    addSystemMessage('Restarting server...');
-    // Brief delay so the client receives the message, then clean shutdown
-    setTimeout(requestRestart, 200);
-    return true;
-  }
-
-  if (trimmed === '/reasoning') {
-    const isOn = currentThinking !== 'off';
-    addSystemMessage(`Reasoning: ${isOn ? 'on' : 'off'}\nUsage: /reasoning on | /reasoning off`);
-    return true;
-  }
-
-  if (trimmed === '/reasoning on') {
-    if (currentThinking === 'off') {
-      agent.thinkingLevel = savedEffortLevel;
-      currentThinking = savedEffortLevel;
-    }
-    addSystemMessage(`Reasoning: on (${currentThinking})`);
-    broadcast({ type: 'state', thinking: currentThinking });
-    doAutoSave();
-    return true;
-  }
-
-  if (trimmed === '/reasoning off') {
-    if (currentThinking !== 'off') {
-      savedEffortLevel = currentThinking;
-    }
-    agent.thinkingLevel = 'off';
-    currentThinking = 'off';
-    addSystemMessage('Reasoning: off');
-    broadcast({ type: 'state', thinking: currentThinking });
-    doAutoSave();
-    return true;
-  }
-
-  if (trimmed === '/effort') {
-    const effortLevels = VALID_THINKING_LEVELS.filter((l) => l !== 'off');
-    addSystemMessage(`Effort: ${currentThinking === 'off' ? '(reasoning off)' : currentThinking}\nLevels: ${effortLevels.join(', ')}\nUsage: /effort <level>`);
-    return true;
-  }
-
-  if (trimmed.startsWith('/effort ')) {
-    const level = trimmed.split(' ')[1] as ThinkingLevel;
-    const effortLevels: ThinkingLevel[] = ['low', 'medium', 'high', 'max'];
-    if (effortLevels.includes(level)) {
-      agent.thinkingLevel = level;
-      currentThinking = level;
-      addSystemMessage(`Effort: ${level}`);
-      broadcast({ type: 'state', thinking: currentThinking });
-      doAutoSave();
-    } else {
-      addSystemMessage(`Invalid effort. Options: ${effortLevels.join(', ')}`);
-    }
-    return true;
-  }
-
-  if (trimmed === '/short') {
-    addSystemMessage(`Short mode: ${currentShort ? 'on' : 'off'}\nUsage: /short on | /short off`);
-    return true;
-  }
-
-  if (trimmed === '/short on') {
-    currentShort = true;
-    agent.setExtraSystemPrompt(buildExtraSystemPrompt());
-    addSystemMessage('Short mode: on');
-    broadcast({ type: 'state', short: true });
-    doAutoSave();
-    return true;
-  }
-
-  if (trimmed === '/short off') {
-    currentShort = false;
-    agent.setExtraSystemPrompt(buildExtraSystemPrompt());
-    addSystemMessage('Short mode: off');
-    broadcast({ type: 'state', short: false });
-    doAutoSave();
-    return true;
-  }
-
-  if (trimmed === '/profiles' || trimmed === '/profile list') {
-    const profiles = listProfiles(workspacePath);
-    if (profiles.length === 0) {
-      addSystemMessage(`No profiles yet. Current: ${currentProfile}\nCreate one: /profile create <name>`);
-    } else {
-      const list = profiles.map((p) => `  ${p.name === currentProfile ? '>' : ' '} ${p.name}`).join('\n');
-      addSystemMessage(`Profiles:\n${list}`);
-    }
-    return true;
-  }
-
-  if (trimmed.startsWith('/profile create ')) {
-    const name = trimmed.slice('/profile create '.length).trim();
-    if (!name || name.includes('/') || name.includes('..')) {
-      addSystemMessage('Invalid profile name.');
-      return true;
-    }
-    getProfilePath(workspacePath, name);
-    addSystemMessage(`Profile "${name}" created. Switch to it: /profile ${name}`);
-    return true;
-  }
-
-  if (trimmed.startsWith('/profile ') && !trimmed.startsWith('/profile list') && !trimmed.startsWith('/profile create')) {
-    const name = trimmed.slice('/profile '.length).trim();
-    const profileDir = getProfilePath(workspacePath, name);
-    agent.reset();
-    agent.reloadWorkspace(profileDir);
-    currentProfile = name;
-    currentSessionId = generateSessionId();
-    messages = [];
-    usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    addSystemMessage(`Switched to profile: ${name}`);
-    broadcast({ type: 'state', profile: currentProfile, sessionId: currentSessionId });
-    broadcast({ type: 'usage', usage });
-    return true;
-  }
-
-  if (trimmed === '/save') {
-    saveSession(workspacePath, currentProfile, currentSessionId, agent.getMessages());
-    addSystemMessage(`Session saved: ${currentSessionId}`);
-    return true;
-  }
-
-  if (trimmed === '/sessions') {
-    const sessions = listSessions(workspacePath, currentProfile);
-    if (sessions.length === 0) {
-      addSystemMessage('No saved sessions. Use /save to save current session.');
-    } else {
-      const list = sessions.map((s) =>
-        `  ${s.id === currentSessionId ? '>' : ' '} ${s.id} (${s.messageCount} msgs, ${s.lastActiveAt.slice(0, 10)})`
-      ).join('\n');
-      addSystemMessage(`Sessions (${currentProfile}):\n${list}`);
-    }
-    return true;
-  }
-
-  if (trimmed.startsWith('/load ')) {
-    const sessionId = trimmed.slice('/load '.length).trim();
-    const data = loadSession(workspacePath, currentProfile, sessionId);
-    if (!data) {
-      addSystemMessage(`Session not found: ${sessionId}`);
-      return true;
-    }
-    agent.setMessages(data.messages as ProviderMessage[]);
-    currentSessionId = sessionId;
-    usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-    addSystemMessage(`Loaded session: ${sessionId} (${data.messages.length} messages)`);
-    broadcast({ type: 'state', sessionId: currentSessionId });
-    broadcast({ type: 'usage', usage });
-    return true;
-  }
-
-  if (trimmed.startsWith('/image ')) {
-    const rest = trimmed.slice('/image '.length).trim();
-    if (!rest) {
-      addSystemMessage('Usage: /image <path> [message]\nExample: /image /tmp/screenshot.png What is this?');
-      return true;
-    }
-    const spaceIdx = rest.indexOf(' ');
-    const imgPath = spaceIdx > 0 ? rest.slice(0, spaceIdx) : rest;
-    const imgText = spaceIdx > 0 ? rest.slice(spaceIdx + 1).trim() : 'Describe this image.';
-
-    const img = readImageBase64(imgPath);
-    if (!img) {
-      addSystemMessage(`Cannot read image: ${imgPath}\nSupported formats: PNG, JPG, GIF, WebP`);
-      return true;
-    }
-
-    const userContent: UserContent = [
-      { type: 'image', mediaType: img.mediaType, data: img.data },
-      { type: 'text', text: imgText },
-    ];
-
-    if (isLoading) {
-      addSystemMessage('Cannot send image while processing. Wait for the current request to finish.');
-      return true;
-    }
-    void processAgentTurn(userContent, { displayText: `[image: ${imgPath}] ${imgText}` });
-    return true;
-  }
-
-  if (trimmed === '/compact') {
-    if (isLoading) {
-      addSystemMessage('Cannot compact while loading.');
-      return true;
-    }
-    addSystemMessage('Compacting conversation...');
-    void (async () => {
-      try {
-        const result = await agent.forceCompact({
-          onCompact: (summary) => {
-            addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
-          },
-        });
-        addSystemMessage(result);
-        doAutoSave();
-      } catch (err: unknown) {
-        const e = err as { message?: string };
-        addSystemMessage(`Compaction failed: ${e.message ?? 'unknown error'}`);
-      }
-    })();
-    return true;
-  }
-
-  if (trimmed === '/usage') {
-    addSystemMessage(formatLifetimeUsage(workspacePath, usage));
-    return true;
-  }
-
-  if (trimmed === '/context') {
-    broadcast({ type: 'context_breakdown', breakdown: agent.getContextBreakdown() });
-    return true;
-  }
-
-  if (trimmed === '/tasks') {
-    const allTasks = taskQueue.getInfos();
-    if (allTasks.length === 0) {
-      addSystemMessage('No background tasks.');
-    } else {
-      const running = allTasks.filter((t) => t.status === 'running');
-      const completed = allTasks.filter((t) => t.status !== 'running');
-      const pending = taskQueue.pendingCount;
-      const lines: string[] = [];
-      if (running.length > 0) {
-        lines.push(`Running (${running.length}):`);
-        for (const t of running) {
-          const elapsed = ((Date.now() - new Date(t.startedAt).getTime()) / 1000).toFixed(0);
-          lines.push(`  ${t.id}: ${t.description} (${elapsed}s)`);
-        }
-      }
-      if (pending > 0) {
-        lines.push(`Awaiting review: ${pending} result${pending > 1 ? 's' : ''}`);
-      }
-      if (completed.length > 0) {
-        lines.push(`History (${completed.length}):`);
-        for (const t of completed.slice(-5)) {
-          lines.push(`  ${t.id}: ${t.description} [${t.status}]`);
-        }
-      }
-      addSystemMessage(lines.join('\n'));
-    }
-    return true;
-  }
-
-  if (trimmed === '/model') {
-    const list = AVAILABLE_MODELS.map((m) => (m === model ? `> ${m}` : `  ${m}`)).join('\n');
-    addSystemMessage(`Current model: ${model}\nAvailable:\n${list}\nUsage: /model <name>`);
-    return true;
-  }
-
-  if (trimmed.startsWith('/model ')) {
-    const requested = trimmed.slice('/model '.length).trim();
-    if (!AVAILABLE_MODELS.includes(requested)) {
-      addSystemMessage(`Unknown model: ${requested}\nAvailable: ${AVAILABLE_MODELS.join(', ')}`);
-    } else if (requested === model) {
-      addSystemMessage(`Already using: ${model}`);
-    } else {
-      model = requested;
-      agent.currentModel = requested;
-      addSystemMessage(`Model switched to: ${model}`);
-      broadcast({ type: 'state', model });
-      doAutoSave();
-    }
-    return true;
-  }
-
-  if (trimmed === '/help') {
-    addSystemMessage(
-      'Commands:\n' +
-      '  /reset              Clear conversation\n' +
-      '  /restart            Restart server (picks up code changes)\n' +
-      '  /refresh            Reload workspace files\n' +
-      '  /compact            Compact context (free up space)\n' +
-      '  /reasoning on|off   Toggle reasoning\n' +
-      '  /effort <level>     Set effort (low/medium/high/max)\n' +
-      '  /short on|off       Short/voice mode (brief plain-text replies)\n' +
-      '  /model [name]       Show or switch model\n' +
-      '  /image <path> [msg] Send an image with optional message\n' +
-      '  /usage              Show token usage (session + lifetime)\n' +
-      '  /context            Show context window breakdown by component\n' +
-      '  /tasks              Show background tasks\n' +
-      '  /profiles           List profiles\n' +
-      '  /profile <name>     Switch profile\n' +
-      '  /profile create <n> Create new profile\n' +
-      '  /save               Save current session\n' +
-      '  /sessions           List saved sessions\n' +
-      '  /load <id>          Load a saved session\n' +
-      '  Esc                 Cancel generation / clear input\n' +
-      '  Ctrl+C              Cancel / clear input (x2 to exit)'
-    );
-    return true;
-  }
-
-  if (trimmed.startsWith('/')) {
-    addSystemMessage(`Unknown command: ${trimmed}\nType /help for available commands.`);
-    return true;
-  }
-
-  return false;
+  const ctx: CommandContext = {
+    agent,
+    taskQueue,
+    get messages() { return messages; },
+    set messages(v) { messages = v; },
+    get usage() { return usage; },
+    set usage(v) { usage = v; },
+    get currentThinking() { return currentThinking; },
+    set currentThinking(v) { currentThinking = v; },
+    get savedEffortLevel() { return savedEffortLevel; },
+    set savedEffortLevel(v) { savedEffortLevel = v; },
+    get currentShort() { return currentShort; },
+    set currentShort(v) { currentShort = v; },
+    get currentProfile() { return currentProfile; },
+    set currentProfile(v) { currentProfile = v; },
+    get currentSessionId() { return currentSessionId; },
+    set currentSessionId(v) { currentSessionId = v; },
+    get model() { return model; },
+    set model(v) { model = v; },
+    get isLoading() { return isLoading; },
+    get workspacePath() { return workspacePath; },
+    get availableModels() { return AVAILABLE_MODELS; },
+    addSystemMessage,
+    broadcast,
+    doAutoSave,
+    buildExtraSystemPrompt,
+    requestRestart,
+    processAgentTurn,
+  };
+  return _handleCommand(cmd, ctx);
 }
 
 // --- Message processing ---
