@@ -16,27 +16,25 @@ interface SettingsState {
   setServerSettingPending: (key: string, value: boolean | number | string) => void;
 }
 
-function buildSettingsPayload(key: string, value: boolean | number | string, all: SettingsValues): Record<string, unknown> {
+/** @internal — exported for testing only */
+export function buildSettingsPayload(key: string, value: boolean | number | string, all: SettingsValues): Record<string, unknown> {
   const getList = (k: string): string[] => {
     try { return JSON.parse(String(all[k] ?? '[]')) as string[]; } catch { return []; }
   };
-  if (key.startsWith('exec_perm_')) {
-    return {
-      exec_permissions: {
-        alwaysAllow: getList('exec_perm_alwaysAllow'),
-        prompt: getList('exec_perm_prompt'),
-        deny: getList('exec_perm_deny'),
-      },
-    };
+  // Only send the specific sub-field that changed — never rebuild the full
+  // permission object.  This prevents stale browser state from overwriting
+  // entries added by the gatekeeper (e.g. via --always approve).
+  if (key === 'exec_perm_alwaysAllow') {
+    return { exec_permissions: { alwaysAllow: getList(key) } };
   }
-  if (key.startsWith('fetch_perm_')) {
-    return {
-      fetch_permissions: {
-        alwaysAllow: getList('fetch_perm_alwaysAllow'),
-        prompt: getList('fetch_perm_prompt'),
-        deny: getList('fetch_perm_deny'),
-      },
-    };
+  if (key === 'exec_perm_deny') {
+    return { exec_permissions: { deny: getList(key) } };
+  }
+  if (key === 'fetch_perm_alwaysAllow') {
+    return { fetch_permissions: { alwaysAllow: getList(key) } };
+  }
+  if (key === 'fetch_perm_deny') {
+    return { fetch_permissions: { deny: getList(key) } };
   }
   if (key.startsWith('tools_')) {
     return {
