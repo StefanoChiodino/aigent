@@ -589,6 +589,11 @@ html, body {
   50% { opacity: 0.5; }
 }
 
+/* Milkdrop theme: extra softness via CSS blur */
+[data-theme="milkdrop"] .theme-canvas-bg {
+  filter: blur(1px);
+}
+
 /* Speak preview icon + tooltip */
 .speak-preview {
   position: relative;
@@ -4278,7 +4283,11 @@ body[data-demo] #app {
 }
 
 body[data-demo]::after {
-  content: 'DEMO';
+  /* replaced by #demo-banner React element */
+  display: none;
+}
+
+#demo-banner {
   position: fixed;
   top: 0;
   left: 50%;
@@ -4287,12 +4296,27 @@ body[data-demo]::after {
   height: 48px;
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+#demo-banner .demo-label {
   font-size: 18px;
   font-weight: 800;
   letter-spacing: 3px;
   color: #ff44cc;
   text-shadow: 0 0 16px rgba(255, 68, 204, 0.7);
   pointer-events: none;
+}
+
+#demo-banner .demo-github {
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  transition: color var(--transition);
+}
+
+#demo-banner .demo-github:hover {
+  color: #ff44cc;
 }
 
 #app.demo-fade {
@@ -4325,11 +4349,20 @@ body[data-demo]::after {
   display: flex;
   gap: 4px;
   overflow-x: auto;
-  scrollbar-width: none;
-  padding: 2px 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  padding: 2px 0 6px;
 }
 
-.demo-sections::-webkit-scrollbar { display: none; }
+.demo-sections::-webkit-scrollbar { height: 6px; }
+.demo-sections::-webkit-scrollbar-track { background: transparent; }
+.demo-sections::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+.demo-sections::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
 
 .demo-section-pill {
   font-size: 10px;

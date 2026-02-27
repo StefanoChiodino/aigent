@@ -729,11 +729,50 @@ const browserExtTool: ToolDef = {
   },
 };
 
+const askUserTool: ToolDef = {
+  name: 'ask_user',
+  description:
+    'Present a question to the user and wait for their response. ' +
+    'Use this to gather input, preferences, or decisions. ' +
+    'Supports free-text input, single-select, and multi-select with labeled options. ' +
+    'Blocks until the user responds or dismisses.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      question: {
+        type: 'string',
+        description: 'The question or prompt to display to the user.',
+      },
+      options: {
+        type: 'array',
+        description: 'Selectable options. Each has a label and optional description.',
+        items: {
+          type: 'object',
+          properties: {
+            label: { type: 'string', description: 'Short option label.' },
+            description: { type: 'string', description: 'Optional longer description.' },
+          },
+          required: ['label'],
+        },
+      },
+      multi_select: {
+        type: 'boolean',
+        description: 'If true and options provided, allow selecting multiple. Default: false.',
+      },
+      allow_free_text: {
+        type: 'boolean',
+        description: 'If true, show a free-text input (in addition to or instead of options). Default: true when no options, false when options provided.',
+      },
+    },
+    required: ['question'],
+  },
+};
+
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
   hostTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
-  searchMemoryTool, browserExtTool,
+  searchMemoryTool, browserExtTool, askUserTool,
 ];
 
 /**
@@ -770,8 +809,9 @@ interface RequestConfigWriteInput { file: string; content: string; reason: strin
 interface HostEditFileInput { path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
 interface SwitchModelInput { model: string; reason?: string }
 interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: Record<string, unknown>[]; url?: string }
+interface AskUserInput { question: string; options?: { label: string; description?: string }[]; multi_select?: boolean; allow_free_text?: boolean }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput | AskUserInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -863,6 +903,11 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
         return `browser: run_script (${n} step${n === 1 ? '' : 's'})`;
       }
       return rootSelector ? `browser: ${action} (${rootSelector})` : `browser: ${action}`;
+    }
+    case 'ask_user': {
+      const { question } = input as AskUserInput;
+      const short = question.length > 60 ? question.slice(0, 60) + '...' : question;
+      return `ask: ${short}`;
     }
     default:
       return name;
@@ -1524,6 +1569,19 @@ export async function executeTool(
       if (steps !== undefined) params.steps = steps;
       if (url !== undefined) params.url = url;
       return requestBrowserExt(action, params, signal);
+    }
+
+    case 'ask_user': {
+      const { question, options, multi_select, allow_free_text } = input as AskUserInput;
+      const { requestUserQuestion } = await import('./server.js');
+      const res = await requestUserQuestion(question, options, multi_select, allow_free_text, signal);
+      if (res.dismissed) {
+        return 'User dismissed the question without answering.';
+      }
+      if (res.selectedOptions && res.selectedOptions.length > 0) {
+        return `User selected: ${res.selectedOptions.join(', ')}`;
+      }
+      return `User responded: ${res.answer}`;
     }
 
     default:

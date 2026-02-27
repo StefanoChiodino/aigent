@@ -710,6 +710,82 @@ function resolveEditFileRequest(id: string, response: { ok: boolean; message: st
   }
 }
 
+// --- User question request handling ---
+
+const pendingUserQuestionRequests = new Map<string, {
+  question: string;
+  options?: { label: string; description?: string }[];
+  multiSelect?: boolean;
+  allowFreeText?: boolean;
+  resolve: (response: { answer: string; selectedOptions?: string[]; dismissed: boolean }) => void;
+}>();
+let userQuestionCounter = 0;
+
+/**
+ * Present a question to the user and wait for their response.
+ * Broadcasts a user_question_request event to the UI and blocks until the user answers or dismisses.
+ */
+export function requestUserQuestion(
+  question: string,
+  options?: { label: string; description?: string }[],
+  multiSelect?: boolean,
+  allowFreeText?: boolean,
+  signal?: AbortSignal,
+): Promise<{ answer: string; selectedOptions?: string[]; dismissed: boolean }> {
+  const id = `question_${++userQuestionCounter}`;
+
+  if (signal?.aborted) {
+    return Promise.resolve({ answer: '', dismissed: true });
+  }
+
+  return new Promise((resolve) => {
+    const finish = (response: { answer: string; selectedOptions?: string[]; dismissed: boolean }) => {
+      pendingUserQuestionRequests.delete(id);
+      resolve(response);
+    };
+
+    const onAbort = () => finish({ answer: '', dismissed: true });
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      finish({ answer: '', dismissed: true });
+    }, 300_000); // 5 minute timeout
+
+    pendingUserQuestionRequests.set(id, {
+      question,
+      ...(options !== undefined && { options }),
+      ...(multiSelect !== undefined && { multiSelect }),
+      ...(allowFreeText !== undefined && { allowFreeText }),
+      resolve: (response) => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        finish(response);
+      },
+    });
+
+    broadcast({
+      type: 'user_question_request',
+      id,
+      question,
+      ...(options ? { options } : {}),
+      ...(multiSelect !== undefined ? { multiSelect } : {}),
+      ...(allowFreeText !== undefined ? { allowFreeText } : {}),
+    });
+  });
+}
+
+function resolveUserQuestionRequest(
+  id: string,
+  response: { answer: string; selectedOptions?: string[]; dismissed: boolean },
+): void {
+  const pending = pendingUserQuestionRequests.get(id);
+  if (pending) {
+    pendingUserQuestionRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
 // --- Background task queue ---
 
 import { TaskQueue } from './tasks.js';
@@ -814,7 +890,7 @@ async function processAgentTurn(
   // System prompt instructions get buried in long conversations; a user-turn
   // reminder is far more reliable at keeping the model concise.
   if (currentShort && !isTaskResult) {
-    const shortReminder = '\n\n[SHORT MODE — respond with <speak>1-2 sentence summary</speak> first, then optional brief body. Be concise.]';
+    const shortReminder = '\n\n[SHORT MODE — HARD LIMIT 100 WORDS. <speak>1-2 sentences</speak> first, then at most 1-3 sentences. No blockquotes, no long content, no before/after comparisons. If content is needed, use a tool.]';
     if (typeof userContent === 'string') {
       userContent = userContent + shortReminder;
     } else if (Array.isArray(userContent)) {
@@ -1609,6 +1685,16 @@ function handleClient(socket: Socket): void {
   for (const [id, req] of pendingExecRequests) {
     send(socket, { type: 'exec_request', id, command: req.command });
   }
+  for (const [id, req] of pendingUserQuestionRequests) {
+    send(socket, {
+      type: 'user_question_request',
+      id,
+      question: req.question,
+      ...(req.options ? { options: req.options } : {}),
+      ...(req.multiSelect !== undefined ? { multiSelect: req.multiSelect } : {}),
+      ...(req.allowFreeText !== undefined ? { allowFreeText: req.allowFreeText } : {}),
+    });
+  }
 
   socket.on('data', (data) => {
     buffer += data.toString();
@@ -1757,6 +1843,13 @@ function handleClient(socket: Socket): void {
             break;
           case 'browser_ext_result':
             resolveBrowserExtRequest(cmd.id, cmd);
+            break;
+          case 'user_question_response':
+            resolveUserQuestionRequest(cmd.id, {
+              answer: cmd.answer,
+              ...(cmd.selectedOptions !== undefined && { selectedOptions: cmd.selectedOptions }),
+              dismissed: cmd.dismissed,
+            });
             break;
           case 'context_breakdown_request':
             try {
@@ -1976,6 +2069,8 @@ function buildExtraSystemPrompt(): string {
 
 You are in voice conversation mode. Your output is read aloud via TTS. Brevity is non-negotiable.
 
+HARD LIMIT: Your entire response (speak block + body) must be under 100 words. No exceptions.
+
 FORMAT — every single response, no exceptions:
 
 <speak>One or two natural sentences. Plain English. No markdown, no code, no lists.</speak>
@@ -1991,7 +2086,9 @@ RULES:
 2. The speak content is 1-2 sentences max — it will be read aloud to a human.
 3. After the speak block: at most 1-3 brief sentences. If the speak block fully answers the question, stop there.
 4. When using tools, still begin your final text response with <speak>.
-5. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.`;
+5. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.
+6. NEVER include long-form content in your response — no blockquotes, no before/after comparisons, no full paragraphs of quoted text. If the user needs to see content, write it to a file or use a tool. Your text response stays short.
+7. This applies even when showing diffs, edits, rewrites, or comparisons. Describe the change in 1-2 sentences; do not reproduce the content.`;
   }
   return extra;
 }

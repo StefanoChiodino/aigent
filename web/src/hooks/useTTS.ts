@@ -37,6 +37,29 @@ let ttsChunkPlaying = false;
 let ttsStreamFetchCtrls: AbortController[] = [];
 const ttsStreamLastLen = { current: 0 };
 
+/** Split text into sentence-sized chunks for pipelined TTS. */
+function splitIntoSentences(text: string): string[] {
+  const re = /[.!?]['"\u00BB]?\s+|\n\n/g;
+  const chunks: string[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const end = m.index + m[0].length;
+    const chunk = text.slice(last, end).trim();
+    if (chunk) chunks.push(chunk);
+    last = end;
+  }
+  // Remainder after the last sentence boundary
+  const tail = text.slice(last).trim();
+  if (tail) chunks.push(tail);
+  return chunks;
+}
+
+/** Get the current TTS audio element (for connecting an AnalyserNode). */
+export function getTtsAudioElement(): HTMLAudioElement | null {
+  return ttsAudio;
+}
+
 /** Stop all TTS playback — callable outside of React (e.g. from useMic). */
 export function ttsStopAll(): void {
   for (const ctrl of ttsStreamFetchCtrls) ctrl.abort();
@@ -200,39 +223,26 @@ export function useTTS(): TTSControls {
       return;
     }
 
-    const ratePct = getRatePct();
-    const rateStr = ratePct >= 0 ? `+${ratePct}%` : `${ratePct}%`;
-    const ctrl = new AbortController();
-    ttsAbortCtrl = ctrl;
+    // Split text into sentence chunks so the first sentence starts playing
+    // immediately while the rest synthesize in the background.
+    const sentences = splitIntoSentences(stripped);
+    if (sentences.length === 0) { onDone?.(); return; }
 
-    useVoiceStore.getState().setTtsPlaying(true);
-    fetch(`/tts?rate=${encodeURIComponent(rateStr)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: stripped,
-      signal: ctrl.signal,
-    }).then(async (resp) => {
-      if (!resp.ok) throw new Error('TTS unavailable');
-      const blob = await resp.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      if (ttsAbortCtrl !== ctrl) { URL.revokeObjectURL(blobUrl); return; }
-      const audio = new Audio(blobUrl);
-      ttsAudio = audio;
-      audio.onended = () => {
-        URL.revokeObjectURL(blobUrl);
-        ttsAudio = null;
-        if (ttsAbortCtrl === ctrl) ttsAbortCtrl = null;
-        useVoiceStore.getState().setTtsPlaying(false);
-        onDone?.();
+    // Use the streaming chunk queue — enqueue each sentence, then attach
+    // onDone to fire after the last chunk finishes playing.
+    for (const sentence of sentences) {
+      enqueueChunk(sentence);
+    }
+
+    // When onDone is provided, poll for queue drain and call it.
+    if (onDone) {
+      const checkDone = () => {
+        if (!ttsChunkPlaying && ttsChunkQueue.length === 0) { onDone(); return; }
+        setTimeout(checkDone, 100);
       };
-      await applySinkId(audio);
-      void audio.play();
-    }).catch((err: unknown) => {
-      if (err instanceof Error && err.name === 'AbortError') return;
-      if (ttsAbortCtrl === ctrl) ttsAbortCtrl = null;
-      useVoiceStore.getState().setTtsPlaying(false);
-    });
-  }, [stopAll]);
+      checkDone();
+    }
+  }, [stopAll, enqueueChunk]);
 
   return { speakText, stopAll, stopStream, enqueueChunk, flushStream, ttsStreamLastLen };
 }

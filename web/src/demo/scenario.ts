@@ -680,21 +680,21 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 5.5: Background themes showcase
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'label', text: 'Theme: Circuit', id: 'themes' },
+    { action: 'label', text: 'Theme: Matrix', id: 'themes' },
     wait(1000),
-    { action: 'set_theme', theme: 'circuit' },
-    wait(4000),
-
-    { action: 'label', text: 'Theme: Matrix' },
     { action: 'set_theme', theme: 'matrix' },
     wait(4000),
 
-    { action: 'label', text: 'Theme: Constellation' },
-    { action: 'set_theme', theme: 'constellation' },
+    { action: 'label', text: 'Theme: Spectrum' },
+    { action: 'set_theme', theme: 'spectrum' },
     wait(4000),
 
-    { action: 'label', text: 'Theme: Topology' },
-    { action: 'set_theme', theme: 'topology' },
+    { action: 'label', text: 'Theme: Milkdrop' },
+    { action: 'set_theme', theme: 'milkdrop' },
+    wait(4000),
+
+    { action: 'label', text: 'Theme: Circular Spectrum' },
+    { action: 'set_theme', theme: 'circular' },
     wait(4000),
 
     { action: 'label', text: 'Theme: Ember' },

@@ -140,6 +140,10 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     default: 'aurora',
     options: [
       { value: 'aurora', label: 'Aurora (fluid blobs)' },
+      { value: 'spectrum', label: 'Spectrum (frequency bars)' },
+      { value: 'oscilloscope', label: 'Oscilloscope (waveform)' },
+      { value: 'circular', label: 'Circular (radial spectrum)' },
+      { value: 'milkdrop', label: 'Milkdrop (psychedelic)' },
       { value: 'circuit', label: 'Circuit (hex network)' },
       { value: 'matrix', label: 'Matrix (digital rain)' },
       { value: 'constellation', label: 'Constellation (starfield)' },

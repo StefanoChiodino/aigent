@@ -9,6 +9,8 @@ Stick to this general plan for any non-trivial change:
 4. Update @README.md
 5. Update demo website
 6. Add/update e2e and unit tests
+7. commit
+8. push
 
 ## What This Is
 

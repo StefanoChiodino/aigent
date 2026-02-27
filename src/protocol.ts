@@ -34,6 +34,7 @@ export type ClientCommand =
   | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string }
   | { type: 'browser_write_response'; id: string; ok: boolean; message: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
+  | { type: 'user_question_response'; id: string; answer: string; selectedOptions?: string[]; dismissed: boolean }
   | { type: 'ping' };
 
 // --- Server → Client ---
@@ -138,6 +139,7 @@ export type ServerEvent =
   | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; steps?: unknown[]; url?: string; autonomousCmd?: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'classifier_decision'; tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
+  | { type: 'user_question_request'; id: string; question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean; allowFreeText?: boolean }
   | { type: 'reset' }
   | { type: 'pong' };
 

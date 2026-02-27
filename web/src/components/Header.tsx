@@ -8,6 +8,7 @@ import { usePiP } from '../hooks/usePiP';
 import type { MountInfo, BackgroundTaskInfo } from '../types';
 import { CAP_INFO, GRANT_DESCRIPTIONS } from '../lib/capabilities';
 
+
 function modelDisplayName(id: string): string {
   const m = id.match(/^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/);
   if (m) {
