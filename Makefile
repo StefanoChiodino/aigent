@@ -1,4 +1,4 @@
-.PHONY: dev dev-ts serve web web-dev build rebuild typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup kill-ports plugin plugin-dev plugin-typecheck
+.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup kill-ports plugin plugin-dev plugin-typecheck
 
 # --- Development ---
 
@@ -35,14 +35,6 @@ web:
 
 web-dev:
 	npx vite dev --config web/vite.config.ts
-
-# --- Build ---
-
-build:
-	docker compose build aigent
-
-rebuild:
-	docker compose build --no-cache aigent
 
 # --- Quality gate (run before every commit) ---
 
@@ -91,7 +83,7 @@ plugin-typecheck:
 clean:
 	rm -rf dist/ web/dist/ aigent-extension/dist/
 
-# Kill any lingering processes on dev ports and stale worker containers before starting
+# Kill any lingering processes on dev ports before starting
 kill-ports:
 	@for port in 3141 8765 8766; do \
 		pid=$$(lsof -ti tcp:$$port 2>/dev/null); \
@@ -100,11 +92,6 @@ kill-ports:
 			kill $$pid 2>/dev/null || true; \
 		fi; \
 	done
-	@stale=$$(docker ps -q --filter 'name=aigent-worker-' 2>/dev/null); \
-	if [ -n "$$stale" ]; then \
-		echo "--> Stopping stale aigent-worker containers"; \
-		docker stop $$stale 2>/dev/null || true; \
-	fi
 
 # --- STT (Parakeet speech-to-text sidecar) ---
 

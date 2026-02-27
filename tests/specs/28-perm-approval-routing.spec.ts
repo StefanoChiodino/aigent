@@ -32,51 +32,6 @@ async function getNewSystemMessages(
 test.describe('@fast Permission Approval Routing', () => {
   const getPage = useSharedPage();
 
-  test('approving a mount request does not produce "Unknown command"', async () => {
-    const page = getPage();
-
-    await injectEvent({ type: 'mount_request', id: 'route_m1', path: '/tmp/test-route', mode: 'rw' });
-    await expectVisible(page.locator('#perm-overlay'));
-
-    // Timestamp just before the approval action
-    const before = await page.evaluate(() => Date.now());
-
-    await page.locator('#perm-approve-btn').click();
-    await expectHidden(page.locator('#perm-overlay'));
-
-    // Wait for any system message to arrive from the server
-    // Negative assertion: wait for any error message to arrive (500ms is enough
-    // for a server round-trip; we're checking that nothing bad happened).
-    await page.waitForTimeout(500);
-
-    // Only check system messages that arrived after the button click
-    const msgs = await getNewSystemMessages(page, before);
-    for (const text of msgs) {
-      expect(text).not.toContain('Unknown command');
-    }
-  });
-
-  test('denying a mount request does not produce "Unknown command"', async () => {
-    const page = getPage();
-
-    await injectEvent({ type: 'mount_request', id: 'route_m2', path: '/tmp/test-route', mode: 'ro' });
-    await expectVisible(page.locator('#perm-overlay'));
-
-    const before = await page.evaluate(() => Date.now());
-
-    await page.locator('#perm-deny-btn').click();
-    await expectHidden(page.locator('#perm-overlay'));
-
-    // Negative assertion: wait for any error message to arrive (500ms is enough
-    // for a server round-trip; we're checking that nothing bad happened).
-    await page.waitForTimeout(500);
-
-    const msgs = await getNewSystemMessages(page, before);
-    for (const text of msgs) {
-      expect(text).not.toContain('Unknown command');
-    }
-  });
-
   test('approving an exec request does not produce "Unknown command"', async () => {
     const page = getPage();
 

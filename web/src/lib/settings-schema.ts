@@ -23,9 +23,6 @@ export const COMMANDS: CommandDef[] = [
   { name: '/save',      desc: 'Save session' },
   { name: '/sessions',  desc: 'List sessions' },
   { name: '/load',      desc: 'Load session',              argHint: '<id>' },
-  { name: '/mount',     desc: 'Mount folder into sandbox', argHint: '<path> [ro|rw]' },
-  { name: '/unmount',   desc: 'Remove a mount',            argHint: '<path>' },
-  { name: '/mounts',    desc: 'List active mounts' },
   { name: '/grant',     desc: 'Approve pending request' },
   { name: '/deny',      desc: 'Deny pending request' },
   { name: '/approve',        desc: 'Approve config write' },
@@ -311,7 +308,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'exec_perm_alwaysAllow',
     label: 'Always Allow',
-    desc: 'Commands matching these glob patterns are always run without prompting.',
+    desc: 'One pattern per line. "ls" = ls and ls <args>. "git *" = any git subcommand. "*" = allow all. "?" = single char.',
     group: 'Permissions',
     type: 'string-list',
     default: '[]',
@@ -320,7 +317,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'exec_perm_deny',
     label: 'Always Deny',
-    desc: 'Commands matching these glob patterns are always blocked.',
+    desc: 'One pattern per line. Same syntax as Allow. Deny rules always win over Allow.',
     group: 'Permissions',
     type: 'string-list',
     default: '[]',
@@ -329,7 +326,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'fetch_perm_alwaysAllow',
     label: 'Always Allow',
-    desc: 'URLs or hostname glob patterns always fetched without prompting.',
+    desc: 'One pattern per line. "example.com" = hostname. "*.example.com" = subdomains. "https://api.example.com/v1/*" = URL prefix. "*" = allow all.',
     group: 'Fetch Permissions',
     type: 'string-list',
     default: '[]',
@@ -338,7 +335,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'fetch_perm_deny',
     label: 'Always Deny',
-    desc: 'Hostnames matching these glob patterns are always blocked.',
+    desc: 'One pattern per line. Same syntax as Allow. Deny rules always win over Allow.',
     group: 'Fetch Permissions',
     type: 'string-list',
     default: '[]',

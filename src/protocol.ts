@@ -20,7 +20,6 @@ export type ClientCommand =
   | { type: 'message'; content: string; images?: { mediaType: string; data: string }[]; attachments?: { name: string; mediaType: string; data: string; thumbnail?: string }[]; thinkingOverride?: ThinkingLevel }
   | { type: 'cancel' }
   | { type: 'command'; cmd: string }
-  | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
   | { type: 'config_write_response'; id: string; ok: boolean; message: string }
   | { type: 'edit_file_response'; id: string; ok: boolean; message: string }
   | { type: 'exec_response'; id: string; ok: boolean; alwaysAllow?: boolean; message: string }
@@ -119,7 +118,6 @@ export type ServerEvent =
   | { type: 'error'; message: string }
   | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string; concise?: boolean; availableModels?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
-  | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number; fallbackHint?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'edit_file_request'; id: string; path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
@@ -139,13 +137,11 @@ export type ServerEvent =
 // --- Worker → Gatekeeper (capability/mount requests) ---
 
 export type WorkerRequest =
-  | { type: 'mount_request'; id: string; path: string; mode: 'ro' | 'rw'; reason?: string; durationMinutes?: number; fallbackHint?: string }
   | { type: 'capability_request'; id: string; capability: string; params: Record<string, unknown>; reason?: string };
 
 // --- Gatekeeper → Worker (responses to requests) ---
 
 export type GatekeeperResponse =
-  | { type: 'mount_response'; id: string; ok: boolean; containerPath?: string; message: string }
   | { type: 'capability_response'; id: string; ok: boolean; result?: unknown; message: string };
 
 // Socket directory — shared mount between host and container.

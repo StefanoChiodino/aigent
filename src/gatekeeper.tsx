@@ -1,29 +1,26 @@
 #!/usr/bin/env tsx
 /**
- * Gatekeeper — runs on the host, manages the Docker sandbox and web UI.
- * (Touched to restart tsx watcher — 2026-02-25, query-string stripping in web-bridge)
+ * Gatekeeper — runs on the host, spawns the server process directly.
  *
  * Responsibilities:
- *   - Container lifecycle (start, stop, restart with updated mounts)
- *   - Mount management (add/remove folders, ro/rw, timed grants)
- *   - LLM proxy (API keys never enter the sandbox)
+ *   - Server process lifecycle (start, stop, restart)
+ *   - Three-tier command safety (static deny → static allow → Haiku classifier)
+ *   - LLM proxy (API keys never enter the server process)
  *   - Web UI bridge (WebSocket ↔ Unix socket)
  *   - OS bridge (clipboard, audio, etc.)
- *
- * The gatekeeper intercepts certain commands before they reach the worker:
- *   /mount, /unmount, /mounts — handled locally
- *   Everything else — forwarded to the worker
+ *   - File watcher for self-modification auto-restart
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createWriteStream } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
-import { checkExecPermission, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions } from './safety.js';
+import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, parseCommandPipeline } from './safety.js';
+import { initClassifier, classifyCommand, isClassifierAvailable } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
 import { buildDisplayDiff } from './diff.js';
 
@@ -52,19 +49,7 @@ const REPO_DIR = resolve(__dirname, '..');
 
 // --- Types ---
 
-interface Mount {
-  hostPath: string;        // Absolute path on host
-  containerPath: string;   // Path inside container (mirrors host path exactly)
-  mode: 'ro' | 'rw';
-  expiresAt?: number;      // Timestamp for timed grants
-  durationMinutes?: number; // Granted duration (for UI progress bar)
-  implicit?: boolean;      // true for docker-compose.yml built-in mounts (not passed as -v)
-  originalMode?: 'ro' | 'rw'; // set when an implicit mount is upgraded (tracks pre-upgrade mode)
-}
-
 interface GatekeeperArgs {
-  projectFolder?: string;
-  writeAccess: boolean;
   model?: string;
   thinking?: string;
   headless: boolean;
@@ -75,21 +60,12 @@ interface GatekeeperArgs {
 
 // --- State ---
 
-const mounts: Mount[] = [
-  // Implicit mounts from docker-compose.yml — shown in UI but not passed as -v flags.
-  { hostPath: resolve(REPO_DIR), containerPath: '/app', mode: 'ro', implicit: true },
-  { hostPath: resolve(REPO_DIR, 'workspace'), containerPath: '/workspace', mode: 'rw', implicit: true },
-  { hostPath: resolve(REPO_DIR, 'workspace', 'config'), containerPath: '/workspace/config', mode: 'ro', implicit: true },
-];
-let containerProcess: ChildProcess | null = null;
-let containerName = '';
+let serverProcess: ChildProcess | null = null;
 let gatekeeperArgs: GatekeeperArgs;
 let client: InstanceType<typeof import('./client.js').AgentClient> | null = null;
 let isRestarting = false;
 
-// Container name prefix — namespaced so test instances don't kill dev containers.
-const CONTAINER_PREFIX = process.env['AIGENT_TEST_MODE'] ? 'aigent-test-worker' : 'aigent-worker';
-// In test mode the container is not started, so injected requests are never registered
+// In test mode the server is not started, so injected requests are never registered
 // in the pending maps. Suppress "no pending X" error messages to keep tests clean.
 const IS_TEST_MODE = process.env['AIGENT_TEST_MODE'] === '1';
 
@@ -97,13 +73,11 @@ const IS_TEST_MODE = process.env['AIGENT_TEST_MODE'] === '1';
 
 function parseArgs(): GatekeeperArgs {
   const args = process.argv.slice(2);
-  const result: GatekeeperArgs = { writeAccess: false, headless: false };
+  const result: GatekeeperArgs = { headless: false };
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
-    if (arg === '--rw') {
-      result.writeAccess = true;
-    } else if (arg === '--model' && args[i + 1]) {
+    if (arg === '--model' && args[i + 1]) {
       result.model = args[++i]!;
     } else if (arg === '--thinking' && args[i + 1]) {
       result.thinking = args[++i]!;
@@ -116,12 +90,11 @@ function parseArgs(): GatekeeperArgs {
     } else if (arg === '--api-key' && args[i + 1]) {
       result.apiKey = args[++i]!;
     } else if (arg === '--help' || arg === '-h') {
-      console.log(`aigent — AI agent with sandboxed execution
+      console.log(`aigent — AI agent with three-tier command safety
 
-Usage: aigent [project-folder] [options]
+Usage: aigent [options]
 
 Options:
-  --rw                   Mount project folder read-write (default: read-only)
   --model <model>        Model to use (default: claude-opus-4-6)
   --thinking <level>     Thinking level: off, low, medium, high, max
   --headless             Web UI only, no terminal interface
@@ -131,29 +104,20 @@ Options:
 
 Examples:
   aigent                                         # Anthropic (from env or ~/.config/aigent/provider.json)
-  aigent ~/projects/myapp                        # Mount project read-only
-  aigent ~/projects/myapp --rw                   # Mount project read-write
   aigent --headless                              # Web UI only at localhost:3141
   aigent --provider openai --base-url http://localhost:11434/v1 --api-key x  # Ollama
 
 Persistent config (~/.config/aigent/provider.json):
   { "provider": "openai", "baseURL": "http://localhost:11434/v1", "apiKey": "your-token" }
-
-Mount management (in the web UI or via slash commands):
-  /mount <path> [ro|rw]   Mount a host folder into the sandbox
-  /unmount <path>          Remove a mount (sandbox restarts)
-  /mounts                  List active mounts
 `);
       process.exit(0);
-    } else if (!arg.startsWith('-')) {
-      result.projectFolder = resolve(arg);
     }
   }
 
   return result;
 }
 
-// --- Mount management ---
+// --- Utility ---
 
 /** Resolve ~ and relative paths. */
 function resolveHostPath(input: string): string {
@@ -161,129 +125,6 @@ function resolveHostPath(input: string): string {
     return resolve(homedir(), input.slice(2));
   }
   return resolve(input);
-}
-
-/** Generate a container mount path from a host path. */
-function toContainerPath(hostPath: string): string {
-  // Mirror the host path exactly so the agent never has to guess or translate.
-  return hostPath;
-}
-
-/** Reverse-map a container path to a host path.
- *  Container paths mirror host paths, so this is mostly a passthrough with
- *  prefix matching for the implicit /app and /workspace mounts. */
-function resolveContainerToHost(containerPath: string): string | null {
-  // Check dynamic mounts first (container path mirrors host path)
-  for (const m of mounts) {
-    if (containerPath === m.containerPath || containerPath.startsWith(m.containerPath + '/')) {
-      const relative = containerPath.slice(m.containerPath.length);
-      return m.hostPath + relative;
-    }
-  }
-
-  // Implicit mount: /app → REPO_DIR (from docker-compose.yml)
-  if (containerPath === '/app' || containerPath.startsWith('/app/')) {
-    const relative = containerPath.slice('/app'.length);
-    return REPO_DIR + relative;
-  }
-
-  // Implicit mount: /workspace → REPO_DIR/workspace
-  if (containerPath === '/workspace' || containerPath.startsWith('/workspace/')) {
-    const relative = containerPath.slice('/workspace'.length);
-    return resolve(REPO_DIR, 'workspace') + relative;
-  }
-
-  return null;
-}
-
-/** Paths that must never be mounted. */
-const FORBIDDEN_PATHS = ['/', '/etc', '/var', '/usr', '/bin', '/sbin', '/lib', '/boot', '/dev', '/proc', '/sys'];
-
-function isForbiddenPath(hostPath: string): boolean {
-  const normalized = resolve(hostPath);
-  return FORBIDDEN_PATHS.includes(normalized) || normalized === homedir();
-}
-
-function findMount(hostPath: string): Mount | undefined {
-  const normalized = resolve(hostPath);
-  return mounts.find((m) => m.hostPath === normalized);
-}
-
-function addMount(hostPath: string, mode: 'ro' | 'rw', expiresAt?: number, durationMinutes?: number): { ok: boolean; message: string } {
-  const normalized = resolve(hostPath);
-
-  if (isForbiddenPath(normalized)) {
-    return { ok: false, message: `Refusing to mount ${normalized} — sensitive path` };
-  }
-
-  if (!existsSync(normalized)) {
-    return { ok: false, message: `Path does not exist: ${normalized}` };
-  }
-
-  const existing = findMount(normalized);
-  if (existing) {
-    if (existing.implicit) {
-      if (existing.mode === mode) {
-        return { ok: false, message: `Already a built-in mount: ${normalized} (${existing.mode})` };
-      }
-      // Allow upgrading implicit mounts (e.g., ro → rw)
-      existing.originalMode ??= existing.mode;
-      existing.mode = mode;
-      if (expiresAt !== undefined) existing.expiresAt = expiresAt;
-      if (durationMinutes !== undefined) existing.durationMinutes = durationMinutes;
-      return { ok: true, message: `Upgraded ${normalized} from ${existing.originalMode} to ${mode}.` };
-    }
-    if (existing.mode === mode) {
-      return { ok: false, message: `Already mounted: ${normalized} (${mode})` };
-    }
-    // Upgrade/downgrade mode
-    existing.mode = mode;
-    if (expiresAt !== undefined) existing.expiresAt = expiresAt;
-    return { ok: true, message: `Updated ${normalized} to ${mode}.` };
-  }
-
-  mounts.push({
-    hostPath: normalized,
-    containerPath: toContainerPath(normalized),
-    mode,
-    ...(expiresAt !== undefined ? { expiresAt } : {}),
-    ...(durationMinutes !== undefined ? { durationMinutes } : {}),
-  });
-
-  return { ok: true, message: `Mounted ${normalized} (${mode}).` };
-}
-
-function removeMount(hostPath: string): { ok: boolean; message: string } {
-  const normalized = resolve(hostPath);
-  const idx = mounts.findIndex((m) => m.hostPath === normalized);
-  if (idx === -1) {
-    return { ok: false, message: `Not mounted: ${normalized}` };
-  }
-  if (mounts[idx]!.implicit) {
-    if (mounts[idx]!.originalMode) {
-      // Revert upgraded implicit mount to its original mode
-      mounts[idx]!.mode = mounts[idx]!.originalMode!;
-      delete mounts[idx]!.originalMode;
-      delete mounts[idx]!.expiresAt;
-      delete mounts[idx]!.durationMinutes;
-      return { ok: true, message: `Reverted ${normalized} to ${mounts[idx]!.mode}.` };
-    }
-    return { ok: false, message: `Cannot unmount built-in mount: ${normalized}` };
-  }
-  mounts.splice(idx, 1);
-  return { ok: true, message: `Unmounted ${normalized}.` };
-}
-
-function listMounts(): string {
-  if (mounts.length === 0) return 'No active mounts.';
-  const lines = mounts.map((m) => {
-    const tag = m.implicit
-      ? (m.originalMode ? ` [built-in, upgraded ${m.originalMode}→${m.mode}]` : ' [built-in]')
-      : '';
-    const expiry = m.expiresAt ? ` (expires ${new Date(m.expiresAt).toLocaleTimeString()})` : '';
-    return `  ${m.hostPath} → ${m.containerPath} (${m.mode})${tag}${expiry}`;
-  });
-  return `Active mounts:\n${lines.join('\n')}`;
 }
 
 /** Read capability permissions from the host daemon's config file. */
@@ -314,150 +155,179 @@ function readCapabilities(): Record<string, string> {
   }
 }
 
-/** Push current host state (mounts + capabilities) to all UI listeners. */
+/** Push current host state (capabilities) to all UI listeners. */
 function emitHostState(): void {
   if (!client) return;
   client.emit(
     'host_state',
-    mounts.map((m) => ({
-      hostPath: m.hostPath,
-      containerPath: m.containerPath,
-      mode: m.mode,
-      ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
-      ...(m.durationMinutes !== undefined ? { durationMinutes: m.durationMinutes } : {}),
-      ...(m.originalMode !== undefined ? { originalMode: m.originalMode } : {}),
-    })),
+    [], // No mounts — agent runs on host with direct filesystem access
     readCapabilities(),
   );
 }
 
-// --- Container lifecycle ---
+// --- Server lifecycle (direct spawn, no Docker) ---
 
-function buildDockerArgs(): string[] {
-  const args: string[] = [
-    'compose', 'run', '--rm', '-T',
-    '--name', containerName,
-  ];
+// Crash restart rate limiting
+const MAX_CRASH_RESTARTS = 3;
+const CRASH_WINDOW_MS = 30_000;
+let crashTimestamps: number[] = [];
 
-  // Socket directory
-  args.push('-v', `${SOCKET_DIR}:${SOCKET_DIR}`);
+function startServerProcess(): void {
+  const serverEntry = resolve(__dirname, 'server.ts');
+  const tsconfig = resolve(REPO_DIR, 'tsconfig.json');
 
-  // Dynamic mounts (skip implicit ones — those come from docker-compose.yml)
-  for (const mount of mounts) {
-    if (mount.implicit && !mount.originalMode) continue;  // unchanged implicit — from compose
-    args.push('-v', `${mount.hostPath}:${mount.containerPath}:${mount.mode}`);
-  }
+  log.info('Starting server...');
 
-  // Environment — CLI flags take precedence over .env values
-  const model = gatekeeperArgs.model ?? process.env['AIGENT_MODEL'];
-  if (model) {
-    args.push('-e', `AIGENT_MODEL=${model}`);
-  }
-  const thinking = gatekeeperArgs.thinking ?? process.env['AIGENT_THINKING'];
-  if (thinking) {
-    args.push('-e', `AIGENT_THINKING=${thinking}`);
-  }
-  if (process.env['AIGENT_DEBUG']) {
-    args.push('-e', `AIGENT_DEBUG=${process.env['AIGENT_DEBUG']}`);
-  }
-  if (process.env['AIGENT_LOG_LEVEL']) {
-    args.push('-e', `AIGENT_LOG_LEVEL=${process.env['AIGENT_LOG_LEVEL']}`);
-  }
-  // Pass socket dir so the container uses the same namespaced path as the host.
-  if (process.env['AIGENT_SOCKET_DIR']) {
-    args.push('-e', `AIGENT_SOCKET_DIR=${process.env['AIGENT_SOCKET_DIR']}`);
-  }
-
-  args.push('aigent');
-  return args;
-}
-
-async function startContainer(): Promise<void> {
-  containerName = `${CONTAINER_PREFIX}-${Date.now()}`;
-
-  const dockerArgs = buildDockerArgs();
-  log.info('Starting sandbox...');
-  const userMounts = mounts.filter((m) => !m.implicit);
-  if (userMounts.length > 0) {
-    for (const m of userMounts) {
-      log.info('Mount', { path: m.hostPath, mode: m.mode });
-    }
-  }
-
-  containerProcess = spawn('docker', dockerArgs, {
-    stdio: ['ignore', 'pipe', 'pipe'],
+  serverProcess = spawn('tsx', ['--tsconfig', tsconfig, serverEntry], {
+    stdio: ['pipe', 'pipe', 'pipe'],
     cwd: REPO_DIR,
+    env: {
+      ...process.env,
+      AIGENT_WORKSPACE: process.env['AIGENT_WORKSPACE'] ?? resolve(REPO_DIR, 'workspace'),
+    },
   });
 
-  // Pipe container stdout/stderr to log file instead of terminal.
-  // Without this, server console.error (via worker → container → gatekeeper) corrupts the TUI.
-  // { end: false } prevents pipe from closing logStream when the container exits.
-  containerProcess.stdout?.pipe(logStream, { end: false });
-  containerProcess.stderr?.pipe(logStream, { end: false });
+  // Pipe server output to log file instead of terminal
+  serverProcess.stdout?.pipe(logStream, { end: false });
+  serverProcess.stderr?.pipe(logStream, { end: false });
 
-  containerProcess.on('error', (err) => {
-    log.error('Failed to start container', { error: err.message });
+  serverProcess.on('error', (err) => {
+    log.error('Failed to start server', { error: err.message });
     if (!isRestarting) process.exit(1);
   });
 
-  containerProcess.on('exit', (code, signal) => {
-    containerProcess = null;
-    if (!isRestarting) {
-      log.info('Sandbox exited', { code, signal });
-      cleanupSocket();
-      process.exit(code ?? 1);
-    }
-  });
+  serverProcess.on('exit', (code, signal) => {
+    serverProcess = null;
 
-  // Wait for socket
-  await waitForSocket();
-  log.info('Sandbox ready');
+    if (isRestarting) {
+      setTimeout(startServerProcess, 300);
+      return;
+    }
+
+    // Code 100 = /restart command — clean restart
+    if (code === 100) {
+      log.info('Restart requested — restarting server');
+      setTimeout(startServerProcess, 300);
+      return;
+    }
+
+    // Unexpected crash — restart with rate limiting
+    if (signal !== 'SIGTERM' && signal !== 'SIGINT' && code !== 0) {
+      const now = Date.now();
+      crashTimestamps = crashTimestamps.filter((t) => now - t < CRASH_WINDOW_MS);
+      crashTimestamps.push(now);
+
+      if (crashTimestamps.length >= MAX_CRASH_RESTARTS) {
+        log.error('Crash loop — stopping', { crashes: crashTimestamps.length });
+        process.exit(1);
+      }
+
+      log.warn('Server crashed — restarting', { code, signal, crashes: crashTimestamps.length });
+      setTimeout(startServerProcess, 1000);
+      return;
+    }
+
+    // Normal exit
+    log.info('Server exited', { code, signal });
+    cleanupSocket();
+    process.exit(code ?? 0);
+  });
 }
 
-async function restartContainer(): Promise<void> {
+async function restartServer(): Promise<void> {
   isRestarting = true;
 
-  // Remove exit handler from old process BEFORE killing it.
-  // Without this, the async 'exit' event fires after isRestarting is cleared,
-  // causing the handler to call process.exit() and kill the gatekeeper.
-  if (containerProcess) {
-    containerProcess.removeAllListeners('exit');
-    containerProcess.removeAllListeners('error');
-    try {
-      // Graceful shutdown: SIGTERM lets the worker run shutdown() → doAutoSave()
-      // so conversation history (including any in-flight mount request turn) is preserved.
-      // docker stop waits up to 15s before SIGKILL.
-      execSync(`docker stop --time 15 ${containerName} 2>/dev/null`, { stdio: 'ignore' });
-      execSync(`docker rm ${containerName} 2>/dev/null`, { stdio: 'ignore' });
-    } catch {}
-    containerProcess = null;
+  if (serverProcess) {
+    serverProcess.removeAllListeners('exit');
+    serverProcess.removeAllListeners('error');
+    try { serverProcess.kill('SIGTERM'); } catch {}
+    serverProcess = null;
   }
 
-  // Clean socket
   cleanupSocket();
-
-  // Small delay for clean shutdown
   await new Promise<void>((r) => setTimeout(r, 500));
 
-  // Start new container with updated mounts.
-  // isRestarting stays true until startContainer() completes, so the new
-  // process's exit handler won't prematurely kill the gatekeeper if the
-  // container takes a moment to stabilize.
   try {
-    await startContainer();
+    startServerProcess();
+    await waitForSocket();
   } catch (err) {
-    // Socket timeout — the container may still be starting (Docker can be slow).
-    // Don't throw — the client's auto-reconnect will recover once the socket appears.
     const msg = err instanceof Error ? err.message : String(err);
-    log.warn('Container restart slow', { error: msg });
+    log.warn('Server restart slow', { error: msg });
     injectSystemMessage(
-      `Sandbox is slow to start. Will auto-reconnect when ready.\n` +
+      `Server is slow to start. Will auto-reconnect when ready.\n` +
       `If it doesn't recover, try /restart.`
     );
   } finally {
     isRestarting = false;
     emitHostState();
   }
+}
+
+// --- File watcher (self-modification auto-restart, ported from worker.ts) ---
+
+const SRC_DIR = join(REPO_DIR, 'src');
+
+function getFileHashes(dir: string): Map<string, number> {
+  const hashes = new Map<string, number>();
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        for (const [k, v] of getFileHashes(full)) hashes.set(k, v);
+      } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+        try {
+          hashes.set(full, statSync(full).mtimeMs);
+        } catch {}
+      }
+    }
+  } catch {}
+  return hashes;
+}
+
+let lastFileHashes = getFileHashes(SRC_DIR);
+let fileWatchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+function startFileWatcher(): void {
+  setInterval(() => {
+    const current = getFileHashes(SRC_DIR);
+    let changed = false;
+    for (const [file, mtime] of current) {
+      if (lastFileHashes.get(file) !== mtime) {
+        changed = true;
+        break;
+      }
+    }
+    if (current.size !== lastFileHashes.size) changed = true;
+
+    if (changed) {
+      lastFileHashes = current;
+      if (fileWatchDebounce) clearTimeout(fileWatchDebounce);
+      fileWatchDebounce = setTimeout(() => {
+        fileWatchDebounce = null;
+
+        // Typecheck before restarting
+        log.info('Source files changed — typechecking');
+        try {
+          execSync('npx tsc --noEmit', {
+            cwd: REPO_DIR,
+            stdio: ['ignore', 'ignore', 'pipe'],
+            timeout: 30_000,
+          });
+          log.info('Typecheck passed — restarting server');
+        } catch (err: unknown) {
+          const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
+          const errorLines = stderr.split('\n').filter((l: string) => l.includes('error TS')).slice(0, 5);
+          const detail = errorLines.length > 0 ? errorLines.map((l: string) => l.trim()).join('; ') : stderr.slice(0, 500);
+          log.warn('Typecheck failed — not restarting', { errors: detail });
+          return;
+        }
+
+        void restartServer();
+      }, 2000);
+    }
+  }, 1000);
 }
 
 async function waitForSocket(timeoutMs = 60_000): Promise<void> {
@@ -479,14 +349,8 @@ function cleanupSocket(): void {
 
 function cleanupAll(): void {
   stopHostDaemon();
-  if (containerProcess) {
-    // Kill the spawned docker process first (fast), then attempt async container removal.
-    // docker rm -f can be slow on a loaded system, so we don't block on it —
-    // kill-ports at the next `make dev` will clean up any leftover containers.
-    try { containerProcess.kill('SIGKILL'); } catch {}
-    try {
-      execSync(`docker rm -f ${containerName} 2>/dev/null`, { stdio: 'ignore', timeout: 3000 });
-    } catch {}
+  if (serverProcess) {
+    try { serverProcess.kill('SIGTERM'); } catch {}
   }
   cleanupSocket();
 }
@@ -494,7 +358,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/mount', '/unmount', '/mounts', '/grant', '/deny', '/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-browser-write', '/deny-browser-write', '/grant-browser-autonomous', '/revoke-browser-autonomous', '/set-env']);
+const GATEKEEPER_COMMANDS = new Set(['/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-browser-write', '/deny-browser-write', '/grant-browser-autonomous', '/revoke-browser-autonomous', '/set-env']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -551,8 +415,7 @@ function writeEnvVars(updates: Record<string, boolean | number | string>): void 
 }
 
 async function handleGatekeeperCommand(input: string): Promise<void> {
-  // Check dynamic commands first (grant/deny, approve/reject/preview)
-  if (await handleGrantDeny(input)) return;
+  // Check dynamic commands first (approve/reject/preview)
   if (await handleConfigApproveReject(input)) return;
   if (await handleEditFileApproveReject(input)) return;
   if (await handleExecApproveReject(input)) return;
@@ -564,50 +427,6 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   const cmd = parts[0]?.toLowerCase();
 
   switch (cmd) {
-    case '/mounts': {
-      injectSystemMessage(listMounts());
-      break;
-    }
-
-    case '/mount': {
-      const path = parts[1];
-      if (!path) {
-        injectSystemMessage('Usage: /mount <path> [ro|rw]\nExample: /mount ~/projects/myapp rw');
-        return;
-      }
-
-      const mode = (parts[2]?.toLowerCase() === 'rw') ? 'rw' as const : 'ro' as const;
-      const hostPath = resolveHostPath(path);
-      const result = addMount(hostPath, mode);
-      injectSystemMessage(result.message);
-
-      if (result.ok) {
-        injectSystemMessage('Sandbox restarting with new mount...');
-        await restartContainer();
-        injectSystemMessage(`Sandbox ready. ${hostPath} is now mounted at ${toContainerPath(hostPath)} (${mode}).`);
-      }
-      break;
-    }
-
-    case '/unmount': {
-      const path = parts[1];
-      if (!path) {
-        injectSystemMessage('Usage: /unmount <path>\nExample: /unmount ~/projects/myapp');
-        return;
-      }
-
-      const hostPath = resolveHostPath(path);
-      const result = removeMount(hostPath);
-      injectSystemMessage(result.message);
-
-      if (result.ok) {
-        injectSystemMessage('Sandbox restarting without the removed mount...');
-        await restartContainer();
-        injectSystemMessage(`Sandbox ready. ${hostPath} has been unmounted.`);
-      }
-      break;
-    }
-
     case '/set-env': {
       const jsonStr = input.slice('/set-env'.length).trim();
       let updates: Record<string, boolean | number | string>;
@@ -636,113 +455,6 @@ function injectSystemMessage(content: string): void {
   if (client) {
     client.emit('system', content);
   }
-}
-
-// --- Agent mount requests ---
-
-async function handleAgentMountRequest(
-  id: string,
-  path: string,
-  mode: 'ro' | 'rw',
-  _reason?: string,
-  durationMinutes?: number,
-): Promise<void> {
-  // The agent sends container paths (e.g., /app/src). Try to reverse-map first.
-  const hostPath = resolveContainerToHost(path) ?? resolveHostPath(path);
-
-  // Store pending request — resolved when user replies /grant or /deny
-  pendingAgentMountRequests.set(id, { hostPath, mode, ...(durationMinutes !== undefined ? { durationMinutes } : {}) });
-}
-
-const pendingAgentMountRequests = new Map<string, { hostPath: string; mode: 'ro' | 'rw'; durationMinutes?: number }>();
-
-async function handleGrantDeny(input: string): Promise<boolean> {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase();
-
-  if (cmd === '/grant') {
-    let id = parts[1];
-    // Auto-infer ID when there's exactly one pending request
-    if (!id && pendingAgentMountRequests.size === 1) {
-      id = pendingAgentMountRequests.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingAgentMountRequests.size === 0
-        ? 'No pending mount requests.'
-        : `Multiple pending requests — specify ID: ${[...pendingAgentMountRequests.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingAgentMountRequests.get(id);
-    if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending mount request: ${id}`);
-      return true;
-    }
-
-    const mode = (parts[2]?.toLowerCase() === 'rw') ? 'rw' as const : pending.mode;
-    pendingAgentMountRequests.delete(id);
-
-    const expiresAt = pending.durationMinutes
-      ? Date.now() + pending.durationMinutes * 60_000
-      : undefined;
-    const result = addMount(pending.hostPath, mode, expiresAt, pending.durationMinutes);
-    const containerPath = toContainerPath(pending.hostPath);
-
-    // Send response to worker
-    client!.send({
-      type: 'mount_response',
-      id,
-      ok: result.ok,
-      ...(result.ok ? { containerPath } : {}),
-      message: result.message,
-    });
-
-    log.info('Mount granted', { id, path: pending.hostPath, mode, durationMinutes: pending.durationMinutes });
-    injectSystemMessage(result.message);
-    if (result.ok) {
-      injectSystemMessage('Sandbox restarting with new mount...');
-      await restartContainer();
-      const expiryText = pending.durationMinutes
-        ? ` (auto-expires in ${pending.durationMinutes} min)`
-        : '';
-      injectSystemMessage(`Sandbox ready. ${pending.hostPath} is now mounted at ${containerPath} (${mode})${expiryText}.`);
-    }
-    return true;
-  }
-
-  if (cmd === '/deny') {
-    let id = parts[1];
-    if (!id && pendingAgentMountRequests.size === 1) {
-      id = pendingAgentMountRequests.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingAgentMountRequests.size === 0
-        ? 'No pending mount requests.'
-        : `Multiple pending requests — specify ID: ${[...pendingAgentMountRequests.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingAgentMountRequests.get(id);
-    if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending mount request: ${id}`);
-      return true;
-    }
-
-    pendingAgentMountRequests.delete(id);
-
-    client!.send({
-      type: 'mount_response',
-      id,
-      ok: false,
-      message: 'Mount denied by user',
-    });
-
-    log.info('Mount denied', { id, path: pending.hostPath });
-    injectSystemMessage(`Denied mount request for ${pending.hostPath}`);
-    return true;
-  }
-
-  return false;
 }
 
 // --- Config write requests ---
@@ -927,12 +639,7 @@ function handleEditFileRequest(
   edits: Array<{ old_str: string; new_str: string; index?: number }>,
   reason: string,
 ): void {
-  const hostPath = resolveContainerToHost(containerPath) ?? resolveHostPath(containerPath);
-
-  if (isForbiddenPath(hostPath)) {
-    client!.send({ type: 'edit_file_response', id, ok: false, message: `Refusing to edit ${hostPath} — sensitive path` });
-    return;
-  }
+  const hostPath = resolveHostPath(containerPath);
 
   let originalContent: string;
   try {
@@ -1101,7 +808,7 @@ async function handleEditFileApproveReject(input: string): Promise<boolean> {
 
 // --- Exec command approval ---
 
-const pendingExecApprovals = new Map<string, { command: string }>();
+const pendingExecApprovals = new Map<string, { command: string; classifierReason?: string }>();
 // IDs auto-handled (allow/deny) before any browser listener fires — web-bridge skips these
 const autoHandledExecIds = new Set<string>();
 
@@ -1116,8 +823,12 @@ function readExecPermissions(): ExecPermissions {
     if (!perms || typeof perms !== 'object') return DEFAULT_EXEC_PERMISSIONS;
     const p = perms as Partial<ExecPermissions>;
     return {
-      alwaysAllow: Array.isArray(p.alwaysAllow) ? p.alwaysAllow : DEFAULT_EXEC_PERMISSIONS.alwaysAllow,
-      deny: Array.isArray(p.deny) ? p.deny : DEFAULT_EXEC_PERMISSIONS.deny,
+      alwaysAllow: Array.isArray(p.alwaysAllow)
+        ? [...new Set([...DEFAULT_EXEC_PERMISSIONS.alwaysAllow, ...p.alwaysAllow])]
+        : DEFAULT_EXEC_PERMISSIONS.alwaysAllow,
+      deny: Array.isArray(p.deny)
+        ? [...new Set([...DEFAULT_EXEC_PERMISSIONS.deny, ...p.deny])]
+        : DEFAULT_EXEC_PERMISSIONS.deny,
     };
   } catch {
     return DEFAULT_EXEC_PERMISSIONS;
@@ -1136,18 +847,60 @@ function broadcastUpdatedPermissions(): void {
   });
 }
 
+/**
+ * Derive glob patterns from a command for "always allow".
+ * For simple commands, extracts the executable and returns both `"<exe>"` and `"<exe> *"`.
+ * For pipelines or commands already containing globs, returns the raw command as-is.
+ */
+function deriveExecPatterns(command: string): string[] {
+  const cmd = command.trim();
+  // Already a glob pattern — save as-is
+  if (cmd.includes('*') || cmd.includes('?') || cmd.includes('[')) return [cmd];
+  // Pipeline — too complex to extract a meaningful pattern
+  const segments = parseCommandPipeline(cmd);
+  if (segments.length > 1) return [cmd];
+  const exe = segments[0]?.executable;
+  if (!exe) return [cmd];
+  // Save both bare executable and "<exe> *" to cover args/no-args
+  return [exe, `${exe} *`];
+}
+
 function addCommandToAlwaysAllow(command: string): void {
   try {
     const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
     const settings = JSON.parse(raw) as Record<string, unknown>;
     const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
     const current = Array.isArray(perms.alwaysAllow) ? perms.alwaysAllow : [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow];
-    if (!current.includes(command)) {
-      current.push(command);
+    const patterns = deriveExecPatterns(command);
+    for (const pattern of patterns) {
+      if (!current.includes(pattern)) {
+        current.push(pattern);
+      }
     }
     settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current };
     writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-    log.info('Added command to always-allow', { command });
+    log.info('Added command to always-allow', { command, patterns });
+    broadcastUpdatedPermissions();
+  } catch (err) {
+    log.error('Failed to update exec permissions', { error: String(err) });
+  }
+}
+
+function addCommandToDenyList(command: string): void {
+  try {
+    const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
+    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
+    const current = Array.isArray(perms.deny) ? perms.deny : [...DEFAULT_EXEC_PERMISSIONS.deny];
+    const patterns = deriveExecPatterns(command);
+    for (const pattern of patterns) {
+      if (!current.includes(pattern)) {
+        current.push(pattern);
+      }
+    }
+    settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, deny: current };
+    writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    log.info('Added command to deny list', { command, patterns });
     broadcastUpdatedPermissions();
   } catch (err) {
     log.error('Failed to update exec permissions', { error: String(err) });
@@ -1155,34 +908,80 @@ function addCommandToAlwaysAllow(command: string): void {
 }
 
 function handleAgentExecRequest(id: string, command: string): void {
+  // --- Tier 1: Static deny (instant block, no override) ---
+  const tier1 = checkTier1Deny(command);
+  if (tier1) {
+    log.info('Exec blocked by Tier 1 (static deny)', { id, command, reason: tier1 });
+    autoHandledExecIds.add(id);
+    client!.send({ type: 'exec_response', id, ok: false, message: `Blocked (safety): ${tier1}` });
+    injectSystemMessage(`[exec] Blocked by safety engine: ${tier1}\n  Command: ${command}`);
+    return;
+  }
+
+  // --- Tier 2: Static allow/deny (from settings.json) ---
   const permissions = readExecPermissions();
   const level = checkExecPermission(command, permissions);
 
   if (level === 'allow') {
-    log.info('Exec auto-allowed', { id, command });
+    log.info('Exec auto-allowed (Tier 2)', { id, command });
     autoHandledExecIds.add(id);
     client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by permission policy' });
     return;
   }
 
   if (level === 'deny') {
-    log.info('Exec auto-denied', { id, command });
+    log.info('Exec auto-denied (Tier 2)', { id, command });
     autoHandledExecIds.add(id);
     client!.send({ type: 'exec_response', id, ok: false, message: 'Denied by permission policy' });
     injectSystemMessage(`[exec] Blocked by deny policy: ${command}`);
     return;
   }
 
-  // 'prompt' — store and forward to web UI for user approval
-  pendingExecApprovals.set(id, { command });
-  log.info('Exec approval requested', { id, command });
+  // --- Tier 3: Haiku classifier (async) ---
+  if (isClassifierAvailable() && process.env['AIGENT_CLASSIFIER'] !== '0') {
+    classifyCommand(command, { cwd: process.cwd() })
+      .then(result => {
+        if (result.action === 'allow') {
+          log.info('Exec auto-allowed (Tier 3 classifier)', { id, command, reason: result.reason });
+          autoHandledExecIds.add(id);
+          client!.send({ type: 'exec_response', id, ok: true, message: `Allowed by classifier: ${result.reason}` });
+          return;
+        }
 
-  // Inject a message so TUI users also see the prompt
-  injectSystemMessage(
-    `Agent wants to run: ${command}\n` +
-    `  Reply: /approve-exec ${id} or /deny-exec ${id}\n` +
-    `  To always allow: /approve-exec ${id} --always`
-  );
+        if (result.action === 'block') {
+          log.info('Exec blocked (Tier 3 classifier)', { id, command, reason: result.reason });
+          autoHandledExecIds.add(id);
+          client!.send({ type: 'exec_response', id, ok: false, message: `Blocked by classifier: ${result.reason}` });
+          injectSystemMessage(`[exec] Blocked by classifier: ${result.reason}\n  Command: ${command}`);
+          return;
+        }
+
+        // 'ask' — prompt the user with the classifier's assessment
+        promptUserForExec(id, command, result.reason);
+      })
+      .catch(() => {
+        // Classifier failed — fall back to user prompt
+        promptUserForExec(id, command);
+      });
+    return;
+  }
+
+  // No classifier — fall back to user prompt
+  promptUserForExec(id, command);
+}
+
+function promptUserForExec(id: string, command: string, classifierReason?: string): void {
+  pendingExecApprovals.set(id, classifierReason ? { command, classifierReason } : { command });
+  log.info('Exec approval requested', { id, command, classifierReason });
+
+  let msg = `Agent wants to run: ${command}\n`;
+  if (classifierReason) {
+    msg += `  Classifier: ${classifierReason}\n`;
+  }
+  msg += `  Reply: /approve-exec ${id} or /deny-exec ${id}\n`;
+  msg += `  To always allow: /approve-exec ${id} --always`;
+  msg += `  To always deny: /deny-exec ${id} --always`;
+  injectSystemMessage(msg);
 }
 
 async function handleExecApproveReject(input: string): Promise<boolean> {
@@ -1212,7 +1011,8 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
 
     if (alwaysAllow) {
       addCommandToAlwaysAllow(pending.command);
-      injectSystemMessage(`Approved and added to always-allow: ${pending.command}`);
+      const patterns = deriveExecPatterns(pending.command);
+      injectSystemMessage(`Approved and added to always-allow: ${patterns.join(', ')}`);
     } else {
       injectSystemMessage(`Approved (once): ${pending.command}`);
     }
@@ -1239,8 +1039,17 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
       return true;
     }
 
+    const alwaysDeny = parts.includes('--always');
     pendingExecApprovals.delete(id);
-    injectSystemMessage(`Denied: ${pending.command}`);
+
+    if (alwaysDeny) {
+      addCommandToDenyList(pending.command);
+      const patterns = deriveExecPatterns(pending.command);
+      injectSystemMessage(`Denied and added to always-deny: ${patterns.join(', ')}`);
+    } else {
+      injectSystemMessage(`Denied: ${pending.command}`);
+    }
+
     client!.send({ type: 'exec_response', id, ok: false, alwaysAllow: false, message: 'Denied by user' });
     return true;
   }
@@ -1262,8 +1071,12 @@ function readFetchPermissions(): FetchPermissions {
     if (!perms || typeof perms !== 'object') return DEFAULT_FETCH_PERMISSIONS;
     const p = perms as Partial<FetchPermissions>;
     return {
-      alwaysAllow: Array.isArray(p.alwaysAllow) ? p.alwaysAllow : DEFAULT_FETCH_PERMISSIONS.alwaysAllow,
-      deny: Array.isArray(p.deny) ? p.deny : DEFAULT_FETCH_PERMISSIONS.deny,
+      alwaysAllow: Array.isArray(p.alwaysAllow)
+        ? [...new Set([...DEFAULT_FETCH_PERMISSIONS.alwaysAllow, ...p.alwaysAllow])]
+        : DEFAULT_FETCH_PERMISSIONS.alwaysAllow,
+      deny: Array.isArray(p.deny)
+        ? [...new Set([...DEFAULT_FETCH_PERMISSIONS.deny, ...p.deny])]
+        : DEFAULT_FETCH_PERMISSIONS.deny,
     };
   } catch {
     return DEFAULT_FETCH_PERMISSIONS;
@@ -1655,33 +1468,9 @@ process.stderr.write = ((chunk: string | Uint8Array) => {
   return true;
 }) as typeof process.stderr.write;
 
-// Set up initial mount from CLI
-if (gatekeeperArgs.projectFolder) {
-  const mode = gatekeeperArgs.writeAccess ? 'rw' as const : 'ro' as const;
-  mounts.push({
-    hostPath: resolve(gatekeeperArgs.projectFolder),
-    containerPath: toContainerPath(gatekeeperArgs.projectFolder),
-    mode,
-  });
-}
-
-// Ensure socket directory — mode 0o777 so the container's `node` user can create sockets too
+// Ensure socket directory
 mkdirSync(SOCKET_DIR, { recursive: true, mode: 0o777 });
 cleanupSocket();
-
-// Kill any stale worker containers left over from a previous crashed gatekeeper.
-// tsx --watch restarts spawn a new process that gets a new containerName, so cleanupAll()
-// on the old process won't find them. Force-remove anything matching the current prefix
-// (dev: aigent-worker-, test: aigent-test-worker-) so tests don't kill dev containers.
-try {
-  const stale = execSync(
-    `docker ps -q --filter 'name=${CONTAINER_PREFIX}-'`,
-    { encoding: 'utf-8' }
-  ).trim();
-  if (stale) {
-    execSync(`docker rm -f ${stale.split('\n').join(' ')}`, { stdio: 'ignore' });
-  }
-} catch { /* no stale containers — fine */ }
 
 // Start host daemon (clipboard, screen capture, etc.)
 await startHostDaemon();
@@ -1690,15 +1479,21 @@ await startHostDaemon();
 await startLLMProxy();
 log.info('LLM proxy ready');
 
-// Set up client early (before container) so the web server can start immediately.
-// AgentClient doesn't require the container — it connects to the socket separately.
+// Initialize Tier 3 classifier (uses Anthropic API key if available)
+const classifierKey = process.env['ANTHROPIC_API_KEY'];
+if (classifierKey && process.env['AIGENT_CLASSIFIER'] !== '0') {
+  initClassifier(classifierKey);
+  log.info('Tier 3 classifier initialized');
+} else {
+  log.info('Tier 3 classifier disabled', { reason: classifierKey ? 'AIGENT_CLASSIFIER=0' : 'no ANTHROPIC_API_KEY' });
+}
+
+// Set up client early (before server) so the web server can start immediately.
 const { AgentClient } = await import('./client.js');
 client = new AgentClient();
 
-// Intercept commands BEFORE starting the web server. The web UI sends /grant, /approve,
-// etc. as commands via WebSocket → web-bridge → client.sendCommand(). If we apply
-// overrides after startContainer(), there's a race: commands that arrive while the
-// container is starting bypass the gatekeeper and reach the worker as "Unknown command".
+// Intercept commands BEFORE starting the web server. The web UI sends /approve,
+// etc. as commands via WebSocket → web-bridge → client.sendCommand().
 const originalSendMessage = client.sendMessage.bind(client);
 client.sendMessage = (content: string) => {
   if (isGatekeeperCommand(content)) {
@@ -1725,8 +1520,7 @@ client.sendCommand = (cmd: string) => {
   originalSendCommand(cmd);
 };
 
-// Start web UI server before the container so it's available during startup/restarts.
-// This prevents "connection refused" when tsx watch restarts the process.
+// Start web UI server before the server process so it's available during startup/restarts.
 const { startWebServer } = await import('./web-bridge.js');
 startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
@@ -1734,28 +1528,28 @@ startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: read
   log.error('Web UI failed to start', { error: (err as Error).message });
 });
 
-// Start container (skip in test mode — tests inject events via /test/inject)
+// Start server process (skip in test mode — tests inject events via /test/inject)
 if (!process.env['AIGENT_TEST_MODE']) {
   try {
-    await startContainer();
+    startServerProcess();
+    await waitForSocket();
+    log.info('Server ready');
+    // Start file watcher for self-modification auto-restart
+    startFileWatcher();
   } catch (err) {
-    log.error('Container start failed', { error: (err as Error).message });
+    log.error('Server start failed', { error: (err as Error).message });
     cleanupAll();
     process.exit(1);
   }
 } else {
-  log.info('Test mode — skipping container startup');
+  log.info('Test mode — skipping server startup');
 }
 
-// Push mount state to web UI when client connects to the worker
+// Push host state to web UI when client connects to the worker
 client.on('connected', () => {
   setTimeout(() => emitHostState(), 100);
 });
 
-// Handle mount requests from the worker (agent requests a folder)
-client.on('mount_request', (id: string, path: string, mode: 'ro' | 'rw', reason?: string, durationMinutes?: number) => {
-  void handleAgentMountRequest(id, path, mode, reason, durationMinutes);
-});
 
 // Handle config write requests from the worker
 client.on('config_write_request', (id: string, file: string, content: string, reason: string) => {
@@ -1832,38 +1626,6 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
   });
 });
 
-// Expiry timer — check every 30s for mounts that have timed out
-let expiryRestartInProgress = false;
-setInterval(() => {
-  const now = Date.now();
-  const expired = mounts.filter((m) =>
-    m.expiresAt !== undefined && m.expiresAt <= now && (!m.implicit || m.originalMode),
-  );
-  if (expired.length === 0 || expiryRestartInProgress) return;
-
-  expiryRestartInProgress = true;
-  for (const m of expired) {
-    if (m.implicit && m.originalMode) {
-      // Revert upgraded implicit mount to its original mode
-      m.mode = m.originalMode;
-      delete m.originalMode;
-      delete m.expiresAt;
-      delete m.durationMinutes;
-      injectSystemMessage(`Mount upgrade expired, reverted to ${m.mode}: ${m.hostPath}`);
-    } else {
-      removeMount(m.hostPath);
-      injectSystemMessage(`Mount expired and removed: ${m.hostPath}`);
-    }
-  }
-  injectSystemMessage('Sandbox restarting to apply expired mount removal...');
-  restartContainer()
-    .then(() => {
-      injectSystemMessage('Sandbox ready.');
-      emitHostState();
-    })
-    .finally(() => { expiryRestartInProgress = false; });
-}, 30_000).unref();
-
 // Run UI
 if (gatekeeperArgs.headless) {
   // Headless mode: web UI only, no terminal interface
@@ -1873,7 +1635,7 @@ if (gatekeeperArgs.headless) {
   await new Promise<void>((r) => {
     process.on('SIGINT', r);
     process.on('SIGTERM', r);
-    if (containerProcess) containerProcess.on('exit', r);
+    if (serverProcess) serverProcess.on('exit', r);
   });
 } else {
   const canUseTUI = Boolean(
@@ -1892,7 +1654,7 @@ if (gatekeeperArgs.headless) {
     client.connect();
     startRepl(client);
     await new Promise<void>((r) => {
-      if (containerProcess) containerProcess.on('exit', r);
+      if (serverProcess) serverProcess.on('exit', r);
       else r();
     });
   }

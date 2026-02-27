@@ -7,7 +7,6 @@
  * - Command safety checks (warn on destructive patterns)
  */
 
-import { resolve } from 'node:path';
 import { minimatch } from 'minimatch';
 
 // --- Environment sanitization ---
@@ -58,42 +57,6 @@ export function sanitizedEnv(): Record<string, string | undefined> {
   }
 
   return env;
-}
-
-// --- Path validation ---
-
-/**
- * Directories the agent is allowed to write to.
- *
- * In the gatekeeper architecture, /app is read-only by default.
- * Additional writable directories are added dynamically when the user
- * mounts folders via /mount (these mirror the host path inside the container).
- * The Docker mounts are the real security boundary — this is defense in depth.
- */
-const WRITABLE_ROOTS = [
-  '/workspace',     // Workspace (memory, config, sessions)
-  '/project',       // User-mounted project folders (gatekeeper-controlled)
-  '/tmp',           // Temp files
-];
-
-/**
- * Check if a file path is safe to write to.
- * Returns null if safe, or an error message if blocked.
- *
- * Note: this is defense-in-depth. The real write protection comes from
- * Docker mount modes (ro/rw) controlled by the gatekeeper. The kernel
- * enforces those regardless of what this function says.
- */
-export function validateWritePath(filePath: string): string | null {
-  const resolved = resolve(filePath);
-
-  // Check if within a writable root
-  const inWritableRoot = WRITABLE_ROOTS.some((root) => resolved.startsWith(root + '/') || resolved === root);
-  if (!inWritableRoot) {
-    return `Blocked: writes only allowed under ${WRITABLE_ROOTS.join(', ')}. Use request_mount to ask for access to other folders.`;
-  }
-
-  return null; // Safe
 }
 
 // --- URL validation (SSRF protection) ---
@@ -357,6 +320,10 @@ export const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {
     'npm --version', 'npm -v', 'npm list *', 'npm ls *',
     'tsc --version', 'tsc -v',
     'npx tsc --noEmit', 'npx tsc --noEmit *',
+    // npm scripts / make
+    'npm test', 'npm test *',
+    'npm run', 'npm run *',
+    'make', 'make *',
   ],
   deny: [
     'sudo *',
@@ -391,15 +358,6 @@ function matchesGlob(command: string, pattern: string): boolean {
     .replace(/\*/g, '.*')
     .replace(/\?/g, '.');
   return new RegExp('^' + regexSrc + '$').test(cmd);
-}
-
-/**
- * Returns true if a command contains subshell constructs or explicit shell invocations
- * that make static permission matching unreliable.
- * Used to downgrade 'allow' → 'prompt' so the user sees the full command.
- */
-function containsSubshell(command: string): boolean {
-  return /\$\(/.test(command) || /`/.test(command) || /\b(ba)?sh\s+-c\b/.test(command);
 }
 
 // --- Pipeline parsing (for UI display) ---
@@ -489,13 +447,52 @@ export function parseCommandPipeline(command: string): CommandSegment[] {
   return segments.length > 0 ? segments : [{ raw: command, operator: null, executable: null, isSubshell: false }];
 }
 
+/** Tier 1: Hard deny patterns that can never be overridden. */
+const TIER1_DENY_PATTERNS: [RegExp | ((cmd: string) => boolean), string][] = [
+  // Shell injection constructs — make static analysis impossible
+  [/\$\(/, 'subshell construct $()'],
+  [/`/, 'backtick subshell'],
+  [/\beval\b/, 'eval command'],
+  [/\bsource\b/, 'source command'],
+  [/\b(ba)?sh\s+-c\b/, 'shell -c invocation'],
+
+  // Credential paths
+  [(cmd: string) => /~\/\.ssh\b|\/\.ssh\//.test(cmd), 'SSH key access'],
+  [(cmd: string) => /~\/\.gnupg\b|\/\.gnupg\//.test(cmd), 'GPG key access'],
+  [(cmd: string) => /~\/\.aws\b|\/\.aws\//.test(cmd), 'AWS credential access'],
+
+  // System destruction
+  [/\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\s*$/, 'rm on root filesystem'],
+  [/\bmkfs\b/, 'filesystem format'],
+  [/\bdd\s+.*of=\/dev\//, 'raw device write'],
+  [/:\(\)\s*\{.*\|.*&\s*\}\s*;/, 'fork bomb'],
+
+  // Privilege escalation
+  [/\bsudo\b/, 'privilege escalation (sudo)'],
+  [/\bsu\s/, 'privilege escalation (su)'],
+
+  // Exfiltration
+  [/\bcurl\b.*\|\s*(ba)?sh\b/, 'pipe URL to shell'],
+  [/\bwget\b.*\|\s*(ba)?sh\b/, 'pipe URL to shell'],
+];
+
+/**
+ * Tier 1 static deny check. Returns the reason string if blocked, null if pass.
+ * Runs before Tier 2 (settings.json) and Tier 3 (Haiku classifier).
+ * Catches injection constructs that make glob-based pattern matching unreliable.
+ */
+export function checkTier1Deny(command: string): string | null {
+  for (const [check, reason] of TIER1_DENY_PATTERNS) {
+    if (typeof check === 'function' ? check(command) : check.test(command)) {
+      return reason;
+    }
+  }
+  return null;
+}
+
 /**
  * Check what permission level a command requires given user-configured permissions.
  * Evaluation order: deny → alwaysAllow → default(prompt)
- *
- * Subshell constructs ($(...), backticks, bash -c) always require prompt at minimum,
- * even if the leading command would otherwise be auto-allowed — static pattern matching
- * cannot inspect what runs inside a subshell.
  */
 export function checkExecPermission(
   command: string,
@@ -505,10 +502,7 @@ export function checkExecPermission(
     if (matchesGlob(command, pattern)) return 'deny';
   }
   for (const pattern of permissions.alwaysAllow) {
-    if (matchesGlob(command, pattern)) {
-      // Downgrade to prompt if the command contains subshell constructs
-      return containsSubshell(command) ? 'prompt' : 'allow';
-    }
+    if (matchesGlob(command, pattern)) return 'allow';
   }
   return 'prompt';
 }

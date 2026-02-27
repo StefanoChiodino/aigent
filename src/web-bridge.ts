@@ -10,7 +10,6 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
-import { glob } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { AgentClient } from './client.js';
@@ -123,11 +122,9 @@ export async function startWebServer(
     if (cachedState) cachedState = { ...cachedState, ...partial };
   });
 
-  // Cache latest host state from gatekeeper (mounts + capabilities).
-  let cachedMounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] = [];
+  // Cache latest host state from gatekeeper (capabilities).
   let cachedCapabilities: Record<string, string> | undefined;
-  client.on('host_state', (mounts, capabilities) => {
-    cachedMounts = mounts;
+  client.on('host_state', (_mounts: unknown, capabilities: Record<string, string> | undefined) => {
     cachedCapabilities = capabilities;
   });
 
@@ -179,7 +176,7 @@ export async function startWebServer(
 
     // Test injection endpoint — only active when AIGENT_TEST_MODE=1.
     // Accepts a POST with a ServerEvent JSON body and broadcasts it to all connected WS clients.
-    // Allows Playwright tests to inject fake exec_request / mount_request events without an LLM.
+    // Allows Playwright tests to inject fake exec_request events without an LLM.
     if (process.env['AIGENT_TEST_MODE'] === '1' && req.method === 'POST' && url === '/test/inject') {
       const chunks: Buffer[] = [];
       req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -259,44 +256,6 @@ export async function startWebServer(
         });
         return;
       }
-    }
-
-    // File search — GET /files?q=<query> returns files from mounted paths matching a fuzzy query.
-    if (req.method === 'GET' && url.startsWith('/files')) {
-      const qs = new URLSearchParams(url.includes('?') ? url.slice(url.indexOf('?') + 1) : '');
-      const query = (qs.get('q') ?? '').trim().toLowerCase();
-      const results: { path: string; mountPath: string }[] = [];
-
-      if (cachedMounts.length > 0) {
-        const MAX_RESULTS = 50;
-        const parts = query ? query.split(/\s+/) : [];
-
-        for (const mount of cachedMounts) {
-          if (results.length >= MAX_RESULTS) break;
-          try {
-            // Use glob to walk the mount. Skip noisy dirs via exclude.
-            const SKIP_DIRS = new Set(['node_modules', '.git', '__pycache__', '.next', 'dist', 'build', '.cache', 'target', 'vendor']);
-            const entries = glob('**/*', {
-              cwd: mount.hostPath,
-              exclude: (name: string) => SKIP_DIRS.has(name) || name.startsWith('.'),
-            });
-            for await (const entry of entries) {
-              if (results.length >= MAX_RESULTS) break;
-              // Skip paths that are too deep (> 8 levels)
-              if (entry.split('/').length > 8) continue;
-              // Fuzzy match: all query parts must appear (in order) in the path
-              const lower = entry.toLowerCase();
-              if (parts.length === 0 || parts.every(p => lower.includes(p))) {
-                results.push({ path: entry, mountPath: mount.containerPath });
-              }
-            }
-          } catch { /* inaccessible mount — skip */ }
-        }
-      }
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ files: results }));
-      return;
     }
 
     // Static files from web/ — strip query string before resolving path
@@ -427,8 +386,8 @@ export async function startWebServer(
     }
 
     // Send cached host state so the sidebar populates immediately.
-    if (cachedMounts.length > 0 || cachedCapabilities) {
-      ws.send(JSON.stringify({ type: 'host_state', mounts: cachedMounts, ...(cachedCapabilities ? { capabilities: cachedCapabilities } : {}) }));
+    if (cachedCapabilities) {
+      ws.send(JSON.stringify({ type: 'host_state', mounts: [], ...(cachedCapabilities ? { capabilities: cachedCapabilities } : {}) }));
     }
 
     // Send current client settings so the browser can sync from the JSON file.
@@ -490,8 +449,6 @@ export async function startWebServer(
       error: (message: string) => send({ type: 'error', message }),
       state: (partial: { thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string }) =>
         send({ type: 'state', ...partial }),
-      mount_request: (id: string, path: string, mode: 'ro' | 'rw', reason?: string, durationMinutes?: number, fallbackHint?: string) =>
-        send({ type: 'mount_request', id, path, mode, ...(reason !== undefined ? { reason } : {}), ...(durationMinutes !== undefined ? { durationMinutes } : {}), ...(fallbackHint !== undefined ? { fallbackHint } : {}) }),
       config_write_request: (id: string, file: string, content: string, reason: string) =>
         send({ type: 'config_write_request', id, file, content, reason }),
       edit_file_request: (id: string, path: string, edits: Array<{ old_str: string; new_str: string; index?: number }>, reason: string) =>
@@ -609,9 +566,6 @@ export async function startWebServer(
             break;
           case 'command':
             client.sendCommand(cmd.cmd);
-            break;
-          case 'mount_response':
-            client.send(cmd);
             break;
           case 'config_write_response':
             client.send(cmd);

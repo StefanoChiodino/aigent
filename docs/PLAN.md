@@ -7,17 +7,16 @@
 
 ```
 Host (gatekeeper.tsx)
-  ├── TUI (ink v6 + React 19)
-  │     ├── client.ts (socket connector, auto-reconnect, command queue)
-  │     ├── App.tsx, ChatView.tsx, InputBar.tsx, TextInput.tsx
-  │     └── Markdown.tsx (terminal markdown rendering)
-  ├── Container lifecycle (start/stop/restart Docker)
-  └── Permission engine (mounts, capabilities)
+  ├── Safety Engine (three-tier: static deny → static allow → Haiku classifier)
+  ├── LLM Proxy (holds API keys)
+  ├── Web UI Bridge (HTTP + WebSocket)
+  ├── Permission Engine (exec, fetch, file edit, browser actions)
+  └── OS Bridge (clipboard, audio, screen, browser extension)
         ↕ Unix socket (NDJSON over /tmp/aigent/worker.sock)
-Docker container (worker.ts → server.ts)
+Server process (spawned directly, no Docker)
   ├── agent.ts (conversation loop, streaming, retry, sub-agents)
   ├── provider.ts (Anthropic + OpenAI abstraction, image support)
-  ├── tools.ts (12 tools: exec, read_file, write_file, edit_file, list_files, grep, glob, fetch, tree, patch, spawn_agent, host)
+  ├── tools.ts (exec, read_file, write_file, edit_file, list_files, grep, glob, fetch, tree, patch, spawn_agent, host)
   ├── auth.ts (API key / OAT token handling)
   ├── workspace.ts (memory system)
   ├── profiles.ts (multi-profile, sessions)
@@ -25,8 +24,7 @@ Docker container (worker.ts → server.ts)
 ```
 
 - TypeScript strict mode, ESM, Node 22
-- Gatekeeper/sandbox split: TUI on host, agent in Docker
-- `make start` runs gatekeeper (new), `make dev` runs everything in Docker (legacy)
+- No Docker — agent runs directly on host, gated by three-tier safety engine
 - Protocol: NDJSON over Unix socket (/tmp/aigent/worker.sock)
 - See docs/architecture.md for full security design
 
@@ -75,10 +73,10 @@ Docker container (worker.ts → server.ts)
 
 ### Self-Authoring
 - [x] System prompt describes full codebase architecture
-- [x] Agent can read/modify its own source at /app/
+- [x] Agent can read/modify its own source
 - [x] Backend/frontend split — server restarts on code change, TUI reconnects
 - [x] Auto-save/restore conversation across server restarts
-- [x] Polling-based file watcher (works in Docker/WSL2 bind mounts)
+- [x] Polling-based file watcher (works in bind mounts)
 - [x] Debounced file watcher (2s settle time — safe for multi-file self-edits)
 
 ### Provider Abstraction
@@ -107,98 +105,57 @@ Docker container (worker.ts → server.ts)
 - [x] TaskList UI: running tasks shown with spinners + elapsed time
 - [x] /tasks command with running, awaiting review, and history views
 
-### Security
-- [x] src/safety.ts: sanitizedEnv(), validateWritePath(), validateFetchUrl(), checkCommandSafety()
+### Security — Three-Tier Command Safety
+- [x] Docker sandbox (gatekeeper/container split) — superseded by host-native safety
+- [x] Removed Docker dependency — agent runs directly on host
+- [x] Tier 1: Static deny — shell injection ($(), backticks), credential paths, system destruction, privilege escalation, exfiltration patterns
+- [x] Tier 2: Static allow/deny from settings.json — glob-based exec_permissions with ~40 default safe patterns
+- [x] Tier 3: Haiku classifier — LLM-based command evaluation for ambiguous commands, cached, ~$0.001/call
+- [x] src/safety.ts: sanitizedEnv(), validateFetchUrl(), checkCommandSafety(), checkTier1Deny(), checkExecPermission()
 - [x] Env sanitization applied to exec, grep, glob, fetch, MCP servers
-- [x] Path validation: only /workspace, /app/src, /tmp writable
 - [x] SSRF protection: private IPs, localhost, metadata endpoints blocked
 - [x] Close stdin on all spawned processes (prevents sudo/passwd hangs)
+- [x] Exec permission learning: --always flag promotes commands to static allow list
+- [x] --always-deny: promote commands to static deny list
 
 ### Infrastructure
-- [x] Docker hardening: cap_drop ALL, no-new-privileges, ulimits, tmpfs, resource limits
-- [x] Read-only app mount, writable src and workspace mounts
+- [x] Read-only workspace config, writable workspace memory
 - [x] Client command queue (reliable message delivery during reconnection)
 - [x] Proper cancel support: abort signal through agent → provider → API stream
 
-### Gatekeeper/Sandbox Architecture (Phase 1)
-- [x] Gatekeeper on host (gatekeeper.tsx) — TUI + container lifecycle
-- [x] Worker in Docker (worker.ts) — server management + file watcher
-- [x] Socket in shared directory (/tmp/aigent/worker.sock)
-- [x] /app read-only by default — self-modification requires explicit grant
-- [x] Mount management: /mount, /unmount, /mounts commands in TUI
-- [x] Agent mount requests: request_mount tool → user approves via /grant or /deny
-- [x] Forbidden path protection (/, /etc, /home root, etc.)
-- [x] Safety paths updated for gatekeeper model (/workspace, /project, /tmp)
-- [x] Pre-restart typecheck in worker file watcher
-- [x] Legacy backward compat: make dev still works (everything in Docker)
+### Browser Automation
+- [x] Phase 1 — Observe: extension + WebSocket bridge + `extract_a11y` + `screenshot`
+- [x] Phase 2 — Write: `run_script` (batched steps) + `navigate` action
+- [x] Phase 3a — Multi-tab + grants: `activate_tab`, `open_tab`, session-level `browser.write` grant
+- [x] Prompt injection defense: page content wrapped in untrusted markers
+
+### Web UI & Extension
+- [x] Replace sidepanel iframe with `chrome.windows.create({ type: 'popup' })`
+- [x] Delete mic relay chain, isSidepanel branches, sidepanel files
+
+### Memory System
+- [x] MEMORY.md as curated short-term memory in system prompt
+- [x] Daily logs as archive — index only in prompt, full content on demand
+- [x] distillToMemory() on reset and session shutdown
+- [x] search_memory tool — keyword grep across daily logs
 
 ---
 
 ## Next Up
 
-### Gatekeeper (Phase 2 — LLM proxy + workspace split)
-- [ ] LLM proxy: gatekeeper proxies API calls, keys never in sandbox
-- [ ] Workspace split: config files (ro) vs memory files (rw)
-- [ ] Config writes require gatekeeper approval with diff shown to user
-- [ ] Tool call inspection at gatekeeper level
+### Browser Automation
+- [ ] Phase 3b — Autonomous mode: `browser.autonomous` grant, destructive action heuristics, `close_tab`
+- [ ] Phase 3c — Destructive action heuristics for browser actions
+- [ ] Headless browser (deferred) — Playwright fallback for unattended/CI runs
+- [ ] Computer-use loop (deferred) — screenshot + Anthropic computer-use API
 
-### Gatekeeper (Phase 3 — OS bridge)
-- [ ] Clipboard push (/clipboard command, Ctrl+V image paste)
-- [ ] File attach (/attach command)
-- [ ] Audio play (agent → host speakers)
-- [ ] Notifications
-- [ ] Timed grants with auto-expiry
-- [ ] Audit log
-- [ ] Browser plugin integration
+### Memory System
+- [ ] Haiku-filtered retrieval — when keyword results are noisy, Haiku filters to relevant chunks
+- [ ] RAG with local embeddings — if/when logs span 6+ months
 
-### Stabilize
-- [x] End-to-end test: gatekeeper/sandbox split works (2026-02-18)
-- [x] Pre-restart typecheck: tsc --noEmit before server restart in file watcher
-- [ ] Test with OpenAI-compatible endpoint (e.g., Ollama)
-
-### Web UI & Extension (see docs/web-ui-architecture.md)
-> Extension sidepanel replaced with popup window (`chrome.windows.create`).
-> This eliminates the iframe, mic relay chain, BroadcastChannel sync, and all
-> `isSidepanel` branches. The popup window is a normal browser context with
-> full getUserMedia access — identical to opening localhost:3141 in a tab.
-
-**Done (2026-02-25)**
-- [x] Replace sidepanel iframe with `chrome.windows.create({ type: 'popup' })`
-- [x] Delete mic relay chain (postMessage → chrome.runtime → executeScript → BroadcastChannel)
-- [x] Delete all `isSidepanel` branches from InputArea.tsx (~100 lines removed)
-- [x] Delete sidepanel files (sidepanel.html, sidepanel.js)
-- [x] Remove Permissions-Policy header from web-bridge.ts (was for iframe embed)
-- [x] Update popup with "Open aigent" button + connection status
-
-**Future — PWA for mobile**
-- [ ] Add PWA manifest + service worker for installable mobile app
+### Web UI
+- [ ] PWA manifest + service worker for installable mobile app
 - [ ] Test mic/TTS on iOS Safari and Android Chrome
-- [ ] Offline mode: cache static assets, show "server unavailable" gracefully
-
-### Browser Automation (primary OS presence track)
-> Strategy: Chrome extension over the user's live session — not headless Playwright.
-> See `docs/os-automation-strategy.md` (strategy) and `docs/design-browser-extension.md` (full design).
-> Native OS APIs deferred. Headless Playwright deferred (wrong model — parallel robot browser, not live session).
-> Computer-use (screenshot + vision) deferred as expensive fallback for non-browser desktop apps.
-
-**Architecture:** Extension ↔ Gatekeeper WebSocket (port 3141 /ext) ↔ Agent Unix socket
-**Interaction model:** observe (1 LLM call) → plan (emit batched action script) → execute (extension runs locally, no LLM) → report
-**Permission model:** read-only default, write requires explicit grant, destructive actions need confirmation
-
-- [x] Phase 1 — Observe: extension + WebSocket bridge + `extract_a11y` + `screenshot` (read-only, no permissions). `aigent-extension/`, `src/ext-bridge.ts`, `src/web-bridge.ts` `/ext` path. `npm run ext:build` → load from `aigent-extension/dist/`.
-- [x] Phase 2 — Write: `run_script` (batched steps: fill, click, scroll, wait, pressKey, etc.) + `navigate` action. Gatekeeper approval gate (`pendingBrowserWriteApprovals`, `/approve-browser-write`, `/deny-browser-write`). Web UI `browser_write_request` permission modal — same pattern as exec/fetch. (2026-02-26)
-- [x] Phase 3a — Multi-tab + grants: `activate_tab` (switch tab focus, auto-allowed), `open_tab` (new tab, write-gated), session-level `browser.write` grant via `--always` flag and "Always Allow" button. (2026-02-26)
-- [ ] Phase 3b — Autonomous mode: `browser.autonomous` grant (distinct from `browser.write`), destructive action heuristics, `close_tab`
-- [x] Prompt injection defense: page content wrapped in `=== BROWSER PAGE CONTENT (UNTRUSTED) ===`, system prompt hardening when extension connected
-
-### Memory System (see docs/memory-architecture.md for full design)
-- [x] MEMORY.md as curated short-term memory in system prompt
-- [x] Daily logs as archive — index only in prompt, full content on demand
-- [x] distillToMemory() on reset and session shutdown — model rewrites MEMORY.md
-- [x] Mid-task compaction stays task-focused, does not touch MEMORY.md
-- [x] search_memory tool — keyword grep across daily logs, zero LLM cost
-- [ ] Haiku-filtered retrieval — when keyword results are noisy, Haiku filters to relevant chunks (~$0.005/query)
-- [ ] RAG with local embeddings — if/when logs span 6+ months and keyword search gets noisy
 
 ### Polish
 - [ ] Better image UX (drag-and-drop paths, URL fetch)
@@ -208,4 +165,4 @@ Docker container (worker.ts → server.ts)
 
 ## Blocked
 
-- **GitHub push**: no SSH in sandbox — Stefano pushes from host
+(nothing currently blocked)

@@ -1,7 +1,7 @@
 import { execSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { sanitizedEnv, validateWritePath, validateFetchUrl, checkCommandSafety, validateReadonlyCommand } from './safety.js';
+import { sanitizedEnv, validateFetchUrl, checkCommandSafety, validateReadonlyCommand } from './safety.js';
 import type { ToolContentBlock, ImageMediaType } from './provider.js';
 import { createLogger } from './logger.js';
 
@@ -520,46 +520,6 @@ const hostTool: ToolDef = {
   },
 };
 
-const requestMountTool: ToolDef = {
-  name: 'request_mount',
-  description:
-    'Request access to a folder on the host filesystem. The user will be prompted to approve. ' +
-    'The sandbox will restart with the folder mounted. Use this when the user asks you to work ' +
-    'on a project or access files outside the current sandbox. Always explain why you need access.\n\n' +
-    'Default to "ro" (read-only). To propose file edits, use the apply_patch tool — it shows the user ' +
-    'a diff to review and approve without needing write access. Request "rw" only when the task ' +
-    'genuinely requires it (e.g. running build tools that write outputs, or when the user explicitly grants it).\n\n' +
-    'When you plan to make changes to 3 or more files, request a temporary rw mount with a ' +
-    'durationMinutes estimate and a fallbackHint explaining the alternative. If the mount is denied, ' +
-    'fall back to host_edit_file for each change individually.',
-  input_schema: {
-    type: 'object' as const,
-    properties: {
-      path: {
-        type: 'string',
-        description: 'Absolute path on the host (e.g., ~/projects/myapp or /home/user/data)',
-      },
-      mode: {
-        type: 'string',
-        description: 'Access mode: "ro" (read-only, default) or "rw" (read-write, only when explicitly needed)',
-      },
-      reason: {
-        type: 'string',
-        description: 'Why you need access. Shown to the user in the approval prompt.',
-      },
-      durationMinutes: {
-        type: 'number',
-        description: 'How many minutes you need access. Estimate based on the task. Default is 30. The mount will be automatically removed after this time.',
-      },
-      fallbackHint: {
-        type: 'string',
-        description: 'Message shown to the user explaining what happens if they deny. E.g. "If denied, I\'ll send 7 individual file edits for review instead."',
-      },
-    },
-    required: ['path', 'reason'],
-  },
-};
-
 const requestConfigWriteTool: ToolDef = {
   name: 'request_config_write',
   description:
@@ -742,7 +702,7 @@ const browserExtTool: ToolDef = {
 const internalTools = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
-  hostTool, requestMountTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
+  hostTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
   searchMemoryTool, browserExtTool,
 ];
 
@@ -776,13 +736,12 @@ interface ScreenshotInput { region?: string }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
 interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number; delivery?: 'agent-review' | 'user-pull' }
 interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
-interface RequestMountInput { path: string; mode?: string; reason: string; durationMinutes?: number; fallbackHint?: string }
 interface RequestConfigWriteInput { file: string; content: string; reason: string }
 interface HostEditFileInput { path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
 interface SwitchModelInput { model: string; reason?: string }
 interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: Record<string, unknown>[]; url?: string }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestMountInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput;
 
 /**
  * Produce a short human-readable summary of a tool call for display.
@@ -844,10 +803,6 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
     case 'host': {
       const { capability, reason } = input as HostInput;
       return reason ? `host: ${capability} (${reason.slice(0, 40)})` : `host: ${capability}`;
-    }
-    case 'request_mount': {
-      const { path, mode } = input as RequestMountInput;
-      return `mount: ${path} (${mode ?? 'ro'})`;
     }
     case 'request_config_write': {
       const { file } = input as RequestConfigWriteInput;
@@ -1009,8 +964,6 @@ export async function executeTool(
 
     case 'write_file': {
       const { path, content } = input as WriteFileInput;
-      const writeErr = validateWritePath(path);
-      if (writeErr) return writeErr;
       try {
         mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, content, 'utf-8');
@@ -1023,8 +976,6 @@ export async function executeTool(
 
     case 'edit_file': {
       const { path, old_text, new_text } = input as EditFileInput;
-      const editErr = validateWritePath(path);
-      if (editErr) return editErr;
       try {
         const content = readFileSync(path, 'utf-8');
         const index = content.indexOf(old_text);
@@ -1241,8 +1192,6 @@ export async function executeTool(
 
     case 'patch': {
       const { path: filePath, edits } = input as PatchInput;
-      const patchErr = validateWritePath(filePath);
-      if (patchErr) return patchErr;
       if (!edits || edits.length === 0) {
         return 'Error: no edits provided';
       }
@@ -1333,18 +1282,6 @@ export async function executeTool(
         return `Edit applied. ${res.message}`;
       }
       return `Edit denied: ${res.message}`;
-    }
-
-    case 'request_mount': {
-      const { path, mode = 'ro', reason, durationMinutes, fallbackHint } = input as RequestMountInput;
-      const { requestMount } = await import('./server.js');
-      const mountMode = mode === 'rw' ? 'rw' as const : 'ro' as const;
-      const res = await requestMount(path, mountMode, reason, durationMinutes, fallbackHint);
-
-      if (res.ok) {
-        return `Mount approved: ${path} (${mountMode}) → ${res.containerPath ?? 'pending restart'}\n${res.message}\nThe sandbox will restart. Your conversation will continue automatically.`;
-      }
-      return `Mount denied: ${res.message}\nYou should now fall back to host_edit_file for individual edits.`;
     }
 
     case 'host': {

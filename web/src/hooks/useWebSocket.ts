@@ -175,22 +175,6 @@ export function useWebSocket(): void {
           settings().mergeClientSettings(event.settings);
           break;
 
-        case 'mount_request': {
-          ui().enqueuePermRequest({
-            type: 'mount',
-            id: event.id,
-            title: `Mount Request (${event.mode})`,
-            detail: event.path,
-            ...(event.reason ? { body: event.reason } : {}),
-            approveCmd: `/grant ${event.id}`,
-            denyCmd: `/deny ${event.id}`,
-            ...(event.durationMinutes !== undefined ? { durationMinutes: event.durationMinutes } : {}),
-            ...(event.fallbackHint ? { fallbackHint: event.fallbackHint } : {}),
-          });
-          playPermissionSound();
-          break;
-        }
-
         case 'config_write_request':
           ui().enqueuePermRequest({
             type: 'config_write',

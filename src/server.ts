@@ -156,89 +156,6 @@ let isProcessingTaskResult = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
 
-// --- Mount request handling ---
-
-// Cache of currently active mounts to avoid duplicate requests
-let activeMounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] = [];
-
-const pendingMountRequests = new Map<string, {
-  path: string;
-  mode: 'ro' | 'rw';
-  reason?: string;
-  durationMinutes?: number;
-  resolve: (response: { ok: boolean; containerPath?: string; message: string }) => void;
-}>();
-let mountRequestCounter = 0;
-
-/**
- * Send a mount request to the gatekeeper (via the socket) and wait for approval.
- * Called by the request_mount tool.
- */
-export function requestMount(
-  path: string,
-  mode: 'ro' | 'rw',
-  reason?: string,
-  durationMinutes?: number,
-  fallbackHint?: string,
-): Promise<{ ok: boolean; containerPath?: string; message: string }> {
-  const id = `mount_${++mountRequestCounter}`;
-  
-  // Check if this mount already exists
-  // Note: rw mode satisfies ro requests, but not vice versa
-  const existingMount = activeMounts.find(mount => 
-    mount.hostPath === path && 
-    (mount.mode === mode || (mount.mode === 'rw' && mode === 'ro'))
-  );
-  
-  if (existingMount) {
-    // Return success immediately without triggering UI
-    const contextNote = `Mount already active: ${path} (${existingMount.mode})`;
-    log.info(contextNote);
-    return Promise.resolve({ ok: true, containerPath: existingMount.containerPath, message: contextNote });
-  }
-
-  return new Promise((resolve) => {
-    // Timeout after 60s
-    const timer = setTimeout(() => {
-      pendingMountRequests.delete(id);
-      resolve({ ok: false, message: 'Mount request timed out (60s)' });
-    }, 60_000);
-
-    pendingMountRequests.set(id, {
-      path,
-      mode,
-      ...(reason !== undefined ? { reason } : {}),
-      ...(durationMinutes !== undefined ? { durationMinutes } : {}),
-      resolve: (response) => {
-        clearTimeout(timer);
-        resolve(response);
-      },
-    });
-
-    // Send to gatekeeper via the socket
-    broadcast({
-      type: 'mount_request', id, path, mode,
-      ...(reason !== undefined ? { reason } : {}),
-      ...(durationMinutes !== undefined ? { durationMinutes } : {}),
-      ...(fallbackHint !== undefined ? { fallbackHint } : {}),
-    });
-  });
-}
-
-function resolveMountRequest(id: string, response: { ok: boolean; containerPath?: string; message: string }): void {
-  const pending = pendingMountRequests.get(id);
-  if (pending) {
-    pendingMountRequests.delete(id);
-    // When a mount is approved, a container restart is imminent.
-    // Auto-save now so conversation state survives the restart.
-    if (response.ok) {
-      isMountRestart = true;
-      doAutoSave();
-    }
-    pending.resolve(response);
-  }
-}
-
 // --- Exec command approval handling ---
 
 const pendingExecRequests = new Map<string, {
@@ -830,7 +747,7 @@ function buildBackgroundToolSet(allTools: ProviderToolDef[], capabilities: Set<s
   // Always blocked — no recursion, no host interaction
   const blocked = new Set([
     'spawn_agent', 'dispatch_task',
-    'request_mount', 'request_config_write',
+    'request_config_write',
     'host', 'screenshot', 'request_screenshot',
   ]);
 
@@ -1438,14 +1355,7 @@ function handleCommand(cmd: string): boolean {
       '  /sessions           List saved sessions\n' +
       '  /load <id>          Load a saved session\n' +
       '  Esc                 Cancel generation / clear input\n' +
-      '  Ctrl+C              Cancel / clear input (x2 to exit)\n' +
-      '\n' +
-      'Gatekeeper (host-side):\n' +
-      '  /mount <path> [ro|rw]  Mount a host folder into the sandbox\n' +
-      '  /unmount <path>        Remove a mount (sandbox restarts)\n' +
-      '  /mounts                List active mounts\n' +
-      '  /grant <id> [ro|rw]    Approve a mount request from the agent\n' +
-      '  /deny <id>             Deny a mount request'
+      '  Ctrl+C              Cancel / clear input (x2 to exit)'
     );
     return true;
   }
@@ -1531,9 +1441,6 @@ function handleClient(socket: Socket): void {
   send(socket, { type: 'connected', state: getState() });
 
   // Replay any pending permission requests so reconnecting clients see them
-  for (const [id, req] of pendingMountRequests) {
-    send(socket, { type: 'mount_request', id, path: req.path, mode: req.mode, ...(req.reason !== undefined ? { reason: req.reason } : {}), ...(req.durationMinutes !== undefined ? { durationMinutes: req.durationMinutes } : {}) });
-  }
   for (const [id, req] of pendingConfigWriteRequests) {
     send(socket, { type: 'config_write_request', id, file: req.file, content: req.content, reason: req.reason });
   }
@@ -1653,14 +1560,9 @@ function handleClient(socket: Socket): void {
           case 'command':
             handleCommand(cmd.cmd);
             break;
-          case 'mount_response':
-            resolveMountRequest(cmd.id, cmd);
-            break;
           case 'host_state':
-            // Update our cache of active mounts for duplicate detection
-            if (cmd.mounts) {
-              activeMounts = cmd.mounts;
-            }
+            // Refresh system prompt so the agent sees current state
+            agent?.setExtraSystemPrompt(buildExtraSystemPrompt());
             break;
           case 'config_write_response':
             resolveConfigWriteRequest(cmd.id, cmd);
@@ -2007,19 +1909,9 @@ try {
   process.exit(1);
 }
 
-const needsResume = restoreSession();
+restoreSession();
 const server = startServer();
 log.info('Listening', { socket: SOCKET_PATH });
-
-// If the session was interrupted mid-turn (e.g. by a mount restart), auto-resume
-// the agent so it continues its work without the user having to re-send their message.
-if (needsResume) {
-  // Small delay to let the client reconnect and receive restored state first.
-  setTimeout(() => {
-    addSystemMessage('Sandbox restarted (mount applied). Resuming...');
-    void processAgentTurn('[System: The sandbox restarted to apply a new mount. Your previous work was interrupted — continue where you left off.]', { isTaskResult: true });
-  }, 500);
-}
 
 // --- End-of-session summary ---
 
@@ -2066,7 +1958,6 @@ function writeEndOfSessionSummary(): void {
 
 // Graceful shutdown
 let restartRequested = false;
-let isMountRestart = false;
 let isShuttingDown = false;
 
 async function shutdown(): Promise<void> {
@@ -2089,23 +1980,19 @@ async function shutdown(): Promise<void> {
   doAutoSave();
 
   // Distill conversation to MEMORY.md — give it up to 30s before forcing exit.
-  // Skip during mount restarts: the session continues after restart, so
-  // distillation is unnecessary and wastes the docker stop grace period.
-  if (!isMountRestart) {
-    const agentMessages = agent?.getMessages() ?? [];
-    if (agentMessages.length >= 4 && agent) {
-      try {
-        await Promise.race([
-          distillToMemory(agent.underlyingProvider, agent.currentModel, agentMessages, workspacePath),
-          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 30_000)),
-        ]);
-      } catch {
-        // Non-critical — write a minimal fallback entry
-        writeEndOfSessionSummary();
-      }
-    } else {
+  const agentMessages = agent?.getMessages() ?? [];
+  if (agentMessages.length >= 4 && agent) {
+    try {
+      await Promise.race([
+        distillToMemory(agent.underlyingProvider, agent.currentModel, agentMessages, workspacePath),
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), 30_000)),
+      ]);
+    } catch {
+      // Non-critical — write a minimal fallback entry
       writeEndOfSessionSummary();
     }
+  } else {
+    writeEndOfSessionSummary();
   }
 
   if (mcpManager) mcpManager.shutdown();
