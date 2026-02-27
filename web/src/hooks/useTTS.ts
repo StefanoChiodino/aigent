@@ -116,6 +116,9 @@ export function useTTS(): TTSControls {
       if (!r.ok) throw new Error('tts error');
       return URL.createObjectURL(await r.blob());
     });
+    // Attach a no-op catch so abort/errors don't become unhandled rejections
+    // before drainQueue consumes this promise.
+    p.catch(() => undefined);
     ttsChunkQueue.push(p);
     if (!ttsChunkPlaying) void drainQueue();
   }, [drainQueue]);
