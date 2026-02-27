@@ -118,6 +118,10 @@ export function useWebSocket(): void {
           chat().appendToolOutput(event.content);
           break;
 
+        case 'tool_images':
+          chat().appendToolImages(event.images);
+          break;
+
         case 'tool_end':
           chat().finalizeToolBlock();
           break;

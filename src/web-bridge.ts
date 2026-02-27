@@ -473,6 +473,7 @@ export async function startWebServer(
       tool_start: (name: string, input: string, summary: string) =>
         send({ type: 'tool_start', name, input, summary }),
       tool_output: (content: string) => send({ type: 'tool_output', content }),
+      tool_images: (images: { mediaType: string; data: string }[]) => send({ type: 'tool_images', images }),
       tool_end: () => send({ type: 'tool_end' }),
       task_update: (task: ServerEvent extends { type: 'task_update'; task: infer T } ? T : never) =>
         send({ type: 'task_update', task }),

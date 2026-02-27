@@ -2778,6 +2778,27 @@ html, body {
   color: var(--text-secondary);
 }
 
+.tool-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.tool-result-image {
+  max-width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.tool-result-image:hover {
+  opacity: 0.85;
+}
+
 /* ── Permission request overlay ──────────────────────────── */
 
 /* Default: toast pinned to top-right */

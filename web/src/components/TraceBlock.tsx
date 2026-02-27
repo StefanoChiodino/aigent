@@ -124,6 +124,25 @@ export function TraceBlock({ trace }: Props) {
               : trace.toolOutput}
           </pre>
         )}
+        {trace.images && trace.images.length > 0 && (
+          <div className="tool-images">
+            {trace.images.map((img, i) => (
+              <img
+                key={i}
+                className="tool-result-image"
+                src={`data:${img.mediaType};base64,${img.data}`}
+                alt={`${trace.toolName} result`}
+                onClick={() => {
+                  const w = window.open();
+                  if (w) {
+                    w.document.write(`<img src="data:${img.mediaType};base64,${img.data}" style="max-width:100%;background:#111">`);
+                    w.document.title = `${trace.toolName} result`;
+                  }
+                }}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

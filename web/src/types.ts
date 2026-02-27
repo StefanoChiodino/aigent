@@ -35,6 +35,7 @@ export interface ToolTrace {
   model?: string;
   thinking?: string;
   classifierMeta?: ClassifierMeta;
+  images?: { mediaType: string; data: string }[];
 }
 
 export interface DisplayAttachment {
@@ -118,6 +119,7 @@ export type ServerEvent =
   | { type: 'thinking'; content: string }
   | { type: 'tool_start'; name: string; input: string; summary: string; model?: string; thinking?: string }
   | { type: 'tool_output'; content: string }
+  | { type: 'tool_images'; images: { mediaType: string; data: string }[] }
   | { type: 'tool_end' }
   | { type: 'message'; message: DisplayMessage }
   | { type: 'system'; content: string }

@@ -417,6 +417,10 @@ async function processAgentTurn(
         if (controller.signal.aborted) return;
         broadcast({ type: 'tool_output', content: toolContent });
       },
+      onToolImages: (images) => {
+        if (controller.signal.aborted) return;
+        broadcast({ type: 'tool_images', images });
+      },
       onToolEnd: () => {
         if (controller.signal.aborted) return;
         broadcast({ type: 'tool_end' });

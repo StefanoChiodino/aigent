@@ -110,6 +110,7 @@ export interface ChatCallbacks {
   onThinking?: (fullText: string) => void;
   onToolStart?: (name: string, input: string, summary: string, meta?: { model?: string; thinking?: string }) => void;
   onToolOutput?: (content: string) => void;
+  onToolImages?: (images: { mediaType: string; data: string }[]) => void;
   onToolEnd?: () => void;
   onUsage?: (usage: TokenUsage) => void;
   onCompact?: (summary: string) => void;
@@ -327,6 +328,19 @@ export class Agent {
           }
           const toolMs = (performance.now() - toolStart).toFixed(0);
           log.info('Tool executed', { tool: toolName, ms: toolMs });
+
+          // Broadcast tool result to UI: images and text for non-streaming tools.
+          if (typeof result !== 'string') {
+            // ToolContentBlock[] — extract text parts for UI, images for display
+            const texts = result.filter(b => b.type === 'text').map(b => (b as { text: string }).text);
+            const images = result.filter(b => b.type === 'image');
+            if (texts.length) callbacks?.onToolOutput?.(texts.join('\n'));
+            if (images.length) callbacks?.onToolImages?.(images.map(i => ({ mediaType: (i as { mediaType: string }).mediaType, data: (i as { data: string }).data })));
+          } else if (!['exec', 'exec_readonly'].includes(toolName)) {
+            // Non-exec string results — broadcast text (exec already streams via onOutput)
+            const preview = result.length > 2000 ? result.slice(0, 2000) + '\n\u2026 (truncated)' : result;
+            callbacks?.onToolOutput?.(preview);
+          }
 
           // Summarize large string results (if enabled), then truncate based on context budget;
           // deduplicate images.

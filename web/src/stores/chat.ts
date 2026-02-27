@@ -8,6 +8,7 @@ interface StreamingState {
   isThinking: boolean;
   thinkingText: string;
   currentToolOutput: string;
+  currentToolImages: { mediaType: string; data: string }[];
   traces: TraceEntry[];
   turnStartCtx: number;
 }
@@ -36,6 +37,7 @@ interface ChatState {
 
   startToolBlock: (name: string, summary: string, input: string, model?: string, thinking?: string) => void;
   appendToolOutput: (content: string) => void;
+  appendToolImages: (images: { mediaType: string; data: string }[]) => void;
   finalizeToolBlock: () => void;
   setClassifierMeta: (meta: ClassifierMeta) => void;
 }
@@ -45,7 +47,7 @@ let traceIdCounter = 0;
 const INITIAL_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const INITIAL_STREAMING: StreamingState = {
   active: false, text: '', isThinking: false, thinkingText: '',
-  currentToolOutput: '', traces: [], turnStartCtx: 0,
+  currentToolOutput: '', currentToolImages: [], traces: [], turnStartCtx: 0,
 };
 
 export const useChatStore = create<ChatState>()(
@@ -111,6 +113,7 @@ export const useChatStore = create<ChatState>()(
             ...s.streaming,
             text: '',
             currentToolOutput: '',
+            currentToolImages: [],
             traces: [...s.streaming.traces, {
               id, type: 'tool', toolName: name, toolSummary: summary,
               toolInput: input, toolOutput: '', running: true,
@@ -123,12 +126,18 @@ export const useChatStore = create<ChatState>()(
       appendToolOutput: (content) => set(s => ({
         streaming: { ...s.streaming, currentToolOutput: s.streaming.currentToolOutput + content },
       })),
+      appendToolImages: (images) => set(s => ({
+        streaming: { ...s.streaming, currentToolImages: [...s.streaming.currentToolImages, ...images] },
+      })),
       finalizeToolBlock: () => set(s => {
         const output = s.streaming.currentToolOutput;
+        const images = s.streaming.currentToolImages;
         const traces = s.streaming.traces.map(t =>
-          t.type === 'tool' && t.running ? { ...t, toolOutput: output, running: false } : t
+          t.type === 'tool' && t.running
+            ? { ...t, toolOutput: output, running: false, ...(images.length ? { images } : {}) }
+            : t
         );
-        return { streaming: { ...s.streaming, currentToolOutput: '', traces } };
+        return { streaming: { ...s.streaming, currentToolOutput: '', currentToolImages: [], traces } };
       }),
       setClassifierMeta: (meta) => set(s => {
         // Attach classifier metadata to the last tool trace (the one that triggered the decision)
