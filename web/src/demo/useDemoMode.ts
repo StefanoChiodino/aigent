@@ -48,12 +48,13 @@ export function useDemoMode(): void {
 
     // Small delay to let React mount everything before starting playback
     const startTimer = setTimeout(() => {
+      // Always start the play loop — it's the async loop that processes
+      // seeks, pauses, and step execution. Without it, nothing happens.
+      void engine.play();
+
       if (initialHash && engine.sectionIndex.has(initialHash)) {
-        // Seek to the section and auto-resume playback from there
+        // Seek to the section (play loop will process the _seekTarget)
         engine.seekToSection(initialHash);
-        engine.resume();
-      } else {
-        void engine.play();
       }
     }, 500);
 
