@@ -7,7 +7,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,8 +38,23 @@ async function readClientSettings(): Promise<ClientSettings> {
 
 async function writeClientSettings(updates: ClientSettings): Promise<void> {
   const current = await readClientSettings();
-  const merged = { ...current, ...updates };
-  await writeFile(SETTINGS_PATH, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+  const merged: Record<string, unknown> = { ...current as Record<string, unknown> };
+  for (const [k, v] of Object.entries(updates)) {
+    // Deep-merge nested permission objects so gatekeeper-added entries survive
+    // a browser POST that only intends to update one sub-field.
+    if ((k === 'exec_permissions' || k === 'fetch_permissions') &&
+        v !== null && typeof v === 'object' &&
+        merged[k] !== null && typeof merged[k] === 'object') {
+      const existing = merged[k] as Record<string, unknown>;
+      const incoming = v as Record<string, unknown>;
+      merged[k] = { ...existing, ...incoming };
+    } else {
+      merged[k] = v;
+    }
+  }
+  const tmp = SETTINGS_PATH + '.tmp';
+  await writeFile(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+  await rename(tmp, SETTINGS_PATH);
 }
 
 const MIME_TYPES: Record<string, string> = {

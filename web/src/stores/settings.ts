@@ -79,9 +79,23 @@ export const useSettingsStore = create<SettingsState>()(
         });
       },
 
-      mergeClientSettings: (updates) => set(s => ({
-        clientSettings: { ...s.clientSettings, ...updates },
-      })),
+      // Server sends its view of settings on connect. We let the browser's own
+      // persisted values (localStorage) win over the server push — the server
+      // is just filling in keys we don't have locally yet.
+      // Exception: exec_perm_* and fetch_perm_* always take the server value
+      // because the gatekeeper is the authoritative owner of those lists.
+      mergeClientSettings: (updates) => set(s => {
+        const merged: SettingsValues = { ...s.clientSettings };
+        for (const [k, v] of Object.entries(updates)) {
+          if (k.startsWith('exec_perm_') || k.startsWith('fetch_perm_')) {
+            merged[k] = v; // gatekeeper is authoritative
+          } else if (!(k in s.clientSettings)) {
+            merged[k] = v; // fill in missing keys only
+          }
+          // otherwise keep the locally-persisted value
+        }
+        return { clientSettings: merged };
+      }),
 
       setServerSettings: (updates) => set(s => ({
         serverSettings: { ...s.serverSettings, ...updates },

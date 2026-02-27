@@ -12,7 +12,7 @@
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, renameSync, createWriteStream, readdirSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import 'dotenv/config'; // Load .env from cwd (repo root)
@@ -878,7 +878,9 @@ function addCommandToAlwaysAllow(command: string): void {
       }
     }
     settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current };
-    writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    const tmp = SETTINGS_PATH + '.tmp';
+    writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    renameSync(tmp, SETTINGS_PATH);
     log.info('Added command to always-allow', { command, patterns });
     broadcastUpdatedPermissions();
   } catch (err) {
@@ -899,7 +901,9 @@ function addCommandToDenyList(command: string): void {
       }
     }
     settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, deny: current };
-    writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    const tmp = SETTINGS_PATH + '.tmp';
+    writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    renameSync(tmp, SETTINGS_PATH);
     log.info('Added command to deny list', { command, patterns });
     broadcastUpdatedPermissions();
   } catch (err) {
@@ -1093,7 +1097,9 @@ function addToFetchAlwaysAllow(pattern: string): void {
       current.push(pattern);
     }
     settings['fetch_permissions'] = { ...DEFAULT_FETCH_PERMISSIONS, ...perms, alwaysAllow: current };
-    writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    const tmp = SETTINGS_PATH + '.tmp';
+    writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    renameSync(tmp, SETTINGS_PATH);
     log.info('Added pattern to fetch always-allow', { pattern });
     broadcastUpdatedPermissions();
   } catch (err) {
