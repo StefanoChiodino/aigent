@@ -15,6 +15,7 @@ const TYPE_ICONS: Record<string, string> = {
   file_access: '📄',
   fetch_size: '📦',
   mcp_tool: '🔌',
+  user_question: '❓',
 };
 
 export function PermissionModal() {
@@ -25,6 +26,9 @@ export function PermissionModal() {
   const [wordWrap, setWordWrap] = useState(true);
 
   const req = permQueue[0] ?? null;
+
+  // Don't render if the front item is a user question — QuestionModal handles that
+  const isQuestion = req?.type === 'user_question';
 
   useEffect(() => {
     setActiveFileIdx(0);
@@ -62,7 +66,7 @@ export function PermissionModal() {
   const multiSegment = isExec && req?.segments && req.segments.length > 1;
 
   const overlayClass = [
-    !req ? 'hidden' : '',
+    (!req || isQuestion) ? 'hidden' : '',
     isPatch ? 'patch-mode' : '',
     isExec ? 'exec-mode' : '',
     isFetch ? 'fetch-mode' : '',

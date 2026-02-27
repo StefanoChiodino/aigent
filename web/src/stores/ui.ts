@@ -28,6 +28,7 @@ interface UIState {
   setLoading: (loading: boolean) => void;
   enqueuePermRequest: (req: PermRequest) => void;
   resolvePermRequest: (send: (data: Record<string, unknown>) => void, approve: boolean, alwaysAllow?: boolean, alwaysDomain?: boolean) => void;
+  resolveQuestionRequest: (send: (data: Record<string, unknown>) => void, answer: string, selectedOptions?: string[], dismissed?: boolean) => void;
   setModelPickerOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
@@ -100,6 +101,25 @@ export const useUIStore = create<UIState>((set, get) => ({
     } else {
       send({ type: 'command', cmd: req.denyCmd });
     }
+  },
+
+  resolveQuestionRequest: (send, answer, selectedOptions, dismissed = false) => {
+    let resolved: PermRequest | null = null;
+    set(s => {
+      const req = s.permQueue[0];
+      if (!req || req.type !== 'user_question') return s;
+      resolved = req;
+      const next = s.permQueue.slice(1);
+      return { permQueue: next, permShowing: next.length > 0 };
+    });
+    if (!resolved) return;
+    send({
+      type: 'user_question_response',
+      id: (resolved as PermRequest).id,
+      answer,
+      ...(selectedOptions ? { selectedOptions } : {}),
+      dismissed,
+    });
   },
 
   setModelPickerOpen: (open) => set({ modelPickerOpen: open }),

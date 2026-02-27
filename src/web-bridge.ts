@@ -584,6 +584,15 @@ export async function startWebServer(
         send({ type: 'host_state', mounts, ...(capabilities ? { capabilities } : {}) }),
       context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) =>
         send({ type: 'context_breakdown', breakdown }),
+      user_question_request: (id: string, question: string, options?: { label: string; description?: string }[], multiSelect?: boolean, allowFreeText?: boolean) =>
+        send({
+          type: 'user_question_request',
+          id,
+          question,
+          ...(options ? { options } : {}),
+          ...(multiSelect !== undefined ? { multiSelect } : {}),
+          ...(allowFreeText !== undefined ? { allowFreeText } : {}),
+        }),
       reset: () => send({ type: 'reset' }),
     };
 
@@ -655,6 +664,9 @@ export async function startWebServer(
             client.send(cmd);
             break;
           case 'browser_write_response':
+            client.send(cmd);
+            break;
+          case 'user_question_response':
             client.send(cmd);
             break;
           case 'context_breakdown_request':

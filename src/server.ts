@@ -752,17 +752,18 @@ export function requestUserQuestion(
       finish({ answer: '', dismissed: true });
     }, 300_000); // 5 minute timeout
 
-    pendingUserQuestionRequests.set(id, {
+    const entry: typeof pendingUserQuestionRequests extends Map<string, infer V> ? V : never = {
       question,
-      ...(options !== undefined && { options }),
-      ...(multiSelect !== undefined && { multiSelect }),
-      ...(allowFreeText !== undefined && { allowFreeText }),
       resolve: (response) => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);
         finish(response);
       },
-    });
+    };
+    if (options !== undefined) entry.options = options;
+    if (multiSelect !== undefined) entry.multiSelect = multiSelect;
+    if (allowFreeText !== undefined) entry.allowFreeText = allowFreeText;
+    pendingUserQuestionRequests.set(id, entry);
 
     broadcast({
       type: 'user_question_request',
@@ -1845,11 +1846,12 @@ function handleClient(socket: Socket): void {
             resolveBrowserExtRequest(cmd.id, cmd);
             break;
           case 'user_question_response':
-            resolveUserQuestionRequest(cmd.id, {
+            const questionResponse: { answer: string; selectedOptions?: string[]; dismissed: boolean } = {
               answer: cmd.answer,
-              ...(cmd.selectedOptions !== undefined && { selectedOptions: cmd.selectedOptions }),
               dismissed: cmd.dismissed,
-            });
+            };
+            if (cmd.selectedOptions !== undefined) questionResponse.selectedOptions = cmd.selectedOptions;
+            resolveUserQuestionRequest(cmd.id, questionResponse);
             break;
           case 'context_breakdown_request':
             try {

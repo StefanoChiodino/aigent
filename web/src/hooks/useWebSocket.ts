@@ -330,6 +330,21 @@ export function useWebSocket(): void {
           playPermissionSound();
           break;
 
+        case 'user_question_request':
+          ui().enqueuePermRequest({
+            type: 'user_question',
+            id: event.id,
+            title: 'Question from Agent',
+            detail: event.question,
+            questionOptions: event.options,
+            questionMultiSelect: event.multiSelect,
+            questionAllowFreeText: event.allowFreeText ?? (event.options ? false : true),
+            approveCmd: '',
+            denyCmd: '',
+          });
+          playPermissionSound();
+          break;
+
         case 'screenshot_request': {
           const base64 = captureScreenshot();
           if (!base64) {

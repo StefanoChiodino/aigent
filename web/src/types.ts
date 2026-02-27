@@ -142,6 +142,7 @@ export type ServerEvent =
   | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; autonomousCmd?: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'classifier_decision'; tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
+  | { type: 'user_question_request'; id: string; question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean; allowFreeText?: boolean }
   | { type: 'reset' }
   | { type: 'pong' };
 
@@ -158,7 +159,7 @@ export interface DiffFile {
 }
 
 export interface PermRequest {
-  type: 'mount' | 'config_write' | 'patch' | 'exec' | 'fetch' | 'file_access' | 'fetch_size' | 'mcp_tool' | 'browser_write';
+  type: 'mount' | 'config_write' | 'patch' | 'exec' | 'fetch' | 'file_access' | 'fetch_size' | 'mcp_tool' | 'browser_write' | 'user_question';
   id: string;
   title: string;
   detail: string;
@@ -173,6 +174,9 @@ export interface PermRequest {
   fallbackHint?: string;
   diff?: string;
   diffFiles?: DiffFile[];
+  questionOptions?: { label: string; description?: string }[];
+  questionMultiSelect?: boolean;
+  questionAllowFreeText?: boolean;
 }
 
 export interface PendingAttachment {

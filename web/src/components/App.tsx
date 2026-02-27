@@ -21,6 +21,7 @@ import { OscilloscopeBackground } from './backgrounds/OscilloscopeBackground';
 import { CircularSpectrumBackground } from './backgrounds/CircularSpectrumBackground';
 import { MilkdropBackground } from './backgrounds/MilkdropBackground';
 import { PermissionModal } from './modals/PermissionModal';
+import { QuestionModal } from './modals/QuestionModal';
 import { SettingsModal } from './modals/SettingsModal';
 import { ContextInspector } from './modals/ContextInspector';
 import { TaskResultPanel } from './modals/TaskResultPanel';
@@ -91,6 +92,7 @@ export function App() {
         </div>
       </div>
       {createPortal(<PermissionModal />, document.body)}
+      {createPortal(<QuestionModal />, document.body)}
       {createPortal(<SettingsModal />, document.body)}
       {createPortal(<ContextInspector />, document.body)}
       {createPortal(<TaskResultPanel />, document.body)}

@@ -240,7 +240,7 @@ Key settings groups:
 
 ---
 
-## Tools (20)
+## Tools (21)
 
 | Tool | Description |
 |------|-------------|
@@ -264,6 +264,7 @@ Key settings groups:
 | `request_config_write` | Propose edits to config files (SOUL.md, AGENTS.md, etc.) — user sees diff |
 | `search_memory` | Keyword search across past session logs (zero LLM cost) |
 | `browser_ext` | Interact with Chrome via the aigent extension (a11y tree, screenshots, tab control, script execution) |
+| `ask_user` | Present a question to the user with optional multiple-choice options |
 
 ---
 
