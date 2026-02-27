@@ -12,7 +12,7 @@
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, renameSync, createWriteStream, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import 'dotenv/config'; // Load .env from cwd (repo root)
@@ -24,6 +24,7 @@ import { initClassifier, classifyCommand, isClassifierAvailable } from './classi
 import { extensionBridge } from './ext-bridge.js';
 import { buildDisplayDiff } from './diff.js';
 import { auditLog } from './audit.js';
+import { readSettingsSync, writeSettingsSync } from './settings-file.js';
 
 const log = createLogger('gatekeeper');
 
@@ -845,13 +846,9 @@ const pendingExecApprovals = new Map<string, {
 // IDs auto-handled (allow/deny) before any browser listener fires — web-bridge skips these
 const autoHandledExecIds = new Set<string>();
 
-const SETTINGS_PATH = resolve(REPO_DIR, 'settings.json');
-
 function readExecPermissions(): ExecPermissions {
   try {
-    if (!existsSync(SETTINGS_PATH)) return DEFAULT_EXEC_PERMISSIONS;
-    const raw = readFileSync(SETTINGS_PATH, 'utf-8');
-    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const settings = readSettingsSync();
     const perms = settings['exec_permissions'];
     if (!perms || typeof perms !== 'object') return DEFAULT_EXEC_PERMISSIONS;
     const p = perms as Partial<ExecPermissions>;
@@ -900,20 +897,17 @@ function deriveExecPatterns(command: string): string[] {
 
 function addCommandToAlwaysAllow(command: string): void {
   try {
-    const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
-    const settings = JSON.parse(raw) as Record<string, unknown>;
-    const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
-    const current = Array.isArray(perms.alwaysAllow) ? perms.alwaysAllow : [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow];
     const patterns = deriveExecPatterns(command);
-    for (const pattern of patterns) {
-      if (!current.includes(pattern)) {
-        current.push(pattern);
+    writeSettingsSync('gatekeeper:addToExecAlwaysAllow', (settings) => {
+      const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
+      const current = Array.isArray(perms.alwaysAllow) ? [...perms.alwaysAllow] : [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow];
+      for (const pattern of patterns) {
+        if (!current.includes(pattern)) {
+          current.push(pattern);
+        }
       }
-    }
-    settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current };
-    const tmp = SETTINGS_PATH + '.tmp';
-    writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-    renameSync(tmp, SETTINGS_PATH);
+      return { ...settings, exec_permissions: { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current } };
+    });
     log.info('Added command to always-allow', { command, patterns });
     broadcastUpdatedPermissions();
   } catch (err) {
@@ -923,20 +917,17 @@ function addCommandToAlwaysAllow(command: string): void {
 
 function addCommandToDenyList(command: string): void {
   try {
-    const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
-    const settings = JSON.parse(raw) as Record<string, unknown>;
-    const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
-    const current = Array.isArray(perms.deny) ? perms.deny : [...DEFAULT_EXEC_PERMISSIONS.deny];
     const patterns = deriveExecPatterns(command);
-    for (const pattern of patterns) {
-      if (!current.includes(pattern)) {
-        current.push(pattern);
+    writeSettingsSync('gatekeeper:addToExecDeny', (settings) => {
+      const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
+      const current = Array.isArray(perms.deny) ? [...perms.deny] : [...DEFAULT_EXEC_PERMISSIONS.deny];
+      for (const pattern of patterns) {
+        if (!current.includes(pattern)) {
+          current.push(pattern);
+        }
       }
-    }
-    settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, deny: current };
-    const tmp = SETTINGS_PATH + '.tmp';
-    writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-    renameSync(tmp, SETTINGS_PATH);
+      return { ...settings, exec_permissions: { ...DEFAULT_EXEC_PERMISSIONS, ...perms, deny: current } };
+    });
     log.info('Added command to deny list', { command, patterns });
     broadcastUpdatedPermissions();
   } catch (err) {
@@ -946,19 +937,16 @@ function addCommandToDenyList(command: string): void {
 
 function addPatternsToAlwaysAllow(patterns: string[]): void {
   try {
-    const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
-    const settings = JSON.parse(raw) as Record<string, unknown>;
-    const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
-    const current = Array.isArray(perms.alwaysAllow) ? perms.alwaysAllow : [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow];
-    for (const pattern of patterns) {
-      if (!current.includes(pattern)) {
-        current.push(pattern);
+    writeSettingsSync('gatekeeper:addClassifierPatterns', (settings) => {
+      const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
+      const current = Array.isArray(perms.alwaysAllow) ? [...perms.alwaysAllow] : [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow];
+      for (const pattern of patterns) {
+        if (!current.includes(pattern)) {
+          current.push(pattern);
+        }
       }
-    }
-    settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current };
-    const tmp = SETTINGS_PATH + '.tmp';
-    writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-    renameSync(tmp, SETTINGS_PATH);
+      return { ...settings, exec_permissions: { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current } };
+    });
     log.info('Added classifier-suggested patterns to always-allow', { patterns });
     broadcastUpdatedPermissions();
   } catch (err) {
@@ -1153,9 +1141,7 @@ const autoHandledFetchIds = new Set<string>();
 
 function readFetchPermissions(): FetchPermissions {
   try {
-    if (!existsSync(SETTINGS_PATH)) return DEFAULT_FETCH_PERMISSIONS;
-    const raw = readFileSync(SETTINGS_PATH, 'utf-8');
-    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const settings = readSettingsSync();
     const perms = settings['fetch_permissions'];
     if (!perms || typeof perms !== 'object') return DEFAULT_FETCH_PERMISSIONS;
     const p = perms as Partial<FetchPermissions>;
@@ -1174,17 +1160,14 @@ function readFetchPermissions(): FetchPermissions {
 
 function addToFetchAlwaysAllow(pattern: string): void {
   try {
-    const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
-    const settings = JSON.parse(raw) as Record<string, unknown>;
-    const perms = (settings['fetch_permissions'] as Partial<FetchPermissions> | undefined) ?? {};
-    const current = Array.isArray(perms.alwaysAllow) ? perms.alwaysAllow : [...DEFAULT_FETCH_PERMISSIONS.alwaysAllow];
-    if (!current.includes(pattern)) {
-      current.push(pattern);
-    }
-    settings['fetch_permissions'] = { ...DEFAULT_FETCH_PERMISSIONS, ...perms, alwaysAllow: current };
-    const tmp = SETTINGS_PATH + '.tmp';
-    writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
-    renameSync(tmp, SETTINGS_PATH);
+    writeSettingsSync('gatekeeper:addToFetchAlwaysAllow', (settings) => {
+      const perms = (settings['fetch_permissions'] as Partial<FetchPermissions> | undefined) ?? {};
+      const current = Array.isArray(perms.alwaysAllow) ? [...perms.alwaysAllow] : [...DEFAULT_FETCH_PERMISSIONS.alwaysAllow];
+      if (!current.includes(pattern)) {
+        current.push(pattern);
+      }
+      return { ...settings, fetch_permissions: { ...DEFAULT_FETCH_PERMISSIONS, ...perms, alwaysAllow: current } };
+    });
     log.info('Added pattern to fetch always-allow', { pattern });
     broadcastUpdatedPermissions();
   } catch (err) {

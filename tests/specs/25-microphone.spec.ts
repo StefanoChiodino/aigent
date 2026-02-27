@@ -34,10 +34,10 @@ test.describe('@mic Microphone UI state, controls, and VAD feedback', () => {
     await expect(sticky).toHaveText('∞');
   });
 
-  test('mic-clear is hidden when not recording', async () => {
+  test('input-clear is absent when not recording', async () => {
     const page = getPage();
-    // React component uses CSS visibility:hidden via the 'disabled' class
-    await expect(page.locator('#mic-clear')).toHaveClass(/\bdisabled\b/);
+    // #input-clear is only rendered when inputValue is non-empty
+    await expect(page.locator('#input-clear')).toHaveCount(0);
   });
 
   test('mic-capped indicator is hidden by default', async () => {
@@ -230,7 +230,7 @@ test.describe('@mic Microphone UI state, controls, and VAD feedback', () => {
     await expect(input).toHaveValue('hello world', { timeout: 5000 });
   });
 
-  test('mic-clear button appears when there is transcribed text', async () => {
+  test('input-clear button appears when there is transcribed text', async () => {
     const page = getPage();
     await installMicMock(page);
     await mockSTT(page, 'some text');
@@ -248,11 +248,11 @@ test.describe('@mic Microphone UI state, controls, and VAD feedback', () => {
     // Wait for transcription to appear
     await expect(page.locator('#input')).toHaveValue('some text', { timeout: 5000 });
 
-    // Now mic-clear should be visible
-    await expect(page.locator('#mic-clear')).not.toHaveClass(/\bhidden\b/, { timeout: 3000 });
+    // Now input-clear should be visible (rendered when inputValue is non-empty)
+    await expect(page.locator('#input-clear')).toBeVisible({ timeout: 3000 });
   });
 
-  test('clicking mic-clear resets transcription text', async () => {
+  test('clicking input-clear resets transcription text', async () => {
     const page = getPage();
     await installMicMock(page);
     await mockSTT(page, 'some text');
@@ -267,11 +267,11 @@ test.describe('@mic Microphone UI state, controls, and VAD feedback', () => {
       for (let i = 0; i < 5; i++) mock.fireAudioFrame(0.1);
     });
 
-    // Wait for transcription to appear (exact value may vary due to stale intervals)
-    await expect(page.locator('#mic-clear')).not.toHaveClass(/\bdisabled\b/, { timeout: 5000 });
+    // Wait for transcription to appear
+    await expect(page.locator('#input')).toHaveValue('some text', { timeout: 5000 });
 
     // Click clear
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(page.locator('#input')).toHaveValue('');
   });
 
@@ -532,7 +532,7 @@ test.describe('@mic Microphone UI state, controls, and VAD feedback', () => {
     expect(hasHidden).toBe(true);
   });
 
-  test('mic-capped indicator clears on mic-clear click', async () => {
+  test('mic-capped indicator clears on input-clear click', async () => {
     const page = getPage();
     await installMicMock(page);
     await mockSTT(page, 'text');
@@ -551,8 +551,8 @@ test.describe('@mic Microphone UI state, controls, and VAD feedback', () => {
     // Wait for transcription
     await expect(page.locator('#input')).toHaveValue('text', { timeout: 5000 });
 
-    // Click mic-clear should reset the capped indicator too
-    await page.locator('#mic-clear').click();
+    // Click input-clear should reset the capped indicator too
+    await page.locator('#input-clear').click();
     await expect(capped).toHaveClass(/\bhidden\b/);
   });
 });

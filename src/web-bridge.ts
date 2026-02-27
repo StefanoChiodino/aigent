@@ -7,8 +7,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, writeFile, rename } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { resolve, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -19,42 +18,37 @@ import type { ThinkingLevel } from './agent.js';
 import type { ExecPermissions, FetchPermissions } from './safety.js';
 import { parseCommandPipeline } from './safety.js';
 import { createLogger } from './logger.js';
+import { readSettingsSync, writeSettings } from './settings-file.js';
 
 const log = createLogger('web-bridge');
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..');
 const WEB_DIR = resolve(__dirname, '..', 'web');
-const SETTINGS_PATH = resolve(__dirname, '..', 'settings.json');
 
 type ClientSettings = Record<string, boolean | number | string>;
 
-async function readClientSettings(): Promise<ClientSettings> {
-  try {
-    if (!existsSync(SETTINGS_PATH)) return {};
-    const raw = await readFile(SETTINGS_PATH, 'utf-8');
-    return JSON.parse(raw) as ClientSettings;
-  } catch { return {}; }
+function readClientSettings(): ClientSettings {
+  return readSettingsSync() as ClientSettings;
 }
 
 async function writeClientSettings(updates: ClientSettings): Promise<void> {
-  const current = await readClientSettings();
-  const merged: Record<string, unknown> = { ...current as Record<string, unknown> };
-  for (const [k, v] of Object.entries(updates)) {
-    // Deep-merge nested permission objects so gatekeeper-added entries survive
-    // a browser POST that only intends to update one sub-field.
-    if ((k === 'exec_permissions' || k === 'fetch_permissions') &&
-        v !== null && typeof v === 'object' &&
-        merged[k] !== null && typeof merged[k] === 'object') {
-      const existing = merged[k] as Record<string, unknown>;
-      const incoming = v as Record<string, unknown>;
-      merged[k] = { ...existing, ...incoming };
-    } else {
-      merged[k] = v;
+  await writeSettings('web-bridge', (current) => {
+    const merged: Record<string, unknown> = { ...current };
+    for (const [k, v] of Object.entries(updates)) {
+      // Deep-merge nested permission objects so gatekeeper-added entries survive
+      // a browser POST that only intends to update one sub-field.
+      if ((k === 'exec_permissions' || k === 'fetch_permissions') &&
+          v !== null && typeof v === 'object' &&
+          merged[k] !== null && typeof merged[k] === 'object') {
+        const existing = merged[k] as Record<string, unknown>;
+        const incoming = v as Record<string, unknown>;
+        merged[k] = { ...existing, ...incoming };
+      } else {
+        merged[k] = v;
+      }
     }
-  }
-  const tmp = SETTINGS_PATH + '.tmp';
-  await writeFile(tmp, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
-  await rename(tmp, SETTINGS_PATH);
+    return merged;
+  });
 }
 
 const MIME_TYPES: Record<string, string> = {
@@ -429,7 +423,8 @@ export async function startWebServer(
     // Send current client settings so the browser can sync from the JSON file.
     // Also include effective exec permissions (defaults merged with overrides) so the
     // Permissions pane in the settings modal shows accurate data before any edits.
-    readClientSettings().then((settings) => {
+    {
+      const settings = readClientSettings();
       if (ws.readyState === WebSocket.OPEN) {
         let merged: Record<string, boolean | number | string> = settings;
         if (getExecPermissions) {
@@ -462,7 +457,7 @@ export async function startWebServer(
         }
         ws.send(JSON.stringify({ type: 'client_settings', settings: merged }));
       }
-    }).catch(() => { /* file missing is fine */ });
+    }
 
     // --- Relay AgentClient events → WebSocket ---
 
