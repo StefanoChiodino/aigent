@@ -4,6 +4,7 @@ import { renderMarkdown, extractSpeakContent, stripSpeakTag } from '../lib/markd
 import { useVoiceStore } from '../stores/voice';
 import { useTTS } from '../hooks/useTTS';
 import { TraceBlock } from './TraceBlock';
+import { SpeakPreview } from './SpeakPreview';
 
 interface Props {
   message: DisplayMessage;
@@ -100,14 +101,7 @@ export const Message = React.memo(function Message({ message }: Props) {
           <span className="elapsed">{message.elapsed.toFixed(1)}s</span>
         )}
         {message.role === 'assistant' && <TTSButton text={ttsText} />}
-        {speakContent && (
-          <span className="speak-preview">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            <span className="speak-preview-tooltip">{speakContent}</span>
-          </span>
-        )}
+        {speakContent && <SpeakPreview content={speakContent} />}
       </div>
       {message.attachments && message.attachments.length > 0 && (
         <MessageAttachments attachments={message.attachments} />
