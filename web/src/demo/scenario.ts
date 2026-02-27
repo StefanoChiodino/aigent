@@ -677,6 +677,17 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'close_modal', modal: 'context' },
 
     // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 5.4: Picture-in-Picture
+    // ════════════════════════════════════════════════════════════════════════
+
+    { action: 'label', text: 'Picture-in-Picture', id: 'pip' },
+    wait(1500),
+    { action: 'click', selector: 'button[title="Float (PiP)"]' },
+    wait(5000),
+    { action: 'close_pip' },
+    wait(1000),
+
+    // ════════════════════════════════════════════════════════════════════════
     //  PHASE 5.5: Background themes showcase
     // ════════════════════════════════════════════════════════════════════════
 

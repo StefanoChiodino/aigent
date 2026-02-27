@@ -22,6 +22,7 @@ import { loadMCP, type MCPManager } from './mcp.js';
 import { createLogger } from './logger.js';
 import { execReadonlyTool, fetchReadonlyTool, getToolDefinitions } from './tools.js';
 import type { ProviderToolDef } from './provider.js';
+import { PendingRequestBroker } from './pending-request.js';
 
 const log = createLogger('server');
 
@@ -156,575 +157,208 @@ let isProcessingTaskResult = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
 
-// --- Exec command approval handling ---
+// --- Permission request brokers ---
+// Each broker manages one category of pending request (exec, fetch, etc.).
+// See pending-request.ts for the generic implementation.
 
-const pendingExecRequests = new Map<string, {
-  command: string;
-  resolve: (response: { ok: boolean; alwaysAllow: boolean; message: string }) => void;
-}>();
-let execApprovalCounter = 0;
+type OkAlwaysAllow = { ok: boolean; alwaysAllow: boolean; message: string };
+type OkMessage = { ok: boolean; message: string };
 
-/**
- * Request user approval before running a shell command.
- * Called by the exec tool when a command requires prompt-level permission.
- * If signal is already aborted, or fires before the user responds, resolves
- * immediately with ok:false so the agent can unblock and handle the abort.
- */
-export function requestExecApproval(command: string, signal?: AbortSignal): Promise<{ ok: boolean; alwaysAllow: boolean; message: string }> {
-  const id = `exec_${++execApprovalCounter}`;
-
-  // Already aborted — skip the UI prompt entirely
-  if (signal?.aborted) {
-    return Promise.resolve({ ok: false, alwaysAllow: false, message: 'Aborted by user' });
-  }
-
-  return new Promise((resolve) => {
-    const finish = (response: { ok: boolean; alwaysAllow: boolean; message: string }) => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      pendingExecRequests.delete(id);
-      resolve(response);
-    };
-
-    const onAbort = () => finish({ ok: false, alwaysAllow: false, message: 'Aborted by user' });
-
-    const timer = setTimeout(() => {
-      finish({ ok: false, alwaysAllow: false, message: 'Exec approval request timed out (60s)' });
-    }, 60_000);
-
-    pendingExecRequests.set(id, { command, resolve: finish });
-
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    broadcast({ type: 'exec_request', id, command });
-  });
-}
-
-function resolveExecRequest(id: string, response: { ok: boolean; alwaysAllow: boolean; message: string }): void {
-  const pending = pendingExecRequests.get(id);
-  if (pending) {
-    pendingExecRequests.delete(id);
-    pending.resolve(response);
-  }
-}
-
-// --- Browser extension request handling ---
+const execBroker = new PendingRequestBroker<{ command: string }, OkAlwaysAllow>({
+  prefix: 'exec',
+  abortResponse: { ok: false, alwaysAllow: false, message: 'Aborted by user' },
+  timeoutResponse: { ok: false, alwaysAllow: false, message: 'Exec approval request timed out (60s)' },
+});
 
 type BrowserExtResponse = { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string };
 
-const pendingBrowserExtRequests = new Map<string, {
-  resolve: (response: BrowserExtResponse) => void;
-}>();
-let browserExtCounter = 0;
+const browserExtBroker = new PendingRequestBroker<
+  { action: string; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string },
+  BrowserExtResponse
+>({
+  prefix: 'bext',
+  timeoutMs: 30_000,
+  abortResponse: { ok: false, error: 'Aborted by user' },
+  timeoutResponse: { ok: false, error: 'Browser extension request timed out (30s). Is the extension connected?' },
+});
 
-/**
- * Request the browser extension to perform an action (observe or write).
- * Read actions are relayed directly; write actions (run_script, navigate) require
- * gatekeeper approval before the extension executes them.
- * Sends browser_ext_request over the Unix socket to the gatekeeper, which relays it to
- * the Chrome extension via ExtensionBridge. Returns a tool result for the LLM.
- */
+const fetchBroker = new PendingRequestBroker<{ url: string; method?: string }, OkAlwaysAllow>({
+  prefix: 'fetch',
+  abortResponse: { ok: false, alwaysAllow: false, message: 'Aborted by user' },
+  timeoutResponse: { ok: false, alwaysAllow: false, message: 'Fetch approval request timed out (60s)' },
+});
+
+const fileAccessBroker = new PendingRequestBroker<{ path: string; operation: 'read' | 'write' }, OkMessage>({
+  prefix: 'file',
+  abortResponse: { ok: false, message: 'Aborted by user' },
+  timeoutResponse: { ok: false, message: 'File access approval request timed out (60s)' },
+});
+
+export const FETCH_DEFAULT_BYTES = 1 * 1024 * 1024;   // 1 MB
+export const FETCH_MAX_BYTES_HARD = 10 * 1024 * 1024; // 10 MB hard ceiling
+
+const fetchSizeBroker = new PendingRequestBroker<{ url: string; requestedBytes: number }, { ok: boolean; approvedBytes: number; message: string }>({
+  prefix: 'fetchsz',
+  abortResponse: { ok: false, approvedBytes: FETCH_DEFAULT_BYTES, message: 'Aborted by user' },
+  timeoutResponse: { ok: false, approvedBytes: FETCH_DEFAULT_BYTES, message: 'Fetch size approval request timed out (60s)' },
+});
+
+const mcpToolBroker = new PendingRequestBroker<{ server: string; tool: string; params: string }, OkMessage>({
+  prefix: 'mcp',
+  abortResponse: { ok: false, message: 'Aborted by user' },
+  timeoutResponse: { ok: false, message: 'MCP tool approval request timed out (60s)' },
+});
+
+const screenShareBroker = new PendingRequestBroker<Record<string, never>, OkMessage>({
+  prefix: 'ss',
+  abortResponse: { ok: false, message: 'Aborted by user' },
+  timeoutResponse: { ok: false, message: 'Screen share request timed out (60s)' },
+});
+
+const screenshotBroker = new PendingRequestBroker<Record<string, never>, { ok: boolean; data?: string; mediaType?: string; message: string }>({
+  prefix: 'sc',
+  timeoutMs: 30_000,
+  abortResponse: { ok: false, message: 'Aborted by user' },
+  timeoutResponse: { ok: false, message: 'Screenshot request timed out (30s)' },
+});
+
+const configWriteBroker = new PendingRequestBroker<{ file: string; content: string; reason: string }, OkMessage>({
+  prefix: 'config',
+  abortResponse: { ok: false, message: 'Aborted by user' },
+  timeoutResponse: { ok: false, message: 'Config write request timed out (60s)' },
+});
+
+const editFileBroker = new PendingRequestBroker<
+  { path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string },
+  OkMessage
+>({
+  prefix: 'edit',
+  timeoutMs: 120_000,
+  abortResponse: { ok: false, message: 'Aborted by user' },
+  timeoutResponse: { ok: false, message: 'Edit request timed out (120s)' },
+});
+
+const userQuestionBroker = new PendingRequestBroker<
+  { question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean; allowFreeText?: boolean },
+  { answer: string; selectedOptions?: string[]; dismissed: boolean }
+>({
+  prefix: 'question',
+  timeoutMs: 300_000,
+  abortResponse: { answer: '', dismissed: true },
+  timeoutResponse: { answer: '', dismissed: true },
+});
+
+// --- Thin wrappers that preserve the original exported API ---
+
+export function requestExecApproval(command: string, signal?: AbortSignal): Promise<OkAlwaysAllow> {
+  const [id, promise] = execBroker.request({ command }, signal);
+  broadcast({ type: 'exec_request', id, command });
+  return promise;
+}
+
 export async function requestBrowserExt(
   action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab',
   params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string } = {},
   signal?: AbortSignal,
 ): Promise<string | import('./provider.js').ToolContentBlock[]> {
   if (signal?.aborted) return 'Aborted by user';
+  const [id, promise] = browserExtBroker.request({ action, ...params }, signal);
+  broadcast({ type: 'browser_ext_request', id, action, ...params });
+  const response = await promise;
 
-  const id = `bext_${++browserExtCounter}`;
+  if (!response.ok) return `Browser extension error: ${response.error ?? 'unknown error'}`;
 
-  return new Promise((resolve) => {
-    const finish = (response: BrowserExtResponse) => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      pendingBrowserExtRequests.delete(id);
-
-      if (!response.ok) {
-        resolve(`Browser extension error: ${response.error ?? 'unknown error'}`);
-        return;
-      }
-
-      if (action === 'screenshot' && response.dataUrl) {
-        const [header, b64] = response.dataUrl.split(',');
-        const rawType = header?.replace('data:', '').replace(';base64', '') ?? 'image/png';
-        const mediaType: import('./provider.js').ImageMediaType =
-          (rawType === 'image/png' || rawType === 'image/jpeg' || rawType === 'image/gif' || rawType === 'image/webp')
-            ? rawType
-            : 'image/png';
-        resolve([{ type: 'image' as const, mediaType, data: b64 ?? '' }]);
-        return;
-      }
-
-      if (action === 'list_tabs' && response.tabs) {
-        const lines = response.tabs.map(t =>
-          `[${t.active ? '*' : ' '}] tab:${t.id}  ${t.title}  (${t.url})`
-        );
-        resolve(`Open browser tabs (${response.tabs.length}):\n${lines.join('\n')}\n\nUse tabId parameter with extract_a11y or screenshot to target a specific tab. Active tab is marked with [*].`);
-        return;
-      }
-
-      if (action === 'navigate') {
-        resolve(`Navigated to: ${response.finalUrl ?? params.url ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`);
-        return;
-      }
-
-      if (action === 'run_script') {
-        const parts: string[] = [`Script completed: ${response.stepsCompleted ?? '?'}/${response.totalSteps ?? '?'} steps`];
-        if (response.finalUrl) parts.push(`Final URL: ${response.finalUrl}`);
-        if (response.finalTitle) parts.push(`Final title: ${response.finalTitle}`);
-        resolve(parts.join('\n'));
-        return;
-      }
-
-      if (action === 'activate_tab') {
-        resolve(`Switched to tab: ${response.finalUrl ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`);
-        return;
-      }
-
-      if (action === 'open_tab') {
-        resolve(`Opened new tab (id: ${response.newTabId ?? '?'}): ${response.finalUrl ?? params.url ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`);
-        return;
-      }
-
-      resolve(response.treeText ?? '(no content)');
-    };
-
-    const onAbort = () => finish({ ok: false, error: 'Aborted by user' });
-
-    const timer = setTimeout(() => {
-      finish({ ok: false, error: 'Browser extension request timed out (30s). Is the extension connected?' });
-    }, 30_000);
-
-    pendingBrowserExtRequests.set(id, { resolve: finish });
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    broadcast({ type: 'browser_ext_request', id, action, ...params });
-  });
-}
-
-function resolveBrowserExtRequest(id: string, response: BrowserExtResponse): void {
-  const pending = pendingBrowserExtRequests.get(id);
-  if (pending) {
-    pendingBrowserExtRequests.delete(id);
-    pending.resolve(response);
+  if (action === 'screenshot' && response.dataUrl) {
+    const [header, b64] = response.dataUrl.split(',');
+    const rawType = header?.replace('data:', '').replace(';base64', '') ?? 'image/png';
+    const mediaType: import('./provider.js').ImageMediaType =
+      (rawType === 'image/png' || rawType === 'image/jpeg' || rawType === 'image/gif' || rawType === 'image/webp')
+        ? rawType : 'image/png';
+    return [{ type: 'image' as const, mediaType, data: b64 ?? '' }];
   }
-}
-
-// --- Fetch URL approval handling ---
-
-const pendingFetchRequests = new Map<string, {
-  url: string;
-  method?: string;
-  resolve: (response: { ok: boolean; alwaysAllow: boolean; message: string }) => void;
-}>();
-let fetchApprovalCounter = 0;
-
-/**
- * Request user approval before fetching a URL.
- * Called by the fetch tool when a URL requires prompt-level permission.
- */
-export function requestFetchApproval(url: string, method?: string, signal?: AbortSignal): Promise<{ ok: boolean; alwaysAllow: boolean; message: string }> {
-  const id = `fetch_${++fetchApprovalCounter}`;
-
-  if (signal?.aborted) {
-    return Promise.resolve({ ok: false, alwaysAllow: false, message: 'Aborted by user' });
+  if (action === 'list_tabs' && response.tabs) {
+    const lines = response.tabs.map(t => `[${t.active ? '*' : ' '}] tab:${t.id}  ${t.title}  (${t.url})`);
+    return `Open browser tabs (${response.tabs.length}):\n${lines.join('\n')}\n\nUse tabId parameter with extract_a11y or screenshot to target a specific tab. Active tab is marked with [*].`;
   }
-
-  return new Promise((resolve) => {
-    const finish = (response: { ok: boolean; alwaysAllow: boolean; message: string }) => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      pendingFetchRequests.delete(id);
-      resolve(response);
-    };
-
-    const onAbort = () => finish({ ok: false, alwaysAllow: false, message: 'Aborted by user' });
-
-    const timer = setTimeout(() => {
-      finish({ ok: false, alwaysAllow: false, message: 'Fetch approval request timed out (60s)' });
-    }, 60_000);
-
-    pendingFetchRequests.set(id, { url, ...(method !== undefined ? { method } : {}), resolve: finish });
-
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    broadcast({ type: 'fetch_request', id, url, ...(method ? { method } : {}) });
-  });
-}
-
-function resolveFetchRequest(id: string, response: { ok: boolean; alwaysAllow: boolean; message: string }): void {
-  const pending = pendingFetchRequests.get(id);
-  if (pending) {
-    pendingFetchRequests.delete(id);
-    pending.resolve(response);
+  if (action === 'navigate') return `Navigated to: ${response.finalUrl ?? params.url ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`;
+  if (action === 'run_script') {
+    const parts: string[] = [`Script completed: ${response.stepsCompleted ?? '?'}/${response.totalSteps ?? '?'} steps`];
+    if (response.finalUrl) parts.push(`Final URL: ${response.finalUrl}`);
+    if (response.finalTitle) parts.push(`Final title: ${response.finalTitle}`);
+    return parts.join('\n');
   }
+  if (action === 'activate_tab') return `Switched to tab: ${response.finalUrl ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`;
+  if (action === 'open_tab') return `Opened new tab (id: ${response.newTabId ?? '?'}): ${response.finalUrl ?? params.url ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`;
+  return response.treeText ?? '(no content)';
 }
 
-// --- File access approval handling ---
-
-const pendingFileAccessRequests = new Map<string, {
-  resolve: (response: { ok: boolean; message: string }) => void;
-}>();
-let fileAccessCounter = 0;
-
-/**
- * Request user approval before reading/writing a sensitive or out-of-project path.
- * Called by the read_file/write_file/edit_file tools for paths outside the project root
- * or matching sensitive path patterns.
- */
-export function requestFileApproval(path: string, operation: 'read' | 'write', signal?: AbortSignal): Promise<{ ok: boolean; message: string }> {
-  const id = `file_${++fileAccessCounter}`;
-
-  if (signal?.aborted) {
-    return Promise.resolve({ ok: false, message: 'Aborted by user' });
-  }
-
-  return new Promise((resolve) => {
-    const finish = (response: { ok: boolean; message: string }) => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      pendingFileAccessRequests.delete(id);
-      resolve(response);
-    };
-
-    const onAbort = () => finish({ ok: false, message: 'Aborted by user' });
-
-    const timer = setTimeout(() => {
-      finish({ ok: false, message: 'File access approval request timed out (60s)' });
-    }, 60_000);
-
-    pendingFileAccessRequests.set(id, { resolve: finish });
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    broadcast({ type: 'file_access_request', id, path, operation, reason: `Agent wants to ${operation} this path` });
-  });
+export function requestFetchApproval(url: string, method?: string, signal?: AbortSignal): Promise<OkAlwaysAllow> {
+  const [id, promise] = fetchBroker.request({ url, ...(method !== undefined ? { method } : {}) }, signal);
+  broadcast({ type: 'fetch_request', id, url, ...(method ? { method } : {}) });
+  return promise;
 }
 
-function resolveFileAccessRequest(id: string, response: { ok: boolean; message: string }): void {
-  const pending = pendingFileAccessRequests.get(id);
-  if (pending) {
-    pendingFileAccessRequests.delete(id);
-    pending.resolve(response);
-  }
+export function requestFileApproval(path: string, operation: 'read' | 'write', signal?: AbortSignal): Promise<OkMessage> {
+  const [id, promise] = fileAccessBroker.request({ path, operation }, signal);
+  broadcast({ type: 'file_access_request', id, path, operation, reason: `Agent wants to ${operation} this path` });
+  return promise;
 }
 
-// --- Fetch size approval handling ---
-
-const pendingFetchSizeRequests = new Map<string, {
-  resolve: (response: { ok: boolean; approvedBytes: number; message: string }) => void;
-}>();
-let fetchSizeCounter = 0;
-
-export const FETCH_DEFAULT_BYTES = 1 * 1024 * 1024;   // 1 MB
-export const FETCH_MAX_BYTES_HARD = 10 * 1024 * 1024; // 10 MB hard ceiling
-
-/**
- * Request user approval for a fetch that exceeds the default 1 MB size limit.
- * Returns the approved byte limit (may be clamped to FETCH_MAX_BYTES_HARD).
- */
 export function requestFetchSizeApproval(url: string, requestedBytes: number, signal?: AbortSignal): Promise<{ ok: boolean; approvedBytes: number; message: string }> {
-  const id = `fetchsz_${++fetchSizeCounter}`;
-
-  if (signal?.aborted) {
-    return Promise.resolve({ ok: false, approvedBytes: FETCH_DEFAULT_BYTES, message: 'Aborted by user' });
-  }
-
-  return new Promise((resolve) => {
-    const finish = (response: { ok: boolean; approvedBytes: number; message: string }) => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      pendingFetchSizeRequests.delete(id);
-      resolve(response);
-    };
-
-    const onAbort = () => finish({ ok: false, approvedBytes: FETCH_DEFAULT_BYTES, message: 'Aborted by user' });
-
-    const timer = setTimeout(() => {
-      finish({ ok: false, approvedBytes: FETCH_DEFAULT_BYTES, message: 'Fetch size approval request timed out (60s)' });
-    }, 60_000);
-
-    pendingFetchSizeRequests.set(id, { resolve: finish });
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    broadcast({ type: 'fetch_size_request', id, url, requestedBytes, defaultBytes: FETCH_DEFAULT_BYTES });
-  });
+  const [id, promise] = fetchSizeBroker.request({ url, requestedBytes }, signal);
+  broadcast({ type: 'fetch_size_request', id, url, requestedBytes, defaultBytes: FETCH_DEFAULT_BYTES });
+  return promise;
 }
 
-function resolveFetchSizeRequest(id: string, response: { ok: boolean; approvedBytes: number; message: string }): void {
-  const pending = pendingFetchSizeRequests.get(id);
-  if (pending) {
-    pendingFetchSizeRequests.delete(id);
-    pending.resolve(response);
-  }
+export function requestMcpToolApproval(server: string, tool: string, params: unknown, signal?: AbortSignal): Promise<OkMessage> {
+  const paramsStr = JSON.stringify(params ?? {}, null, 2).slice(0, 500);
+  const [id, promise] = mcpToolBroker.request({ server, tool, params: paramsStr }, signal);
+  broadcast({ type: 'mcp_tool_request', id, server, tool, params: paramsStr });
+  return promise;
 }
 
-// --- MCP tool approval handling ---
-
-const pendingMcpToolRequests = new Map<string, {
-  resolve: (response: { ok: boolean; message: string }) => void;
-}>();
-let mcpToolCounter = 0;
-
-/**
- * Request user approval before calling an MCP tool.
- * Called from agent.ts before mcpManager.callTool() for any non-auto-allowed tool.
- */
-export function requestMcpToolApproval(server: string, tool: string, params: unknown, signal?: AbortSignal): Promise<{ ok: boolean; message: string }> {
-  const id = `mcp_${++mcpToolCounter}`;
-
-  if (signal?.aborted) {
-    return Promise.resolve({ ok: false, message: 'Aborted by user' });
-  }
-
-  return new Promise((resolve) => {
-    const finish = (response: { ok: boolean; message: string }) => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      pendingMcpToolRequests.delete(id);
-      resolve(response);
-    };
-
-    const onAbort = () => finish({ ok: false, message: 'Aborted by user' });
-
-    const timer = setTimeout(() => {
-      finish({ ok: false, message: 'MCP tool approval request timed out (60s)' });
-    }, 60_000);
-
-    pendingMcpToolRequests.set(id, { resolve: finish });
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    const paramsStr = JSON.stringify(params ?? {}, null, 2).slice(0, 500);
-    broadcast({ type: 'mcp_tool_request', id, server, tool, params: paramsStr });
-  });
+export function requestBrowserScreenShare(): Promise<OkMessage> {
+  const [id, promise] = screenShareBroker.request({});
+  broadcast({ type: 'screen_share_request', id });
+  return promise;
 }
 
-function resolveMcpToolRequest(id: string, response: { ok: boolean; message: string }): void {
-  const pending = pendingMcpToolRequests.get(id);
-  if (pending) {
-    pendingMcpToolRequests.delete(id);
-    pending.resolve(response);
-  }
-}
-
-// --- Browser screen share + screenshot request handling ---
-
-const pendingScreenShareRequests = new Map<string, {
-  resolve: (response: { ok: boolean; message: string }) => void;
-}>();
-const pendingScreenshotRequests = new Map<string, {
-  resolve: (response: { ok: boolean; data?: string; mediaType?: string; message: string }) => void;
-}>();
-let screenshotRequestCounter = 0;
-
-/**
- * Ask the browser to start screen sharing (opens the OS picker).
- * Resolves once the user picks a source (or cancels).
- */
-export function requestBrowserScreenShare(): Promise<{ ok: boolean; message: string }> {
-  const id = `ss_${++screenshotRequestCounter}`;
-
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pendingScreenShareRequests.delete(id);
-      resolve({ ok: false, message: 'Screen share request timed out (60s)' });
-    }, 60_000);
-
-    pendingScreenShareRequests.set(id, {
-      resolve: (response) => {
-        clearTimeout(timer);
-        resolve(response);
-      },
-    });
-
-    broadcast({ type: 'screen_share_request', id });
-  });
-}
-
-function resolveScreenShareRequest(id: string, response: { ok: boolean; message: string }): void {
-  const pending = pendingScreenShareRequests.get(id);
-  if (pending) {
-    pendingScreenShareRequests.delete(id);
-    pending.resolve(response);
-  }
-}
-
-/**
- * Ask the browser to capture a frame from its active screen share.
- * If screen sharing isn't active, automatically requests the user start sharing first.
- * Called by the request_screenshot tool.
- */
 export async function requestBrowserScreenshot(): Promise<{ ok: boolean; data?: string; mediaType?: string; message: string }> {
-  const id = `sc_${++screenshotRequestCounter}`;
-
   // Try screenshot directly — if screen share isn't active, the browser will reply with ok:false
-  const result = await new Promise<{ ok: boolean; data?: string; mediaType?: string; message: string }>((resolve) => {
-    const timer = setTimeout(() => {
-      pendingScreenshotRequests.delete(id);
-      resolve({ ok: false, message: 'Screenshot request timed out (30s)' });
-    }, 30_000);
-
-    pendingScreenshotRequests.set(id, {
-      resolve: (response) => {
-        clearTimeout(timer);
-        resolve(response);
-      },
-    });
-
-    broadcast({ type: 'screenshot_request', id });
-  });
-
+  const [id, promise] = screenshotBroker.request({});
+  broadcast({ type: 'screenshot_request', id });
+  const result = await promise;
   if (result.ok) return result;
 
   // Screen share wasn't active — ask the browser to start it now
   const shareResult = await requestBrowserScreenShare();
-  if (!shareResult.ok) {
-    return { ok: false, message: shareResult.message };
-  }
+  if (!shareResult.ok) return { ok: false, message: shareResult.message };
 
   // Small delay so the OS screen-share approval dialog has time to dismiss
-  // before we capture the first frame (otherwise the agent sees the dialog).
   await new Promise((r) => setTimeout(r, 1500));
 
   // Retry screenshot now that sharing is active
-  const retryId = `sc_${++screenshotRequestCounter}`;
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pendingScreenshotRequests.delete(retryId);
-      resolve({ ok: false, message: 'Screenshot request timed out after starting screen share (30s)' });
-    }, 30_000);
-
-    pendingScreenshotRequests.set(retryId, {
-      resolve: (response) => {
-        clearTimeout(timer);
-        resolve(response);
-      },
-    });
-
-    broadcast({ type: 'screenshot_request', id: retryId });
-  });
+  const [retryId, retryPromise] = screenshotBroker.request({});
+  broadcast({ type: 'screenshot_request', id: retryId });
+  return retryPromise;
 }
 
-function resolveScreenshotRequest(id: string, response: { ok: boolean; data?: string; mediaType?: string; message: string }): void {
-  const pending = pendingScreenshotRequests.get(id);
-  if (pending) {
-    pendingScreenshotRequests.delete(id);
-    pending.resolve(response);
-  }
+export function requestConfigWrite(file: string, content: string, reason: string): Promise<OkMessage> {
+  const [id, promise] = configWriteBroker.request({ file, content, reason });
+  broadcast({ type: 'config_write_request', id, file, content, reason });
+  return promise;
 }
 
-// --- Config write request handling ---
-
-const pendingConfigWriteRequests = new Map<string, {
-  file: string;
-  content: string;
-  reason: string;
-  resolve: (response: { ok: boolean; message: string }) => void;
-}>();
-let configWriteCounter = 0;
-
-/**
- * Send a config write request to the gatekeeper and wait for approval.
- * The gatekeeper shows a diff to the user, who approves or denies.
- */
-export function requestConfigWrite(
-  file: string,
-  content: string,
-  reason: string,
-): Promise<{ ok: boolean; message: string }> {
-  const id = `config_${++configWriteCounter}`;
-
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pendingConfigWriteRequests.delete(id);
-      resolve({ ok: false, message: 'Config write request timed out (60s)' });
-    }, 60_000);
-
-    pendingConfigWriteRequests.set(id, {
-      file,
-      content,
-      reason,
-      resolve: (response) => {
-        clearTimeout(timer);
-        resolve(response);
-      },
-    });
-
-    broadcast({ type: 'config_write_request', id, file, content, reason });
-  });
-}
-
-function resolveConfigWriteRequest(id: string, response: { ok: boolean; message: string }): void {
-  const pending = pendingConfigWriteRequests.get(id);
-  if (pending) {
-    pendingConfigWriteRequests.delete(id);
-    pending.resolve(response);
-  }
-}
-
-// --- Host edit-file request handling ---
-
-const pendingEditFileRequests = new Map<string, {
-  path: string;
-  edits: Array<{ old_str: string; new_str: string; index?: number }>;
-  reason: string;
-  resolve: (response: { ok: boolean; message: string }) => void;
-}>();
-let editFileCounter = 0;
-
-/**
- * Send a host_edit_file request to the gatekeeper and wait for approval.
- * The gatekeeper matches eagerly, builds a diff, shows it to the user, who approves or denies.
- */
 export function requestHostEditFile(
   path: string,
   edits: Array<{ old_str: string; new_str: string; index?: number }>,
   reason: string,
-): Promise<{ ok: boolean; message: string }> {
-  const id = `edit_${++editFileCounter}`;
-
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      pendingEditFileRequests.delete(id);
-      resolve({ ok: false, message: 'Edit request timed out (120s)' });
-    }, 120_000);
-
-    pendingEditFileRequests.set(id, {
-      path,
-      edits,
-      reason,
-      resolve: (response) => {
-        clearTimeout(timer);
-        resolve(response);
-      },
-    });
-
-    broadcast({ type: 'edit_file_request', id, path, edits, reason });
-  });
+): Promise<OkMessage> {
+  const [id, promise] = editFileBroker.request({ path, edits, reason });
+  broadcast({ type: 'edit_file_request', id, path, edits, reason });
+  return promise;
 }
 
-function resolveEditFileRequest(id: string, response: { ok: boolean; message: string }): void {
-  const pending = pendingEditFileRequests.get(id);
-  if (pending) {
-    pendingEditFileRequests.delete(id);
-    pending.resolve(response);
-  }
-}
-
-// --- User question request handling ---
-
-const pendingUserQuestionRequests = new Map<string, {
-  question: string;
-  options?: { label: string; description?: string }[];
-  multiSelect?: boolean;
-  allowFreeText?: boolean;
-  resolve: (response: { answer: string; selectedOptions?: string[]; dismissed: boolean }) => void;
-}>();
-let userQuestionCounter = 0;
-
-/**
- * Present a question to the user and wait for their response.
- * Broadcasts a user_question_request event to the UI and blocks until the user answers or dismisses.
- */
 export function requestUserQuestion(
   question: string,
   options?: { label: string; description?: string }[],
@@ -732,65 +366,18 @@ export function requestUserQuestion(
   allowFreeText?: boolean,
   signal?: AbortSignal,
 ): Promise<{ answer: string; selectedOptions?: string[]; dismissed: boolean }> {
-  const id = `question_${++userQuestionCounter}`;
-
-  if (signal?.aborted) {
-    return Promise.resolve({ answer: '', dismissed: true });
-  }
-
-  return new Promise((resolve) => {
-    const finish = (response: { answer: string; selectedOptions?: string[]; dismissed: boolean }) => {
-      pendingUserQuestionRequests.delete(id);
-      resolve(response);
-    };
-
-    const onAbort = () => finish({ answer: '', dismissed: true });
-    signal?.addEventListener('abort', onAbort, { once: true });
-
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      finish({ answer: '', dismissed: true });
-    }, 300_000); // 5 minute timeout
-
-    const entry: {
-      question: string;
-      options?: { label: string; description?: string }[];
-      multiSelect?: boolean;
-      allowFreeText?: boolean;
-      resolve: (response: { answer: string; selectedOptions?: string[]; dismissed: boolean }) => void;
-    } = {
-      question,
-      resolve: (response) => {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
-        finish(response);
-      },
-    };
-    if (options !== undefined) entry.options = options;
-    if (multiSelect !== undefined) entry.multiSelect = multiSelect;
-    if (allowFreeText !== undefined) entry.allowFreeText = allowFreeText;
-    pendingUserQuestionRequests.set(id, entry);
-
-    broadcast({
-      type: 'user_question_request',
-      id,
-      question,
-      ...(options ? { options } : {}),
-      ...(multiSelect !== undefined ? { multiSelect } : {}),
-      ...(allowFreeText !== undefined ? { allowFreeText } : {}),
-    });
+  const meta: { question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean; allowFreeText?: boolean } = { question };
+  if (options !== undefined) meta.options = options;
+  if (multiSelect !== undefined) meta.multiSelect = multiSelect;
+  if (allowFreeText !== undefined) meta.allowFreeText = allowFreeText;
+  const [id, promise] = userQuestionBroker.request(meta, signal);
+  broadcast({
+    type: 'user_question_request', id, question,
+    ...(options ? { options } : {}),
+    ...(multiSelect !== undefined ? { multiSelect } : {}),
+    ...(allowFreeText !== undefined ? { allowFreeText } : {}),
   });
-}
-
-function resolveUserQuestionRequest(
-  id: string,
-  response: { answer: string; selectedOptions?: string[]; dismissed: boolean },
-): void {
-  const pending = pendingUserQuestionRequests.get(id);
-  if (pending) {
-    pendingUserQuestionRequests.delete(id);
-    pending.resolve(response);
-  }
+  return promise;
 }
 
 // --- Background task queue ---
@@ -1683,25 +1270,23 @@ function handleClient(socket: Socket): void {
   send(socket, { type: 'connected', state: getState() });
 
   // Replay any pending permission requests so reconnecting clients see them
-  for (const [id, req] of pendingConfigWriteRequests) {
-    send(socket, { type: 'config_write_request', id, file: req.file, content: req.content, reason: req.reason });
-  }
-  for (const [id, req] of pendingEditFileRequests) {
-    send(socket, { type: 'edit_file_request', id, path: req.path, edits: req.edits, reason: req.reason });
-  }
-  for (const [id, req] of pendingExecRequests) {
-    send(socket, { type: 'exec_request', id, command: req.command });
-  }
-  for (const [id, req] of pendingUserQuestionRequests) {
+  configWriteBroker.replayTo((id, meta) => {
+    send(socket, { type: 'config_write_request', id, file: meta.file, content: meta.content, reason: meta.reason });
+  });
+  editFileBroker.replayTo((id, meta) => {
+    send(socket, { type: 'edit_file_request', id, path: meta.path, edits: meta.edits, reason: meta.reason });
+  });
+  execBroker.replayTo((id, meta) => {
+    send(socket, { type: 'exec_request', id, command: meta.command });
+  });
+  userQuestionBroker.replayTo((id, meta) => {
     send(socket, {
-      type: 'user_question_request',
-      id,
-      question: req.question,
-      ...(req.options ? { options: req.options } : {}),
-      ...(req.multiSelect !== undefined ? { multiSelect: req.multiSelect } : {}),
-      ...(req.allowFreeText !== undefined ? { allowFreeText: req.allowFreeText } : {}),
+      type: 'user_question_request', id, question: meta.question,
+      ...(meta.options ? { options: meta.options } : {}),
+      ...(meta.multiSelect !== undefined ? { multiSelect: meta.multiSelect } : {}),
+      ...(meta.allowFreeText !== undefined ? { allowFreeText: meta.allowFreeText } : {}),
     });
-  }
+  });
 
   socket.on('data', (data) => {
     buffer += data.toString();
@@ -1817,28 +1402,28 @@ function handleClient(socket: Socket): void {
             agent?.setExtraSystemPrompt(buildExtraSystemPrompt());
             break;
           case 'config_write_response':
-            resolveConfigWriteRequest(cmd.id, cmd);
+            configWriteBroker.resolve(cmd.id, cmd);
             break;
           case 'edit_file_response':
-            resolveEditFileRequest(cmd.id, cmd);
+            editFileBroker.resolve(cmd.id, cmd);
             break;
           case 'exec_response':
-            resolveExecRequest(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
+            execBroker.resolve(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
             break;
           case 'fetch_response':
-            resolveFetchRequest(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
+            fetchBroker.resolve(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
             break;
           case 'file_access_response':
-            resolveFileAccessRequest(cmd.id, { ok: cmd.ok, message: cmd.message });
+            fileAccessBroker.resolve(cmd.id, { ok: cmd.ok, message: cmd.message });
             break;
           case 'fetch_size_response':
-            resolveFetchSizeRequest(cmd.id, { ok: cmd.ok, approvedBytes: cmd.approvedBytes, message: cmd.message });
+            fetchSizeBroker.resolve(cmd.id, { ok: cmd.ok, approvedBytes: cmd.approvedBytes, message: cmd.message });
             break;
           case 'mcp_tool_response':
-            resolveMcpToolRequest(cmd.id, { ok: cmd.ok, message: cmd.message });
+            mcpToolBroker.resolve(cmd.id, { ok: cmd.ok, message: cmd.message });
             break;
           case 'screenshot_response':
-            resolveScreenshotRequest(cmd.id, {
+            screenshotBroker.resolve(cmd.id, {
               ok: cmd.ok,
               ...(cmd.data !== undefined ? { data: cmd.data } : {}),
               ...(cmd.mediaType !== undefined ? { mediaType: cmd.mediaType } : {}),
@@ -1846,10 +1431,10 @@ function handleClient(socket: Socket): void {
             });
             break;
           case 'screen_share_response':
-            resolveScreenShareRequest(cmd.id, { ok: cmd.ok, message: cmd.message });
+            screenShareBroker.resolve(cmd.id, { ok: cmd.ok, message: cmd.message });
             break;
           case 'browser_ext_result':
-            resolveBrowserExtRequest(cmd.id, cmd);
+            browserExtBroker.resolve(cmd.id, cmd);
             break;
           case 'user_question_response': {
             const questionResponse: { answer: string; selectedOptions?: string[]; dismissed: boolean } = {
@@ -1857,7 +1442,7 @@ function handleClient(socket: Socket): void {
               dismissed: cmd.dismissed,
             };
             if (cmd.selectedOptions !== undefined) questionResponse.selectedOptions = cmd.selectedOptions;
-            resolveUserQuestionRequest(cmd.id, questionResponse);
+            userQuestionBroker.resolve(cmd.id, questionResponse);
             break;
           }
           case 'context_breakdown_request':

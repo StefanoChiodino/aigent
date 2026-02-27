@@ -334,6 +334,10 @@ export class DemoPlaybackEngine {
         useSettingsStore.getState().setClientSetting('AIGENT_THEME', step.theme);
         break;
 
+      case 'close_pip':
+        this.closePiP();
+        break;
+
       case 'loop': break;
     }
   }
@@ -419,6 +423,10 @@ export class DemoPlaybackEngine {
 
       case 'set_theme':
         useSettingsStore.getState().setClientSetting('AIGENT_THEME', step.theme);
+        break;
+
+      case 'close_pip':
+        this.closePiP();
         break;
 
       case 'loop':
@@ -554,6 +562,14 @@ export class DemoPlaybackEngine {
     if (this.cursorRing) this.cursorRing.classList.remove('active');
   }
 
+  private closePiP(): void {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pip = (window as any).documentPictureInPicture;
+      if (pip?.window) pip.window.close();
+    } catch { /* noop — unsupported or already closed */ }
+  }
+
   private autoApprovePermission(): void {
     const { permQueue } = useUIStore.getState();
     if (permQueue.length === 0) return;
@@ -584,6 +600,7 @@ export class DemoPlaybackEngine {
     useSettingsStore.getState().setClientSetting('AIGENT_THEME', 'aurora');
     if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
     speechSynthesis.cancel();
+    this.closePiP();
     this.currentInputText = '';
     window.dispatchEvent(new CustomEvent('__demo_set_input', { detail: '' }));
 
