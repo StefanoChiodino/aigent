@@ -55,5 +55,12 @@ export function extractSpeakContent(text: string): string | null {
 }
 
 export function stripSpeakTag(text: string): string {
-  return text.replace(/<speak>[\s\S]*?<\/speak>/g, '').trimEnd();
+  const stripped = text.replace(/<speak>[\s\S]*?<\/speak>/g, '').trimEnd();
+  // If the entire response was inside <speak> tags, show the speak content
+  // instead of an empty message.
+  if (!stripped) {
+    const inner = extractSpeakContent(text);
+    if (inner) return inner;
+  }
+  return stripped;
 }

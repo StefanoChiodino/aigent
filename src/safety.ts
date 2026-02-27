@@ -299,13 +299,23 @@ export const DEFAULT_FILE_PERMISSIONS: FilePermissions = {
 };
 
 /**
+ * Expand leading `~` or `~/` in a pattern to the user's home directory.
+ */
+function expandTilde(pattern: string): string {
+  if (pattern === '~') return homedir();
+  if (pattern.startsWith('~/')) return homedir() + pattern.slice(1);
+  return pattern;
+}
+
+/**
  * Match a file path against a permission pattern.
  * - The catch-all "*" pattern matches any path.
+ * - `~` at the start of a pattern is expanded to the home directory.
  * - Otherwise uses minimatch with `{ dot: true }` so dotfiles are matched.
  */
 function matchFilePattern(path: string, pattern: string): boolean {
   if (pattern === '*') return true;
-  return minimatch(path, pattern, { dot: true });
+  return minimatch(path, expandTilde(pattern), { dot: true });
 }
 
 /**
@@ -330,6 +340,7 @@ export function checkFilePermission(
 
 export interface ExecPermissions {
   alwaysAllow: string[];
+  alwaysClassify: string[];
   deny: string[];
 }
 
@@ -370,6 +381,13 @@ export const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {
     'npm test', 'npm test *',
     'npm run', 'npm run *',
     'make', 'make *',
+  ],
+  alwaysClassify: [
+    // Commands that should always be reviewed by the Tier 3 classifier,
+    // even if they match an alwaysAllow pattern.
+    'curl *',
+    'python *', 'python3 *',
+    'node -e *', 'node --eval *',
   ],
   deny: [
     'sudo *',
@@ -551,6 +569,20 @@ export function checkExecPermission(
     if (matchesGlob(command, pattern)) return 'allow';
   }
   return 'prompt';
+}
+
+/**
+ * Check if a command should be forced through the Tier 3 classifier,
+ * even if it matched a Tier 2 alwaysAllow pattern.
+ *
+ * Use this for commands like `curl`, `python`, `node -e` that are
+ * context-dependent — sometimes safe, sometimes dangerous.
+ */
+export function shouldForceClassify(command: string, patterns: string[]): boolean {
+  for (const pattern of patterns) {
+    if (matchesGlob(command, pattern)) return true;
+  }
+  return false;
 }
 
 // --- Sensitive path detection ---

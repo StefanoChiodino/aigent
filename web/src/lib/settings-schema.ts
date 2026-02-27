@@ -336,6 +336,15 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
+    key: 'exec_perm_alwaysClassify',
+    label: 'Always Classify',
+    desc: 'Commands matching these patterns are always sent to the Haiku classifier, even if they match an Allow pattern. One pattern per line.',
+    group: 'Permissions',
+    type: 'string-list',
+    default: '[]',
+    scope: 'client',
+  },
+  {
     key: 'exec_perm_deny',
     label: 'Always Deny',
     desc: 'One pattern per line. Same syntax as Allow. Deny rules always win over Allow.',
@@ -365,7 +374,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'file_perm_alwaysAllow',
     label: 'Always Allow',
-    desc: 'One path pattern per line. "/home/user/project/**" = all files under project. "/tmp/*" = files directly in /tmp. "*" = allow all.',
+    desc: 'One path pattern per line. "~/project/**" = all files under project. "/tmp/*" = files directly in /tmp. "*" = allow all. ~ expands to your home directory.',
     group: 'File Permissions',
     type: 'string-list',
     default: '[]',

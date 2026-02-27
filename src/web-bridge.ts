@@ -436,6 +436,7 @@ export async function startWebServer(
           merged = {
             ...merged,
             exec_perm_alwaysAllow: JSON.stringify(perms.alwaysAllow),
+            exec_perm_alwaysClassify: JSON.stringify(perms.alwaysClassify),
             exec_perm_deny: JSON.stringify(perms.deny),
           };
         }

@@ -13,8 +13,11 @@ async function applySinkId(audio: HTMLAudioElement): Promise<void> {
   }
 }
 
+/** Sentinel ID used when auto-speak is playing the streaming message. */
+export const TTS_STREAMING_ID = '__streaming__';
+
 interface TTSControls {
-  speakText: (text: string, onDone?: () => void) => void;
+  speakText: (text: string, onDone?: () => void, speakingId?: string) => void;
   stopAll: () => void;
   stopStream: () => void;
   enqueueChunk: (text: string) => void;
@@ -72,6 +75,7 @@ export function ttsStopAll(): void {
   if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
   if (isDemo()) speechSynthesis.cancel();
   useVoiceStore.getState().setTtsPlaying(false);
+  useVoiceStore.getState().setTtsSpeakingId(null);
 }
 
 export function useTTS(): TTSControls {
@@ -87,6 +91,7 @@ export function useTTS(): TTSControls {
     if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
     if (isDemo()) speechSynthesis.cancel();
     useVoiceStore.getState().setTtsPlaying(false);
+    useVoiceStore.getState().setTtsSpeakingId(null);
   }, []);
 
   const stopAll = useCallback((): void => {
@@ -117,6 +122,7 @@ export function useTTS(): TTSControls {
     }
     ttsChunkPlaying = false;
     useVoiceStore.getState().setTtsPlaying(false);
+    useVoiceStore.getState().setTtsSpeakingId(null);
   }, []);
 
   const enqueueChunk = useCallback((text: string): void => {
@@ -129,8 +135,8 @@ export function useTTS(): TTSControls {
       const utterance = new SpeechSynthesisUtterance(stripped);
       utterance.rate = 1 + getRatePct() / 100;
       utterance.onstart = () => useVoiceStore.getState().setTtsPlaying(true);
-      utterance.onend = () => useVoiceStore.getState().setTtsPlaying(false);
-      utterance.onerror = () => useVoiceStore.getState().setTtsPlaying(false);
+      utterance.onend = () => { useVoiceStore.getState().setTtsPlaying(false); useVoiceStore.getState().setTtsSpeakingId(null); };
+      utterance.onerror = () => { useVoiceStore.getState().setTtsPlaying(false); useVoiceStore.getState().setTtsSpeakingId(null); };
       speechSynthesis.speak(utterance);
       return;
     }
@@ -169,6 +175,7 @@ export function useTTS(): TTSControls {
       }
       if (!useVoiceStore.getState().speakBlockSpoken) {
         useVoiceStore.getState().setSpeakBlockSpoken(true);
+        useVoiceStore.getState().setTtsSpeakingId(TTS_STREAMING_ID);
         // Advance the pointer past the closing </speak> tag so we never
         // re-process this region, then speak the extracted content.
         const closeTag = '</speak>';
@@ -189,6 +196,7 @@ export function useTTS(): TTSControls {
     if (!unspoken) return;
 
     if (final) {
+      useVoiceStore.getState().setTtsSpeakingId(TTS_STREAMING_ID);
       enqueueChunk(unspoken);
       ttsStreamLastLen.current = streamText.length;
       return;
@@ -201,14 +209,18 @@ export function useTTS(): TTSControls {
       lastEnd = m.index + m[0].length;
     }
     if (lastEnd > 0) {
+      useVoiceStore.getState().setTtsSpeakingId(TTS_STREAMING_ID);
       enqueueChunk(unspoken.slice(0, lastEnd));
       ttsStreamLastLen.current += lastEnd;
     }
   }, [enqueueChunk]);
 
-  const speakText = useCallback((text: string, onDone?: () => void): void => {
+  const speakText = useCallback((text: string, onDone?: () => void, speakingId?: string): void => {
     if (IS_IFRAME) { onDone?.(); return; }
     stopAll();
+
+    // Set the speaking ID so only the active message's button shows stop state.
+    useVoiceStore.getState().setTtsSpeakingId(speakingId ?? null);
 
     const stripped = stripMarkdownForTTS(text);
 
@@ -217,8 +229,8 @@ export function useTTS(): TTSControls {
       const utterance = new SpeechSynthesisUtterance(stripped);
       utterance.rate = 1 + getRatePct() / 100;
       utterance.onstart = () => useVoiceStore.getState().setTtsPlaying(true);
-      utterance.onend = () => { useVoiceStore.getState().setTtsPlaying(false); onDone?.(); };
-      utterance.onerror = () => { useVoiceStore.getState().setTtsPlaying(false); onDone?.(); };
+      utterance.onend = () => { useVoiceStore.getState().setTtsPlaying(false); useVoiceStore.getState().setTtsSpeakingId(null); onDone?.(); };
+      utterance.onerror = () => { useVoiceStore.getState().setTtsPlaying(false); useVoiceStore.getState().setTtsSpeakingId(null); onDone?.(); };
       speechSynthesis.speak(utterance);
       return;
     }

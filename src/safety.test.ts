@@ -5,6 +5,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { homedir } from 'node:os';
 
 import {
   sanitizedEnv,
@@ -519,6 +520,21 @@ describe('checkFilePermission (custom permissions)', () => {
   it('matches dotfiles with dot: true', () => {
     const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
     assert.equal(checkFilePermission('/home/user/project/.hidden', perms), 'allow');
+  });
+
+  it('expands ~ in allow patterns to home directory', () => {
+    const perms = { alwaysAllow: ['~/project/**'], deny: [] };
+    assert.equal(checkFilePermission(`${homedir()}/project/file.ts`, perms), 'allow');
+  });
+
+  it('expands ~ in deny patterns to home directory', () => {
+    const perms = { alwaysAllow: ['*'], deny: ['~/secret/**'] };
+    assert.equal(checkFilePermission(`${homedir()}/secret/keys.txt`, perms), 'deny');
+  });
+
+  it('does not expand ~ in the middle of a pattern', () => {
+    const perms = { alwaysAllow: ['/home/~/project/**'], deny: [] };
+    assert.equal(checkFilePermission('/home/user/project/file.ts', perms), 'prompt');
   });
 });
 

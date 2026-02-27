@@ -69,11 +69,11 @@ test.describe('@fast File Access Permission Modal', () => {
     await expectHidden(page.locator('#perm-overlay'));
   });
 
-  test('Always Allow button is hidden (not supported for file access)', async () => {
+  test('Always Allow button is visible for file access', async () => {
     const page = getPage();
     await injectEvent({ type: 'file_access_request', id: 'fa8', path: '/tmp/test', operation: 'read', reason: 'Agent wants to read this path' });
     await expectVisible(page.locator('#perm-overlay'));
-    await expect(page.locator('#perm-always-allow-btn')).toHaveClass(/\bhidden\b/);
+    await expect(page.locator('#perm-always-allow-btn')).not.toHaveClass(/\bhidden\b/);
     await page.locator('#perm-deny-btn').click();
   });
 });

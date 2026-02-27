@@ -49,7 +49,7 @@ globalThis.URL.revokeObjectURL = vi.fn();
 describe('TTS singleton state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useVoiceStore.setState({ ttsPlaying: false, ttsAutoSpeak: false, ttsRatePct: 0 });
+    useVoiceStore.setState({ ttsPlaying: false, ttsSpeakingId: null, ttsAutoSpeak: false, ttsRatePct: 0 });
   });
 
   it('stopAll from instance B stops audio started by instance A', async () => {
@@ -122,6 +122,7 @@ describe('flushStream — <speak> block handling (short mode)', () => {
     useVoiceStore.setState({
       ttsAutoSpeak: true,
       ttsPlaying: false,
+      ttsSpeakingId: null,
       ttsRatePct: 0,
       speakBlockSpoken: false,
     });

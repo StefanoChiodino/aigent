@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useChatStore } from '../stores/chat';
 import { useVoiceStore } from '../stores/voice';
-import { useTTS } from '../hooks/useTTS';
+import { useTTS, TTS_STREAMING_ID } from '../hooks/useTTS';
 import { stripSpeakTag, extractSpeakContent, renderMarkdown } from '../lib/markdown';
 import { TraceBlock } from './TraceBlock';
 import { SpeakPreview } from './SpeakPreview';
@@ -22,7 +22,7 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
   const text = useChatStore(s => s.streaming.text);
   const traces = useChatStore(s => s.streaming.traces);
   const isThinking = useChatStore(s => s.streaming.isThinking);
-  const ttsPlaying = useVoiceStore(s => s.ttsPlaying);
+  const isSpeaking = useVoiceStore(s => s.ttsSpeakingId === TTS_STREAMING_ID);
   const { stopAll } = useTTS();
 
   const handleStopTTS = () => {
@@ -38,7 +38,7 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
     <div className="message assistant streaming">
       <div className="role-label">
         aigent
-        {ttsPlaying && (
+        {isSpeaking && (
           <button
             className="tts-btn speaking"
             title="Stop speaking"

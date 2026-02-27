@@ -10,6 +10,8 @@ interface VoiceState {
   micState: MicState;
   vadActive: boolean;
   ttsPlaying: boolean;
+  /** Which message is actively being spoken (timestamp, or '__streaming__'). */
+  ttsSpeakingId: string | null;
   speakBlockSpoken: boolean;
   /** Selected mic deviceId ('' = system default) */
   micDeviceId: string;
@@ -22,6 +24,7 @@ interface VoiceState {
   setMicState: (state: MicState) => void;
   setVadActive: (active: boolean) => void;
   setTtsPlaying: (playing: boolean) => void;
+  setTtsSpeakingId: (id: string | null) => void;
   setSpeakBlockSpoken: (spoken: boolean) => void;
   setMicDeviceId: (id: string) => void;
   setSpeakerDeviceId: (id: string) => void;
@@ -36,6 +39,7 @@ export const useVoiceStore = create<VoiceState>()(
       micState: 'idle',
       vadActive: false,
       ttsPlaying: false,
+      ttsSpeakingId: null,
       speakBlockSpoken: false,
       micDeviceId: '',
       speakerDeviceId: '',
@@ -46,6 +50,7 @@ export const useVoiceStore = create<VoiceState>()(
       setMicState: (state) => set({ micState: state }),
       setVadActive: (active) => set({ vadActive: active }),
       setTtsPlaying: (playing) => set({ ttsPlaying: playing }),
+      setTtsSpeakingId: (id) => set({ ttsSpeakingId: id }),
       setSpeakBlockSpoken: (spoken) => set({ speakBlockSpoken: spoken }),
       setMicDeviceId: (id) => set({ micDeviceId: id }),
       setSpeakerDeviceId: (id) => set({ speakerDeviceId: id }),

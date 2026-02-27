@@ -1,14 +1,15 @@
 /**
  * 37 — TTS stop button scope
  *
- * The per-message TTSButton in Message.tsx now mirrors global `ttsPlaying` so
- * that all stop controls are visible whenever TTS is active (auto-speak or
- * manual).
+ * The per-message TTSButton uses `ttsSpeakingId` so only the actively-spoken
+ * message shows the pulsing stop icon.  Other completed messages keep their
+ * normal speak icon.
  *
  * Tests:
- *   - Completed message TTS button shows stop when ttsPlaying is true
- *   - Streaming message shows stop button when ttsPlaying is true
- *   - Streaming message stop button disappears when ttsPlaying returns to false
+ *   - Only the actively speaking message shows the stop button
+ *   - Other completed messages keep speak state while one is speaking
+ *   - Streaming message shows stop button only for streaming TTS
+ *   - Streaming message stop button disappears when TTS stops
  *   - Cancel button in InputArea visible when ttsPlaying is true (not loading)
  *   - Starting mic stops TTS (ttsPlaying becomes false)
  */
@@ -22,6 +23,13 @@ import { installMicMock } from '../helpers/mic-mock.js';
 test.describe('@fast TTS stop button scope', () => {
   const getPage = useSharedPage();
 
+  async function setTtsSpeakingId(page: ReturnType<typeof getPage>, id: string | null) {
+    await page.evaluate((i) => {
+      const store = (window as any).__zustand_voice;
+      store.getState().setTtsSpeakingId(i);
+    }, id);
+  }
+
   async function setTtsPlaying(page: ReturnType<typeof getPage>, playing: boolean) {
     await page.evaluate((p) => {
       const store = (window as any).__zustand_voice;
@@ -29,38 +37,58 @@ test.describe('@fast TTS stop button scope', () => {
     }, playing);
   }
 
-  test('completed message TTS button shows stop when global ttsPlaying is true', async () => {
+  test('only the actively speaking message shows the stop button', async () => {
     const page = getPage();
 
+    const ts1 = '2025-01-01T00:00:01.000Z';
+    const ts2 = '2025-01-01T00:00:02.000Z';
+
+    // Inject two completed assistant messages with distinct timestamps
     await injectEvent({
       type: 'message',
-      message: {
-        role: 'assistant',
-        content: 'A completed response.',
-        timestamp: new Date().toISOString(),
-      },
+      message: { role: 'assistant', content: 'First response.', timestamp: ts1 },
+    });
+    await injectEvent({
+      type: 'message',
+      message: { role: 'assistant', content: 'Second response.', timestamp: ts2 },
     });
 
-    const msg = page.locator('.message.assistant:not(.streaming)').last();
-    await expect(msg).toBeVisible();
-    const ttsBtn = msg.locator('.tts-btn');
-    await expect(ttsBtn).toHaveCount(1);
+    const msgs = page.locator('.message.assistant:not(.streaming)');
+    await expect(msgs).toHaveCount(2, { timeout: 3000 });
 
-    // Global TTS fires (e.g. auto-speak from previous turn still draining)
+    const btn1 = msgs.nth(0).locator('.tts-btn');
+    const btn2 = msgs.nth(1).locator('.tts-btn');
+
+    // Simulate speaking the first message
     await setTtsPlaying(page, true);
+    await setTtsSpeakingId(page, ts1);
 
-    // The per-message button now mirrors global state — it should show stop
-    await expect(ttsBtn).toHaveClass(/\bspeaking\b/, { timeout: 3000 });
-    await expect(ttsBtn).toHaveAttribute('title', 'Stop');
+    // First message's button shows stop (pulsing)
+    await expect(btn1).toHaveClass(/\bspeaking\b/, { timeout: 3000 });
+    await expect(btn1).toHaveAttribute('title', 'Stop');
 
+    // Second message's button stays in speak state
+    await expect(btn2).not.toHaveClass(/\bspeaking\b/, { timeout: 3000 });
+    await expect(btn2).toHaveAttribute('title', 'Speak');
+
+    // Switch to speaking the second message
+    await setTtsSpeakingId(page, ts2);
+
+    // Now second shows stop, first reverts to speak
+    await expect(btn2).toHaveClass(/\bspeaking\b/, { timeout: 3000 });
+    await expect(btn2).toHaveAttribute('title', 'Stop');
+    await expect(btn1).not.toHaveClass(/\bspeaking\b/, { timeout: 3000 });
+    await expect(btn1).toHaveAttribute('title', 'Speak');
+
+    // Stop all
+    await setTtsSpeakingId(page, null);
     await setTtsPlaying(page, false);
 
-    // After TTS stops, button reverts to speak state
-    await expect(ttsBtn).not.toHaveClass(/\bspeaking\b/, { timeout: 3000 });
-    await expect(ttsBtn).toHaveAttribute('title', 'Speak');
+    await expect(btn1).not.toHaveClass(/\bspeaking\b/, { timeout: 3000 });
+    await expect(btn2).not.toHaveClass(/\bspeaking\b/, { timeout: 3000 });
   });
 
-  test('streaming message shows stop button when ttsPlaying is true', async () => {
+  test('streaming message shows stop button only for streaming TTS', async () => {
     const page = getPage();
 
     await injectEvent({ type: 'loading', isLoading: true });
@@ -69,16 +97,19 @@ test.describe('@fast TTS stop button scope', () => {
     const streamingMsg = page.locator('.message.assistant.streaming');
     await expect(streamingMsg).toBeVisible({ timeout: 3000 });
 
+    // Simulate streaming auto-speak
     await setTtsPlaying(page, true);
+    await setTtsSpeakingId(page, '__streaming__');
     const stopBtn = streamingMsg.locator('.tts-btn.speaking');
     await expect(stopBtn).toBeVisible({ timeout: 3000 });
 
     // Cleanup
     await injectEvent({ type: 'loading', isLoading: false });
+    await setTtsSpeakingId(page, null);
     await setTtsPlaying(page, false);
   });
 
-  test('streaming message stop button disappears when ttsPlaying becomes false', async () => {
+  test('streaming message stop button disappears when TTS stops', async () => {
     const page = getPage();
 
     await injectEvent({ type: 'loading', isLoading: true });
@@ -88,13 +119,40 @@ test.describe('@fast TTS stop button scope', () => {
     await expect(streamingMsg).toBeVisible({ timeout: 3000 });
 
     await setTtsPlaying(page, true);
+    await setTtsSpeakingId(page, '__streaming__');
     await expect(streamingMsg.locator('.tts-btn.speaking')).toBeVisible({ timeout: 2000 });
 
+    await setTtsSpeakingId(page, null);
     await setTtsPlaying(page, false);
     await expect(streamingMsg.locator('.tts-btn.speaking')).not.toBeVisible({ timeout: 2000 });
 
     // Cleanup
     await injectEvent({ type: 'loading', isLoading: false });
+  });
+
+  test('completed messages do NOT show stop when streaming TTS is active', async () => {
+    const page = getPage();
+
+    const ts = '2025-01-01T00:00:05.000Z';
+    await injectEvent({
+      type: 'message',
+      message: { role: 'assistant', content: 'Older response.', timestamp: ts },
+    });
+
+    const completedMsg = page.locator('.message.assistant:not(.streaming)').last();
+    await expect(completedMsg).toBeVisible();
+    const ttsBtn = completedMsg.locator('.tts-btn');
+
+    // Streaming auto-speak active — completed message should NOT pulse
+    await setTtsPlaying(page, true);
+    await setTtsSpeakingId(page, '__streaming__');
+
+    await expect(ttsBtn).not.toHaveClass(/\bspeaking\b/, { timeout: 2000 });
+    await expect(ttsBtn).toHaveAttribute('title', 'Speak');
+
+    // Cleanup
+    await setTtsSpeakingId(page, null);
+    await setTtsPlaying(page, false);
   });
 
   test('cancel button visible when ttsPlaying is true and not loading', async () => {
@@ -117,18 +175,21 @@ test.describe('@fast TTS stop button scope', () => {
 
     // Start TTS playback
     await setTtsPlaying(page, true);
+    await setTtsSpeakingId(page, 'some-msg');
     await expectVisible(page.locator('#cancel'));
 
     // Start mic — should stop TTS
     await page.locator('#mic').click();
     await expect(page.locator('#mic')).toHaveClass(/\brecording\b/, { timeout: 3000 });
 
-    // ttsPlaying should now be false (mic's startMic calls ttsStopAll)
-    const ttsPlaying = await page.evaluate(() => {
+    // ttsPlaying and ttsSpeakingId should now be cleared
+    const state = await page.evaluate(() => {
       const store = (window as any).__zustand_voice;
-      return store.getState().ttsPlaying;
+      const s = store.getState();
+      return { ttsPlaying: s.ttsPlaying, ttsSpeakingId: s.ttsSpeakingId };
     });
-    expect(ttsPlaying).toBe(false);
+    expect(state.ttsPlaying).toBe(false);
+    expect(state.ttsSpeakingId).toBeNull();
 
     // Cancel button should be hidden (not loading, TTS stopped)
     await expectHidden(page.locator('#cancel'));

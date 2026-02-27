@@ -153,7 +153,7 @@ function logPermissionDiff(
     const oldPerms = (before[key] ?? {}) as Record<string, unknown>;
     const newPerms = (after[key] ?? {}) as Record<string, unknown>;
 
-    for (const field of ['alwaysAllow', 'deny'] as const) {
+    for (const field of ['alwaysAllow', 'alwaysClassify', 'deny'] as const) {
       const oldArr = Array.isArray(oldPerms[field]) ? oldPerms[field] as string[] : [];
       const newArr = Array.isArray(newPerms[field]) ? newPerms[field] as string[] : [];
 

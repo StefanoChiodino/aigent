@@ -27,6 +27,9 @@ export function buildSettingsPayload(key: string, value: boolean | number | stri
   if (key === 'exec_perm_alwaysAllow') {
     return { exec_permissions: { alwaysAllow: getList(key) } };
   }
+  if (key === 'exec_perm_alwaysClassify') {
+    return { exec_permissions: { alwaysClassify: getList(key) } };
+  }
   if (key === 'exec_perm_deny') {
     return { exec_permissions: { deny: getList(key) } };
   }

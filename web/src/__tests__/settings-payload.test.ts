@@ -38,6 +38,20 @@ describe('buildSettingsPayload', () => {
     expect(perms).not.toHaveProperty('prompt');
   });
 
+  it('exec_perm_alwaysClassify sends only alwaysClassify', () => {
+    const all = {
+      exec_perm_alwaysAllow: '["ls"]',
+      exec_perm_alwaysClassify: '["curl *","python *"]',
+      exec_perm_deny: '["sudo *"]',
+    };
+    const result = buildSettingsPayload('exec_perm_alwaysClassify', all.exec_perm_alwaysClassify, all);
+    expect(result).toEqual({ exec_permissions: { alwaysClassify: ['curl *', 'python *'] } });
+    const perms = result['exec_permissions'] as Record<string, unknown>;
+    expect(perms).not.toHaveProperty('alwaysAllow');
+    expect(perms).not.toHaveProperty('deny');
+    expect(perms).not.toHaveProperty('prompt');
+  });
+
   // ── Fetch permissions ─────────────────────────────────────────────────────
 
   it('fetch_perm_alwaysAllow sends only alwaysAllow', () => {
@@ -93,7 +107,7 @@ describe('buildSettingsPayload', () => {
   // ── No phantom prompt field ───────────────────────────────────────────────
 
   it('never includes a prompt field in exec_permissions', () => {
-    for (const key of ['exec_perm_alwaysAllow', 'exec_perm_deny']) {
+    for (const key of ['exec_perm_alwaysAllow', 'exec_perm_alwaysClassify', 'exec_perm_deny']) {
       const all = { [key]: '["test"]' };
       const result = buildSettingsPayload(key, all[key]!, all);
       const perms = result['exec_permissions'] as Record<string, unknown>;
