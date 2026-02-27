@@ -72,6 +72,34 @@ describe('parseClassifierResponse', () => {
     const result = parseClassifierResponse('');
     assert.equal(result.action, 'ask');
   });
+
+  it('parses suggested_patterns when present', () => {
+    const result = parseClassifierResponse(
+      '{"action":"allow","reason":"safe","suggested_patterns":["cd *","wc *"]}',
+    );
+    assert.equal(result.action, 'allow');
+    assert.deepEqual(result.suggestedPatterns, ['cd *', 'wc *']);
+  });
+
+  it('omits suggestedPatterns for block actions', () => {
+    const result = parseClassifierResponse(
+      '{"action":"block","reason":"dangerous","suggested_patterns":["rm *"]}',
+    );
+    assert.equal(result.action, 'block');
+    assert.equal(result.suggestedPatterns, undefined);
+  });
+
+  it('filters out empty strings and catch-all "*"', () => {
+    const result = parseClassifierResponse(
+      '{"action":"allow","reason":"safe","suggested_patterns":["cd *","","*"]}',
+    );
+    assert.deepEqual(result.suggestedPatterns, ['cd *']);
+  });
+
+  it('omits suggestedPatterns when not in response', () => {
+    const result = parseClassifierResponse('{"action":"allow","reason":"safe"}');
+    assert.equal(result.suggestedPatterns, undefined);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -164,6 +192,18 @@ describe('classifyCommand with fake client', () => {
 
     const result = await classifyCommand('ls');
     assert.equal(result.action, 'ask');
+  });
+
+  it('returns suggestedPatterns from classifier', async () => {
+    _resetForTest(fakeClient(() =>
+      Promise.resolve(fakeTextResponse(
+        '{"action":"ask","reason":"ambiguous","suggested_patterns":["cd *"]}',
+      )),
+    ));
+
+    const result = await classifyCommand('cd /some/path && do-something');
+    assert.equal(result.action, 'ask');
+    assert.deepEqual(result.suggestedPatterns, ['cd *']);
   });
 });
 

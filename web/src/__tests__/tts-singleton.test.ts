@@ -184,6 +184,24 @@ describe('flushStream — <speak> block handling (short mode)', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('does not speak post-tool text when speakBlockSpoken is true (no <speak> in new text)', async () => {
+    const { useTTS } = await import('../hooks/useTTS');
+    const hook = renderHook(() => useTTS());
+    act(() => { hook.result.current.stopStream(); });
+
+    // Simulate: <speak> block was spoken in pre-tool text, then startToolBlock
+    // cleared streaming.text. New post-tool text arrives without <speak>.
+    useVoiceStore.setState({ speakBlockSpoken: true });
+    useChatStore.getState().setStreamText('Here are the results of the search. Found 5 files. ');
+    extractSpeakMock.mockReturnValue(null);
+
+    act(() => { hook.result.current.flushStream(); });
+    act(() => { hook.result.current.flushStream(true); });
+
+    // Nothing should be spoken — the summary was already read aloud
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('falls back to normal sentence chunking when no <speak> tag is present', async () => {
     const { useTTS } = await import('../hooks/useTTS');
     const hook = renderHook(() => useTTS());

@@ -157,6 +157,11 @@ export function useTTS(): TTSControls {
       return;
     }
 
+    // If the <speak> block was already spoken this turn, suppress all further
+    // TTS. This handles post-tool-use text: startToolBlock clears streaming.text
+    // so the <speak> tag is no longer present, but we already spoke the summary.
+    if (useVoiceStore.getState().speakBlockSpoken) return;
+
     const unspoken = streamText.slice(ttsStreamLastLen.current);
     if (!unspoken) return;
 

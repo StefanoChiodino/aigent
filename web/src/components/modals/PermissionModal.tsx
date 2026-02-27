@@ -33,6 +33,12 @@ export function PermissionModal() {
   useEffect(() => {
     if (!req) return;
     const handler = (e: KeyboardEvent) => {
+      // Ignore key events originating from interactive elements (e.g. settings inputs)
+      // so that typing Enter in a text field doesn't approve a permission request.
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+        || (e.target as HTMLElement)?.isContentEditable) return;
+
       if (e.key === 'Enter') { e.preventDefault(); resolvePermRequest(send, true); }
       else if (e.key === 'Escape') { e.preventDefault(); resolvePermRequest(send, false); }
       else if ((e.key === 'a' || e.key === 'A') && req.alwaysAllowCmd) {

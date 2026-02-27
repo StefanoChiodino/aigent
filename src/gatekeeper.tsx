@@ -837,7 +837,11 @@ function getRecentContext(): string | undefined {
 
 // --- Exec command approval ---
 
-const pendingExecApprovals = new Map<string, { command: string; classifierReason?: string }>();
+const pendingExecApprovals = new Map<string, {
+  command: string;
+  classifierReason?: string;
+  suggestedPatterns?: string[];
+}>();
 // IDs auto-handled (allow/deny) before any browser listener fires — web-bridge skips these
 const autoHandledExecIds = new Set<string>();
 
@@ -940,6 +944,28 @@ function addCommandToDenyList(command: string): void {
   }
 }
 
+function addPatternsToAlwaysAllow(patterns: string[]): void {
+  try {
+    const raw = existsSync(SETTINGS_PATH) ? readFileSync(SETTINGS_PATH, 'utf-8') : '{}';
+    const settings = JSON.parse(raw) as Record<string, unknown>;
+    const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
+    const current = Array.isArray(perms.alwaysAllow) ? perms.alwaysAllow : [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow];
+    for (const pattern of patterns) {
+      if (!current.includes(pattern)) {
+        current.push(pattern);
+      }
+    }
+    settings['exec_permissions'] = { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current };
+    const tmp = SETTINGS_PATH + '.tmp';
+    writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+    renameSync(tmp, SETTINGS_PATH);
+    log.info('Added classifier-suggested patterns to always-allow', { patterns });
+    broadcastUpdatedPermissions();
+  } catch (err) {
+    log.error('Failed to update exec permissions', { error: String(err) });
+  }
+}
+
 function handleAgentExecRequest(id: string, command: string): void {
   // --- Tier 1: Static deny (instant block, no override) ---
   const tier1 = checkTier1Deny(command);
@@ -1001,7 +1027,7 @@ function handleAgentExecRequest(id: string, command: string): void {
         }
 
         // 'ask' — prompt the user with the classifier's assessment
-        promptUserForExec(id, command, result.reason);
+        promptUserForExec(id, command, result.reason, result.suggestedPatterns);
       })
       .catch(() => {
         // Classifier failed — fall back to user prompt
@@ -1014,13 +1040,25 @@ function handleAgentExecRequest(id: string, command: string): void {
   promptUserForExec(id, command);
 }
 
-function promptUserForExec(id: string, command: string, classifierReason?: string): void {
-  pendingExecApprovals.set(id, classifierReason ? { command, classifierReason } : { command });
-  log.info('Exec approval requested', { id, command, classifierReason });
+function promptUserForExec(
+  id: string,
+  command: string,
+  classifierReason?: string,
+  suggestedPatterns?: string[],
+): void {
+  pendingExecApprovals.set(id, {
+    command,
+    ...(classifierReason ? { classifierReason } : {}),
+    ...(suggestedPatterns?.length ? { suggestedPatterns } : {}),
+  });
+  log.info('Exec approval requested', { id, command, classifierReason, suggestedPatterns });
 
   let msg = `Agent wants to run: ${command}\n`;
   if (classifierReason) {
     msg += `  Classifier: ${classifierReason}\n`;
+  }
+  if (suggestedPatterns?.length) {
+    msg += `  Suggested always-allow patterns: ${suggestedPatterns.join(', ')}\n`;
   }
   msg += `  Reply: /approve-exec ${id} or /deny-exec ${id}\n`;
   msg += `  To always allow: /approve-exec ${id} --always`;
@@ -1054,9 +1092,14 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
     pendingExecApprovals.delete(id);
 
     if (alwaysAllow) {
-      addCommandToAlwaysAllow(pending.command);
-      const patterns = deriveExecPatterns(pending.command);
-      injectSystemMessage(`Approved and added to always-allow: ${patterns.join(', ')}`);
+      if (pending.suggestedPatterns?.length) {
+        addPatternsToAlwaysAllow(pending.suggestedPatterns);
+        injectSystemMessage(`Approved and added to always-allow: ${pending.suggestedPatterns.join(', ')}`);
+      } else {
+        addCommandToAlwaysAllow(pending.command);
+        const patterns = deriveExecPatterns(pending.command);
+        injectSystemMessage(`Approved and added to always-allow: ${patterns.join(', ')}`);
+      }
     } else {
       injectSystemMessage(`Approved (once): ${pending.command}`);
     }

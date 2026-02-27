@@ -37,6 +37,10 @@ import '../style.css';
   ui.setTaskResultTask(null);
   ui.setContextBreakdown(null);
   ui.clearAttachments();
+  ui.setTtsAvailable(false);
+  ui.setSttAvailable(false);
+  ui.setCaps({});
+  ui.setMounts([]);
   // Clear permission queue
   useUIStore.setState({ permQueue: [], permShowing: false });
 

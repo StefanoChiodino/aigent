@@ -1075,14 +1075,8 @@ html, body {
   background: rgba(224, 160, 64, 0.1);
 }
 
-.cap-grant.cap-stub {
-  color: var(--text-dim);
-  background: transparent;
-  opacity: 0.5;
-}
-
 .cap-unavailable {
-  opacity: 0.4;
+  opacity: 0.55;
 }
 
 .cap-name {
@@ -1406,21 +1400,63 @@ html, body {
   min-width: 0;
 }
 
-.sb-device-select {
+.sb-device-section {
+  position: relative;
   flex: 1;
   min-width: 0;
-  background: var(--bg-input);
+}
+
+.sb-device-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px 3px 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+  background: var(--bg-raised);
   color: var(--text-secondary);
-  font-size: 11px;
-  padding: 2px 4px;
+  font-size: 12px;
   cursor: pointer;
-  text-overflow: ellipsis;
+  transition: all var(--transition);
+  width: 100%;
+  text-align: left;
 }
-.sb-device-select:focus {
-  outline: none;
+
+.sb-device-btn:hover,
+.sb-device-btn.open {
+  background: var(--bg-hover);
+  color: var(--text);
   border-color: var(--accent);
+}
+
+.sb-device-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.sb-device-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  overflow: hidden;
+  margin-top: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.sb-device-picker .sb-model-option {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Sidebar reasoning controls ──────────────────────────── */

@@ -105,6 +105,7 @@ function DevicePicker({ kind, value, onChange }: {
 }) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void listAudioDevices(kind).then(setDevices);
@@ -119,21 +120,41 @@ function DevicePicker({ kind, value, onChange }: {
     if (open) void listAudioDevices(kind).then(setDevices);
   }, [open, kind]);
 
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
   const selected = devices.find(d => d.deviceId === value) ?? devices[0];
 
   return (
-    <select
-      className="sb-device-select"
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      onMouseDown={() => setOpen(true)}
-      onBlur={() => setOpen(false)}
-      title={selected?.label ?? 'Default'}
-    >
-      {devices.map(d => (
-        <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
-      ))}
-    </select>
+    <div className="sb-device-section" ref={ref}>
+      <button
+        className={`sb-device-btn${open ? ' open' : ''}`}
+        onClick={e => { e.stopPropagation(); setOpen(!open); }}
+        title={selected?.label ?? 'Default'}
+      >
+        <span className="sb-device-label">{selected?.label ?? 'Default'}</span>
+        <span className="sb-model-chevron">▾</span>
+      </button>
+      <div className={`sb-device-picker${open ? '' : ' hidden'}`}>
+        {devices.map(d => (
+          <button
+            key={d.deviceId}
+            className={`sb-model-option${d.deviceId === value ? ' active' : ''}`}
+            title={d.label}
+            onClick={() => { onChange(d.deviceId); setOpen(false); }}
+          >
+            {d.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -379,18 +400,16 @@ export function Sidebar() {
                     const ci = CAP_INFO[cap];
                     const label = ci?.label ?? cap;
                     const desc = ci?.description ?? cap;
+                    const grantDesc = GRANT_DESCRIPTIONS[info.grant] ?? info.grant;
                     const tooltip = info.available
-                      ? `${desc} — ${GRANT_DESCRIPTIONS[info.grant] ?? info.grant}`
-                      : `${desc} — Not yet implemented`;
+                      ? `${desc} — ${grantDesc}`
+                      : `${desc} — ${grantDesc} (not yet wired up)`;
+                    const grantLabel = info.grant === 'prompt' ? '?' : info.grant.slice(0, 3);
                     return (
                       <div key={cap} className={`cap-item${info.available ? '' : ' cap-unavailable'}`} title={tooltip}>
-                        {info.available ? (
-                          <span className={`cap-grant ${info.grant}`} title={GRANT_DESCRIPTIONS[info.grant] ?? info.grant}>
-                            {info.grant === 'prompt' ? '?' : info.grant.slice(0, 3)}
-                          </span>
-                        ) : (
-                          <span className="cap-grant cap-stub" title="Not yet implemented">n/a</span>
-                        )}
+                        <span className={`cap-grant ${info.grant}`} title={grantDesc}>
+                          {grantLabel}
+                        </span>
                         <span className="cap-name">{label}</span>
                       </div>
                     );

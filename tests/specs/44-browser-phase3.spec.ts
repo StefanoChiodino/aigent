@@ -131,6 +131,9 @@ test.describe('@fast Browser Phase 3a — Always Allow button', () => {
       stepSummary: 'fill #email',
     });
     await expectVisible(page.locator('#perm-overlay'));
+    // Blur the input so the keydown handler doesn't ignore the event
+    // (the handler skips events from INPUT/TEXTAREA/SELECT targets)
+    await page.locator('#input').blur();
     await page.keyboard.press('a');
     await expectHidden(page.locator('#perm-overlay'));
   });

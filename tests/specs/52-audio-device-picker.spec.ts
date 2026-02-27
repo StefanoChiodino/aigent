@@ -1,6 +1,11 @@
 /**
  * 52 — Audio device picker: sidebar device selectors for mic (STT) and
  *       speaker (TTS), persistence in voice store, and mic deviceId wiring.
+ *
+ * The DevicePicker renders a custom dropdown (button + picker panel) rather
+ * than a native <select>. Each .sb-device-row contains a .sb-device-section
+ * with a .sb-device-btn (shows selected label) and a .sb-device-picker
+ * (dropdown with .sb-model-option buttons).
  */
 
 import { test, expect } from '@playwright/test';
@@ -29,34 +34,40 @@ test.describe('@fast Audio device picker', () => {
    * the picker picks up the mocked list.
    */
   async function enableVoiceServices(page: import('@playwright/test').Page) {
+    // Install mock FIRST, before enabling TTS/STT flags (which mounts the pickers)
     await mockEnumerateDevices(page, MOCK_DEVICES);
-    await injectEvent({
-      type: 'host_state',
-      mounts: [],
-      capabilities: {},
-      ttsAvailable: true,
-      sttAvailable: true,
+    // Set flags directly via store to avoid WS async race with injectEvent
+    await page.evaluate(() => {
+      (window as any).__zustand_ui.getState().setTtsAvailable(true);
+      (window as any).__zustand_ui.getState().setSttAvailable(true);
     });
-    // Wait for the pickers to render, then fire devicechange so they
+    // Wait for the device sections to render, then fire devicechange so they
     // re-enumerate with the mock in place.
-    await page.waitForSelector('.sb-device-select', { timeout: 3_000 });
+    await page.waitForSelector('.sb-device-section', { timeout: 3_000 });
     await fireDeviceChangeEvent(page);
     // Give the async enumerateDevices a moment to resolve
     await page.waitForTimeout(200);
   }
 
-  /** Helper to read all <option> text from a <select> */
-  async function getOptionTexts(page: import('@playwright/test').Page, selectLocator: import('@playwright/test').Locator) {
-    return selectLocator.evaluate((el: HTMLSelectElement) =>
-      Array.from(el.options).map(o => o.text),
-    );
+  /** Helper: get all option labels from a device picker dropdown. */
+  async function getPickerOptionTexts(page: import('@playwright/test').Page, sectionLocator: import('@playwright/test').Locator) {
+    // Open the dropdown
+    await sectionLocator.locator('.sb-device-btn').click();
+    const picker = sectionLocator.locator('.sb-device-picker');
+    await expect(picker).not.toHaveClass(/\bhidden\b/, { timeout: 1_000 });
+    // Collect button texts
+    const texts = await picker.locator('.sb-model-option').allTextContents();
+    // Close the dropdown by clicking the button again
+    await sectionLocator.locator('.sb-device-btn').click();
+    return texts;
   }
 
-  /** Helper to read all <option> values from a <select> */
-  async function getOptionValues(page: import('@playwright/test').Page, selectLocator: import('@playwright/test').Locator) {
-    return selectLocator.evaluate((el: HTMLSelectElement) =>
-      Array.from(el.options).map(o => o.value),
-    );
+  /** Helper: select a device option by label text from a device picker. */
+  async function selectDeviceByLabel(sectionLocator: import('@playwright/test').Locator, label: string) {
+    await sectionLocator.locator('.sb-device-btn').click();
+    const picker = sectionLocator.locator('.sb-device-picker');
+    await expect(picker).not.toHaveClass(/\bhidden\b/, { timeout: 1_000 });
+    await picker.locator('.sb-model-option', { hasText: label }).click();
   }
 
   // ── Visibility ──────────────────────────────────────────────────────────────
@@ -67,7 +78,7 @@ test.describe('@fast Audio device picker', () => {
       (window as any).__zustand_ui.getState().setTtsAvailable(false);
       (window as any).__zustand_ui.getState().setSttAvailable(false);
     });
-    await expect(page.locator('.sb-device-select')).toHaveCount(0);
+    await expect(page.locator('.sb-device-section')).toHaveCount(0);
   });
 
   test('speaker picker appears when TTS is available', async () => {
@@ -75,7 +86,7 @@ test.describe('@fast Audio device picker', () => {
     await enableVoiceServices(page);
     const speakerRow = page.locator('.sb-device-row').filter({ hasText: 'Speaker' });
     await expect(speakerRow).toBeVisible({ timeout: 3_000 });
-    await expect(speakerRow.locator('.sb-device-select')).toBeVisible();
+    await expect(speakerRow.locator('.sb-device-section')).toBeVisible();
   });
 
   test('mic picker appears when STT is available', async () => {
@@ -83,7 +94,7 @@ test.describe('@fast Audio device picker', () => {
     await enableVoiceServices(page);
     const micRow = page.locator('.sb-device-row').filter({ hasText: 'Mic' });
     await expect(micRow).toBeVisible({ timeout: 3_000 });
-    await expect(micRow.locator('.sb-device-select')).toBeVisible();
+    await expect(micRow.locator('.sb-device-section')).toBeVisible();
   });
 
   // ── Device listing ──────────────────────────────────────────────────────────
@@ -91,10 +102,10 @@ test.describe('@fast Audio device picker', () => {
   test('mic picker lists "Default" plus enumerated input devices', async () => {
     const page = getPage();
     await enableVoiceServices(page);
-    const micSelect = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('select');
-    await expect(micSelect).toBeVisible({ timeout: 3_000 });
+    const micSection = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('.sb-device-section');
+    await expect(micSection).toBeVisible({ timeout: 3_000 });
 
-    const options = await getOptionTexts(page, micSelect);
+    const options = await getPickerOptionTexts(page, micSection);
     expect(options[0]).toBe('Default');
     expect(options).toContain('USB Microphone');
     expect(options).toContain('Built-in Mic');
@@ -105,10 +116,10 @@ test.describe('@fast Audio device picker', () => {
   test('speaker picker lists "Default" plus enumerated output devices', async () => {
     const page = getPage();
     await enableVoiceServices(page);
-    const spkSelect = page.locator('.sb-device-row').filter({ hasText: 'Speaker' }).locator('select');
-    await expect(spkSelect).toBeVisible({ timeout: 3_000 });
+    const spkSection = page.locator('.sb-device-row').filter({ hasText: 'Speaker' }).locator('.sb-device-section');
+    await expect(spkSection).toBeVisible({ timeout: 3_000 });
 
-    const options = await getOptionTexts(page, spkSelect);
+    const options = await getPickerOptionTexts(page, spkSection);
     expect(options[0]).toBe('Default');
     expect(options).toContain('HDMI Speakers');
     expect(options).toContain('Headphones');
@@ -121,10 +132,10 @@ test.describe('@fast Audio device picker', () => {
   test('selecting a mic device updates voice store', async () => {
     const page = getPage();
     await enableVoiceServices(page);
-    const micSelect = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('select');
-    await expect(micSelect).toBeVisible({ timeout: 3_000 });
+    const micSection = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('.sb-device-section');
+    await expect(micSection).toBeVisible({ timeout: 3_000 });
 
-    await micSelect.selectOption({ value: 'mic-aaa' });
+    await selectDeviceByLabel(micSection, 'USB Microphone');
 
     const stored = await page.evaluate(() =>
       (window as any).__zustand_voice.getState().micDeviceId,
@@ -135,10 +146,10 @@ test.describe('@fast Audio device picker', () => {
   test('selecting a speaker device updates voice store', async () => {
     const page = getPage();
     await enableVoiceServices(page);
-    const spkSelect = page.locator('.sb-device-row').filter({ hasText: 'Speaker' }).locator('select');
-    await expect(spkSelect).toBeVisible({ timeout: 3_000 });
+    const spkSection = page.locator('.sb-device-row').filter({ hasText: 'Speaker' }).locator('.sb-device-section');
+    await expect(spkSection).toBeVisible({ timeout: 3_000 });
 
-    await spkSelect.selectOption({ value: 'spk-bbb' });
+    await selectDeviceByLabel(spkSection, 'Headphones');
 
     const stored = await page.evaluate(() =>
       (window as any).__zustand_voice.getState().speakerDeviceId,
@@ -149,15 +160,15 @@ test.describe('@fast Audio device picker', () => {
   test('selecting "Default" resets device to empty string', async () => {
     const page = getPage();
     await enableVoiceServices(page);
-    const micSelect = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('select');
-    await expect(micSelect).toBeVisible({ timeout: 3_000 });
+    const micSection = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('.sb-device-section');
+    await expect(micSection).toBeVisible({ timeout: 3_000 });
 
     // Select a specific device first
-    await micSelect.selectOption({ value: 'mic-bbb' });
+    await selectDeviceByLabel(micSection, 'Built-in Mic');
     expect(await page.evaluate(() => (window as any).__zustand_voice.getState().micDeviceId)).toBe('mic-bbb');
 
     // Switch back to Default
-    await micSelect.selectOption({ value: '' });
+    await selectDeviceByLabel(micSection, 'Default');
     expect(await page.evaluate(() => (window as any).__zustand_voice.getState().micDeviceId)).toBe('');
   });
 
@@ -166,8 +177,8 @@ test.describe('@fast Audio device picker', () => {
   test('device list updates on devicechange event', async () => {
     const page = getPage();
     await enableVoiceServices(page);
-    const micSelect = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('select');
-    await expect(micSelect).toBeVisible({ timeout: 3_000 });
+    const micSection = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('.sb-device-section');
+    await expect(micSection).toBeVisible({ timeout: 3_000 });
 
     // Add a new device
     await mockEnumerateDevices(page, [
@@ -175,15 +186,10 @@ test.describe('@fast Audio device picker', () => {
       { deviceId: 'mic-ccc', label: 'New Fancy Mic', kind: 'audioinput' },
     ]);
     await fireDeviceChangeEvent(page);
+    // Wait for re-enumerate
+    await page.waitForTimeout(300);
 
-    // Wait for the new option to appear in the select
-    await page.waitForFunction(() => {
-      const sel = document.querySelector('.sb-device-row:last-child select') as HTMLSelectElement | null;
-      if (!sel) return false;
-      return Array.from(sel.options).some(o => o.text === 'New Fancy Mic');
-    }, undefined, { timeout: 3_000 });
-
-    const options = await getOptionTexts(page, micSelect);
+    const options = await getPickerOptionTexts(page, micSection);
     expect(options).toContain('New Fancy Mic');
   });
 
@@ -192,11 +198,11 @@ test.describe('@fast Audio device picker', () => {
   test('getUserMedia receives selected deviceId constraint', async () => {
     const page = getPage();
     await enableVoiceServices(page);
-    const micSelect = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('select');
-    await expect(micSelect).toBeVisible({ timeout: 3_000 });
+    const micSection = page.locator('.sb-device-row').filter({ hasText: 'Mic' }).locator('.sb-device-section');
+    await expect(micSection).toBeVisible({ timeout: 3_000 });
 
     // Select a specific mic device
-    await micSelect.selectOption({ value: 'mic-aaa' });
+    await selectDeviceByLabel(micSection, 'USB Microphone');
 
     // Install mic mock that captures the constraints
     await page.evaluate(() => {

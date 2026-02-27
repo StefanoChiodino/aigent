@@ -10,10 +10,15 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import { createClient } from './auth.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('classifier');
 
 export interface ClassifierResult {
   action: 'allow' | 'block' | 'ask';
   reason: string;
+  suggestedPatterns?: string[];
 }
 
 interface CacheEntry {
@@ -36,13 +41,26 @@ Guidelines:
 - "block": Commands that could damage the system, exfiltrate data, or access sensitive resources
 - "ask": Ambiguous commands that need human judgment — unusual network access, unfamiliar tools, commands that could be legitimate or malicious
 
-Be practical: developers run many commands. Err toward "allow" for standard dev workflows. Err toward "ask" (not "block") when uncertain.`;
+Be practical: developers run many commands. Err toward "allow" for standard dev workflows. Err toward "ask" (not "block") when uncertain.
+
+When you classify a command as "allow" or "ask", also suggest 1-3 glob patterns for an always-allow list. These patterns let the user auto-approve similar commands in the future.
+
+Pattern rules:
+- Use "*" as a wildcard (matches anything including paths and spaces)
+- For simple commands: suggest "<executable> *" (e.g. "wc *", "cat *")
+- For pipelines (cmd1 && cmd2): suggest a pattern for each safe segment (e.g. "cd *", "wc *")
+- NEVER suggest patterns for destructive commands (rm, mv, chmod, kill, sudo, etc.)
+- NEVER suggest overly broad patterns (e.g. just "*")
+
+Include them as: {"action":"...","reason":"...","suggested_patterns":["pattern1","pattern2"]}
+The suggested_patterns field is optional — omit it if no safe patterns apply.`;
 
 let anthropicClient: Anthropic | null = null;
 const cache = new Map<string, CacheEntry>();
 
 export function initClassifier(apiKey: string): void {
-  anthropicClient = new Anthropic({ apiKey });
+  const { client } = createClient(apiKey);
+  anthropicClient = client;
 }
 
 export function isClassifierAvailable(): boolean {
@@ -92,7 +110,7 @@ export async function classifyCommand(
 
     const response = await anthropicClient.messages.create({
       model: MODEL,
-      max_tokens: 150,
+      max_tokens: 256,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
     });
@@ -109,8 +127,10 @@ export async function classifyCommand(
     pruneCache();
 
     return result;
-  } catch {
+  } catch (err) {
     // Fail open — let the user decide
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error('Classifier API error', { error: msg, command });
     return { action: 'ask', reason: 'Classifier unavailable — please review manually' };
   }
 }
@@ -123,12 +143,24 @@ export function parseClassifierResponse(text: string): ClassifierResult {
     if (!match) {
       return { action: 'ask', reason: 'Could not parse classifier response' };
     }
-    const parsed = JSON.parse(match[0]) as { action?: string; reason?: string };
+    const parsed = JSON.parse(match[0]) as {
+      action?: string;
+      reason?: string;
+      suggested_patterns?: string[];
+    };
     const action = parsed.action;
     if (action !== 'allow' && action !== 'block' && action !== 'ask') {
       return { action: 'ask', reason: parsed.reason ?? 'Unknown classifier action' };
     }
-    return { action, reason: parsed.reason ?? '' };
+    const result: ClassifierResult = { action, reason: parsed.reason ?? '' };
+    // Only attach patterns for non-block actions
+    if (action !== 'block' && Array.isArray(parsed.suggested_patterns)) {
+      const filtered = parsed.suggested_patterns.filter(
+        (p): p is string => typeof p === 'string' && p.length > 0 && p !== '*',
+      );
+      if (filtered.length > 0) result.suggestedPatterns = filtered;
+    }
+    return result;
   } catch {
     return { action: 'ask', reason: 'Could not parse classifier response' };
   }
