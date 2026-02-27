@@ -1540,8 +1540,11 @@ if (!process.env['AIGENT_TEST_MODE']) {
     startServerProcess();
     await waitForSocket();
     log.info('Server ready');
-    // Start file watcher for self-modification auto-restart
-    startFileWatcher();
+    // Optional file watcher for self-modification auto-restart (opt-in)
+    if (process.env['AIGENT_AUTO_RELOAD'] === '1') {
+      startFileWatcher();
+      log.info('Auto-reload enabled (watching src/ for changes)');
+    }
   } catch (err) {
     log.error('Server start failed', { error: (err as Error).message });
     cleanupAll();
