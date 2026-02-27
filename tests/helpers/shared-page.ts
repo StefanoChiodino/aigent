@@ -33,6 +33,8 @@ export function useSharedPage(): () => Page {
     await page.unrouteAll({ behavior: 'ignoreErrors' });
     // Reset all Zustand stores (chat, UI, voice, connection, settings) and
     // dispatch __test_reset_input for local React component state.
+    // Use a polling reset: clear stores, then wait for clean state. If the server
+    // pushes a late message (e.g. from a /reset the previous test sent), re-clear.
     await page.evaluate(() => {
       sessionStorage.removeItem('aigent-draft');
       const reset = (window as Record<string, unknown>).__testResetStores;
@@ -41,16 +43,18 @@ export function useSharedPage(): () => Page {
     // Clear input field using Playwright's fill() to trigger proper React
     // onChange events (the textarea is a controlled component).
     await page.locator('#input').fill('');
-    // Wait for stores to reach clean state instead of arbitrary timeouts.
+    // Wait for stores to reach clean state, re-clearing if server pushes late messages.
     await page.waitForFunction(() => {
-      const chat = (window as Record<string, unknown>).__zustand_chat as { getState: () => { messages: unknown[] } } | undefined;
+      const chat = (window as Record<string, unknown>).__zustand_chat as { getState: () => { messages: unknown[]; clearMessages: () => void } } | undefined;
       const ui = (window as Record<string, unknown>).__zustand_ui as { getState: () => { errorMsg: unknown; isLoading: boolean } } | undefined;
       const voice = (window as Record<string, unknown>).__zustand_voice as { getState: () => { micState: string } } | undefined;
       if (!chat || !ui || !voice) return false;
       const c = chat.getState();
       const u = ui.getState();
       const v = voice.getState();
-      return c.messages.length === 0 && u.errorMsg === null && !u.isLoading && v.micState === 'idle';
+      // If server pushed a late message after clearMessages(), re-clear
+      if (c.messages.length > 0) { c.clearMessages(); return false; }
+      return u.errorMsg === null && !u.isLoading && v.micState === 'idle';
     }, undefined, { timeout: 5_000 });
     // Re-dispatch the local state reset to catch any async callbacks
     // (e.g. STT responses) that fired after the initial reset.
