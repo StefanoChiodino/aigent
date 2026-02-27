@@ -3,6 +3,7 @@ import type { MockWebSocket } from './MockWebSocket';
 import { useUIStore } from '../stores/ui';
 import { useChatStore } from '../stores/chat';
 import { useVoiceStore } from '../stores/voice';
+import { useSettingsStore } from '../stores/settings';
 import { useDemoPlaybackStore } from './demoStore';
 import type { DemoSection } from './demoStore';
 
@@ -10,6 +11,7 @@ interface Snapshot {
   chat: Record<string, unknown>;
   ui: Record<string, unknown>;
   voice: Record<string, unknown>;
+  settings: Record<string, unknown>;
   inputText: string;
 }
 
@@ -185,6 +187,7 @@ export class DemoPlaybackEngine {
         chat: { ...useChatStore.getState() },
         ui: { ...useUIStore.getState() },
         voice: { ...useVoiceStore.getState() },
+        settings: { clientSettings: { ...useSettingsStore.getState().clientSettings } },
         inputText: this.currentInputText,
       };
     }
@@ -226,6 +229,7 @@ export class DemoPlaybackEngine {
     useChatStore.setState(snap.chat);
     useUIStore.setState(snap.ui);
     useVoiceStore.setState(snap.voice);
+    useSettingsStore.setState(snap.settings);
     this.currentInputText = snap.inputText;
     window.dispatchEvent(new CustomEvent('__demo_set_input', { detail: snap.inputText }));
   }
@@ -326,6 +330,10 @@ export class DemoPlaybackEngine {
         break;
       }
 
+      case 'set_theme':
+        useSettingsStore.getState().setClientSetting('AIGENT_THEME', step.theme);
+        break;
+
       case 'loop': break;
     }
   }
@@ -407,6 +415,10 @@ export class DemoPlaybackEngine {
 
       case 'click':
         await this.animatedClick(step.selector);
+        break;
+
+      case 'set_theme':
+        useSettingsStore.getState().setClientSetting('AIGENT_THEME', step.theme);
         break;
 
       case 'loop':
@@ -569,6 +581,7 @@ export class DemoPlaybackEngine {
     useVoiceStore.getState().setTtsAutoSpeak(false);
     useVoiceStore.getState().setTtsPlaying(false);
     useUIStore.getState().setShortMode(false);
+    useSettingsStore.getState().setClientSetting('AIGENT_THEME', 'aurora');
     if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
     speechSynthesis.cancel();
     this.currentInputText = '';

@@ -806,9 +806,21 @@ async function processAgentTurn(
   const startTime = Date.now();
 
   // Parse for images only if it's a plain text user message
-  const userContent = typeof content === 'string' && !isTaskResult
+  let userContent = typeof content === 'string' && !isTaskResult
     ? parseImagesInMessage(content)
     : content;
+
+  // Short mode: inject a per-message reminder close to the generation point.
+  // System prompt instructions get buried in long conversations; a user-turn
+  // reminder is far more reliable at keeping the model concise.
+  if (currentShort && !isTaskResult) {
+    const shortReminder = '\n\n[SHORT MODE — respond with <speak>1-2 sentence summary</speak> first, then optional brief body. Be concise.]';
+    if (typeof userContent === 'string') {
+      userContent = userContent + shortReminder;
+    } else if (Array.isArray(userContent)) {
+      userContent = [...userContent, { type: 'text' as const, text: shortReminder }];
+    }
+  }
 
   try {
     const response = await agent.chat(userContent, {
@@ -1960,7 +1972,26 @@ function buildExtraSystemPrompt(): string {
   let extra = buildHostSystemPrompt();
   extra += buildBrowserExtSystemPrompt();
   if (currentShort) {
-    extra += '\n\n## Response Style (Short / Voice Mode) — MANDATORY\n\nYou are in voice conversation mode. Every single response MUST follow this exact format with no exceptions:\n\n<speak>One or two sentence plain-English summary for text-to-speech. No markdown, no code, no lists.</speak>\n\nOptional concise body (a few sentences max). Skip preamble and filler.\n\nRULES:\n1. The <speak>...</speak> block is REQUIRED as the very first thing in every response. Never omit it.\n2. Keep the speak content to 1-2 natural sentences — it is read aloud.\n3. The body after the speak block must be concise — a few sentences, not paragraphs.\n4. Never repeat what the user already knows. No caveats or hedging.\n5. For simple answers, the speak block alone is sufficient — no body needed.';
+    extra += `\n\n## Response Style (Short / Voice Mode) — MANDATORY
+
+You are in voice conversation mode. Your output is read aloud via TTS. Brevity is non-negotiable.
+
+FORMAT — every single response, no exceptions:
+
+<speak>One or two natural sentences. Plain English. No markdown, no code, no lists.</speak>
+
+Optional: 1-3 sentences of additional detail. No more.
+
+EXAMPLE — user asks "what's the weather API endpoint?":
+<speak>The weather endpoint is slash api slash weather, it takes a city parameter.</speak>
+Check the routes file at src/routes/weather.ts for the full implementation.
+
+RULES:
+1. <speak>...</speak> MUST be the very first thing in every response. No thinking-out-loud before it. No preamble.
+2. The speak content is 1-2 sentences max — it will be read aloud to a human.
+3. After the speak block: at most 1-3 brief sentences. If the speak block fully answers the question, stop there.
+4. When using tools, still begin your final text response with <speak>.
+5. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.`;
   }
   return extra;
 }

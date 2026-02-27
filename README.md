@@ -17,6 +17,8 @@ The agent runs directly on your machine as a child process, can read and edit it
 - Controls your Chrome browser via a companion extension (a11y tree, screenshots, tab management, script execution)
 - Speaks responses aloud (local TTS) and listens via microphone (local STT)
 
+![Chat interface — sidebar with model picker, reasoning controls, and tool call blocks](docs/screenshots/chat.png)
+
 ---
 
 ## Architecture
@@ -91,6 +93,8 @@ make serve   # server only (no frontend dev server)
 
 Type `/` to open the command palette. Available commands:
 
+![Slash command palette](docs/screenshots/slash-commands.png)
+
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
@@ -143,11 +147,17 @@ Dispatched via the `dispatch_task` tool. Shown in the sidebar with:
 
 Background tasks can use cheaper models (e.g. Haiku for read-only work) to keep costs down. Multiple tasks run in parallel; completed results are injected into the conversation when the agent is next idle.
 
+![Background tasks in sidebar](docs/screenshots/tasks.png)
+
 ### Tool visibility
 
 Tool calls are shown inline in the chat — name, input summary, and output excerpt. Collapsed by default; click to expand and see the full input and output.
 
+![Expanded tool call blocks with input and output](docs/screenshots/tool-calls.png)
+
 ### Context inspector
+
+![Context window inspector with token breakdown](docs/screenshots/context-inspector.png)
 
 Click the context usage bar (in the header or the sidebar) to open the **Context Window** inspector overlay. Also accessible via `/context`. It shows:
 
@@ -177,6 +187,8 @@ When the agent wants to edit a workspace config file (SOUL.md, AGENTS.md, USER.m
 Messages are saved to `localStorage` (`aigent_chat_history`) on every update and restored immediately on page load, before the WebSocket connects. This means the chat is visible even during server restarts. Messages are cleared on `/reset`.
 
 ### Settings
+
+![Settings panel](docs/screenshots/settings.png)
 
 The ⚙ gear icon opens the settings panel. Settings are split into two scopes:
 
@@ -343,6 +355,8 @@ Every `exec` call from the agent goes through three gates before it runs:
 | **Tier 3 — Haiku classifier** | LLM-based evaluation of ambiguous commands. Returns `allow`, `block`, or `ask`. Cached (LRU 200, 30-min TTL). Fail-safe: on API error, defers to user | Fallback to user prompt |
 
 Commands that pass Tiers 1 & 2 but aren't in the allow list go to Tier 3. If Tier 3 returns `ask`, you see a prompt: `/approve-exec <id>` or `/deny-exec <id>`. Adding `--always` promotes to the static allow list.
+
+![Permission modal for command approval](docs/screenshots/permission-exec.png)
 
 ### API key isolation
 

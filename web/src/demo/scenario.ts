@@ -677,7 +677,37 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'close_modal', modal: 'context' },
 
     // ════════════════════════════════════════════════════════════════════════
-    //  PHASE 5.5: Browser automation — run_script + navigate
+    //  PHASE 5.5: Background themes showcase
+    // ════════════════════════════════════════════════════════════════════════
+
+    { action: 'label', text: 'Theme: Circuit', id: 'themes' },
+    wait(1000),
+    { action: 'set_theme', theme: 'circuit' },
+    wait(4000),
+
+    { action: 'label', text: 'Theme: Matrix' },
+    { action: 'set_theme', theme: 'matrix' },
+    wait(4000),
+
+    { action: 'label', text: 'Theme: Constellation' },
+    { action: 'set_theme', theme: 'constellation' },
+    wait(4000),
+
+    { action: 'label', text: 'Theme: Topology' },
+    { action: 'set_theme', theme: 'topology' },
+    wait(4000),
+
+    { action: 'label', text: 'Theme: Ember' },
+    { action: 'set_theme', theme: 'ember' },
+    wait(4000),
+
+    // Back to default
+    { action: 'label', text: 'Theme: Aurora' },
+    { action: 'set_theme', theme: 'aurora' },
+    wait(2000),
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 5.75: Browser automation — run_script + navigate
     // ════════════════════════════════════════════════════════════════════════
 
     { action: 'label', text: 'Browser automation', id: 'browser-automation' },

@@ -1,4 +1,4 @@
-.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui clean stt stt-setup tts tts-setup kill-ports plugin plugin-dev plugin-typecheck
+.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots clean stt stt-setup tts tts-setup kill-ports plugin plugin-dev plugin-typecheck
 
 # --- Development ---
 
@@ -53,7 +53,7 @@ test-web:
 	npx vitest run --config web/vite.config.ts
 
 test-e2e:
-	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep-invert @live
+	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep-invert "@live|screenshot:"
 
 # Run a single spec or glob, e.g. make test-e2e-spec SPEC=tests/specs/10-settings.spec.ts
 test-e2e-spec:
@@ -68,6 +68,10 @@ test-e2e-live:
 
 test-e2e-ui:
 	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --ui
+
+# Generate README screenshots into docs/screenshots/
+screenshots: web
+	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep "screenshot:" --reporter=line
 
 # --- Chrome Plugin ---
 

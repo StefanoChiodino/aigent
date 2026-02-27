@@ -17,6 +17,7 @@ export type DemoStep =
   | { action: 'set_short'; on: boolean }
   | { action: 'play_audio'; src: string }
   | { action: 'click'; selector: string }
+  | { action: 'set_theme'; theme: string }
   | { action: 'label'; text: string; id?: string }
   | { action: 'loop' };
 

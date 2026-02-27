@@ -132,6 +132,23 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
+    key: 'AIGENT_THEME',
+    label: 'Background theme',
+    desc: 'Visual background animation style.',
+    group: 'Appearance',
+    type: 'select',
+    default: 'aurora',
+    options: [
+      { value: 'aurora', label: 'Aurora (fluid blobs)' },
+      { value: 'circuit', label: 'Circuit (hex network)' },
+      { value: 'matrix', label: 'Matrix (digital rain)' },
+      { value: 'constellation', label: 'Constellation (starfield)' },
+      { value: 'topology', label: 'Topology (contour lines)' },
+      { value: 'ember', label: 'Ember (rising particles)' },
+    ],
+    scope: 'client',
+  },
+  {
     key: 'AIGENT_NO_TOOLS',
     label: 'Disable all tools',
     desc: 'Send no tool definitions to the model.',
