@@ -284,6 +284,48 @@ export function checkFetchPermission(
   return 'prompt';
 }
 
+// --- File path permissions ---
+
+export interface FilePermissions {
+  alwaysAllow: string[]; // file path glob patterns (e.g. "/home/user/project/**")
+  deny: string[];
+}
+
+export type FilePermissionLevel = 'allow' | 'prompt' | 'deny';
+
+export const DEFAULT_FILE_PERMISSIONS: FilePermissions = {
+  alwaysAllow: [],
+  deny: [],
+};
+
+/**
+ * Match a file path against a permission pattern.
+ * - The catch-all "*" pattern matches any path.
+ * - Otherwise uses minimatch with `{ dot: true }` so dotfiles are matched.
+ */
+function matchFilePattern(path: string, pattern: string): boolean {
+  if (pattern === '*') return true;
+  return minimatch(path, pattern, { dot: true });
+}
+
+/**
+ * Check what permission level a file path requires given user-configured permissions.
+ * Evaluation order: deny → alwaysAllow → prompt → default(prompt)
+ */
+export function checkFilePermission(
+  path: string,
+  permissions: FilePermissions,
+): FilePermissionLevel {
+  const normalizedPath = path.toLowerCase();
+  for (const pattern of permissions.deny) {
+    if (matchFilePattern(normalizedPath, pattern.toLowerCase())) return 'deny';
+  }
+  for (const pattern of permissions.alwaysAllow) {
+    if (matchFilePattern(normalizedPath, pattern.toLowerCase())) return 'allow';
+  }
+  return 'prompt';
+}
+
 // --- Exec command permissions ---
 
 export interface ExecPermissions {

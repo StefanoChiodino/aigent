@@ -19,12 +19,12 @@ import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
-import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, parseCommandPipeline } from './safety.js';
+import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, parseCommandPipeline } from './safety.js';
 import { initClassifier, classifyCommand, isClassifierAvailable } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
 import { buildDisplayDiff } from './diff.js';
 import { auditLog } from './audit.js';
-import { readSettingsSync, writeSettingsSync } from './settings-file.js';
+import { readSettingsSync, writeSettingsSync, getSettingsPath } from './settings-file.js';
 
 const log = createLogger('gatekeeper');
 
@@ -869,11 +869,14 @@ function broadcastUpdatedPermissions(): void {
   if (!client) return;
   const execPerms = readExecPermissions();
   const fetchPerms = readFetchPermissions();
+  const filePerms = readFilePermissions();
   client.emit('permissions_updated', {
     exec_perm_alwaysAllow: JSON.stringify(execPerms.alwaysAllow),
     exec_perm_deny: JSON.stringify(execPerms.deny),
     fetch_perm_alwaysAllow: JSON.stringify(fetchPerms.alwaysAllow),
     fetch_perm_deny: JSON.stringify(fetchPerms.deny),
+    file_perm_alwaysAllow: JSON.stringify(filePerms.alwaysAllow),
+    file_perm_deny: JSON.stringify(filePerms.deny),
   });
 }
 
@@ -1175,6 +1178,44 @@ function addToFetchAlwaysAllow(pattern: string): void {
   }
 }
 
+// --- File path permissions ---
+
+function readFilePermissions(): FilePermissions {
+  try {
+    const settings = readSettingsSync();
+    const perms = settings['file_permissions'];
+    if (!perms || typeof perms !== 'object') return DEFAULT_FILE_PERMISSIONS;
+    const p = perms as Partial<FilePermissions>;
+    return {
+      alwaysAllow: Array.isArray(p.alwaysAllow)
+        ? [...new Set([...DEFAULT_FILE_PERMISSIONS.alwaysAllow, ...p.alwaysAllow])]
+        : DEFAULT_FILE_PERMISSIONS.alwaysAllow,
+      deny: Array.isArray(p.deny)
+        ? [...new Set([...DEFAULT_FILE_PERMISSIONS.deny, ...p.deny])]
+        : DEFAULT_FILE_PERMISSIONS.deny,
+    };
+  } catch {
+    return DEFAULT_FILE_PERMISSIONS;
+  }
+}
+
+function addPathToFileAlwaysAllow(pattern: string): void {
+  try {
+    writeSettingsSync('gatekeeper:addToFileAlwaysAllow', (settings) => {
+      const perms = (settings['file_permissions'] as Partial<FilePermissions> | undefined) ?? {};
+      const current = Array.isArray(perms.alwaysAllow) ? [...perms.alwaysAllow] : [...DEFAULT_FILE_PERMISSIONS.alwaysAllow];
+      if (!current.includes(pattern)) {
+        current.push(pattern);
+      }
+      return { ...settings, file_permissions: { ...DEFAULT_FILE_PERMISSIONS, ...perms, alwaysAllow: current } };
+    });
+    log.info('Added path to file always-allow', { pattern });
+    broadcastUpdatedPermissions();
+  } catch (err) {
+    log.error('Failed to update file permissions', { error: String(err) });
+  }
+}
+
 function handleAgentFetchRequest(id: string, url: string, method?: string): void {
   const permissions = readFetchPermissions();
   const level = checkFetchPermission(url, permissions);
@@ -1291,13 +1332,36 @@ function handleAgentFileAccessRequest(id: string, path: string, operation: 'read
     return;
   }
 
+  // Check file permissions (allow/deny patterns) before prompting
+  const filePerms = readFilePermissions();
+  const level = checkFilePermission(path, filePerms);
+  if (level === 'allow') {
+    log.info('File write auto-allowed by permission policy', { id, path });
+    auditLog({ type: 'file_write', detail: path, reason: 'allowed by file_permissions' });
+    autoHandledFileAccessIds.add(id);
+    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'Allowed by file_permissions' });
+    client!.send({ type: 'file_access_response', id, ok: true, message: 'Allowed by file permission policy' });
+    return;
+  }
+  if (level === 'deny') {
+    log.info('File write auto-denied by permission policy', { id, path });
+    auditLog({ type: 'file_write_block', detail: path, reason: 'denied by file_permissions' });
+    autoHandledFileAccessIds.add(id);
+    classifierDecisions.set(id, { tier: 2, action: 'block', reason: 'Denied by file_permissions' });
+    client!.send({ type: 'file_access_response', id, ok: false, message: 'Denied by file permission policy' });
+    injectSystemMessage(`[file] Blocked by deny policy: ${path}`);
+    return;
+  }
+
   pendingFileAccessApprovals.set(id, { path, operation });
   log.info('File access approval requested', { id, path, operation });
   injectSystemMessage(
     `Agent wants to ${operation.toUpperCase()} file outside project or in a sensitive location:\n` +
     `  Path: ${path}\n` +
     `  Reason: "${reason}"\n\n` +
-    `  Reply: /approve-file ${id} or /deny-file ${id}`
+    `  Reply: /approve-file ${id} or /deny-file ${id}\n` +
+    `  To always allow this file: /approve-file ${id} --always\n` +
+    `  To always allow this directory: /approve-file ${id} --always-dir`
   );
 }
 
@@ -1308,6 +1372,8 @@ function handleFileAccessApproveReject(input: string): boolean {
   if (cmd !== '/approve-file' && cmd !== '/deny-file') return false;
 
   let id = parts[1];
+  // If the first arg is a flag, not an id, and there's only one pending request
+  if (id && id.startsWith('--')) id = undefined;
   if (!id && pendingFileAccessApprovals.size === 1) {
     id = pendingFileAccessApprovals.keys().next().value as string;
   }
@@ -1327,8 +1393,21 @@ function handleFileAccessApproveReject(input: string): boolean {
   pendingFileAccessApprovals.delete(id);
 
   if (cmd === '/approve-file') {
-    log.info('File access approved', { id, path: pending.path });
-    injectSystemMessage(`Approved file ${pending.operation}: ${pending.path}`);
+    const alwaysAllow = parts.includes('--always') || parts.includes('--always-dir');
+    const alwaysDir = parts.includes('--always-dir');
+
+    if (alwaysDir) {
+      const dirPattern = dirname(pending.path) + '/**';
+      addPathToFileAlwaysAllow(dirPattern);
+      injectSystemMessage(`Approved and directory added to always-allow: ${dirPattern}`);
+    } else if (alwaysAllow) {
+      addPathToFileAlwaysAllow(pending.path);
+      injectSystemMessage(`Approved and path added to always-allow: ${pending.path}`);
+    } else {
+      injectSystemMessage(`Approved (once): ${pending.path}`);
+    }
+
+    log.info('File access approved', { id, path: pending.path, alwaysAllow, alwaysDir });
     client!.send({ type: 'file_access_response', id, ok: true, message: 'Approved by user' });
   } else {
     log.info('File access denied', { id, path: pending.path });
@@ -1762,6 +1841,23 @@ client.sendCommand = (cmd: string) => {
   }
   originalSendCommand(cmd);
 };
+
+// Log effective permissions on startup so it's easy to verify what was loaded.
+{
+  const execPerms = readExecPermissions();
+  const fetchPerms = readFetchPermissions();
+  log.info('Loaded exec permissions', {
+    alwaysAllow: execPerms.alwaysAllow.length,
+    deny: execPerms.deny.length,
+    settingsPath: getSettingsPath(),
+  });
+  if (fetchPerms.alwaysAllow.length > 0 || fetchPerms.deny.length > 0) {
+    log.info('Loaded fetch permissions', {
+      alwaysAllow: fetchPerms.alwaysAllow.length,
+      deny: fetchPerms.deny.length,
+    });
+  }
+}
 
 // Start web UI server before the server process so it's available during startup/restarts.
 const { startWebServer } = await import('./web-bridge.js');

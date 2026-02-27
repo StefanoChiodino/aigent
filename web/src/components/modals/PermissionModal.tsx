@@ -173,7 +173,7 @@ export function PermissionModal() {
               className={`perm-btn perm-always-allow-domain${req.alwaysAllowDomainCmd ? '' : ' hidden'}`}
               onClick={() => req.alwaysAllowDomainCmd && resolvePermRequest(send, true, false, true)}
             >
-              Always Allow Domain
+              {req.type === 'file_access' ? 'Always Allow Dir' : 'Always Allow Domain'}
             </button>
             <button
               id="perm-autonomous-btn"

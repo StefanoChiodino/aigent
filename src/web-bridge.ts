@@ -258,7 +258,11 @@ export async function startWebServer(
         req.on('end', async () => {
           try {
             const updates = JSON.parse(Buffer.concat(chunks).toString()) as ClientSettings;
-            await writeClientSettings(updates);
+            // In test mode, accept but don't persist — e2e tests verify browser-side
+            // behavior (zustand/localStorage), not server-side settings writes.
+            if (!TEST_MODE) {
+              await writeClientSettings(updates);
+            }
             res.writeHead(204); res.end();
           } catch {
             res.writeHead(400, { 'Content-Type': 'application/json' });

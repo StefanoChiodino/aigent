@@ -19,7 +19,12 @@ const log = createLogger('settings-file');
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_SETTINGS_PATH = resolve(__dirname, '..', 'settings.json');
 
-let settingsPath = DEFAULT_SETTINGS_PATH;
+const envPath = process.env['AIGENT_SETTINGS_PATH'];
+let settingsPath = envPath ? resolve(envPath) : DEFAULT_SETTINGS_PATH;
+
+if (envPath) {
+  log.info('Using custom settings path from AIGENT_SETTINGS_PATH', { path: settingsPath });
+}
 
 /** Override the settings path — for test isolation. */
 export function _setSettingsPathForTest(path: string): void {
@@ -142,7 +147,7 @@ function logPermissionDiff(
   after: Record<string, unknown>,
   caller: string,
 ): void {
-  const permKeys = ['exec_permissions', 'fetch_permissions'] as const;
+  const permKeys = ['exec_permissions', 'fetch_permissions', 'file_permissions'] as const;
 
   for (const key of permKeys) {
     const oldPerms = (before[key] ?? {}) as Record<string, unknown>;
@@ -159,13 +164,16 @@ function logPermissionDiff(
       const removed = oldArr.filter(x => !newSet.has(x));
 
       if (added.length > 0 || removed.length > 0) {
-        log.info(`${key}.${field} changed`, {
+        const isBulkRemoval = removed.length > 3 && added.length === 0;
+        const logFn = isBulkRemoval ? log.warn.bind(log) : log.info.bind(log);
+        logFn(`${key}.${field} changed [+${added.length} -${removed.length}]`, {
           caller,
           added: added.length > 0 ? added : undefined,
           removed: removed.length > 0 ? removed : undefined,
-          before: oldArr,
-          after: newArr,
         });
+        if (isBulkRemoval) {
+          log.warn(`Bulk removal of ${removed.length} patterns from ${key}.${field} by ${caller} — this may indicate a bug`);
+        }
 
         // Also write to audit log for forensic analysis
         try {

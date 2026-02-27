@@ -275,6 +275,8 @@ export function useWebSocket(): void {
             body: event.reason,
             approveCmd: `/approve-file ${event.id}`,
             denyCmd: `/deny-file ${event.id}`,
+            alwaysAllowCmd: `/approve-file ${event.id} --always`,
+            alwaysAllowDomainCmd: `/approve-file ${event.id} --always-dir`,
           });
           playPermissionSound();
           break;

@@ -15,6 +15,8 @@ import {
   DEFAULT_EXEC_PERMISSIONS,
   checkFetchPermission,
   DEFAULT_FETCH_PERMISSIONS,
+  checkFilePermission,
+  DEFAULT_FILE_PERMISSIONS,
   parseCommandPipeline,
   checkTier1Deny,
 } from './safety.js';
@@ -410,6 +412,64 @@ describe('checkFetchPermission (custom permissions)', () => {
     const perms = { alwaysAllow: ['api.example.com'], deny: [] };
     assert.equal(checkFetchPermission('https://api.example.com/anything', perms), 'allow');
     assert.equal(checkFetchPermission('https://evil.com/anything', perms), 'prompt');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkFilePermission
+// ---------------------------------------------------------------------------
+
+describe('checkFilePermission (with DEFAULT_FILE_PERMISSIONS)', () => {
+  const perms = DEFAULT_FILE_PERMISSIONS;
+
+  it('prompts for any path by default', () => assert.equal(checkFilePermission('/home/user/file.txt', perms), 'prompt'));
+  it('prompts for /tmp path by default', () => assert.equal(checkFilePermission('/tmp/test.txt', perms), 'prompt'));
+});
+
+describe('checkFilePermission (custom permissions)', () => {
+  it('allows path matching alwaysAllow glob', () => {
+    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
+    assert.equal(checkFilePermission('/home/user/project/src/file.ts', perms), 'allow');
+  });
+
+  it('allows deeply nested files with ** glob', () => {
+    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
+    assert.equal(checkFilePermission('/home/user/project/a/b/c/d.txt', perms), 'allow');
+  });
+
+  it('does not allow path outside the allowed directory', () => {
+    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
+    assert.equal(checkFilePermission('/home/user/other/file.txt', perms), 'prompt');
+  });
+
+  it('allows exact path match', () => {
+    const perms = { alwaysAllow: ['/home/user/specific-file.txt'], deny: [] };
+    assert.equal(checkFilePermission('/home/user/specific-file.txt', perms), 'allow');
+  });
+
+  it('denies path matching deny pattern', () => {
+    const perms = { alwaysAllow: [], deny: ['/etc/**'] };
+    assert.equal(checkFilePermission('/etc/passwd', perms), 'deny');
+  });
+
+  it('deny overrides alwaysAllow', () => {
+    const perms = { alwaysAllow: ['/home/user/**'], deny: ['/home/user/secret/**'] };
+    assert.equal(checkFilePermission('/home/user/secret/keys.txt', perms), 'deny');
+  });
+
+  it('wildcard * allows everything', () => {
+    const perms = { alwaysAllow: ['*'], deny: [] };
+    assert.equal(checkFilePermission('/any/path/whatsoever.txt', perms), 'allow');
+  });
+
+  it('case-insensitive matching', () => {
+    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
+    assert.equal(checkFilePermission('/Home/User/Project/file.txt', perms), 'allow');
+  });
+
+  it('matches dotfiles with dot: true', () => {
+    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
+    assert.equal(checkFilePermission('/home/user/project/.hidden', perms), 'allow');
   });
 });
 

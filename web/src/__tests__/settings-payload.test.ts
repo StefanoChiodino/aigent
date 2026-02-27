@@ -64,6 +64,32 @@ describe('buildSettingsPayload', () => {
     expect(perms).not.toHaveProperty('prompt');
   });
 
+  // ── File permissions ─────────────────────────────────────────────────────
+
+  it('file_perm_alwaysAllow sends only alwaysAllow', () => {
+    const all = {
+      file_perm_alwaysAllow: '["/home/user/project/**"]',
+      file_perm_deny: '["/etc/**"]',
+    };
+    const result = buildSettingsPayload('file_perm_alwaysAllow', all.file_perm_alwaysAllow, all);
+    expect(result).toEqual({ file_permissions: { alwaysAllow: ['/home/user/project/**'] } });
+    const perms = result['file_permissions'] as Record<string, unknown>;
+    expect(perms).not.toHaveProperty('deny');
+    expect(perms).not.toHaveProperty('prompt');
+  });
+
+  it('file_perm_deny sends only deny', () => {
+    const all = {
+      file_perm_alwaysAllow: '["/home/user/project/**"]',
+      file_perm_deny: '["/etc/**"]',
+    };
+    const result = buildSettingsPayload('file_perm_deny', all.file_perm_deny, all);
+    expect(result).toEqual({ file_permissions: { deny: ['/etc/**'] } });
+    const perms = result['file_permissions'] as Record<string, unknown>;
+    expect(perms).not.toHaveProperty('alwaysAllow');
+    expect(perms).not.toHaveProperty('prompt');
+  });
+
   // ── No phantom prompt field ───────────────────────────────────────────────
 
   it('never includes a prompt field in exec_permissions', () => {
@@ -80,6 +106,15 @@ describe('buildSettingsPayload', () => {
       const all = { [key]: '["test"]' };
       const result = buildSettingsPayload(key, all[key]!, all);
       const perms = result['fetch_permissions'] as Record<string, unknown>;
+      expect(perms).not.toHaveProperty('prompt');
+    }
+  });
+
+  it('never includes a prompt field in file_permissions', () => {
+    for (const key of ['file_perm_alwaysAllow', 'file_perm_deny']) {
+      const all = { [key]: '["test"]' };
+      const result = buildSettingsPayload(key, all[key]!, all);
+      const perms = result['file_permissions'] as Record<string, unknown>;
       expect(perms).not.toHaveProperty('prompt');
     }
   });

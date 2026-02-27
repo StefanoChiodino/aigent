@@ -14,6 +14,8 @@ const PID_FILE = '/tmp/aigent-test-gatekeeper.pid';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const AUTOSAVE = resolve(ROOT, 'workspace/.autosave.json');
 const AUTOSAVE_BACKUP = `${AUTOSAVE}.test-backup`;
+const SETTINGS_BACKUP = resolve(ROOT, 'settings.json.test-backup');
+const TEST_SETTINGS = '/tmp/aigent-test-settings.json';
 
 export default async function globalTeardown() {
   const timeout = new Promise<void>((_, reject) =>
@@ -61,6 +63,17 @@ async function doTeardown() {
   if (existsSync(AUTOSAVE_BACKUP)) {
     try { renameSync(AUTOSAVE_BACKUP, AUTOSAVE); } catch { /* ignore */ }
     console.log('[test-teardown] Restored .autosave.json');
+  }
+
+  // Clean up the isolated test settings file.
+  if (existsSync(TEST_SETTINGS)) {
+    try { unlinkSync(TEST_SETTINGS); } catch { /* ignore */ }
+    console.log('[test-teardown] Removed test settings file');
+  }
+  // Remove the settings backup (no longer needed — real file was never touched).
+  if (existsSync(SETTINGS_BACKUP)) {
+    try { unlinkSync(SETTINGS_BACKUP); } catch { /* ignore */ }
+    console.log('[test-teardown] Removed settings.json backup');
   }
 
   // Brief wait for OS cleanup (reduced from 800ms)

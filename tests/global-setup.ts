@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { writeFileSync, openSync, readFileSync, existsSync, renameSync } from 'node:fs';
+import { writeFileSync, openSync, readFileSync, existsSync, renameSync, copyFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 
 const PORT = Number(process.env['AIGENT_WEB_PORT'] ?? 3142);
@@ -21,6 +21,9 @@ const PID_FILE = '/tmp/aigent-test-gatekeeper.pid';
 const LOG_FILE = '/tmp/aigent-test-gatekeeper.log';
 const AUTOSAVE = resolve(ROOT, 'workspace/.autosave.json');
 const AUTOSAVE_BACKUP = `${AUTOSAVE}.test-backup`;
+const SETTINGS = resolve(ROOT, 'settings.json');
+const SETTINGS_BACKUP = `${SETTINGS}.test-backup`;
+const TEST_SETTINGS = '/tmp/aigent-test-settings.json';
 
 export default async function globalSetup() {
   // Temporarily move the autosave file so the test worker starts with a clean
@@ -28,6 +31,18 @@ export default async function globalSetup() {
   if (existsSync(AUTOSAVE)) {
     renameSync(AUTOSAVE, AUTOSAVE_BACKUP);
     console.log('[test-setup] Moved .autosave.json aside');
+  }
+
+  // Isolate settings.json: copy to a temp file for the test gatekeeper so
+  // tests never modify the user's real permission lists and other settings.
+  // Also keep a backup of the original as a safety net.
+  if (existsSync(SETTINGS)) {
+    copyFileSync(SETTINGS, SETTINGS_BACKUP);
+    copyFileSync(SETTINGS, TEST_SETTINGS);
+    console.log(`[test-setup] Copied settings.json → ${TEST_SETTINGS} (real file untouched)`);
+  } else {
+    writeFileSync(TEST_SETTINGS, '{}');
+    console.log('[test-setup] No settings.json found; test will use empty settings');
   }
 
   // Kill any previous test gatekeeper by saved PID first (more reliable than by port).
@@ -58,6 +73,7 @@ export default async function globalSetup() {
         AIGENT_WEB_PORT: String(PORT),
         AIGENT_TEST_MODE: '1',
         AIGENT_SOCKET_DIR: '/tmp/aigent-test2',
+        AIGENT_SETTINGS_PATH: TEST_SETTINGS,
       },
       stdio: ['ignore', logFd, logFd],
       detached: false,

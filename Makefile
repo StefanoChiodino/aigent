@@ -1,4 +1,4 @@
-.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots clean stt stt-setup tts tts-setup kill-ports plugin plugin-dev plugin-typecheck
+.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots screenshots-diff clean stt stt-setup tts tts-setup kill-ports plugin plugin-dev plugin-typecheck
 
 # --- Development ---
 
@@ -72,6 +72,21 @@ test-e2e-ui:
 # Generate README screenshots into docs/screenshots/
 screenshots: web
 	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep "screenshot:" --reporter=line
+
+# Revert screenshots that haven't visually changed (RMSE < 1%)
+screenshots-diff:
+	@for f in docs/screenshots/*.png; do \
+		name=$$(basename "$$f"); \
+		git show HEAD:"$$f" > "/tmp/committed_$$name" 2>/dev/null || continue; \
+		pct=$$(compare -metric RMSE "/tmp/committed_$$name" "$$f" /dev/null 2>&1 | grep -oP '\([\d.]+\)' | tr -d '()'); \
+		if [ "$$(echo "$$pct < 0.01" | bc)" -eq 1 ]; then \
+			git checkout -- "$$f"; \
+			echo "  reverted $$name (RMSE=$$pct)"; \
+		else \
+			echo "  CHANGED  $$name (RMSE=$$pct)"; \
+		fi; \
+		rm -f "/tmp/committed_$$name"; \
+	done
 
 # --- Chrome Plugin ---
 
