@@ -314,7 +314,10 @@ export function InputArea() {
   useEffect(() => {
     if (!isDemo()) return;
     const onSet = (e: Event) => {
-      setInputValue((e as CustomEvent<string>).detail);
+      const val = (e as CustomEvent<string>).detail;
+      setInputValue(val);
+      computeAtTrigger(val, val.length);
+      setPaletteHidden(false);
     };
     const onSubmit = () => {
       setTimeout(() => submitMessage(), 0);

@@ -630,6 +630,10 @@ html, body {
 .speak-preview:hover .speak-preview-tooltip {
   display: block;
 }
+/* During streaming, always show the speak bubble (no hover needed) */
+.streaming .speak-preview.streaming-speak {
+  opacity: 1;
+}
 
 /* Streaming message */
 .message.streaming {

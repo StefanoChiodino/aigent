@@ -8,6 +8,35 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('tools');
 
+/**
+ * Extract the response body from raw curl output that includes dumped headers
+ * (via -D -). With -L (follow redirects), curl outputs headers for ALL
+ * intermediate responses. We find the LAST \r\n\r\n to skip past all headers.
+ * If text_only, also strips HTML tags, scripts, styles, and decodes entities.
+ */
+export function parseCurlResponse(raw: string, textOnly: boolean): string {
+  const lastHeaderEnd = raw.lastIndexOf('\r\n\r\n');
+  const body = lastHeaderEnd >= 0 ? raw.slice(lastHeaderEnd + 4) : raw;
+
+  if (textOnly) {
+    const text = body
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .trim();
+    return text || '(empty response)';
+  }
+
+  return body || '(empty response)';
+}
+
 /** Tool definition — provider-agnostic. */
 export interface ToolDef {
   name: string;
@@ -1172,26 +1201,7 @@ export async function executeTool(
           env: sanitizedEnv(),
         });
 
-        if (text_only) {
-          // Strip HTML tags, decode entities, collapse whitespace
-          const bodyStart = raw.indexOf('\r\n\r\n');
-          const body = bodyStart >= 0 ? raw.slice(bodyStart + 4) : raw;
-          const text = body
-            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/&nbsp;/g, ' ')
-            .replace(/&amp;/g, '&')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .replace(/\s+/g, ' ')
-            .trim();
-          return text || '(empty response)';
-        }
-
-        return raw || '(empty response)';
+        return parseCurlResponse(raw, text_only);
       } catch (err: unknown) {
         const e = err as { stdout?: string; stderr?: string; message?: string };
         return `Error fetching ${url}: ${e.stderr ?? e.message ?? 'unknown error'}`;

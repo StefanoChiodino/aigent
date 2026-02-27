@@ -14,6 +14,7 @@ The agent runs directly on your machine as a child process, can read and edit it
 - Maintains persistent memory across sessions (daily logs, curated MEMORY.md, workspace files)
 - Proposes changes to host files via patches — you see a diff and approve before anything is written
 - Spawns background sub-agents for long tasks without blocking your conversation
+- Controls your Chrome browser via a companion extension (a11y tree, screenshots, tab management, script execution)
 - Speaks responses aloud (local TTS) and listens via microphone (local STT)
 
 ---
@@ -31,7 +32,7 @@ Host process: Gatekeeper (gatekeeper.tsx)
 Child process: Agent server (server.ts)
 ├── agent.ts       — conversation loop, streaming, retry
 ├── provider.ts    — Anthropic + OpenAI abstraction
-├── tools.ts       — 19 tools (all gated by gatekeeper)
+├── tools.ts       — 20 tools (all gated by gatekeeper)
 ├── workspace.ts   — memory system
 └── compact.ts     — context compaction
 ```
@@ -47,16 +48,17 @@ Child process: Agent server (server.ts)
 ```bash
 git clone <repo> && cd aigent
 cp .env.example .env        # add your ANTHROPIC_API_KEY
-make start                  # launches gatekeeper + agent server + web UI
+make dev-ts                 # launches gatekeeper + Vite dev server + Chrome plugin
 ```
 
-Open `http://localhost:3141` in your browser.
+Open `http://localhost:3141` in your browser (Vite dev server on `:5173` proxies to the backend).
 
-For development with auto-rebuild of the web UI and auto-restart of the server on source changes:
+To include TTS and STT services:
 
 ```bash
-make dev     # tsx --watch-forever + esbuild --watch + TTS/STT
+make dev     # gatekeeper + Vite + TTS + STT + Chrome plugin (kills stale ports first)
 make dev-ts  # same, without TTS/STT services
+make serve   # server only (no frontend dev server)
 ```
 
 ---
@@ -70,16 +72,20 @@ make dev-ts  # same, without TTS/STT services
   - **Interrupt** — talk over the agent's response and VAD will stop it, letting you speak
 - **Text-to-speech** — speaker button on each assistant message reads it aloud; auto-speak toggle in the sidebar plays responses automatically
 - **Speak preview** — assistant messages with a `<speak>` tag show a chat-bubble icon; hover to see the spoken summary without playing audio
-- **Concise mode** — when enabled, a cheap model generates a short spoken summary of each response; only the summary is read aloud, keeping TTS output brief and conversation-paced
+- **TTS rate control** — adjustable playback speed slider in the sidebar (-50% to +100%)
+- **Audio device pickers** — choose speaker and microphone devices from the sidebar when TTS/STT is available
+- **Short mode** — when enabled, a cheap model generates a short spoken summary of each response; only the summary is read aloud, keeping TTS output brief and conversation-paced
 
 ### Input
 
 - `Enter` to send, `Shift+Enter` for newline
-- `Ctrl+Enter` — one-shot thinking boost (sends with max reasoning, then reverts to current setting)
+- `Ctrl+Enter` — one-shot thinking toggle (if thinking is off, sends with `high` reasoning; if thinking is on, sends without reasoning — then reverts)
 - `/` to open the slash-command palette with autocomplete
-- `@` to open the mention palette — type `@screen` to start screen sharing
-- Paste or drag images into the input box; attach files via the paperclip button
-- Screen-capture button grabs any window or tab via `getDisplayMedia` and attaches it as an image
+- `@` to open the mention palette — `@screen` starts screen sharing, `@clipboard` pastes clipboard content, `@image` attaches an image. When mounts are active, type a filename to search mounted directories.
+- Paste or drag files into the input box; attach via the paperclip button. Supported: images (PNG, JPEG, GIF, WebP), PDFs, plain text, and Markdown (up to 5 attachments)
+- Screen-capture button grabs any window or tab via `getDisplayMedia` and attaches it as an image; while sharing, a snap button captures the current frame
+- **Picture-in-Picture** — "Float (PiP)" button in the header pops the chat into a floating window (browsers with Document PiP API support)
+- `Ctrl+Shift+?` — open the keyboard shortcuts reference
 
 ### Slash commands
 
@@ -94,7 +100,7 @@ Type `/` to open the command palette. Available commands:
 | `/restart` | Restart the agent server |
 | `/reasoning on\|off` | Toggle extended thinking |
 | `/effort low\|medium\|high\|max` | Set thinking budget |
-| `/concise on\|off` | Toggle concise/voice mode |
+| `/short on\|off` | Toggle short/voice mode |
 | `/model <name>` | Show or switch the active model |
 | `/image <path> [msg]` | Send an image from a host path |
 | `/usage` | Show cumulative token and cost stats |
@@ -105,11 +111,9 @@ Type `/` to open the command palette. Available commands:
 | `/save` | Save the current session |
 | `/sessions` | List saved sessions |
 | `/load <id>` | Load a saved session |
-| `/mount <path> [ro\|rw]` | Grant the agent time-limited access to a folder |
-| `/unmount <path>` | Remove a mount |
-| `/mounts` | List active mounts |
-| `/grant` / `/deny` | Approve or deny a pending mount request |
+| `/grant` / `/deny` | Approve or deny a pending permission request |
 | `/approve` / `/reject` | Approve or reject a pending config-write request |
+| `/preview` | Preview a pending config-write diff |
 | `/approve-patch` / `/reject-patch` | Approve or reject a pending patch request |
 
 ### Reasoning & effort
@@ -121,7 +125,7 @@ Toggles in the left sidebar:
 | Reasoning on/off | Enable/disable extended thinking |
 | Effort level (min → max) | Budget tokens allocated to thinking |
 
-Settings persist across reloads. The agent applies thinking heuristics automatically — short messages get lower effort to save tokens. `Ctrl+Enter` temporarily overrides to max effort for one message.
+Settings persist across reloads. The agent applies thinking heuristics automatically — short messages get lower effort to save tokens. `Ctrl+Enter` temporarily toggles thinking for one message.
 
 ### Model picker
 
@@ -160,11 +164,9 @@ Each row is expandable — click to reveal the actual content sent to the model:
 
 ### Mounts
 
-The agent can request time-limited access to folders on your machine via the `request_mount` tool. You see a permission modal (with an audio cue and browser notification if the tab is backgrounded), approve or deny, and the agent gets read or read-write access that auto-expires.
+The agent can request time-limited access to folders on your machine. You see a permission modal (with an audio cue and browser notification if the tab is backgrounded), approve or deny, and the agent gets read or read-write access that auto-expires.
 
 Active mounts are shown in the sidebar with a countdown timer. Click ✕ to revoke early.
-
-You can also grant access directly from the chat with `/mount <path> [ro|rw]`.
 
 ### Config writes
 
@@ -181,18 +183,20 @@ The ⚙ gear icon opens the settings panel. Settings are split into two scopes:
 - **Client settings** — stored in `settings.json` on the host, applied immediately (provider, model, tools allowlist, port, STT/TTS URLs, prompt options)
 - **Server settings** — stored in `.env`, require a server restart (API keys)
 
-Key settings:
+Key settings groups:
 
-| Setting | Description |
-|---------|-------------|
-| Provider | Auto-detect, Anthropic, or OpenAI-compatible |
-| Anthropic / OpenAI API key | Stored in `.env`, never in `settings.json` |
-| OpenAI base URL | For local models (e.g. Ollama, LM Studio) |
-| Default model | Model used at startup |
-| Disable all tools | Send no tool definitions (useful for local models) |
-| Tool allowlist | Comma-separated list of tools to enable |
-| Slim prompt | Omit MEMORY.md to save tokens |
-| Full session logs | Include complete recent logs in the system prompt |
+| Group | Settings |
+|-------|----------|
+| **Provider** | Provider (auto-detect / Anthropic / OpenAI), API keys (stored in `.env`), OpenAI base URL |
+| **Model** | Default model, default reasoning level, short mode |
+| **Tools** | Disable all tools, tool allowlist |
+| **Prompt** | Slim prompt (omit MEMORY.md), full session logs |
+| **Services** | Web UI port, STT URL, TTS URL |
+| **Microphone** | Silence threshold, speech onset frames, silence tail, auto-send on silence, auto-send duration |
+| **Context** | Summarize large tool results, summarize threshold, summarize model, tool filter mode |
+| **Permissions** | Exec always-allow / always-deny patterns (editable per-pattern lists) |
+| **Fetch Permissions** | Fetch always-allow / always-deny patterns (hostname or URL globs) |
+| **Debug** | Relay browser errors to server log |
 
 ---
 
@@ -224,7 +228,7 @@ Key settings:
 
 ---
 
-## Tools (19)
+## Tools (20)
 
 | Tool | Description |
 |------|-------------|
@@ -244,9 +248,10 @@ Key settings:
 | `spawn_agent` | Spawn a sub-agent synchronously — blocks until done |
 | `switch_model` | Change active model mid-conversation (upgrade or downgrade) |
 | `host` | Call host OS capabilities: clipboard, audio, notifications, open |
-| `request_mount` | Ask the user to grant access to a host folder (time-limited) |
+| `host_edit_file` | Propose str_replace edits to a host file — user sees diff and approves |
 | `request_config_write` | Propose edits to config files (SOUL.md, AGENTS.md, etc.) — user sees diff |
 | `search_memory` | Keyword search across past session logs (zero LLM cost) |
+| `browser_ext` | Interact with Chrome via the aigent extension (a11y tree, screenshots, tab control, script execution) |
 
 ---
 
@@ -260,13 +265,18 @@ OPENAI_API_KEY=sk-...             # for OpenAI provider
 AIGENT_PROVIDER=anthropic         # anthropic | openai (auto-detected if omitted)
 AIGENT_MODEL=claude-opus-4-6      # default model
 AIGENT_THINKING=medium            # off | low | medium | high | max
+AIGENT_SHORT=1                    # start in short/voice mode
 AIGENT_WEB_PORT=3141              # web UI port
 AIGENT_BASE_URL=...               # OpenAI-compatible base URL (e.g. Ollama)
 AIGENT_DEBUG=1                    # verbose logging
 AIGENT_SLIM_PROMPT=1              # omit MEMORY.md from system prompt
 AIGENT_FULL_LOGS=1                # include recent session logs in full
 AIGENT_CLASSIFIER=0               # disable Tier 3 LLM classifier (falls back to user prompts)
-AIGENT_AUTO_RELOAD=1              # auto-restart server on source changes (off by default)
+AIGENT_WORKSPACE=/path/to/ws      # custom workspace directory (default: workspace/ in repo root)
+AIGENT_NO_TOOLS=1                 # send no tool definitions to the model
+AIGENT_TOOLS_ALLOWLIST=exec,read_file  # comma-separated list of tools to enable
+AIGENT_STT_URL=http://127.0.0.1:8765   # STT service endpoint
+AIGENT_TTS_URL=http://127.0.0.1:8766   # TTS service endpoint
 ```
 
 ### TTS / STT setup
@@ -302,6 +312,22 @@ Tools are automatically prefixed `mcp_<server>_<name>` and appear alongside buil
 
 ---
 
+## Chrome extension
+
+The `aigent-extension/` directory contains a Chrome extension that enables the `browser_ext` tool. When installed, the agent can:
+
+- Extract the accessibility tree from any tab
+- Take screenshots of browser tabs
+- List, open, close, and switch tabs
+- Execute JavaScript in tabs (requires user approval)
+- Navigate tabs to URLs
+
+Build with `make plugin`, or `make plugin-dev` for watch mode. The extension is also built automatically as part of `make dev` and `make dev-ts`.
+
+Read actions (a11y extraction, screenshots, listing tabs) are auto-allowed. Write actions (script execution, navigation, opening/closing tabs) show an approval prompt.
+
+---
+
 ## Security model
 
 The agent runs as an unprivileged child process. The **gatekeeper** is the sole security boundary.
@@ -312,7 +338,7 @@ Every `exec` call from the agent goes through three gates before it runs:
 
 | Tier | What it does | Override? |
 |------|-------------|-----------|
-| **Tier 1 — Hard deny** | Blocks permanently dangerous patterns: shell injection (`$()`, backticks), credential paths (`~/.ssh`, `~/.aws`), destructive operations (`rm -rf /`, `mkfs`), privilege escalation (`sudo`, `su`), exfiltration (`curl \| bash`) | No — hardcoded, cannot be overridden |
+| **Tier 1 — Hard deny** | Blocks permanently dangerous patterns: shell injection (`$()`, backticks, `eval`, `source`, `bash -c`), credential paths (`~/.ssh`, `~/.aws`, `~/.gnupg`), destructive operations (`rm -rf /`, `mkfs`), privilege escalation (`sudo`, `su`), exfiltration (`curl \| bash`) | No — hardcoded, cannot be overridden |
 | **Tier 2 — Static allow/deny** | Glob-based patterns from `settings.json`. ~40 safe defaults (git reads, ls, grep, npm test, make). You can extend with `--always` / `--always-deny` flags | Yes — user-configurable |
 | **Tier 3 — Haiku classifier** | LLM-based evaluation of ambiguous commands. Returns `allow`, `block`, or `ask`. Cached (LRU 200, 30-min TTL). Fail-safe: on API error, defers to user | Fallback to user prompt |
 

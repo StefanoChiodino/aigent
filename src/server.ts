@@ -853,10 +853,11 @@ async function processAgentTurn(
     if (!controller.signal.aborted) {
       const elapsed = (Date.now() - startTime) / 1000;
       log.info('Agent turn complete', { elapsed, messages: messages.length });
+      const finalContent = ensureSpeakTag(response);
       broadcast({ type: 'text', content: '' });
       const assistantMsg: DisplayMessage = {
         role: 'assistant',
-        content: response,
+        content: finalContent,
         timestamp: new Date().toISOString(),
         elapsed,
       };
@@ -1959,9 +1960,33 @@ function buildExtraSystemPrompt(): string {
   let extra = buildHostSystemPrompt();
   extra += buildBrowserExtSystemPrompt();
   if (currentShort) {
-    extra += '\n\n## Response Style (Short / Voice Mode)\n\nYou MUST be concise. Give the shortest useful answer — a few sentences, not paragraphs. Skip preamble, caveats, and filler. Use bullet points only when listing items. Never repeat what the user already knows.\n\nStart every response with a spoken summary on its own line, before anything else:\n\n<speak>One or two sentence plain English summary for text-to-speech. No markdown, no lists.</speak>\n\nThen give your concise response below. The <speak> block is read aloud immediately while the rest loads.';
+    extra += '\n\n## Response Style (Short / Voice Mode) — MANDATORY\n\nYou are in voice conversation mode. Every single response MUST follow this exact format with no exceptions:\n\n<speak>One or two sentence plain-English summary for text-to-speech. No markdown, no code, no lists.</speak>\n\nOptional concise body (a few sentences max). Skip preamble and filler.\n\nRULES:\n1. The <speak>...</speak> block is REQUIRED as the very first thing in every response. Never omit it.\n2. Keep the speak content to 1-2 natural sentences — it is read aloud.\n3. The body after the speak block must be concise — a few sentences, not paragraphs.\n4. Never repeat what the user already knows. No caveats or hedging.\n5. For simple answers, the speak block alone is sufficient — no body needed.';
   }
   return extra;
+}
+
+/**
+ * If short mode is on but the model omitted the <speak> tag, synthesize one
+ * from the first 1-2 sentences so TTS and the speak-preview icon still work.
+ */
+function ensureSpeakTag(text: string): string {
+  if (!currentShort) return text;
+  if (text.includes('<speak>')) return text;
+  // Extract first 1-2 sentences for the speak block
+  const stripped = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '').trim();
+  const sentenceEnd = /[.!?]\s+/g;
+  let end = 0;
+  let count = 0;
+  let m: RegExpExecArray | null;
+  while ((m = sentenceEnd.exec(stripped)) !== null) {
+    end = m.index + 1; // include the punctuation
+    count++;
+    if (count >= 2) break;
+  }
+  // If no sentence boundary found, take up to 200 chars
+  const summary = end > 0 ? stripped.slice(0, end).trim() : stripped.slice(0, 200).trim();
+  if (!summary) return text;
+  return `<speak>${summary}</speak>\n\n${text}`;
 }
 
 // Initialize MCP, host client, and agent

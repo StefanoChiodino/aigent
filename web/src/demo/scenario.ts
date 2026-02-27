@@ -115,7 +115,8 @@ const RESPONSE_2 =
   'All existing tests pass. Run `npm test` to verify the new tests as well.';
 
 const RESPONSE_3 =
-  'Health endpoint looks good — status ok, uptime reporting correctly, rate limit headers active at 30/min. Ready for production.';
+  'Health endpoint looks good — status ok, uptime reporting correctly, rate limit headers active at 30/min. Ready for production.' +
+  '\n\n<speak>Health endpoint checks out — status ok, rate limiting active.</speak>';
 
 const RESPONSE_4 =
   "Done! I navigated to your app's checkout page and clicked the submit button. " +
@@ -185,7 +186,7 @@ export const DEMO_SCENARIO: DemoScenario = {
           'claude-opus-4-6',
           'claude-haiku-4-5-20251001',
         ],
-        availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch', 'tree', 'patch', 'search_memory', 'browser_ext'],
+        availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch', 'tree', 'patch', 'search_memory', 'switch_model', 'dispatch_task', 'request_mount', 'request_config_write', 'browser_ext'],
         isLoading: false,
         tasks: [],
         pendingResults: 0,
@@ -235,6 +236,19 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'label', text: 'Extended thinking', id: 'thinking' },
     { action: 'stream_thinking', text: THINKING_1, chunkSize: 6, intervalMs: 35 },
     wait(400),
+
+    // Tool: search_memory — check past sessions
+    { action: 'label', text: 'Tool: search memory', id: 'memory' },
+    emit({
+      type: 'tool_start',
+      name: 'search_memory',
+      summary: 'Searching for "health endpoint"',
+      input: JSON.stringify({ query: 'health endpoint' }),
+    }),
+    wait(400),
+    emit({ type: 'tool_output', content: 'No matching entries found.' }),
+    emit({ type: 'tool_end' }),
+    wait(200),
 
     // Tool: read_file
     { action: 'label', text: 'Tool: read file', id: 'tools' },
@@ -304,11 +318,22 @@ export const DEMO_SCENARIO: DemoScenario = {
     }),
 
     // ════════════════════════════════════════════════════════════════════════
-    //  PHASE 3: Brief pause, flash shortcuts modal
+    //  PHASE 3: Slash command palette, effort level, shortcuts modal
     // ════════════════════════════════════════════════════════════════════════
 
+    // Slash command palette — type "/eff" to show matching commands
+    { action: 'label', text: 'Command palette', id: 'command-palette' },
+    wait(2000),
+    { action: 'type_input', text: '/eff', charDelayMs: 120 },
+    wait(2500),
+
+    // Effort level pill — click "max" to upgrade reasoning budget
+    { action: 'label', text: 'Effort level', id: 'effort' },
+    { action: 'click', selector: '#sb-effort-pills .sb-pill[data-level="max"]' },
+    wait(2000),
+
+    // Keyboard shortcuts modal
     { action: 'label', text: 'Keyboard shortcuts', id: 'shortcuts' },
-    wait(3000),
     { action: 'open_modal', modal: 'shortcuts' },
     wait(2500),
     { action: 'close_modal', modal: 'shortcuts' },
@@ -387,6 +412,9 @@ export const DEMO_SCENARIO: DemoScenario = {
       summary: 'npm install express-rate-limit',
       input: JSON.stringify({ command: 'npm install express-rate-limit' }),
     }),
+
+    // Classifier badge: Tier 3 LLM allowed this command
+    emit({ type: 'classifier_decision', tier: 3, action: 'allow', reason: 'Package install — safe' }),
     wait(800),
     emit({
       type: 'tool_output',
@@ -446,6 +474,9 @@ export const DEMO_SCENARIO: DemoScenario = {
       summary: 'npm test',
       input: JSON.stringify({ command: 'npm test -- --reporter verbose 2>&1 | head -30' }),
     }),
+
+    // Classifier badge: Tier 2 static allow for test runner
+    emit({ type: 'classifier_decision', tier: 2, action: 'allow', reason: 'Test runner — static allow' }),
     wait(1000),
     emit({
       type: 'tool_output',
@@ -516,7 +547,22 @@ export const DEMO_SCENARIO: DemoScenario = {
         delivery: 'agent-review',
       },
     }),
-    wait(200),
+    wait(300),
+
+    // Tool: switch_model — agent upgrades to Opus for code review
+    { action: 'label', text: 'Tool: switch model', id: 'switch-model' },
+    emit({
+      type: 'tool_start',
+      name: 'switch_model',
+      summary: 'Upgrading to Opus for review',
+      input: JSON.stringify({ model: 'claude-opus-4-6' }),
+    }),
+    wait(400),
+    emit({ type: 'tool_output', content: 'Model switched to claude-opus-4-6' }),
+    emit({ type: 'tool_end' }),
+    // Reflect model change in UI
+    emit({ type: 'state', model: 'claude-opus-4-6' }),
+    wait(300),
 
     // Streaming response
     { action: 'stream_text', text: RESPONSE_2, chunkSize: 5, intervalMs: 22 },
@@ -590,7 +636,19 @@ export const DEMO_SCENARIO: DemoScenario = {
       ttsAvailable: true,
       sttAvailable: true,
     }),
-    wait(2000),
+    wait(1500),
+
+    // Config write request — agent wants to update TOOLS.md
+    { action: 'label', text: 'Permission: config write', id: 'config-write' },
+    emit({
+      type: 'config_write_request',
+      id: 'cw-001',
+      file: 'TOOLS.md',
+      content: '# Tools\n\n## /health endpoint\n- GET /health — returns { status, uptime }\n- Rate limited: 30 req/min per IP\n- Added: express-rate-limit middleware',
+      reason: 'Documenting new /health endpoint in TOOLS.md',
+    }),
+    { action: 'auto_approve', delayMs: 4500 },
+    wait(500),
 
     // Context inspector — open, expand a couple of entries, then close
     { action: 'label', text: 'Context inspector', id: 'context-inspector' },
@@ -709,6 +767,11 @@ export const DEMO_SCENARIO: DemoScenario = {
     // Toggle short mode ON in the sidebar
     { action: 'set_short', on: true },
     wait(1000),
+
+    // @mention palette — type "@" to show attachment/mention options
+    { action: 'label', text: '@mention palette', id: 'at-palette' },
+    { action: 'type_input', text: '@', charDelayMs: 0 },
+    wait(2500),
 
     // Simulate STT: mic starts recording
     { action: 'label', text: 'Voice input (STT)', id: 'voice-input' },

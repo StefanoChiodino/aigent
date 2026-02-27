@@ -2,7 +2,7 @@ import React from 'react';
 import { useChatStore } from '../stores/chat';
 import { useVoiceStore } from '../stores/voice';
 import { useTTS } from '../hooks/useTTS';
-import { stripSpeakTag } from '../lib/markdown';
+import { stripSpeakTag, extractSpeakContent } from '../lib/markdown';
 import { TraceBlock } from './TraceBlock';
 
 const STOP_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`;
@@ -29,6 +29,7 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
   };
 
   const displayText = stripSpeakTag(text);
+  const speakContent = extractSpeakContent(text);
   const activity = !displayText ? activityLabel(isThinking, traces) : null;
 
   return (
@@ -42,6 +43,14 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
             onClick={handleStopTTS}
             dangerouslySetInnerHTML={{ __html: STOP_ICON }}
           />
+        )}
+        {speakContent && (
+          <span className="speak-preview streaming-speak">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span className="speak-preview-tooltip">{speakContent}</span>
+          </span>
         )}
       </div>
       {traces.length > 0 && (
