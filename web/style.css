@@ -1860,30 +1860,37 @@ html, body {
   flex-shrink: 0;
 }
 
-#mic-clear {
-  width: 28px;
-  height: 36px;
+#input-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: none;
   border: none;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   color: var(--text-dim);
   cursor: pointer;
   flex-shrink: 0;
   transition: color var(--transition), background var(--transition);
   padding: 0;
+  font-size: 12px;
+  z-index: 2;
 }
 
-#mic-clear:hover {
+#input-clear:hover {
   color: var(--text);
   background: var(--bg-hover);
 }
 
-#mic-clear.disabled {
-  visibility: hidden;
-  pointer-events: none;
+/* Give textarea/highlight extra right padding when the clear button is visible */
+#input-wrap:has(#input-clear) #input,
+#input-wrap:has(#input-clear) #input-highlight {
+  padding-right: 34px;
 }
 
 #screen-cap-wrap {

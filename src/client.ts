@@ -28,13 +28,26 @@ export interface AgentClientEvents {
   loading: (isLoading: boolean) => void;
   error: (message: string) => void;
   state: (partial: { thinking?: string; profile?: string; sessionId?: string }) => void;
-  host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[], capabilities?: Record<string, string>) => void;
+  config_write_request: (id: string, file: string, content: string, reason: string) => void;
+  edit_file_request: (id: string, path: string, edits: Array<{ old_str: string; new_str: string; index?: number }>, reason: string) => void;
   patch_request: (id: string, diff: string, reason: string) => void;
   exec_request: (id: string, command: string) => void;
   fetch_request: (id: string, url: string, method?: string) => void;
+  file_access_request: (id: string, path: string, operation: 'read' | 'write', reason: string) => void;
+  fetch_size_request: (id: string, url: string, requestedBytes: number, defaultBytes: number) => void;
+  mcp_tool_request: (id: string, server: string, tool: string, params: string) => void;
+  screenshot_request: (id: string) => void;
+  screen_share_request: (id: string) => void;
   browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate', tabId?: number, rootSelector?: string, steps?: unknown[], url?: string) => void;
+  browser_write_request: (id: string, action: string, stepSummary: string, tabUrl?: string, autonomousCmd?: string) => void;
+  browser_error: (level: 'warn' | 'error', message: string, source?: string) => void;
+  host_state: (mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw' }[], capabilities?: Record<string, string>) => void;
+  client_settings: (settings: Record<string, boolean | number | string>) => void;
+  context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) => void;
+  reset: () => void;
   disconnected: () => void;
   reconnecting: (attempt: number) => void;
+  permissions_updated: (settings: Record<string, string>) => void;
 }
 
 export class AgentClient extends EventEmitter {
@@ -175,11 +188,35 @@ export class AgentClient extends EventEmitter {
       case 'browser_ext_request':
         this.emit('browser_ext_request', event.id, event.action, event.tabId, event.rootSelector, event.steps, event.url);
         break;
+      case 'patch_request':
+        this.emit('patch_request', event.id, event.diff, event.reason);
+        break;
+      case 'file_access_request':
+        this.emit('file_access_request', event.id, event.path, event.operation, event.reason);
+        break;
+      case 'fetch_size_request':
+        this.emit('fetch_size_request', event.id, event.url, event.requestedBytes, event.defaultBytes);
+        break;
+      case 'mcp_tool_request':
+        this.emit('mcp_tool_request', event.id, event.server, event.tool, event.params);
+        break;
       case 'screenshot_request':
         this.emit('screenshot_request', event.id);
         break;
       case 'screen_share_request':
         this.emit('screen_share_request', event.id);
+        break;
+      case 'host_state':
+        this.emit('host_state', event.mounts, event.capabilities);
+        break;
+      case 'client_settings':
+        this.emit('client_settings', event.settings);
+        break;
+      case 'browser_write_request':
+        this.emit('browser_write_request', event.id, event.action, event.stepSummary, event.tabUrl, event.autonomousCmd);
+        break;
+      case 'browser_error':
+        this.emit('browser_error', event.level, event.message, event.source);
         break;
       case 'context_breakdown':
         this.emit('context_breakdown', event.breakdown);

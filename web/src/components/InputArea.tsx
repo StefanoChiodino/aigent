@@ -670,6 +670,24 @@ export function InputArea() {
             onPaste={handlePaste}
             autoFocus
           />
+          {inputValue && (
+            <button
+              id="input-clear"
+              title="Clear input"
+              onClick={() => {
+                if (micState === 'recording') {
+                  clearTranscript();
+                  lastMicTextRef.current = '';
+                  setHasMicText(false);
+                  setMicCapped(false);
+                }
+                setInputValue('');
+                inputRef.current?.focus();
+              }}
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         {/* Attach button */}
@@ -725,21 +743,6 @@ export function InputArea() {
             ∞
           </button>
 
-          <button
-            id="mic-clear"
-            className={micState === 'recording' && hasMicText ? '' : 'disabled'}
-            disabled={!(micState === 'recording' && hasMicText)}
-            title="Clear transcription"
-            onClick={() => {
-              clearTranscript();
-              lastMicTextRef.current = '';
-              setHasMicText(false);
-              setMicCapped(false);
-              setInputValue('');
-            }}
-          >
-            ✕
-          </button>
         </div>
 
         {/* Screen cap */}

@@ -182,7 +182,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     emit({
       type: 'host_state',
       mounts: [
-        { hostPath: '~/projects/myapp', containerPath: '/mnt/myapp', mode: 'rw' },
+        { hostPath: '~/projects/myapp', mountPath: '/mnt/myapp', mode: 'rw' },
       ],
       capabilities: { clipboard: 'allow', audio: 'allow', screen: 'prompt' },
     }),
@@ -557,8 +557,8 @@ export const DEMO_SCENARIO: DemoScenario = {
     emit({
       type: 'host_state',
       mounts: [
-        { hostPath: '~/projects/myapp', containerPath: '/mnt/myapp', mode: 'rw' },
-        { hostPath: '~/projects/shared-lib', containerPath: '/mnt/shared-lib', mode: 'ro' },
+        { hostPath: '~/projects/myapp', mountPath: '/mnt/myapp', mode: 'rw' },
+        { hostPath: '~/projects/shared-lib', mountPath: '/mnt/shared-lib', mode: 'ro' },
       ],
       capabilities: { clipboard: 'allow', audio: 'allow', screen: 'prompt' },
     }),

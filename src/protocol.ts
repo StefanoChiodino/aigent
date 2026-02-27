@@ -24,9 +24,12 @@ export type ClientCommand =
   | { type: 'edit_file_response'; id: string; ok: boolean; message: string }
   | { type: 'exec_response'; id: string; ok: boolean; alwaysAllow?: boolean; message: string }
   | { type: 'fetch_response'; id: string; ok: boolean; alwaysAllow?: boolean; message: string }
+  | { type: 'file_access_response'; id: string; ok: boolean; message: string }
+  | { type: 'fetch_size_response'; id: string; ok: boolean; approvedBytes: number; message: string }
+  | { type: 'mcp_tool_response'; id: string; ok: boolean; message: string }
   | { type: 'screenshot_response'; id: string; ok: boolean; data?: string; mediaType?: string; message: string }
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
-  | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[] }
+  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw' }[] }
   | { type: 'context_breakdown_request' }
   | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string }
   | { type: 'browser_write_response'; id: string; ok: boolean; message: string }
@@ -123,9 +126,12 @@ export type ServerEvent =
   | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'exec_request'; id: string; command: string; segments?: import('./safety.js').CommandSegment[] }
   | { type: 'fetch_request'; id: string; url: string; method?: string }
+  | { type: 'file_access_request'; id: string; path: string; operation: 'read' | 'write'; reason: string }
+  | { type: 'fetch_size_request'; id: string; url: string; requestedBytes: number; defaultBytes: number }
+  | { type: 'mcp_tool_request'; id: string; server: string; tool: string; params: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
-  | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
+  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string }

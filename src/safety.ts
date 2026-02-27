@@ -5,8 +5,13 @@
  * - Path validation (restrict writes to safe directories)
  * - URL validation (block SSRF to private/internal networks)
  * - Command safety checks (warn on destructive patterns)
+ * - Sensitive path detection (block access to credentials, system dirs)
+ * - DNS rebinding protection (resolve hostname before fetch)
+ * - Path confinement (block traversal outside project root)
  */
 
+import { homedir } from 'node:os';
+import { promises as dnsPromises } from 'node:dns';
 import { minimatch } from 'minimatch';
 
 // --- Environment sanitization ---
@@ -505,4 +510,122 @@ export function checkExecPermission(
     if (matchesGlob(command, pattern)) return 'allow';
   }
   return 'prompt';
+}
+
+// --- Sensitive path detection ---
+
+/**
+ * Paths that are always blocked — no user override.
+ * Covers credentials, kernel interfaces, and hardware devices.
+ */
+const SENSITIVE_PATH_HARD_DENY: ((abs: string) => boolean)[] = [
+  // Credential dirs
+  (p) => p.startsWith(homedir() + '/.ssh'),
+  (p) => p.startsWith(homedir() + '/.gnupg'),
+  (p) => p.startsWith(homedir() + '/.aws'),
+  // Kernel / hardware / boot
+  (p) => p.startsWith('/proc'),
+  (p) => p.startsWith('/sys'),
+  (p) => p.startsWith('/dev'),
+  (p) => p.startsWith('/boot'),
+  // Root's home
+  (p) => p.startsWith('/root'),
+  // Credential file extensions (anywhere on the system)
+  (p) => /\.(key|pem|p12|pfx|crt|cer|ppk)$/i.test(p),
+];
+
+/**
+ * Paths that require user approval (prompt) before access.
+ * Agent must provide a reason; user approves or rejects.
+ */
+const SENSITIVE_PATH_PROMPT: ((abs: string, home: string) => boolean)[] = [
+  // Anything in home dir but outside the project
+  (p, home) => p.startsWith(home) && !p.startsWith(home + '/.'),  // broad home access
+  // System config and runtime dirs
+  (p) => p.startsWith('/etc'),
+  (p) => p.startsWith('/usr'),
+  (p) => p.startsWith('/var'),
+  (p) => p.startsWith('/tmp'),
+];
+
+export type SensitivePathLevel = 'deny' | 'prompt' | null;
+
+/**
+ * Check if a (resolved, absolute) file path is sensitive.
+ * Returns:
+ *   'deny'   — hard block, never allowed
+ *   'prompt' — requires user approval
+ *   null     — not sensitive, proceed normally
+ */
+export function checkSensitivePath(absPath: string): SensitivePathLevel {
+  const home = homedir();
+  for (const check of SENSITIVE_PATH_HARD_DENY) {
+    if (check(absPath)) return 'deny';
+  }
+  for (const check of SENSITIVE_PATH_PROMPT) {
+    if (check(absPath, home)) return 'prompt';
+  }
+  return null;
+}
+
+// --- Path confinement ---
+
+/**
+ * Check that a resolved absolute path stays within the project root.
+ * Returns null if safe, or a human-readable reason if outside project root.
+ * Used to block path traversal attacks (../../etc/hosts).
+ */
+export function checkPathConfinement(absPath: string, projectRoot: string): string | null {
+  // Normalize: ensure projectRoot ends without trailing slash for consistent prefix check
+  const root = projectRoot.endsWith('/') ? projectRoot.slice(0, -1) : projectRoot;
+  if (absPath === root || absPath.startsWith(root + '/')) return null;
+  return `Path ${absPath} is outside project root ${root}`;
+}
+
+// --- DNS rebinding SSRF protection ---
+
+/**
+ * Async extension of validateFetchUrl that also resolves the hostname's DNS
+ * to catch DNS rebinding attacks (hostname passes static check but resolves to
+ * a private/internal IP at connection time).
+ *
+ * Returns null if safe, or an error string if blocked.
+ */
+export async function validateFetchUrlDns(url: string): Promise<string | null> {
+  // Static checks first (protocol, private IP literals, blocked hostnames)
+  const staticErr = validateFetchUrl(url);
+  if (staticErr) return staticErr;
+
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return 'Invalid URL';
+  }
+
+  // Skip DNS lookup for IP literals — already checked by PRIVATE_RANGES regexes above
+  if (/^[\d.]+$/.test(hostname) || /^[0-9a-fA-F:]+$/.test(hostname)) return null;
+
+  try {
+    // Resolve both A and AAAA records
+    const results = await Promise.allSettled([
+      dnsPromises.resolve4(hostname),
+      dnsPromises.resolve6(hostname),
+    ]);
+    const addrs: string[] = [];
+    for (const r of results) {
+      if (r.status === 'fulfilled') addrs.push(...r.value);
+    }
+    for (const addr of addrs) {
+      for (const range of PRIVATE_RANGES) {
+        if (range.test(addr)) {
+          return `Blocked: ${hostname} resolves to private/internal IP ${addr} (DNS rebinding protection)`;
+        }
+      }
+    }
+  } catch {
+    // DNS resolution failed — let the fetch fail at the network layer naturally
+  }
+
+  return null;
 }

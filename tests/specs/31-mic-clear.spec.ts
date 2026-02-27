@@ -1,11 +1,9 @@
 /**
- * 31 — Mic-clear button: comprehensive E2E tests.
+ * 31 — Input-clear button: comprehensive E2E tests.
  *
- * Tests the ✕ button that clears transcribed text while the mic is still
- * recording. Covers the core fix for the bug where cleared text would
- * reappear on the next STT live-chunk cycle, plus edge cases around
- * window-cap accumulation, sequential clears, and interactions with
- * stop/submit.
+ * Tests the ✕ button inside the text box that clears the input at any time —
+ * with or without the mic recording. Previously this was a mic-only control;
+ * it is now a permanent feature that appears whenever the input has text.
  */
 
 import { test, expect } from '@playwright/test';
@@ -15,20 +13,43 @@ import { installMicMock, mockSTT, fireLoudFrames, startRecordingWithText, FRAMES
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-test.describe('@mic Mic-clear button: clearing transcribed text', () => {
+test.describe('@mic Input-clear button', () => {
   const getPage = useSharedPage();
 
   test.beforeEach(async () => {
     await dismissPermModal(getPage());
   });
 
-  // ── Basic clear behaviour ──────────────────────────────────────────────────
+  // ── Presence / visibility ──────────────────────────────────────────────────
 
-  test('clicking clear empties the input field', async () => {
+  test('clear button absent when input is empty (no mic)', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('');
+    await page.locator('#input').dispatchEvent('input');
+    await expect(page.locator('#input-clear')).toHaveCount(0);
+  });
+
+  test('clear button appears when text is typed (no mic)', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('hello world');
+    await expect(page.locator('#input-clear')).toBeVisible();
+  });
+
+  test('clear button clears text and disappears (no mic)', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('some text');
+    await page.locator('#input-clear').click();
+    await expect(page.locator('#input')).toHaveValue('');
+    await expect(page.locator('#input-clear')).toHaveCount(0);
+  });
+
+  // ── Basic clear behaviour while recording ──────────────────────────────────
+
+  test('clicking clear empties the input field while recording', async () => {
     const page = getPage();
     await startRecordingWithText(page, 'hello world');
 
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(page.locator('#input')).toHaveValue('');
   });
 
@@ -36,28 +57,23 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     const page = getPage();
     await startRecordingWithText(page, 'hello world');
 
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(page.locator('#mic')).toHaveClass(/\brecording\b/);
   });
 
-  test('hasMicText resets to false after clear', async () => {
+  test('clear button disappears after clearing (input now empty)', async () => {
     const page = getPage();
     await startRecordingWithText(page, 'hello world');
 
-    // mic-clear should be enabled (not disabled class)
-    await expect(page.locator('#mic-clear')).not.toHaveClass(/\bdisabled\b/);
-
-    await page.locator('#mic-clear').click();
-
-    // After clear, mic-clear should be disabled again (no mic text)
-    await expect(page.locator('#mic-clear')).toHaveClass(/\bdisabled\b/);
+    await page.locator('#input-clear').click();
+    await expect(page.locator('#input-clear')).toHaveCount(0);
   });
 
   test('mic-capped indicator resets on clear', async () => {
     const page = getPage();
     await startRecordingWithText(page, 'text');
 
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(page.locator('#mic-capped')).toHaveClass(/\bhidden\b/);
   });
 
@@ -89,7 +105,7 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     const callsBefore = sttCallCount;
 
     // Clear the text
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(input).toHaveValue('');
 
     // Wait for at least 2 more STT cycles (1.2s each) to pass
@@ -132,7 +148,7 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     await fireLoudFrames(page, 5);
 
     // Clear before the next response arrives
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(input).toHaveValue('');
 
     // Now resolve any remaining delayed responses
@@ -166,7 +182,7 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     await expect(input).toHaveValue('first sentence', { timeout: 5000 });
 
     // Clear
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(input).toHaveValue('');
 
     // Change STT response and produce new speech
@@ -176,8 +192,8 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     // Should show only the new text, no remnant of old
     await expect(input).toHaveValue('brand new text', { timeout: 5000 });
 
-    // mic-clear should be enabled again since there's new text
-    await expect(page.locator('#mic-clear')).not.toHaveClass(/\bdisabled\b/);
+    // clear button should be visible again since there's new text
+    await expect(page.locator('#input-clear')).toBeVisible();
   });
 
   // ── Clear with accumulated base text (window cap) ──────────────────────────
@@ -216,7 +232,7 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     await expect(input).toHaveValue('first window second window', { timeout: 5000 });
 
     // Clear everything
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(input).toHaveValue('');
 
     // Wait a few STT cycles — text should NOT reappear
@@ -252,7 +268,7 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     await dismissPermModal(page);
 
     // Clear
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(input).toHaveValue('');
 
     // Produce new speech with different text
@@ -285,14 +301,14 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     // Round 1: speak → clear
     await fireLoudFrames(page, 5);
     await expect(input).toHaveValue('round one', { timeout: 5000 });
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(input).toHaveValue('');
 
     // Round 2: speak again → clear again
     sttText = 'round two';
     await fireLoudFrames(page, 5);
     await expect(input).toHaveValue('round two', { timeout: 5000 });
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(input).toHaveValue('');
 
     // Round 3: speak a third time
@@ -318,7 +334,7 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     await expect(input).toHaveValue('some text', { timeout: 5000 });
 
     // Clear, then stop
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(input).toHaveValue('');
 
     // Stop mic via keyboard shortcut (avoids animation instability)
@@ -344,7 +360,7 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     await expect(input).toHaveValue('dictated text', { timeout: 5000 });
 
     // Clear
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await expect(input).toHaveValue('');
 
     // Stop mic (Enter while recording stops mic then submits)
@@ -355,84 +371,6 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     // No user message bubble should have been added (empty submit is a no-op)
     const userBubbles = await page.locator('.msg.user').count();
     expect(userBubbles).toBe(0);
-  });
-
-  // ── Button enable/disable states ───────────────────────────────────────────
-
-  test('clear button is disabled when not recording', async () => {
-    const page = getPage();
-    await expect(page.locator('#mic-clear')).toHaveClass(/\bdisabled\b/);
-    await expect(page.locator('#mic-clear')).toBeDisabled();
-  });
-
-  test('clear button is disabled when recording with no text', async () => {
-    const page = getPage();
-    await installMicMock(page);
-    // Mock STT to return empty so no text appears
-    await mockSTT(page, '');
-
-    const mic = page.locator('#mic');
-    await mic.click();
-    await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3000 });
-
-    // No transcription yet → clear should still be disabled
-    await expect(page.locator('#mic-clear')).toHaveClass(/\bdisabled\b/);
-  });
-
-  test('clear button becomes enabled when transcription appears', async () => {
-    const page = getPage();
-    await installMicMock(page);
-    await mockSTT(page, 'hello');
-
-    const mic = page.locator('#mic');
-    const clearBtn = page.locator('#mic-clear');
-
-    await mic.click();
-    await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3000 });
-
-    // Initially disabled
-    await expect(clearBtn).toHaveClass(/\bdisabled\b/);
-
-    // Generate speech
-    await fireLoudFrames(page, 5);
-    await expect(page.locator('#input')).toHaveValue('hello', { timeout: 5000 });
-
-    // Now enabled
-    await expect(clearBtn).not.toHaveClass(/\bdisabled\b/);
-  });
-
-  test('clear button re-disables after clear and re-enables with new text', async () => {
-    const page = getPage();
-    await installMicMock(page);
-
-    let sttText = 'first';
-    await page.route('**/stt', route => route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ text: sttText }),
-    }));
-
-    const mic = page.locator('#mic');
-    const clearBtn = page.locator('#mic-clear');
-    const input = page.locator('#input');
-
-    await mic.click();
-    await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3000 });
-
-    // Get text → enabled
-    await fireLoudFrames(page, 5);
-    await expect(input).toHaveValue('first', { timeout: 5000 });
-    await expect(clearBtn).not.toHaveClass(/\bdisabled\b/);
-
-    // Clear → disabled
-    await clearBtn.click();
-    await expect(clearBtn).toHaveClass(/\bdisabled\b/);
-
-    // New text → enabled again
-    sttText = 'second';
-    await fireLoudFrames(page, 5);
-    await expect(input).toHaveValue('second', { timeout: 5000 });
-    await expect(clearBtn).not.toHaveClass(/\bdisabled\b/);
   });
 
   // ── Clear does not disrupt recording lifecycle ─────────────────────────────
@@ -451,7 +389,7 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     await expect(page.locator('#input')).toHaveValue('test', { timeout: 5000 });
 
     // Clear
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
 
     // AudioContext and stream should NOT be closed
     const state = await page.evaluate(() => {
@@ -479,7 +417,7 @@ test.describe('@mic Mic-clear button: clearing transcribed text', () => {
     await expect(page.locator('#input')).toHaveValue('cleanup test', { timeout: 5000 });
 
     // Clear then stop
-    await page.locator('#mic-clear').click();
+    await page.locator('#input-clear').click();
     await page.keyboard.press('Control+Backquote');
     await expect(mic).not.toHaveClass(/\brecording\b/, { timeout: 5000 });
 

@@ -23,6 +23,7 @@ import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type Exe
 import { initClassifier, classifyCommand, isClassifierAvailable } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
 import { buildDisplayDiff } from './diff.js';
+import { auditLog } from './audit.js';
 
 const log = createLogger('gatekeeper');
 
@@ -344,7 +345,7 @@ function cleanupSocket(): void {
     if (existsSync(SOCKET_PATH)) unlinkSync(SOCKET_PATH);
   } catch {}
   // NOTE: Do NOT delete the LLM proxy socket here — the proxy keeps running
-  // across container restarts. It cleans up its own socket in LLMProxy.start().
+  // across server restarts. It cleans up its own socket in LLMProxy.start().
 }
 
 function cleanupAll(): void {
@@ -358,7 +359,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-browser-write', '/deny-browser-write', '/grant-browser-autonomous', '/revoke-browser-autonomous', '/set-env']);
+const GATEKEEPER_COMMANDS = new Set(['/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-file', '/deny-file', '/approve-fetchsize', '/deny-fetchsize', '/approve-mcp', '/deny-mcp', '/approve-browser-write', '/deny-browser-write', '/grant-browser-autonomous', '/revoke-browser-autonomous', '/set-env']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -420,6 +421,9 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   if (await handleEditFileApproveReject(input)) return;
   if (await handleExecApproveReject(input)) return;
   if (await handleFetchApproveReject(input)) return;
+  if (handleFileAccessApproveReject(input)) return;
+  if (handleFetchSizeApproveReject(input)) return;
+  if (handleMcpToolApproveReject(input)) return;
   if (await handleBrowserWriteApproveReject(input)) return;
   if (handleBrowserAutonomousGrant(input)) return;
 
@@ -916,6 +920,7 @@ function handleAgentExecRequest(id: string, command: string): void {
   const tier1 = checkTier1Deny(command);
   if (tier1) {
     log.info('Exec blocked by Tier 1 (static deny)', { id, command, reason: tier1 });
+    auditLog({ type: 'exec_tier1_block', detail: command, reason: tier1 });
     autoHandledExecIds.add(id);
     client!.send({ type: 'exec_response', id, ok: false, message: `Blocked (safety): ${tier1}` });
     injectSystemMessage(`[exec] Blocked by safety engine: ${tier1}\n  Command: ${command}`);
@@ -928,6 +933,7 @@ function handleAgentExecRequest(id: string, command: string): void {
 
   if (level === 'allow') {
     log.info('Exec auto-allowed (Tier 2)', { id, command });
+    auditLog({ type: 'exec_tier2_allow', detail: command });
     autoHandledExecIds.add(id);
     client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by permission policy' });
     return;
@@ -935,6 +941,7 @@ function handleAgentExecRequest(id: string, command: string): void {
 
   if (level === 'deny') {
     log.info('Exec auto-denied (Tier 2)', { id, command });
+    auditLog({ type: 'exec_tier2_deny', detail: command });
     autoHandledExecIds.add(id);
     client!.send({ type: 'exec_response', id, ok: false, message: 'Denied by permission policy' });
     injectSystemMessage(`[exec] Blocked by deny policy: ${command}`);
@@ -947,6 +954,7 @@ function handleAgentExecRequest(id: string, command: string): void {
       .then(result => {
         if (result.action === 'allow') {
           log.info('Exec auto-allowed (Tier 3 classifier)', { id, command, reason: result.reason });
+          auditLog({ type: 'exec_tier3_allow', detail: command, reason: result.reason });
           autoHandledExecIds.add(id);
           client!.send({ type: 'exec_response', id, ok: true, message: `Allowed by classifier: ${result.reason}` });
           return;
@@ -954,6 +962,7 @@ function handleAgentExecRequest(id: string, command: string): void {
 
         if (result.action === 'block') {
           log.info('Exec blocked (Tier 3 classifier)', { id, command, reason: result.reason });
+          auditLog({ type: 'exec_tier3_block', detail: command, reason: result.reason });
           autoHandledExecIds.add(id);
           client!.send({ type: 'exec_response', id, ok: false, message: `Blocked by classifier: ${result.reason}` });
           injectSystemMessage(`[exec] Blocked by classifier: ${result.reason}\n  Command: ${command}`);
@@ -1021,6 +1030,7 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
       injectSystemMessage(`Approved (once): ${pending.command}`);
     }
 
+    auditLog({ type: 'exec_user_approve', detail: pending.command, approved: true });
     client!.send({ type: 'exec_response', id, ok: true, alwaysAllow, message: 'Approved by user' });
     return true;
   }
@@ -1054,6 +1064,7 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
       injectSystemMessage(`Denied: ${pending.command}`);
     }
 
+    auditLog({ type: 'exec_user_deny', detail: pending.command, approved: false });
     client!.send({ type: 'exec_response', id, ok: false, alwaysAllow: false, message: 'Denied by user' });
     return true;
   }
@@ -1205,6 +1216,164 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
   }
 
   return false;
+}
+
+// --- File access approval (sensitive paths / out-of-project writes) ---
+
+const pendingFileAccessApprovals = new Map<string, { path: string; operation: 'read' | 'write' }>();
+
+function handleAgentFileAccessRequest(id: string, path: string, operation: 'read' | 'write', reason: string): void {
+  pendingFileAccessApprovals.set(id, { path, operation });
+  log.info('File access approval requested', { id, path, operation });
+  injectSystemMessage(
+    `Agent wants to ${operation.toUpperCase()} file outside project or in a sensitive location:\n` +
+    `  Path: ${path}\n` +
+    `  Reason: "${reason}"\n\n` +
+    `  Reply: /approve-file ${id} or /deny-file ${id}`
+  );
+}
+
+function handleFileAccessApproveReject(input: string): boolean {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  if (cmd !== '/approve-file' && cmd !== '/deny-file') return false;
+
+  let id = parts[1];
+  if (!id && pendingFileAccessApprovals.size === 1) {
+    id = pendingFileAccessApprovals.keys().next().value as string;
+  }
+  if (!id) {
+    injectSystemMessage(pendingFileAccessApprovals.size === 0
+      ? 'No pending file access requests.'
+      : `Multiple pending — specify ID: ${[...pendingFileAccessApprovals.keys()].join(', ')}`);
+    return true;
+  }
+
+  const pending = pendingFileAccessApprovals.get(id);
+  if (!pending) {
+    if (!IS_TEST_MODE) injectSystemMessage(`No pending file access request: ${id}`);
+    return true;
+  }
+
+  pendingFileAccessApprovals.delete(id);
+
+  if (cmd === '/approve-file') {
+    log.info('File access approved', { id, path: pending.path });
+    injectSystemMessage(`Approved file ${pending.operation}: ${pending.path}`);
+    client!.send({ type: 'file_access_response', id, ok: true, message: 'Approved by user' });
+  } else {
+    log.info('File access denied', { id, path: pending.path });
+    injectSystemMessage(`Denied file ${pending.operation}: ${pending.path}`);
+    client!.send({ type: 'file_access_response', id, ok: false, message: 'Denied by user' });
+  }
+  return true;
+}
+
+// --- Fetch size approval ---
+
+const pendingFetchSizeApprovals = new Map<string, { url: string; requestedBytes: number; defaultBytes: number }>();
+
+function handleAgentFetchSizeRequest(id: string, url: string, requestedBytes: number, defaultBytes: number): void {
+  pendingFetchSizeApprovals.set(id, { url, requestedBytes, defaultBytes });
+  const mb = (requestedBytes / (1024 * 1024)).toFixed(1);
+  const defaultMb = (defaultBytes / (1024 * 1024)).toFixed(0);
+  log.info('Fetch size approval requested', { id, url, requestedBytes });
+  injectSystemMessage(
+    `Agent wants to fetch up to ${mb} MB from:\n` +
+    `  ${url}\n` +
+    `  Default limit is ${defaultMb} MB.\n\n` +
+    `  Reply: /approve-fetchsize ${id} or /deny-fetchsize ${id}`
+  );
+}
+
+function handleFetchSizeApproveReject(input: string): boolean {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  if (cmd !== '/approve-fetchsize' && cmd !== '/deny-fetchsize') return false;
+
+  let id = parts[1];
+  if (!id && pendingFetchSizeApprovals.size === 1) {
+    id = pendingFetchSizeApprovals.keys().next().value as string;
+  }
+  if (!id) {
+    injectSystemMessage(pendingFetchSizeApprovals.size === 0
+      ? 'No pending fetch size requests.'
+      : `Multiple pending — specify ID: ${[...pendingFetchSizeApprovals.keys()].join(', ')}`);
+    return true;
+  }
+
+  const pending = pendingFetchSizeApprovals.get(id);
+  if (!pending) {
+    if (!IS_TEST_MODE) injectSystemMessage(`No pending fetch size request: ${id}`);
+    return true;
+  }
+
+  pendingFetchSizeApprovals.delete(id);
+
+  if (cmd === '/approve-fetchsize') {
+    log.info('Fetch size approved', { id, bytes: pending.requestedBytes });
+    injectSystemMessage(`Approved fetch up to ${(pending.requestedBytes / (1024 * 1024)).toFixed(1)} MB from ${pending.url}`);
+    client!.send({ type: 'fetch_size_response', id, ok: true, approvedBytes: pending.requestedBytes, message: 'Approved by user' });
+  } else {
+    log.info('Fetch size denied', { id });
+    injectSystemMessage(`Denied larger fetch from ${pending.url}`);
+    client!.send({ type: 'fetch_size_response', id, ok: false, approvedBytes: pending.defaultBytes, message: 'Denied by user' });
+  }
+  return true;
+}
+
+// --- MCP tool approval ---
+
+const pendingMcpToolApprovals = new Map<string, { server: string; tool: string; params: string }>();
+
+function handleAgentMcpToolRequest(id: string, server: string, tool: string, params: string): void {
+  pendingMcpToolApprovals.set(id, { server, tool, params });
+  log.info('MCP tool approval requested', { id, server, tool });
+  const paramsPreview = params.length > 200 ? params.slice(0, 200) + '\n  ...' : params;
+  injectSystemMessage(
+    `Agent wants to call MCP tool: ${server}/${tool}\n` +
+    `  Parameters:\n${paramsPreview}\n\n` +
+    `  Reply: /approve-mcp ${id} or /deny-mcp ${id}`
+  );
+}
+
+function handleMcpToolApproveReject(input: string): boolean {
+  const parts = input.trim().split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+
+  if (cmd !== '/approve-mcp' && cmd !== '/deny-mcp') return false;
+
+  let id = parts[1];
+  if (!id && pendingMcpToolApprovals.size === 1) {
+    id = pendingMcpToolApprovals.keys().next().value as string;
+  }
+  if (!id) {
+    injectSystemMessage(pendingMcpToolApprovals.size === 0
+      ? 'No pending MCP tool requests.'
+      : `Multiple pending — specify ID: ${[...pendingMcpToolApprovals.keys()].join(', ')}`);
+    return true;
+  }
+
+  const pending = pendingMcpToolApprovals.get(id);
+  if (!pending) {
+    if (!IS_TEST_MODE) injectSystemMessage(`No pending MCP tool request: ${id}`);
+    return true;
+  }
+
+  pendingMcpToolApprovals.delete(id);
+
+  if (cmd === '/approve-mcp') {
+    log.info('MCP tool approved', { id, server: pending.server, tool: pending.tool });
+    injectSystemMessage(`Approved MCP tool: ${pending.server}/${pending.tool}`);
+    client!.send({ type: 'mcp_tool_response', id, ok: true, message: 'Approved by user' });
+  } else {
+    log.info('MCP tool denied', { id, server: pending.server, tool: pending.tool });
+    injectSystemMessage(`Denied MCP tool: ${pending.server}/${pending.tool}`);
+    client!.send({ type: 'mcp_tool_response', id, ok: false, message: 'Denied by user' });
+  }
+  return true;
 }
 
 // --- Browser write approval ---
@@ -1462,7 +1631,7 @@ gatekeeperArgs = parseArgs();
 // --- Log setup ---
 // Redirect ALL console/stderr output to a log file.
 // The TUI writes directly via process.stdout.write(); everything else must go to the log file.
-// Without this, stray writes (from libraries, Node internals, container output) corrupt the terminal.
+// Without this, stray writes (from libraries, Node internals, child process output) corrupt the terminal.
 const LOG_PATH = process.env['AIGENT_LOG'] ?? '/tmp/aigent-gatekeeper.log';
 const logStream = createWriteStream(LOG_PATH, { flags: 'a' });
 
@@ -1580,6 +1749,21 @@ client.on('fetch_request', (id: string, url: string, method?: string) => {
   handleAgentFetchRequest(id, url, method);
 });
 
+// Handle file access approval requests (sensitive paths / out-of-project writes)
+client.on('file_access_request', (id: string, path: string, operation: 'read' | 'write', reason: string) => {
+  handleAgentFileAccessRequest(id, path, operation, reason);
+});
+
+// Handle fetch size approval requests (agent wants more than the default 1 MB)
+client.on('fetch_size_request', (id: string, url: string, requestedBytes: number, defaultBytes: number) => {
+  handleAgentFetchSizeRequest(id, url, requestedBytes, defaultBytes);
+});
+
+// Handle MCP tool approval requests
+client.on('mcp_tool_request', (id: string, server: string, tool: string, params: string) => {
+  handleAgentMcpToolRequest(id, server, tool, params);
+});
+
 // Handle browser extension requests from the host daemon — relay to the Chrome extension
 client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab', tabId?: number, rootSelector?: string, steps?: unknown[], url?: string) => {
   const isWriteAction = action === 'run_script' || action === 'navigate' || action === 'open_tab' || action === 'close_tab';
@@ -1640,7 +1824,7 @@ if (gatekeeperArgs.headless) {
   // Headless mode: web UI only, no terminal interface
   client.connect();
   log.info('Running in headless mode (web UI only)');
-  // Keep process alive until container exits or SIGINT
+  // Keep process alive until SIGINT
   await new Promise<void>((r) => {
     process.on('SIGINT', r);
     process.on('SIGTERM', r);

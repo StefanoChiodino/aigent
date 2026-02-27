@@ -74,9 +74,16 @@ export const useUIStore = create<UIState>((set, get) => ({
   }),
 
   resolvePermRequest: (send, approve, alwaysAllow = false, alwaysDomain = false) => {
-    const { permQueue } = get();
-    const req = permQueue[0];
-    if (!req) return;
+    let resolved: PermRequest | null = null;
+    set(s => {
+      const req = s.permQueue[0];
+      if (!req) return s;
+      resolved = req;
+      const next = s.permQueue.slice(1);
+      return { permQueue: next, permShowing: next.length > 0 };
+    });
+    if (!resolved) return;
+    const req = resolved;
     if (approve) {
       const cmd = alwaysDomain && req.alwaysAllowDomainCmd
         ? req.alwaysAllowDomainCmd
@@ -87,8 +94,6 @@ export const useUIStore = create<UIState>((set, get) => ({
     } else {
       send({ type: 'command', cmd: req.denyCmd });
     }
-    const next = permQueue.slice(1);
-    set({ permQueue: next, permShowing: next.length > 0 });
   },
 
   setModelPickerOpen: (open) => set({ modelPickerOpen: open }),

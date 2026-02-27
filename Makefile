@@ -8,7 +8,7 @@ dev-ts:
 		--names "gate,web,plugin" \
 		--prefix-colors "cyan,blue,green" \
 		--kill-others-on-fail \
-		"npx tsx watch src/gatekeeper.tsx --headless $(ARGS)" \
+		"npx tsx src/gatekeeper.tsx --headless $(ARGS)" \
 		"npx vite dev --config web/vite.config.ts" \
 		"cd aigent-extension && npm run dev"
 
@@ -18,7 +18,7 @@ dev: kill-ports
 		--names "gate,web,tts,stt,plugin" \
 		--prefix-colors "cyan,blue,yellow,magenta,green" \
 		--kill-others-on-fail \
-		"npx tsx watch src/gatekeeper.tsx --headless $(ARGS)" \
+		"npx tsx src/gatekeeper.tsx --headless $(ARGS)" \
 		"npx vite dev --config web/vite.config.ts" \
 		"$(TTS_PYTHON) tts/main.py" \
 		"$(STT_PYTHON) stt/main.py --eager" \
@@ -26,7 +26,7 @@ dev: kill-ports
 
 # Server only (no frontend rebuild)
 serve:
-	npx tsx watch src/gatekeeper.tsx --headless $(ARGS)
+	npx tsx src/gatekeeper.tsx --headless $(ARGS)
 
 # --- Web UI ---
 

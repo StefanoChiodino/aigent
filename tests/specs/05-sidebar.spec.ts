@@ -239,9 +239,9 @@ test.describe('@fast Sidebar controls', () => {
     await expect(page.locator('#mic-sticky')).toBeVisible();
   });
 
-  test('mic-clear button is hidden by default', async () => {
+  test('input-clear button is absent when input is empty', async () => {
     const page = getPage();
-    // React component uses CSS visibility:hidden via the 'disabled' class
-    await expect(page.locator('#mic-clear')).toHaveClass(/\bdisabled\b/);
+    // The clear button only renders when inputValue is non-empty
+    await expect(page.locator('#input-clear')).toHaveCount(0);
   });
 });

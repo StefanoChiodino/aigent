@@ -55,7 +55,17 @@ export function useWebSocket(): void {
           ui().setLoading(event.state.isLoading);
           chat().setTasks(event.state.tasks ?? []);
           ui().setError(null);
-          chat().endStream();
+          // If the server is mid-turn, start (or keep) the stream so
+          // StreamingMessage renders; otherwise make sure it's ended.
+          if (event.state.isLoading) {
+            if (!chat().streaming.active) {
+              const turnStartCtx = chat().usage.contextTokens ?? 0;
+              voice().setSpeakBlockSpoken(false);
+              chat().startStream(turnStartCtx);
+            }
+          } else {
+            chat().endStream();
+          }
           ui().setModelName(event.state.model);
           ui().setAvailableModels(event.state.availableModels ?? []);
           ui().setAvailableTools(event.state.availableTools ?? []);
@@ -233,6 +243,52 @@ export function useWebSocket(): void {
           });
           playPermissionSound();
           break;
+
+        case 'file_access_request':
+          ui().enqueuePermRequest({
+            type: 'file_access',
+            id: event.id,
+            title: `File ${event.operation === 'read' ? 'Read' : 'Write'}`,
+            detail: event.path,
+            body: event.reason,
+            approveCmd: `/approve-file ${event.id}`,
+            denyCmd: `/deny-file ${event.id}`,
+          });
+          playPermissionSound();
+          break;
+
+        case 'fetch_size_request': {
+          const mb = (event.requestedBytes / (1024 * 1024)).toFixed(1);
+          const defaultMb = (event.defaultBytes / (1024 * 1024)).toFixed(0);
+          ui().enqueuePermRequest({
+            type: 'fetch_size',
+            id: event.id,
+            title: 'Large Fetch',
+            detail: `${mb} MB from ${event.url}`,
+            body: `Default limit is ${defaultMb} MB`,
+            approveCmd: `/approve-fetchsize ${event.id}`,
+            denyCmd: `/deny-fetchsize ${event.id}`,
+          });
+          playPermissionSound();
+          break;
+        }
+
+        case 'mcp_tool_request': {
+          const paramsPreview = event.params.length > 200
+            ? event.params.slice(0, 200) + '\n...'
+            : event.params;
+          ui().enqueuePermRequest({
+            type: 'mcp_tool',
+            id: event.id,
+            title: 'MCP Tool',
+            detail: `${event.server}/${event.tool}`,
+            body: paramsPreview,
+            approveCmd: `/approve-mcp ${event.id}`,
+            denyCmd: `/deny-mcp ${event.id}`,
+          });
+          playPermissionSound();
+          break;
+        }
 
         case 'browser_write_request':
           ui().enqueuePermRequest({

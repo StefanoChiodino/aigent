@@ -9,7 +9,7 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('agent');
 
-const BASE_SYSTEM_PROMPT = `You are an AI agent running inside a Docker container.
+const BASE_SYSTEM_PROMPT = `You are an AI agent running directly on the host machine.
 
 Be direct. Be helpful. Execute commands to verify things rather than guessing.
 
@@ -39,28 +39,32 @@ think about what's parallelizable, dispatch those parts, handle the synthesis yo
 
 ## Your Own Source Code
 
-You are a self-authoring agent. Your source code is mounted at /app/ from the host filesystem.
-Any changes you make to files in /app/ persist on the host and are visible to your user.
+You are a self-authoring agent. Your source code lives directly on the host filesystem.
+Any changes you make to source files persist immediately and are visible to your user.
 
-Architecture (sandbox-side files you can edit):
-  /app/src/server.ts    — Agent backend server (Unix socket, manages agent lifecycle)
-  /app/src/agent.ts     — Agent class, conversation loop, streaming
-  /app/src/protocol.ts  — Shared types for client-server communication
-  /app/src/auth.ts      — API key / OAT token handling
-  /app/src/provider.ts  — Multi-provider abstraction (Anthropic + OpenAI)
-  /app/src/tools.ts     — Tool definitions and execution
-  /app/src/safety.ts    — Command and path safety checks
-  /app/src/host-client.ts — Client for host daemon (clipboard, audio, screen)
-  /app/src/workspace.ts — Workspace file loading
-  /app/src/compact.ts   — Context compaction
-  /app/src/mcp.ts       — MCP client
-  /app/web/             — Web UI (HTML/CSS/TypeScript served to browser)
+Architecture (files you can edit):
+  src/server.ts    — Agent backend server (Unix socket, manages agent lifecycle)
+  src/agent.ts     — Agent class, conversation loop, streaming
+  src/protocol.ts  — Shared types for client-server communication
+  src/auth.ts      — API key / OAT token handling
+  src/provider.ts  — Multi-provider abstraction (Anthropic + OpenAI)
+  src/tools.ts     — Tool definitions and execution
+  src/safety.ts    — Command and path safety checks
+  src/workspace.ts — Workspace file loading
+  src/compact.ts   — Context compaction
+  src/mcp.ts       — MCP client
+  web/             — Web UI (HTML/CSS/TypeScript served to browser)
 
-Host-side (not directly editable from sandbox, but visible at /app/src/):
-  /app/src/gatekeeper.tsx — Host process: container lifecycle, LLM proxy, web bridge, permission engine
-  /app/src/web-bridge.ts  — WebSocket bridge between gatekeeper and web UI
+Gatekeeper (runs as your parent process, enforces security policy):
+  src/gatekeeper.tsx — LLM proxy, web bridge, three-tier command safety, permission broker
+  src/web-bridge.ts  — WebSocket bridge between gatekeeper and web UI
+  src/classifier.ts  — Haiku-based command classifier (Tier 3 safety)
+  src/audit.ts       — Structured audit log at /tmp/aigent-audit.log
 
-The gatekeeper (host process) manages the container and serves the web UI.
+Security model: All your tool calls (exec, file I/O, fetch) go through the gatekeeper's
+three-tier safety system before executing. API keys are never in your environment.
+The gatekeeper proxies all LLM calls.
+
 Your conversation is auto-saved and reloaded on server restart.
 
 When modifying your own code:
@@ -313,7 +317,18 @@ export class Agent {
           } else if (toolName === 'spawn_agent') {
             result = await this.executeSpawnAgent(tc.input as Record<string, unknown>);
           } else if (this.mcpManager?.isMCPTool(toolName)) {
-            result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
+            // Gate MCP tool calls — require user approval before calling the server.
+            // Tool names are prefixed: mcp_<server>_<tool>
+            const mcpMatch = toolName.match(/^mcp_([^_]+)_(.+)$/);
+            const mcpServer = mcpMatch?.[1] ?? 'unknown';
+            const mcpTool = mcpMatch?.[2] ?? toolName;
+            const { requestMcpToolApproval } = await import('./server.js');
+            const mcpApproval = await requestMcpToolApproval(mcpServer, mcpTool, tc.input, signal);
+            if (!mcpApproval.ok) {
+              result = `MCP tool call denied: ${mcpApproval.message}`;
+            } else {
+              result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
+            }
           } else {
             result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput, signal);
           }
@@ -454,8 +469,8 @@ export class Agent {
       context ? `\nContext: ${context}` : '',
     ].join('\n');
 
-    // Reuse the agent's provider — creating a new one would fail in the
-    // sandbox (no API keys; the SocketProvider proxies through the gatekeeper).
+    // Reuse the agent's provider — creating a new one would fail because the agent
+    // process has no API keys; the SocketProvider proxies through the gatekeeper.
     const subProvider = this.provider;
     // Exclude spawn_agent from sub-agent tools to prevent recursion
     const subToolDefs = this.toolDefs.filter((t) => t.name !== 'spawn_agent');
@@ -634,8 +649,8 @@ export class Agent {
     model: string;
     shouldSummarizeTool: (name: string) => boolean;
   } {
-    // settings.json is at /app/settings.json inside the container (repo mounted at /app)
-    const settingsPath = process.env['AIGENT_SETTINGS_PATH'] ?? '/app/settings.json';
+    // settings.json path — overridable via env for tests or multi-instance setups
+    const settingsPath = process.env['AIGENT_SETTINGS_PATH'] ?? `${process.env['AIGENT_REPO_DIR'] ?? process.cwd()}/settings.json`;
     try {
       const raw = readFileSync(settingsPath, 'utf-8');
       const settings = JSON.parse(raw) as Record<string, unknown>;

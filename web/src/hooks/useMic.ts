@@ -173,6 +173,8 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
           if (vadLoudFrames.current >= loudFramesNeeded && !vadSpeaking.current) {
             vadSpeaking.current = true;
             setVadActive(true);
+            // Barge-in: stop TTS when user starts speaking
+            ttsStopAll();
           }
         } else {
           // Keep a short tail of silence after speech so words don't get clipped

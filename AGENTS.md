@@ -10,7 +10,7 @@ Stick to this general plan for any non-trivial change:
 
 ## What This Is
 
-A self-authoring AI agent that runs in a sandboxed Docker container with a gatekeeper on the host enforcing least-privilege access. Web UI is the current interface.
+A self-authoring AI agent that runs as a child process on the host, with a gatekeeper enforcing least-privilege access via a three-tier command safety system. Web UI is the current interface.
 
 For architecture details see `docs/architecture.md`. For roadmap and current state see `docs/PLAN.md`.
 
@@ -26,7 +26,7 @@ For architecture details see `docs/architecture.md`. For roadmap and current sta
 | Web UI | `web/index.html`, `web/src/app.ts`, `src/web-bridge.ts` |
 | Memory | `workspace/config/` (AGENTS.md, SOUL.md, etc.), `workspace/memory/` |
 | Docs | `docs/PLAN.md` (roadmap), `docs/architecture.md`, `docs/tui-architecture.md` |
-| Infra | `Dockerfile`, `docker-compose.yml`, `Makefile`, `package.json` |
+| Infra | `Makefile`, `package.json` |
 
 ## Development Rules
 
@@ -38,7 +38,7 @@ For architecture details see `docs/architecture.md`. For roadmap and current sta
 6. **Run `make check` before considering code changes done.** This runs typecheck, unit tests, web component tests, and web build. All must pass. Do not skip this — do not commit if it fails.
 7. **TypeScript strict mode, ESM, Node 22+.** No CommonJS. No `any` unless absolutely necessary.
 8. **Don't over-engineer.** Simple and working beats clever and abstract.
-9. **Self-edits are real.** Changes to source persist on the host filesystem and survive container restarts.
+9. **Self-edits are real.** Changes to source persist on the host filesystem and survive server restarts.
 10. **Rebuild web UI after changing `web/src/` or `web/style.css`.** Run `rm -rf web/dist && npx vite build --outDir dist web/`. The test server and prod server both serve from `web/dist/`. Playwright e2e tests will fail on stale builds.
 11. **Commit early, commit small.** Make atomic commits after each logical change — don't batch multiple unrelated changes. Write clear commit messages that explain *what* changed and *why*. This makes `git revert` trivial when something breaks.
 12. **When fixing a bug, write a test first.** Reproduce the failure with a test, then fix the code. This prevents regressions from recurring.

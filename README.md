@@ -2,7 +2,7 @@
 
 **A self-modifying AI agent platform built for developers and AI researchers.**
 
-The agent runs in a Docker sandbox, can read and edit its own source code, and talks to you through a browser-based UI. API keys never enter the sandbox. All host access is permission-gated.
+The agent runs directly on your machine as a child process, can read and edit its own source code, and talks to you through a browser-based UI. API keys never reach the agent process. All tool use is gated through a three-tier safety system.
 
 ---
 
@@ -21,34 +21,33 @@ The agent runs in a Docker sandbox, can read and edit its own source code, and t
 ## Architecture
 
 ```
-Host
-├── Gatekeeper (gatekeeper.tsx)
-│   ├── Web UI  ←→  Browser
-│   ├── Container lifecycle
-│   ├── LLM proxy  (API keys never enter sandbox)
-│   └── Permission broker  (mounts, capabilities)
-│         ↕  NDJSON / Unix socket
-└── Docker Sandbox
-    ├── agent.ts       — conversation loop, streaming, retry
-    ├── provider.ts    — Anthropic + OpenAI abstraction
-    ├── tools.ts       — 19 tools
-    ├── tasks.ts       — background task queue
-    ├── workspace.ts   — memory system
-    └── compact.ts     — context compaction
+Host process: Gatekeeper (gatekeeper.tsx)
+├── Web UI server  ←→  Browser
+├── LLM proxy  (API keys never reach the agent process)
+├── Three-tier command safety (Tier 1: hard deny, Tier 2: static allow/deny, Tier 3: Haiku classifier)
+├── Permission broker  (file access, fetch, MCP tools)
+└── Audit log  →  /tmp/aigent-audit.log
+      ↕  NDJSON / Unix socket  (/tmp/aigent/worker.sock)
+Child process: Agent server (server.ts)
+├── agent.ts       — conversation loop, streaming, retry
+├── provider.ts    — Anthropic + OpenAI abstraction
+├── tools.ts       — 19 tools (all gated by gatekeeper)
+├── workspace.ts   — memory system
+└── compact.ts     — context compaction
 ```
 
-**Security model:** Docker with `cap_drop ALL`, `no-new-privileges`, read-only app mount. The gatekeeper is the only process with credentials. The sandbox is disposable.
+**Security model:** The gatekeeper is the only process with API credentials. Every shell command, file write, and fetch the agent attempts must pass through the gatekeeper's safety pipeline before it executes. See [Security model](#security-model) below.
 
 ---
 
 ## Quick start
 
-**Requirements:** Docker, Node.js 22+, Anthropic API key (or OAT subscription token)
+**Requirements:** Node.js 22+, Anthropic API key (or OAT subscription token)
 
 ```bash
 git clone <repo> && cd aigent
 cp .env.example .env        # add your ANTHROPIC_API_KEY
-make start                  # launches gatekeeper + sandbox + web UI
+make start                  # launches gatekeeper + agent server + web UI
 ```
 
 Open `http://localhost:3141` in your browser.
@@ -92,12 +91,12 @@ Type `/` to open the command palette. Available commands:
 | `/reset` | Clear conversation and start fresh |
 | `/compact` | Manually trigger context compaction |
 | `/refresh` | Reload workspace files into the system prompt |
-| `/restart` | Restart the sandbox server |
+| `/restart` | Restart the agent server |
 | `/reasoning on\|off` | Toggle extended thinking |
 | `/effort low\|medium\|high\|max` | Set thinking budget |
 | `/concise on\|off` | Toggle concise/voice mode |
 | `/model <name>` | Show or switch the active model |
-| `/image <path> [msg]` | Send an image from a sandbox path |
+| `/image <path> [msg]` | Send an image from a host path |
 | `/usage` | Show cumulative token and cost stats |
 | `/context` | Open the context window inspector |
 | `/tasks` | Show background task status |
@@ -106,7 +105,7 @@ Type `/` to open the command palette. Available commands:
 | `/save` | Save the current session |
 | `/sessions` | List saved sessions |
 | `/load <id>` | Load a saved session |
-| `/mount <path> [ro\|rw]` | Mount a host folder into the sandbox |
+| `/mount <path> [ro\|rw]` | Grant the agent time-limited access to a folder |
 | `/unmount <path>` | Remove a mount |
 | `/mounts` | List active mounts |
 | `/grant` / `/deny` | Approve or deny a pending mount request |
@@ -161,11 +160,11 @@ Each row is expandable — click to reveal the actual content sent to the model:
 
 ### Mounts
 
-The agent can request access to folders on your machine via the `request_mount` tool. You see a permission modal (with an audio cue and browser notification if the tab is backgrounded), approve or deny, and the agent gets a time-limited mount that auto-expires.
+The agent can request time-limited access to folders on your machine via the `request_mount` tool. You see a permission modal (with an audio cue and browser notification if the tab is backgrounded), approve or deny, and the agent gets read or read-write access that auto-expires.
 
 Active mounts are shown in the sidebar with a countdown timer. Click ✕ to revoke early.
 
-You can also grant mounts directly from the chat with `/mount <path> [ro|rw]`.
+You can also grant access directly from the chat with `/mount <path> [ro|rw]`.
 
 ### Config writes
 
@@ -202,7 +201,7 @@ Key settings:
 ```
 /workspace/
 ├── config/
-│   ├── AGENTS.md      — operating instructions (read-only in sandbox)
+│   ├── AGENTS.md      — operating instructions (read-only to agent)
 │   ├── SOUL.md        — personality and values
 │   ├── USER.md        — info about you
 │   ├── IDENTITY.md    — identity framing
@@ -239,7 +238,7 @@ Key settings:
 | `glob` | Recursive file-pattern matching (skips node_modules etc.) |
 | `tree` | Directory tree, gitignore-aware |
 | `fetch` | HTTP requests (all methods, optional HTML→text stripping) |
-| `screenshot` | Capture the sandbox virtual display (Xvfb) as PNG |
+| `screenshot` | Capture the virtual display (Xvfb) as PNG |
 | `request_screenshot` | Capture the user's live browser screen (requires screen-share active) |
 | `dispatch_task` | Spawn a background agent — returns immediately, result injected later |
 | `spawn_agent` | Spawn a sub-agent synchronously — blocks until done |
@@ -266,6 +265,8 @@ AIGENT_BASE_URL=...               # OpenAI-compatible base URL (e.g. Ollama)
 AIGENT_DEBUG=1                    # verbose logging
 AIGENT_SLIM_PROMPT=1              # omit MEMORY.md from system prompt
 AIGENT_FULL_LOGS=1                # include recent session logs in full
+AIGENT_CLASSIFIER=0               # disable Tier 3 LLM classifier (falls back to user prompts)
+AIGENT_AUTO_RELOAD=1              # auto-restart server on source changes (off by default)
 ```
 
 ### TTS / STT setup
@@ -301,20 +302,74 @@ Tools are automatically prefixed `mcp_<server>_<name>` and appear alongside buil
 
 ---
 
+## Security model
+
+The agent runs as an unprivileged child process. The **gatekeeper** is the sole security boundary.
+
+### Three-tier command safety
+
+Every `exec` call from the agent goes through three gates before it runs:
+
+| Tier | What it does | Override? |
+|------|-------------|-----------|
+| **Tier 1 — Hard deny** | Blocks permanently dangerous patterns: shell injection (`$()`, backticks), credential paths (`~/.ssh`, `~/.aws`), destructive operations (`rm -rf /`, `mkfs`), privilege escalation (`sudo`, `su`), exfiltration (`curl \| bash`) | No — hardcoded, cannot be overridden |
+| **Tier 2 — Static allow/deny** | Glob-based patterns from `settings.json`. ~40 safe defaults (git reads, ls, grep, npm test, make). You can extend with `--always` / `--always-deny` flags | Yes — user-configurable |
+| **Tier 3 — Haiku classifier** | LLM-based evaluation of ambiguous commands. Returns `allow`, `block`, or `ask`. Cached (LRU 200, 30-min TTL). Fail-safe: on API error, defers to user | Fallback to user prompt |
+
+Commands that pass Tiers 1 & 2 but aren't in the allow list go to Tier 3. If Tier 3 returns `ask`, you see a prompt: `/approve-exec <id>` or `/deny-exec <id>`. Adding `--always` promotes to the static allow list.
+
+### API key isolation
+
+`sanitizedEnv()` strips all credential variables from every spawned subprocess:
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`, and others
+- Pattern-based: anything matching `/secret|token|password|credential|api[_-]?key/i`
+
+The agent process never sees your credentials. All LLM calls are proxied through the gatekeeper.
+
+### Fetch safety (SSRF protection)
+
+`fetch` calls are validated against:
+- Private IP ranges (10.x, 172.16-31.x, 192.168.x, 127.x, 169.254.x)
+- IPv6 loopback, unique local, link-local
+- Cloud metadata endpoints (169.254.169.254, metadata.google.internal)
+- Non-HTTP/HTTPS protocols
+
+A DNS lookup follows the static check to catch DNS rebinding attacks. Responses are capped at 1 MB by default; the agent must request user approval to fetch more (hard ceiling: 10 MB).
+
+### Audit log
+
+All security decisions are appended as JSON-lines to `/tmp/aigent-audit.log`:
+
+```json
+{"ts":1708952400123,"type":"exec_tier1_block","detail":"rm -rf /","reason":"rm on root filesystem"}
+{"ts":1708952410456,"type":"exec_tier2_allow","detail":"git status"}
+{"ts":1708952420789,"type":"exec_user_approve","detail":"npm install","approved":true}
+```
+
+Event types cover the full pipeline: exec (tier1/2/3/user), file (read/write/block), fetch (ssrf/dns/size/allow), and MCP tool calls.
+
+### Path confinement
+
+File reads and writes are checked for path traversal (`../../etc/hosts`). Sensitive paths (`~/.ssh`, `/proc`, `/sys`, credential files) are hard-blocked or require user approval.
+
+---
+
 ## Self-modification
 
-The agent's source is mounted at `/app/src/` inside the container. Edits persist on the host filesystem. The file watcher ([worker.ts](src/worker.ts)) polls `src/` every second and, after a 2s debounce, runs `tsc --noEmit` before restarting the server.
+The agent's source files live directly on your filesystem. Edits persist immediately. The file watcher ([worker.ts](src/worker.ts)) polls `src/` every second and, after a 2s debounce, runs `tsc --noEmit` before restarting the server.
 
 ```
 You:   Add a tool that runs Python snippets and returns stdout
 Agent: [reads tools.ts, implements PythonTool, adds to registry, runs tsc, commits]
 ```
 
-### Safety model
+### Self-mod safety
 
 **Typecheck gate** — the server never restarts on bad code. If `tsc --noEmit` fails, the running server is left untouched and the error is logged to `/tmp/aigent-server.log`. The agent sees the failure and can fix it before the change takes effect.
 
-**Rollback** — because the source is a normal git repo on your host, you can always revert agent edits manually:
+**Three-tier gate** — `exec` calls the agent makes during self-modification (e.g. `git commit`, `npx tsc`) go through the same command safety pipeline as any other command.
+
+**Rollback** — the source is a normal git repo, so you can always revert agent edits:
 
 ```bash
 git diff src/               # see what the agent changed
@@ -324,7 +379,7 @@ git checkout src/           # revert all of src/
 
 To trigger a clean restart after reverting: use the `/restart` slash command in the chat.
 
-There is currently no automated rollback or git-stash integration. The typecheck gate plus manual `git checkout` is the intended safety net for now. A more granular self-mod policy (allowlist of files the agent may edit autonomously vs. files requiring human approval) is tracked in TODO.md.
+**Policy:** The agent may autonomously edit files in `src/` and `web/src/` as part of self-improvement. Changes to `workspace/config/` (SOUL.md, AGENTS.md, USER.md, IDENTITY.md, TOOLS.md) go through the `request_config_write` tool — you see a diff and approve or reject before anything is written.
 
 ---
 

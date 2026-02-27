@@ -360,6 +360,152 @@ function resolveFetchRequest(id: string, response: { ok: boolean; alwaysAllow: b
   }
 }
 
+// --- File access approval handling ---
+
+const pendingFileAccessRequests = new Map<string, {
+  resolve: (response: { ok: boolean; message: string }) => void;
+}>();
+let fileAccessCounter = 0;
+
+/**
+ * Request user approval before reading/writing a sensitive or out-of-project path.
+ * Called by the read_file/write_file/edit_file tools for paths outside the project root
+ * or matching sensitive path patterns.
+ */
+export function requestFileApproval(path: string, operation: 'read' | 'write', signal?: AbortSignal): Promise<{ ok: boolean; message: string }> {
+  const id = `file_${++fileAccessCounter}`;
+
+  if (signal?.aborted) {
+    return Promise.resolve({ ok: false, message: 'Aborted by user' });
+  }
+
+  return new Promise((resolve) => {
+    const finish = (response: { ok: boolean; message: string }) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      pendingFileAccessRequests.delete(id);
+      resolve(response);
+    };
+
+    const onAbort = () => finish({ ok: false, message: 'Aborted by user' });
+
+    const timer = setTimeout(() => {
+      finish({ ok: false, message: 'File access approval request timed out (60s)' });
+    }, 60_000);
+
+    pendingFileAccessRequests.set(id, { resolve: finish });
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    broadcast({ type: 'file_access_request', id, path, operation, reason: `Agent wants to ${operation} this path` });
+  });
+}
+
+function resolveFileAccessRequest(id: string, response: { ok: boolean; message: string }): void {
+  const pending = pendingFileAccessRequests.get(id);
+  if (pending) {
+    pendingFileAccessRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
+// --- Fetch size approval handling ---
+
+const pendingFetchSizeRequests = new Map<string, {
+  resolve: (response: { ok: boolean; approvedBytes: number; message: string }) => void;
+}>();
+let fetchSizeCounter = 0;
+
+export const FETCH_DEFAULT_BYTES = 1 * 1024 * 1024;   // 1 MB
+export const FETCH_MAX_BYTES_HARD = 10 * 1024 * 1024; // 10 MB hard ceiling
+
+/**
+ * Request user approval for a fetch that exceeds the default 1 MB size limit.
+ * Returns the approved byte limit (may be clamped to FETCH_MAX_BYTES_HARD).
+ */
+export function requestFetchSizeApproval(url: string, requestedBytes: number, signal?: AbortSignal): Promise<{ ok: boolean; approvedBytes: number; message: string }> {
+  const id = `fetchsz_${++fetchSizeCounter}`;
+
+  if (signal?.aborted) {
+    return Promise.resolve({ ok: false, approvedBytes: FETCH_DEFAULT_BYTES, message: 'Aborted by user' });
+  }
+
+  return new Promise((resolve) => {
+    const finish = (response: { ok: boolean; approvedBytes: number; message: string }) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      pendingFetchSizeRequests.delete(id);
+      resolve(response);
+    };
+
+    const onAbort = () => finish({ ok: false, approvedBytes: FETCH_DEFAULT_BYTES, message: 'Aborted by user' });
+
+    const timer = setTimeout(() => {
+      finish({ ok: false, approvedBytes: FETCH_DEFAULT_BYTES, message: 'Fetch size approval request timed out (60s)' });
+    }, 60_000);
+
+    pendingFetchSizeRequests.set(id, { resolve: finish });
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    broadcast({ type: 'fetch_size_request', id, url, requestedBytes, defaultBytes: FETCH_DEFAULT_BYTES });
+  });
+}
+
+function resolveFetchSizeRequest(id: string, response: { ok: boolean; approvedBytes: number; message: string }): void {
+  const pending = pendingFetchSizeRequests.get(id);
+  if (pending) {
+    pendingFetchSizeRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
+// --- MCP tool approval handling ---
+
+const pendingMcpToolRequests = new Map<string, {
+  resolve: (response: { ok: boolean; message: string }) => void;
+}>();
+let mcpToolCounter = 0;
+
+/**
+ * Request user approval before calling an MCP tool.
+ * Called from agent.ts before mcpManager.callTool() for any non-auto-allowed tool.
+ */
+export function requestMcpToolApproval(server: string, tool: string, params: unknown, signal?: AbortSignal): Promise<{ ok: boolean; message: string }> {
+  const id = `mcp_${++mcpToolCounter}`;
+
+  if (signal?.aborted) {
+    return Promise.resolve({ ok: false, message: 'Aborted by user' });
+  }
+
+  return new Promise((resolve) => {
+    const finish = (response: { ok: boolean; message: string }) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      pendingMcpToolRequests.delete(id);
+      resolve(response);
+    };
+
+    const onAbort = () => finish({ ok: false, message: 'Aborted by user' });
+
+    const timer = setTimeout(() => {
+      finish({ ok: false, message: 'MCP tool approval request timed out (60s)' });
+    }, 60_000);
+
+    pendingMcpToolRequests.set(id, { resolve: finish });
+    signal?.addEventListener('abort', onAbort, { once: true });
+
+    const paramsStr = JSON.stringify(params ?? {}, null, 2).slice(0, 500);
+    broadcast({ type: 'mcp_tool_request', id, server, tool, params: paramsStr });
+  });
+}
+
+function resolveMcpToolRequest(id: string, response: { ok: boolean; message: string }): void {
+  const pending = pendingMcpToolRequests.get(id);
+  if (pending) {
+    pendingMcpToolRequests.delete(id);
+    pending.resolve(response);
+  }
+}
+
 // --- Browser screen share + screenshot request handling ---
 
 const pendingScreenShareRequests = new Map<string, {
@@ -1576,6 +1722,15 @@ function handleClient(socket: Socket): void {
           case 'fetch_response':
             resolveFetchRequest(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
             break;
+          case 'file_access_response':
+            resolveFileAccessRequest(cmd.id, { ok: cmd.ok, message: cmd.message });
+            break;
+          case 'fetch_size_response':
+            resolveFetchSizeRequest(cmd.id, { ok: cmd.ok, approvedBytes: cmd.approvedBytes, message: cmd.message });
+            break;
+          case 'mcp_tool_response':
+            resolveMcpToolRequest(cmd.id, { ok: cmd.ok, message: cmd.message });
+            break;
           case 'screenshot_response':
             resolveScreenshotRequest(cmd.id, {
               ok: cmd.ok,
@@ -1804,7 +1959,7 @@ function buildExtraSystemPrompt(): string {
   let extra = buildHostSystemPrompt();
   extra += buildBrowserExtSystemPrompt();
   if (currentConcise) {
-    extra += '\n\n## Response Style (Voice Mode)\n\nStart every response with a spoken summary on its own line, before anything else:\n\n<speak>One or two sentence plain English summary for text-to-speech. No markdown, no lists.</speak>\n\nThen give your full response with markdown as normal. The <speak> block is read aloud immediately while the rest loads. Keep it brief and conversational.';
+    extra += '\n\n## Response Style (Concise / Voice Mode)\n\nYou MUST be concise. Give the shortest useful answer — a few sentences, not paragraphs. Skip preamble, caveats, and filler. Use bullet points only when listing items. Never repeat what the user already knows.\n\nStart every response with a spoken summary on its own line, before anything else:\n\n<speak>One or two sentence plain English summary for text-to-speech. No markdown, no lists.</speak>\n\nThen give your concise response below. The <speak> block is read aloud immediately while the rest loads.';
   }
   return extra;
 }

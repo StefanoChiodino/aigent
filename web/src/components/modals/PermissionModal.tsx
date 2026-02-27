@@ -12,6 +12,9 @@ const TYPE_ICONS: Record<string, string> = {
   fetch: '🌐',
   config_write: '✏️',
   browser_write: '🖱️',
+  file_access: '📄',
+  fetch_size: '📦',
+  mcp_tool: '🔌',
 };
 
 export function PermissionModal() {

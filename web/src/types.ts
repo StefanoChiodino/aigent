@@ -124,9 +124,12 @@ export type ServerEvent =
   | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'exec_request'; id: string; command: string; segments?: CommandSegment[] }
   | { type: 'fetch_request'; id: string; url: string; method?: string }
+  | { type: 'file_access_request'; id: string; path: string; operation: 'read' | 'write'; reason: string }
+  | { type: 'fetch_size_request'; id: string; url: string; requestedBytes: number; defaultBytes: number }
+  | { type: 'mcp_tool_request'; id: string; server: string; tool: string; params: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
-  | { type: 'host_state'; mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
+  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; autonomousCmd?: string }
@@ -147,7 +150,7 @@ export interface DiffFile {
 }
 
 export interface PermRequest {
-  type: 'mount' | 'config_write' | 'patch' | 'exec' | 'fetch' | 'browser_write';
+  type: 'mount' | 'config_write' | 'patch' | 'exec' | 'fetch' | 'file_access' | 'fetch_size' | 'mcp_tool' | 'browser_write';
   id: string;
   title: string;
   detail: string;
@@ -184,7 +187,7 @@ export interface AtItem {
 
 export interface MountInfo {
   hostPath: string;
-  containerPath: string;
+  mountPath: string;
   mode: 'ro' | 'rw';
   expiresAt?: number;
   durationMinutes?: number;

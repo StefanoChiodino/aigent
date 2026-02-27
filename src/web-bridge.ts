@@ -528,11 +528,17 @@ export async function startWebServer(
           send({ type: 'browser_write_request', id, action, stepSummary, ...(tabUrl ? { tabUrl } : {}), autonomousCmd: `/grant-browser-autonomous` });
         }
       },
+      file_access_request: (id: string, path: string, operation: 'read' | 'write', reason: string) =>
+        send({ type: 'file_access_request', id, path, operation, reason }),
+      fetch_size_request: (id: string, url: string, requestedBytes: number, defaultBytes: number) =>
+        send({ type: 'fetch_size_request', id, url, requestedBytes, defaultBytes }),
+      mcp_tool_request: (id: string, server: string, tool: string, params: string) =>
+        send({ type: 'mcp_tool_request', id, server, tool, params }),
       screenshot_request: (id: string) =>
         send({ type: 'screenshot_request', id }),
       screen_share_request: (id: string) =>
         send({ type: 'screen_share_request', id }),
-      host_state: (mounts: { hostPath: string; containerPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, string>) =>
+      host_state: (mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, string>) =>
         send({ type: 'host_state', mounts, ...(capabilities ? { capabilities } : {}) }),
       context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) =>
         send({ type: 'context_breakdown', breakdown }),
@@ -592,6 +598,21 @@ export async function startWebServer(
             client.send(cmd);
             break;
           case 'fetch_response':
+            client.send(cmd);
+            break;
+          case 'file_access_response':
+            client.send(cmd);
+            break;
+          case 'fetch_size_response':
+            client.send(cmd);
+            break;
+          case 'mcp_tool_response':
+            client.send(cmd);
+            break;
+          case 'exec_response':
+            client.send(cmd);
+            break;
+          case 'browser_write_response':
             client.send(cmd);
             break;
           case 'context_breakdown_request':

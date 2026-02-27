@@ -4,6 +4,8 @@
 
 coincise mode seems to start often saying literally " slash speech"
 
+~~Move the X button to clear the text input as a permanent feature that doesn't go away, right next to the text box. It should work in all context, with or without the always on recording.~~ **Fixed** — X button is now always inside the text box, visible whenever there's text, clears mic transcript too if recording.
+
 ~~If there is nothing in the text box and I start the microphone and then send the the message which is empty, it will disable the microphone but keep the always on turn on.~~ **Fixed** — empty submit now restarts mic when sticky mode is on.
 
 If I queue a message and then I cancel the agent's running, my message looks queued, but it doesn't uh get picked up at all. I'm finding a lot of these type of bugs and to be honest it is getting pretty annoying to the point where I wanted to have a look at the whole chain of events where it should be a straightforward type of cue that allows to send these things and then can cancel them, etcetera. This seems very, very brittle.

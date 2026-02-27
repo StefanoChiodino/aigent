@@ -1,7 +1,8 @@
 import { execSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { sanitizedEnv, validateFetchUrl, checkCommandSafety, validateReadonlyCommand } from './safety.js';
+import { sanitizedEnv, validateFetchUrl, validateFetchUrlDns, checkCommandSafety, validateReadonlyCommand, checkSensitivePath, checkPathConfinement } from './safety.js';
+import { auditLog } from './audit.js';
 import type { ToolContentBlock, ImageMediaType } from './provider.js';
 import { createLogger } from './logger.js';
 
@@ -945,8 +946,27 @@ export async function executeTool(
 
     case 'read_file': {
       const { path, offset, limit } = input as ReadFileInput;
+      const absPath = resolve(path);
+
+      // Tier 1: hard-block access to credentials and system interfaces
+      const sensitivityLevel = checkSensitivePath(absPath);
+      if (sensitivityLevel === 'deny') {
+        auditLog({ type: 'file_sensitive_block', detail: absPath, reason: 'hard-denied sensitive path' });
+        return `Access denied: ${absPath} is a protected path (credentials or system interface)`;
+      }
+
+      // Tier 2: prompt for home dir / system dirs outside project
+      if (sensitivityLevel === 'prompt') {
+        const { requestFileApproval } = await import('./server.js');
+        const approval = await requestFileApproval(absPath, 'read', signal);
+        auditLog({ type: approval.ok ? 'file_user_approve' : 'file_user_deny', detail: absPath, approved: approval.ok });
+        if (!approval.ok) return `File access denied: ${approval.message}`;
+      } else {
+        auditLog({ type: 'file_read', detail: absPath });
+      }
+
       try {
-        const content = readFileSync(path, 'utf-8');
+        const content = readFileSync(absPath, 'utf-8');
         if (!offset && !limit) return content;
 
         const lines = content.split('\n');
@@ -964,10 +984,34 @@ export async function executeTool(
 
     case 'write_file': {
       const { path, content } = input as WriteFileInput;
+      const absPath = resolve(path);
+      const projectRoot = process.env['AIGENT_WORKSPACE'] ?? process.cwd();
+
+      // Tier 1: hard-block writes to credentials and system interfaces
+      const sensitivityLevel = checkSensitivePath(absPath);
+      if (sensitivityLevel === 'deny') {
+        auditLog({ type: 'file_sensitive_block', detail: absPath, reason: 'hard-denied sensitive path (write)' });
+        return `Access denied: ${absPath} is a protected path`;
+      }
+
+      // Path confinement: block writes outside project root (prompt user)
+      const confinementErr = checkPathConfinement(absPath, projectRoot);
+      if (confinementErr || sensitivityLevel === 'prompt') {
+        if (confinementErr) {
+          auditLog({ type: 'file_traversal_block', detail: absPath, reason: confinementErr });
+        }
+        const { requestFileApproval } = await import('./server.js');
+        const approval = await requestFileApproval(absPath, 'write', signal);
+        auditLog({ type: approval.ok ? 'file_user_approve' : 'file_user_deny', detail: absPath, approved: approval.ok });
+        if (!approval.ok) return `File write denied: ${approval.message}`;
+      } else {
+        auditLog({ type: 'file_write', detail: absPath });
+      }
+
       try {
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, content, 'utf-8');
-        return `Wrote ${content.length} bytes to ${path}`;
+        mkdirSync(dirname(absPath), { recursive: true });
+        writeFileSync(absPath, content, 'utf-8');
+        return `Wrote ${content.length} bytes to ${absPath}`;
       } catch (err: unknown) {
         const fsErr = err as { message?: string };
         return `Error writing file: ${fsErr.message ?? 'unknown error'}`;
@@ -976,20 +1020,44 @@ export async function executeTool(
 
     case 'edit_file': {
       const { path, old_text, new_text } = input as EditFileInput;
+      const absPath = resolve(path);
+      const projectRoot = process.env['AIGENT_WORKSPACE'] ?? process.cwd();
+
+      // Tier 1: hard-block edits to credentials and system interfaces
+      const sensitivityLevel = checkSensitivePath(absPath);
+      if (sensitivityLevel === 'deny') {
+        auditLog({ type: 'file_sensitive_block', detail: absPath, reason: 'hard-denied sensitive path (edit)' });
+        return `Access denied: ${absPath} is a protected path`;
+      }
+
+      // Path confinement: block edits outside project root (prompt user)
+      const confinementErr = checkPathConfinement(absPath, projectRoot);
+      if (confinementErr || sensitivityLevel === 'prompt') {
+        if (confinementErr) {
+          auditLog({ type: 'file_traversal_block', detail: absPath, reason: confinementErr });
+        }
+        const { requestFileApproval } = await import('./server.js');
+        const approval = await requestFileApproval(absPath, 'write', signal);
+        auditLog({ type: approval.ok ? 'file_user_approve' : 'file_user_deny', detail: absPath, approved: approval.ok });
+        if (!approval.ok) return `File edit denied: ${approval.message}`;
+      } else {
+        auditLog({ type: 'file_write', detail: absPath });
+      }
+
       try {
-        const content = readFileSync(path, 'utf-8');
+        const content = readFileSync(absPath, 'utf-8');
         const index = content.indexOf(old_text);
         if (index === -1) {
-          return `Error: old_text not found in ${path}. Make sure it matches exactly (including whitespace).`;
+          return `Error: old_text not found in ${absPath}. Make sure it matches exactly (including whitespace).`;
         }
         // Check for multiple matches
         const secondIndex = content.indexOf(old_text, index + 1);
         if (secondIndex !== -1) {
-          return `Error: old_text appears multiple times in ${path}. Use a more specific match.`;
+          return `Error: old_text appears multiple times in ${absPath}. Use a more specific match.`;
         }
         const newContent = content.slice(0, index) + new_text + content.slice(index + old_text.length);
-        writeFileSync(path, newContent, 'utf-8');
-        return `Edited ${path}`;
+        writeFileSync(absPath, newContent, 'utf-8');
+        return `Edited ${absPath}`;
       } catch (err: unknown) {
         const fsErr = err as { message?: string };
         return `Error editing file: ${fsErr.message ?? 'unknown error'}`;
@@ -1040,16 +1108,47 @@ export async function executeTool(
     }
 
     case 'fetch': {
-      const { url, method = 'GET', headers: reqHeaders, body: reqBody, text_only = false, max_bytes = 100_000 } = input as FetchInput;
+      const { url, method = 'GET', headers: reqHeaders, body: reqBody, text_only = false, max_bytes: rawMaxBytes } = input as FetchInput;
+
+      // Static SSRF check (IP literals, blocked hostnames, protocol)
       const ssrfErr = validateFetchUrl(url);
-      if (ssrfErr) return ssrfErr;
+      if (ssrfErr) {
+        auditLog({ type: 'fetch_ssrf_block', detail: url, reason: ssrfErr });
+        return ssrfErr;
+      }
+
+      // DNS rebinding protection — resolve hostname and check resolved IPs
+      const dnsErr = await validateFetchUrlDns(url);
+      if (dnsErr) {
+        auditLog({ type: 'fetch_dns_block', detail: url, reason: dnsErr });
+        return dnsErr;
+      }
 
       // Permission check — gatekeeper decides allow/prompt/deny based on fetch_permissions settings
-      const { requestFetchApproval } = await import('./server.js');
+      const { requestFetchApproval, requestFetchSizeApproval, FETCH_DEFAULT_BYTES, FETCH_MAX_BYTES_HARD } = await import('./server.js');
       const fetchApproval = await requestFetchApproval(url, method, signal);
       if (!fetchApproval.ok) {
+        auditLog({ type: 'fetch_user_deny', detail: url });
         return `Fetch not allowed: ${fetchApproval.message}`;
       }
+
+      // Size limit: default 1 MB. Agent may request more — prompt user if over default.
+      let max_bytes: number;
+      if (rawMaxBytes === undefined || rawMaxBytes <= FETCH_DEFAULT_BYTES) {
+        max_bytes = rawMaxBytes ?? FETCH_DEFAULT_BYTES;
+      } else {
+        // Agent requested more than default — clamp to hard ceiling then ask user
+        const clamped = Math.min(rawMaxBytes, FETCH_MAX_BYTES_HARD);
+        auditLog({ type: 'fetch_size_prompt', detail: url, reason: `Agent requested ${rawMaxBytes} bytes` });
+        const sizeApproval = await requestFetchSizeApproval(url, clamped, signal);
+        if (!sizeApproval.ok) {
+          auditLog({ type: 'fetch_user_deny', detail: url, reason: 'size approval denied' });
+          return `Fetch size denied: ${sizeApproval.message}`;
+        }
+        max_bytes = sizeApproval.approvedBytes;
+      }
+
+      auditLog({ type: 'fetch_allow', detail: url });
 
       try {
         const args: string[] = ['-sS', '-L', '--max-time', '30', '--max-filesize', String(max_bytes)];

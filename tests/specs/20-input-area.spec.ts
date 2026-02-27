@@ -50,9 +50,26 @@ test.describe('@fast Input area', () => {
     await expect(page.locator('#mic-sticky')).toBeVisible();
   });
 
-  test('mic-clear button is hidden by default', async () => {
+  test('input-clear button is not present when input is empty', async () => {
     const page = getPage();
-    await expect(page.locator('#mic-clear')).toHaveClass(/\bdisabled\b/);
+    // Clear button only renders when inputValue is non-empty
+    await page.locator('#input').fill('');
+    await page.locator('#input').dispatchEvent('input');
+    await expect(page.locator('#input-clear')).toHaveCount(0);
+  });
+
+  test('input-clear button appears when text is typed', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('hello');
+    await expect(page.locator('#input-clear')).toBeVisible();
+  });
+
+  test('input-clear button clears the textarea', async () => {
+    const page = getPage();
+    await page.locator('#input').fill('some text');
+    await page.locator('#input-clear').click();
+    await expect(page.locator('#input')).toHaveValue('');
+    await expect(page.locator('#input-clear')).toHaveCount(0);
   });
 
   // ── Send / Cancel toggling ─────────────────────────────────────────────────────

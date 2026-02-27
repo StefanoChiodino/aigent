@@ -160,6 +160,44 @@ test.describe('@fast Patch Permission Modal', () => {
     await page.locator('#perm-deny-btn').click();
   });
 
+  test('double-click approve sends command exactly once', async () => {
+    const page = getPage();
+
+    // Spy on WebSocket sends
+    await page.evaluate(() => {
+      (window as Record<string, unknown>).__wsSent = [] as string[];
+      const orig = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+        if (typeof data === 'string') {
+          ((window as Record<string, unknown>).__wsSent as string[]).push(data);
+        }
+        return orig.call(this, data);
+      };
+    });
+
+    await injectEvent({ type: 'patch_request', id: 'dbl1', diff: SINGLE_FILE_DIFF, reason: 'Double-click test' });
+    await expectVisible(page.locator('#perm-overlay'));
+
+    // Fire two synchronous clicks in the same JS task to simulate the double-fire race
+    // (e.g. button click + Enter keydown both firing before React re-renders)
+    await page.evaluate(() => {
+      const btn = document.getElementById('perm-approve-btn');
+      btn?.click();
+      btn?.click();
+    });
+
+    await expectHidden(page.locator('#perm-overlay'));
+
+    const sent = await page.evaluate(() => (window as Record<string, unknown>).__wsSent as string[]);
+    const approveCmds = sent.filter(s => {
+      try { const p = JSON.parse(s); return p.type === 'command' && typeof p.cmd === 'string' && p.cmd.includes('dbl1'); }
+      catch { return false; }
+    });
+    expect(approveCmds).toHaveLength(1);
+
+    await page.evaluate(() => { delete (window as Record<string, unknown>).__wsSent; });
+  });
+
   test('patch and exec requests queue correctly', async () => {
     const page = getPage();
     await injectEvent({ type: 'patch_request', id: 'pq1', diff: SINGLE_FILE_DIFF, reason: 'queue' });

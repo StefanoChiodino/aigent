@@ -22,7 +22,7 @@ interface CacheEntry {
 }
 
 const CACHE_MAX = 200;
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const MODEL = 'claude-haiku-4-5-20251001';
 
 const SYSTEM_PROMPT = `You are a security classifier for an AI coding agent. Your job is to evaluate shell commands the agent wants to run.
