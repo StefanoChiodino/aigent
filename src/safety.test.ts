@@ -19,6 +19,7 @@ import {
   DEFAULT_FILE_PERMISSIONS,
   parseCommandPipeline,
   checkTier1Deny,
+  shouldForceClassify,
 } from './safety.js';
 
 // ---------------------------------------------------------------------------
@@ -264,6 +265,7 @@ describe('checkExecPermission (with DEFAULT_EXEC_PERMISSIONS)', () => {
   it('deny overrides alwaysAllow in custom permissions', () => {
     const custom = {
       alwaysAllow: ['ls *', 'ls'],
+      alwaysClassify: [],
       deny: ['ls *'],
     };
     // "ls" exact match in deny? No — deny is "ls *" (wildcard). "ls" alone matches alwaysAllow exact.
@@ -275,6 +277,7 @@ describe('checkExecPermission (with DEFAULT_EXEC_PERMISSIONS)', () => {
   it('deny takes precedence over alwaysAllow for overlapping globs', () => {
     const custom = {
       alwaysAllow: ['git *'],
+      alwaysClassify: [],
       deny: ['git push *', 'git push'],
     };
     assert.equal(checkExecPermission('git status', custom), 'allow');
@@ -284,25 +287,25 @@ describe('checkExecPermission (with DEFAULT_EXEC_PERMISSIONS)', () => {
 
 describe('checkExecPermission — wildcard edge cases', () => {
   it('"*" in alwaysAllow matches any command', () => {
-    const perms = { alwaysAllow: ['*'], deny: [] };
+    const perms = { alwaysAllow: ['*'], alwaysClassify: [], deny: [] };
     assert.equal(checkExecPermission('anything at all', perms), 'allow');
     assert.equal(checkExecPermission('node script.js', perms), 'allow');
     assert.equal(checkExecPermission('rm -rf /', perms), 'allow');
   });
 
   it('"ls" does NOT match "ls2" (no prefix-of-word matching)', () => {
-    const perms = { alwaysAllow: ['ls'], deny: [] };
+    const perms = { alwaysAllow: ['ls'], alwaysClassify: [], deny: [] };
     assert.equal(checkExecPermission('ls2', perms), 'prompt');
   });
 
   it('"ls" matches "ls" and "ls -la" (prefix + space)', () => {
-    const perms = { alwaysAllow: ['ls'], deny: [] };
+    const perms = { alwaysAllow: ['ls'], alwaysClassify: [], deny: [] };
     assert.equal(checkExecPermission('ls', perms), 'allow');
     assert.equal(checkExecPermission('ls -la', perms), 'allow');
   });
 
   it('"ls *" matches "ls foo" but NOT bare "ls"', () => {
-    const perms = { alwaysAllow: ['ls *'], deny: [] };
+    const perms = { alwaysAllow: ['ls *'], alwaysClassify: [], deny: [] };
     assert.equal(checkExecPermission('ls foo', perms), 'allow');
     assert.equal(checkExecPermission('ls', perms), 'prompt');
   });
@@ -311,6 +314,7 @@ describe('checkExecPermission — wildcard edge cases', () => {
     // Simulates what gatekeeper now does: merge defaults with user additions
     const merged = {
       alwaysAllow: [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow, 'custom-tool', 'custom-tool *'],
+      alwaysClassify: [...DEFAULT_EXEC_PERMISSIONS.alwaysClassify],
       deny: [...DEFAULT_EXEC_PERMISSIONS.deny],
     };
     // Default commands still allowed
@@ -319,6 +323,51 @@ describe('checkExecPermission — wildcard edge cases', () => {
     // User-added command also allowed
     assert.equal(checkExecPermission('custom-tool --flag', merged), 'allow');
     assert.equal(checkExecPermission('custom-tool', merged), 'allow');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shouldForceClassify
+// ---------------------------------------------------------------------------
+
+describe('shouldForceClassify', () => {
+  const defaults = DEFAULT_EXEC_PERMISSIONS.alwaysClassify;
+
+  it('matches curl commands against default patterns', () => {
+    assert.equal(shouldForceClassify('curl https://example.com', defaults), true);
+    assert.equal(shouldForceClassify('curl -s https://api.github.com/repos | jq .', defaults), true);
+  });
+
+  it('matches python commands against default patterns', () => {
+    assert.equal(shouldForceClassify('python script.py', defaults), true);
+    assert.equal(shouldForceClassify('python3 -m pytest', defaults), true);
+  });
+
+  it('matches node -e against default patterns', () => {
+    assert.equal(shouldForceClassify('node -e "console.log(1)"', defaults), true);
+    assert.equal(shouldForceClassify('node --eval "process.exit(1)"', defaults), true);
+  });
+
+  it('does not match safe commands', () => {
+    assert.equal(shouldForceClassify('ls -la', defaults), false);
+    assert.equal(shouldForceClassify('git status', defaults), false);
+    assert.equal(shouldForceClassify('cat README.md', defaults), false);
+  });
+
+  it('does not match node without -e flag', () => {
+    assert.equal(shouldForceClassify('node --version', defaults), false);
+    assert.equal(shouldForceClassify('node -v', defaults), false);
+  });
+
+  it('returns false for empty patterns list', () => {
+    assert.equal(shouldForceClassify('curl https://example.com', []), false);
+  });
+
+  it('works with custom patterns', () => {
+    const custom = ['wget *', 'pip *'];
+    assert.equal(shouldForceClassify('wget https://example.com/file.tar.gz', custom), true);
+    assert.equal(shouldForceClassify('pip install requests', custom), true);
+    assert.equal(shouldForceClassify('curl https://example.com', custom), false);
   });
 });
 

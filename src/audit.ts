@@ -26,6 +26,7 @@ export type AuditEventType =
   | 'exec_tier1_block'
   | 'exec_tier2_allow'
   | 'exec_tier2_deny'
+  | 'exec_tier2_force_classify'
   | 'exec_tier3_allow'
   | 'exec_tier3_block'
   | 'exec_tier3_ask'
@@ -34,6 +35,7 @@ export type AuditEventType =
   // File access
   | 'file_read'
   | 'file_write'
+  | 'file_write_block'
   | 'file_sensitive_block'
   | 'file_sensitive_prompt'
   | 'file_user_approve'

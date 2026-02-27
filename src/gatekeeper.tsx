@@ -19,12 +19,18 @@ import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
-import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, parseCommandPipeline } from './safety.js';
+import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, parseCommandPipeline, shouldForceClassify } from './safety.js';
 import { initClassifier, classifyCommand, isClassifierAvailable } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
-import { buildDisplayDiff } from './diff.js';
 import { auditLog } from './audit.js';
 import { readSettingsSync, writeSettingsSync, getSettingsPath } from './settings-file.js';
+import {
+  handleConfigWriteRequest as _handleConfigWriteRequest,
+  handleConfigApproveReject as _handleConfigApproveReject,
+  handleEditFileRequest as _handleEditFileRequest,
+  handleEditFileApproveReject as _handleEditFileApproveReject,
+  type ConfigWriteContext,
+} from './gk-config-writes.js';
 
 const log = createLogger('gatekeeper');
 
@@ -470,180 +476,18 @@ function injectSystemMessage(content: string): void {
   }
 }
 
-// --- Config write requests ---
+// --- Config write & edit-file requests (delegated to gk-config-writes.ts) ---
 
-const VALID_CONFIG_FILES = new Set(['AGENTS.md', 'SOUL.md', 'USER.md', 'TOOLS.md', 'IDENTITY.md']);
-const pendingConfigWriteRequests = new Map<string, { file: string; content: string }>();
+function getConfigWriteContext(): ConfigWriteContext {
+  return { client, log, injectSystemMessage, IS_TEST_MODE, REPO_DIR, resolveHostPath };
+}
 
 function handleConfigWriteRequest(id: string, file: string, content: string, reason: string): void {
-  if (!VALID_CONFIG_FILES.has(file)) {
-    client!.send({ type: 'config_write_response', id, ok: false, message: `${file} is not a config file` });
-    return;
-  }
-
-  // Read current content for diff
-  const configPath = join(REPO_DIR, 'workspace', 'config', file);
-  const fallbackPath = join(REPO_DIR, 'workspace', file);
-  let current = '';
-  try {
-    current = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : 
-              existsSync(fallbackPath) ? readFileSync(fallbackPath, 'utf-8') : '';
-  } catch {}
-
-  // Generate a simple diff summary
-  const currentLines = current.split('\n');
-  const newLines = content.split('\n');
-  const added = newLines.filter((l) => !currentLines.includes(l)).length;
-  const removed = currentLines.filter((l) => !newLines.includes(l)).length;
-
-  pendingConfigWriteRequests.set(id, { file, content });
-
-  injectSystemMessage(
-    `Agent wants to edit config/${file}:\n` +
-    `  Reason: "${reason}"\n` +
-    `  Changes: +${added} lines, -${removed} lines\n` +
-    `  New size: ${content.length} bytes\n\n` +
-    `Reply: /approve or /reject\n` +
-    `Preview: /preview`
-  );
+  _handleConfigWriteRequest(getConfigWriteContext(), id, file, content, reason);
 }
 
-async function handleConfigApproveReject(input: string): Promise<boolean> {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase();
-
-  if (cmd === '/approve') {
-    let id = parts[1];
-    if (!id && pendingConfigWriteRequests.size === 1) {
-      id = pendingConfigWriteRequests.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingConfigWriteRequests.size === 0
-        ? 'No pending config writes.'
-        : `Multiple pending — specify ID: ${[...pendingConfigWriteRequests.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingConfigWriteRequests.get(id);
-    if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending config write: ${id}`);
-      return true;
-    }
-
-    pendingConfigWriteRequests.delete(id);
-
-    // Write the file on the host side
-    const configDir = join(REPO_DIR, 'workspace', 'config');
-    mkdirSync(configDir, { recursive: true });
-    const filePath = join(configDir, pending.file);
-    try {
-      writeFileSync(filePath, pending.content);
-      // Also write to workspace root for backward compat
-      writeFileSync(join(REPO_DIR, 'workspace', pending.file), pending.content);
-
-      log.info('Config write approved', { id, file: pending.file });
-      client!.send({ type: 'config_write_response', id, ok: true, message: `${pending.file} updated` });
-      injectSystemMessage(`Approved: config/${pending.file} updated`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      client!.send({ type: 'config_write_response', id, ok: false, message: msg });
-      injectSystemMessage(`Failed to write ${pending.file}: ${msg}`);
-    }
-    return true;
-  }
-
-  if (cmd === '/reject') {
-    let id = parts[1];
-    if (!id && pendingConfigWriteRequests.size === 1) {
-      id = pendingConfigWriteRequests.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingConfigWriteRequests.size === 0
-        ? 'No pending config writes.'
-        : `Multiple pending — specify ID: ${[...pendingConfigWriteRequests.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingConfigWriteRequests.get(id);
-    if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending config write: ${id}`);
-      return true;
-    }
-
-    pendingConfigWriteRequests.delete(id);
-    log.info('Config write rejected', { id, file: pending.file });
-    client!.send({ type: 'config_write_response', id, ok: false, message: 'Config write rejected by user' });
-    injectSystemMessage(`Rejected config write to ${pending.file}`);
-    return true;
-  }
-
-  if (cmd === '/preview') {
-    let id = parts[1];
-    if (!id && pendingConfigWriteRequests.size === 1) {
-      id = pendingConfigWriteRequests.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingConfigWriteRequests.size === 0
-        ? 'No pending config writes.'
-        : `Multiple pending — specify ID: ${[...pendingConfigWriteRequests.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingConfigWriteRequests.get(id);
-    if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending config write: ${id}`);
-      return true;
-    }
-
-    // Show the proposed content (truncated if very long)
-    const preview = pending.content.length > 2000
-      ? pending.content.slice(0, 2000) + '\n\n... [truncated]'
-      : pending.content;
-    injectSystemMessage(`Preview of ${pending.file}:\n\n${preview}`);
-    return true;
-  }
-
-  return false;
-}
-
-// --- Host edit-file requests (str_replace with index disambiguation) ---
-
-interface ResolvedEdit {
-  old_str: string;
-  new_str: string;
-  /** Which occurrence to replace (0-based). Resolved eagerly from index or default 0 when unambiguous. */
-  occurrenceIndex: number;
-  /** Line number (1-based) of the chosen occurrence in the original file. For diff display. */
-  lineNumber: number;
-}
-
-interface PendingEditFile {
-  hostPath: string;
-  /** Original file content at request time. Applied against this. */
-  originalContent: string;
-  /** Resolved edits ready to apply in order. */
-  resolvedEdits: ResolvedEdit[];
-  reason: string;
-}
-
-const pendingEditFileRequests = new Map<string, PendingEditFile>();
-
-/** Find all start indices of needle in haystack. */
-function findAllOccurrences(haystack: string, needle: string): number[] {
-  const positions: number[] = [];
-  let from = 0;
-  while (true) {
-    const idx = haystack.indexOf(needle, from);
-    if (idx === -1) break;
-    positions.push(idx);
-    from = idx + 1;
-  }
-  return positions;
-}
-
-/** Return the 1-based line number for a char offset in text. */
-function lineOfOffset(text: string, offset: number): number {
-  return text.slice(0, offset).split('\n').length;
+function handleConfigApproveReject(input: string): Promise<boolean> {
+  return _handleConfigApproveReject(getConfigWriteContext(), input);
 }
 
 function handleEditFileRequest(
@@ -652,171 +496,11 @@ function handleEditFileRequest(
   edits: Array<{ old_str: string; new_str: string; index?: number }>,
   reason: string,
 ): void {
-  const hostPath = resolveHostPath(containerPath);
-
-  let originalContent: string;
-  try {
-    originalContent = readFileSync(hostPath, 'utf-8');
-  } catch {
-    client!.send({ type: 'edit_file_response', id, ok: false, message: `Cannot read ${hostPath}` });
-    return;
-  }
-
-  // Eagerly resolve each edit against the file state after previous edits.
-  const resolvedEdits: ResolvedEdit[] = [];
-  let workingContent = originalContent;
-  let lineOffset = 0; // net line delta from edits applied so far
-
-  for (let i = 0; i < edits.length; i++) {
-    const edit = edits[i]!;
-    const positions = findAllOccurrences(workingContent, edit.old_str);
-
-    if (positions.length === 0) {
-      client!.send({ type: 'edit_file_response', id, ok: false, message: `Edit ${i + 1}: old_str not found in ${hostPath}` });
-      return;
-    }
-
-    if (positions.length > 1 && edit.index === undefined) {
-      const lineNumbers = positions.map((p) => lineOfOffset(workingContent, p) + lineOffset);
-      client!.send({
-        type: 'edit_file_response',
-        id,
-        ok: false,
-        message:
-          `Edit ${i + 1}: old_str matches ${positions.length} times in ${hostPath} at lines [${lineNumbers.join(', ')}]. ` +
-          `Retry with index (0-based) to select which occurrence to replace.`,
-      });
-      return;
-    }
-
-    const occurrenceIndex = edit.index ?? 0;
-    if (occurrenceIndex < 0 || occurrenceIndex >= positions.length) {
-      client!.send({
-        type: 'edit_file_response',
-        id,
-        ok: false,
-        message: `Edit ${i + 1}: index ${occurrenceIndex} out of range — only ${positions.length} occurrence(s) found.`,
-      });
-      return;
-    }
-
-    const charPos = positions[occurrenceIndex]!;
-    const lineNumber = lineOfOffset(workingContent, charPos) + lineOffset;
-
-    resolvedEdits.push({ old_str: edit.old_str, new_str: edit.new_str, occurrenceIndex, lineNumber });
-
-    // Apply to working content so subsequent edits see the updated file.
-    workingContent =
-      workingContent.slice(0, charPos) +
-      edit.new_str +
-      workingContent.slice(charPos + edit.old_str.length);
-
-    // Track line offset shift for subsequent edits' line number reporting.
-    lineOffset += edit.new_str.split('\n').length - edit.old_str.split('\n').length;
-  }
-
-  pendingEditFileRequests.set(id, { hostPath, originalContent, resolvedEdits, reason });
-
-  const diff = buildDisplayDiff(originalContent, workingContent, hostPath);
-  const editSummary = resolvedEdits.map((e, i) =>
-    `  Edit ${i + 1}: replace occurrence ${e.occurrenceIndex} at line ${e.lineNumber}`
-  ).join('\n');
-
-  // Emit a patch_request event so the web UI shows the diff modal with approve/reject buttons.
-  // Fall back to a system message if no client is connected yet.
-  if (client) {
-    client.emit('patch_request', id, diff, reason);
-  } else {
-    injectSystemMessage(
-      `Agent wants to edit ${hostPath}\n` +
-      `  Reason: "${reason}"\n` +
-      `  ${resolvedEdits.length} edit${resolvedEdits.length > 1 ? 's' : ''}:\n${editSummary}\n\n` +
-      `\`\`\`diff\n${diff}\n\`\`\`\n\n` +
-      `Reply: /approve-edit or /reject-edit`
-    );
-  }
+  _handleEditFileRequest(getConfigWriteContext(), id, containerPath, edits, reason);
 }
 
-async function handleEditFileApproveReject(input: string): Promise<boolean> {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase();
-
-  if (cmd === '/approve-edit' || cmd === '/approve-patch') {
-    let id = parts[1];
-    if (!id && pendingEditFileRequests.size === 1) {
-      id = pendingEditFileRequests.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingEditFileRequests.size === 0
-        ? 'No pending edit requests.'
-        : `Multiple pending — specify ID: ${[...pendingEditFileRequests.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingEditFileRequests.get(id);
-    if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending edit request: ${id}`);
-      return true;
-    }
-
-    pendingEditFileRequests.delete(id);
-
-    // Re-apply edits against the original snapshot in order.
-    let content = pending.originalContent;
-    for (let i = 0; i < pending.resolvedEdits.length; i++) {
-      const edit = pending.resolvedEdits[i]!;
-      const positions = findAllOccurrences(content, edit.old_str);
-      if (positions.length === 0 || edit.occurrenceIndex >= positions.length) {
-        const msg = `Edit ${i + 1}: file changed since approval — old_str no longer found at expected position.`;
-        log.error('Edit apply failed', { id, error: msg });
-        client!.send({ type: 'edit_file_response', id, ok: false, message: msg });
-        injectSystemMessage(`Edit failed: ${msg}`);
-        return true;
-      }
-      const charPos = positions[edit.occurrenceIndex]!;
-      content = content.slice(0, charPos) + edit.new_str + content.slice(charPos + edit.old_str.length);
-    }
-
-    try {
-      writeFileSync(pending.hostPath, content, 'utf-8');
-      log.info('Edit applied', { id, path: pending.hostPath, edits: pending.resolvedEdits.length });
-      client!.send({ type: 'edit_file_response', id, ok: true, message: `Applied ${pending.resolvedEdits.length} edit(s) to ${pending.hostPath}` });
-      injectSystemMessage(`Approved: edit applied to ${pending.hostPath}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error('Edit write failed', { id, error: msg });
-      client!.send({ type: 'edit_file_response', id, ok: false, message: `Write failed: ${msg}` });
-      injectSystemMessage(`Edit failed: ${msg}`);
-    }
-    return true;
-  }
-
-  if (cmd === '/reject-edit' || cmd === '/reject-patch') {
-    let id = parts[1];
-    if (!id && pendingEditFileRequests.size === 1) {
-      id = pendingEditFileRequests.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingEditFileRequests.size === 0
-        ? 'No pending edit requests.'
-        : `Multiple pending — specify ID: ${[...pendingEditFileRequests.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingEditFileRequests.get(id);
-    if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending edit request: ${id}`);
-      return true;
-    }
-
-    pendingEditFileRequests.delete(id);
-    log.info('Edit rejected', { id });
-    client!.send({ type: 'edit_file_response', id, ok: false, message: 'Edit rejected by user' });
-    injectSystemMessage(`Rejected edit for ${pending.hostPath}`);
-    return true;
-  }
-
-  return false;
+function handleEditFileApproveReject(input: string): Promise<boolean> {
+  return _handleEditFileApproveReject(getConfigWriteContext(), input);
 }
 
 // --- Classifier decision metadata ---
@@ -856,6 +540,9 @@ function readExecPermissions(): ExecPermissions {
       alwaysAllow: Array.isArray(p.alwaysAllow)
         ? [...new Set([...DEFAULT_EXEC_PERMISSIONS.alwaysAllow, ...p.alwaysAllow])]
         : DEFAULT_EXEC_PERMISSIONS.alwaysAllow,
+      alwaysClassify: Array.isArray(p.alwaysClassify)
+        ? [...new Set([...DEFAULT_EXEC_PERMISSIONS.alwaysClassify, ...p.alwaysClassify])]
+        : DEFAULT_EXEC_PERMISSIONS.alwaysClassify,
       deny: Array.isArray(p.deny)
         ? [...new Set([...DEFAULT_EXEC_PERMISSIONS.deny, ...p.deny])]
         : DEFAULT_EXEC_PERMISSIONS.deny,
@@ -872,6 +559,7 @@ function broadcastUpdatedPermissions(): void {
   const filePerms = readFilePermissions();
   client.emit('permissions_updated', {
     exec_perm_alwaysAllow: JSON.stringify(execPerms.alwaysAllow),
+    exec_perm_alwaysClassify: JSON.stringify(execPerms.alwaysClassify),
     exec_perm_deny: JSON.stringify(execPerms.deny),
     fetch_perm_alwaysAllow: JSON.stringify(fetchPerms.alwaysAllow),
     fetch_perm_deny: JSON.stringify(fetchPerms.deny),
@@ -975,12 +663,19 @@ function handleAgentExecRequest(id: string, command: string): void {
   const level = checkExecPermission(command, permissions);
 
   if (level === 'allow') {
-    log.info('Exec auto-allowed (Tier 2)', { id, command });
-    auditLog({ type: 'exec_tier2_allow', detail: command });
-    autoHandledExecIds.add(id);
-    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'Allowed by permission policy' });
-    client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by permission policy' });
-    return;
+    // Check if this command should be forced through the classifier despite matching alwaysAllow
+    if (shouldForceClassify(command, permissions.alwaysClassify)) {
+      log.info('Exec Tier 2 allow overridden by alwaysClassify', { id, command });
+      auditLog({ type: 'exec_tier2_force_classify', detail: command });
+      // Fall through to Tier 3 below
+    } else {
+      log.info('Exec auto-allowed (Tier 2)', { id, command });
+      auditLog({ type: 'exec_tier2_allow', detail: command });
+      autoHandledExecIds.add(id);
+      classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'Allowed by permission policy' });
+      client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by permission policy' });
+      return;
+    }
   }
 
   if (level === 'deny') {

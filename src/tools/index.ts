@@ -1,8 +1,8 @@
 /**
- * Barrel re-export — all tool logic now lives in src/tools/.
- * This file exists so that existing `import ... from './tools.js'` statements
- * continue to work without modification.
+ * Tool barrel — re-exports everything from defs.ts and execute.ts
+ * so consumers can import from './tools/index.js' (or './tools.js' via the barrel).
  */
+
 export {
   type ToolDef,
   toClaudeCodeName,
@@ -11,7 +11,10 @@ export {
   internalTools,
   execReadonlyTool,
   fetchReadonlyTool,
+} from './defs.js';
+
+export {
   parseCurlResponse,
   summarizeToolCall,
   executeTool,
-} from './tools/index.js';
+} from './execute.js';
