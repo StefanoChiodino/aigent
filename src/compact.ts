@@ -9,7 +9,19 @@ const log = createLogger('compact');
  * Prompt for mid-conversation compaction.
  * Goal: stay task-focused, keep the agent on track. NOT long-term memory.
  */
-const COMPACT_PROMPT = `Summarize this conversation as a compact reference for continuing the current task. Include: user goals, decisions made, files changed, commands run, current state, pending tasks. Be specific (file paths, commands, technical details). No narrative or meta-commentary.`;
+const COMPACT_PROMPT = `Summarize this conversation as a compact reference for continuing the current task.
+
+Include ALL of:
+1. **Named entities & topics**: character names, chapter numbers, feature names, project names, people — use proper nouns, never "the character" or "the file"
+2. **User goals**: what the user wants to achieve, both immediate and overarching
+3. **Decisions made**: choices, preferences, direction changes
+4. **Current state**: what's done, what's in progress, what's blocked
+5. **Files & commands**: specific paths, commands run, errors encountered
+6. **Active discussion threads**: ongoing conversations/debates not yet resolved
+
+Start with a "Key entities:" line listing every named entity discussed.
+Be specific and concrete — preserve the details that let someone pick up mid-conversation.
+No narrative or meta-commentary.`;
 
 /**
  * Prompt for end-of-session/reset memory distillation.
@@ -30,6 +42,7 @@ Only include things that would be useful to know at the start of a future sessio
 - Bugs found and fixed (with root cause)
 - User preferences or communication style notes
 - Unresolved TODOs or next steps worth remembering
+- **Active threads**: what was being discussed/worked on at session end (character names, chapter numbers, feature names — use proper nouns). This is critical for continuity.
 
 Output ONLY the updated MEMORY.md content. No preamble, no commentary.`;
 
@@ -77,8 +90,8 @@ function messagesToSummaryInput(messages: ProviderMessage[]): ProviderMessage[] 
           textContent = textParts.join('\n');
           if (imageCount > 0) textContent += ` [+${imageCount} image(s)]`;
         }
-        const truncated = textContent.length > 300
-          ? textContent.slice(0, 300) + `… [${textContent.length}B]`
+        const truncated = textContent.length > 600
+          ? textContent.slice(0, 600) + `… [${textContent.length}B]`
           : textContent;
         return `[result]: ${truncated}`;
       });
@@ -126,7 +139,7 @@ export async function compactConversation(
   model: string,
   messages: ProviderMessage[],
   _workspacePath?: string,
-  keepRecentTurns: number = 4,
+  keepRecentTurns: number = 2,
 ): Promise<{ messages: ProviderMessage[]; summary: string }> {
   // Count "turns" — a turn is either a real user message OR a tool_result
   // (which the API sends as role:'user'). During long tool-use loops there may

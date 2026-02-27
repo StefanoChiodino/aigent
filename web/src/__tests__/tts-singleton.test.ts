@@ -113,7 +113,7 @@ describe('TTS singleton state', () => {
   });
 });
 
-describe('flushStream — <speak> block handling (concise mode)', () => {
+describe('flushStream — <speak> block handling (short mode)', () => {
   const extractSpeakMock = vi.mocked(markdownLib.extractSpeakContent);
 
   beforeEach(() => {
@@ -189,7 +189,7 @@ describe('flushStream — <speak> block handling (concise mode)', () => {
     const hook = renderHook(() => useTTS());
     act(() => { hook.result.current.stopStream(); });
 
-    // Plain response — no concise mode tags
+    // Plain response — no short mode tags
     useChatStore.getState().setStreamText('Hello there. How can I help you today? ');
     extractSpeakMock.mockReturnValue(null);
 

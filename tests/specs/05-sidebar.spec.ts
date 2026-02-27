@@ -1,5 +1,5 @@
 /**
- * 05 — Sidebar controls: TTS, STT, reasoning, effort pills, concise,
+ * 05 — Sidebar controls: TTS, STT, reasoning, effort pills, short,
  *       model picker, context meter, mounts, cost
  */
 
@@ -62,9 +62,9 @@ test.describe('@fast Sidebar controls', () => {
     await injectEvent({
       type: 'host_state',
       mounts: [],
-      capabilities: { exec: 'always-allow' },
+      capabilities: { 'clipboard.read': { grant: 'allow', available: true } },
     });
-    await expect(page.locator('#sb-caps-list')).toContainText(/exec|always-allow/i, { timeout: 3_000 });
+    await expect(page.locator('#sb-caps-list')).toContainText(/Clipboard Read/i, { timeout: 3_000 });
   });
 
   // ── Reasoning toggle & effort pills ──────────────────────────────────────────
@@ -159,16 +159,16 @@ test.describe('@fast Sidebar controls', () => {
     await expect(page.locator('#sb-tts-rate-label')).toContainText('50%');
   });
 
-  // ── Concise ───────────────────────────────────────────────────────────────────
+  // ── Short ────────────────────────────────────────────────────────────────────
 
-  test('concise toggle is visible', async () => {
+  test('short toggle is visible', async () => {
     const page = getPage();
-    await expect(page.locator('#sb-concise-toggle')).toBeVisible();
+    await expect(page.locator('#sb-short-toggle')).toBeVisible();
   });
 
-  test('clicking concise toggle flips its state', async () => {
+  test('clicking short toggle flips its state', async () => {
     const page = getPage();
-    const toggle = page.locator('#sb-concise-toggle');
+    const toggle = page.locator('#sb-short-toggle');
     const before = (await toggle.innerText()).trim();
     const expected = before === 'ON' ? 'OFF' : 'ON';
     await toggle.click();

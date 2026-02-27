@@ -6,7 +6,9 @@ Stick to this general plan for any non-trivial change:
 1. Investigate, explore, discover
 2. Write new docs, or update existing ones
 3. Create a plan for your changes for me to review
-4. Consider updating @README.md, demo website, e2e and unit tests
+4. Update @README.md
+5. Update demo website
+6. Add/update e2e and unit tests
 
 ## What This Is
 

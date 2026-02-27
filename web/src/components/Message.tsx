@@ -36,13 +36,12 @@ function MessageTraces({ traces }: { traces: NonNullable<DisplayMessage['traces'
   const [expanded, setExpanded] = useState(false);
   if (traces.length === 0) return null;
 
-  const thinkingCount = traces.filter(t => t.type === 'thinking').length;
   const toolCount = traces.filter(t => t.type === 'tool').length;
+  const hasThinking = traces.some(t => t.type === 'thinking');
 
-  const summaryParts: string[] = [];
-  if (thinkingCount > 0) summaryParts.push('💭 reasoned');
-  if (toolCount > 0) summaryParts.push(`${toolCount} tool${toolCount > 1 ? 's' : ''}`);
-  const summaryLabel = summaryParts.join(' · ');
+  const summaryLabel = toolCount > 0
+    ? `${toolCount} tool${toolCount > 1 ? 's' : ''}`
+    : hasThinking ? '💭 reasoned' : 'reasoning';
 
   return (
     <div className="message-traces">
@@ -102,10 +101,11 @@ export const Message = React.memo(function Message({ message }: Props) {
         )}
         {message.role === 'assistant' && <TTSButton text={ttsText} />}
         {speakContent && (
-          <span className="speak-preview" title={speakContent}>
+          <span className="speak-preview">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
+            <span className="speak-preview-tooltip">{speakContent}</span>
           </span>
         )}
       </div>

@@ -11,6 +11,10 @@ interface VoiceState {
   vadActive: boolean;
   ttsPlaying: boolean;
   speakBlockSpoken: boolean;
+  /** Selected mic deviceId ('' = system default) */
+  micDeviceId: string;
+  /** Selected speaker deviceId ('' = system default) */
+  speakerDeviceId: string;
 
   setTtsAutoSpeak: (on: boolean) => void;
   setTtsRatePct: (pct: number) => void;
@@ -19,6 +23,8 @@ interface VoiceState {
   setVadActive: (active: boolean) => void;
   setTtsPlaying: (playing: boolean) => void;
   setSpeakBlockSpoken: (spoken: boolean) => void;
+  setMicDeviceId: (id: string) => void;
+  setSpeakerDeviceId: (id: string) => void;
 }
 
 export const useVoiceStore = create<VoiceState>()(
@@ -31,6 +37,8 @@ export const useVoiceStore = create<VoiceState>()(
       vadActive: false,
       ttsPlaying: false,
       speakBlockSpoken: false,
+      micDeviceId: '',
+      speakerDeviceId: '',
 
       setTtsAutoSpeak: (on) => set({ ttsAutoSpeak: on }),
       setTtsRatePct: (pct) => set({ ttsRatePct: pct }),
@@ -39,10 +47,17 @@ export const useVoiceStore = create<VoiceState>()(
       setVadActive: (active) => set({ vadActive: active }),
       setTtsPlaying: (playing) => set({ ttsPlaying: playing }),
       setSpeakBlockSpoken: (spoken) => set({ speakBlockSpoken: spoken }),
+      setMicDeviceId: (id) => set({ micDeviceId: id }),
+      setSpeakerDeviceId: (id) => set({ speakerDeviceId: id }),
     }),
     {
       name: 'aigent-voice',
-      partialize: (s) => ({ ttsAutoSpeak: s.ttsAutoSpeak, ttsRatePct: s.ttsRatePct }),
+      partialize: (s) => ({
+        ttsAutoSpeak: s.ttsAutoSpeak,
+        ttsRatePct: s.ttsRatePct,
+        micDeviceId: s.micDeviceId,
+        speakerDeviceId: s.speakerDeviceId,
+      }),
     }
   )
 );

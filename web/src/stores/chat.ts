@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { DisplayMessage, TokenUsage, BackgroundTaskInfo, TraceEntry } from '../types';
+import type { DisplayMessage, TokenUsage, BackgroundTaskInfo, TraceEntry, ClassifierMeta } from '../types';
 
 interface StreamingState {
   active: boolean;
@@ -37,6 +37,7 @@ interface ChatState {
   startToolBlock: (name: string, summary: string, input: string, model?: string, thinking?: string) => void;
   appendToolOutput: (content: string) => void;
   finalizeToolBlock: () => void;
+  setClassifierMeta: (meta: ClassifierMeta) => void;
 }
 
 let traceIdCounter = 0;
@@ -128,6 +129,18 @@ export const useChatStore = create<ChatState>()(
           t.type === 'tool' && t.running ? { ...t, toolOutput: output, running: false } : t
         );
         return { streaming: { ...s.streaming, currentToolOutput: '', traces } };
+      }),
+      setClassifierMeta: (meta) => set(s => {
+        // Attach classifier metadata to the last tool trace (the one that triggered the decision)
+        const traces = [...s.streaming.traces];
+        for (let i = traces.length - 1; i >= 0; i--) {
+          const t = traces[i]!;
+          if (t.type === 'tool') {
+            traces[i] = { ...t, classifierMeta: meta };
+            break;
+          }
+        }
+        return { streaming: { ...s.streaming, traces } };
       }),
     }),
     {

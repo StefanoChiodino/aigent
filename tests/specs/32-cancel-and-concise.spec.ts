@@ -1,12 +1,12 @@
 /**
- * 32 — Cancel button and concise mode
+ * 32 — Cancel button and short mode
  *
  * Tests:
  *   - Cancel button visibility reacts to loading state
  *   - Cancel button click sends cancel message over WebSocket
  *   - Escape key sends cancel when loading
- *   - Concise mode toggle sends command and updates via server round-trip
- *   - Concise mode state reflected in sidebar toggle after state event
+ *   - Short mode toggle sends command and updates via server round-trip
+ *   - Short mode state reflected in sidebar toggle after state event
  */
 
 import { test, expect } from '@playwright/test';
@@ -123,12 +123,12 @@ test.describe('@fast Cancel button', () => {
   });
 });
 
-test.describe('@fast Concise mode', () => {
+test.describe('@fast Short mode', () => {
   const getPage = useSharedPage();
 
-  test('concise toggle sends /concise command and updates state', async () => {
+  test('short toggle sends /short command and updates state', async () => {
     const page = getPage();
-    const toggle = page.locator('#sb-concise-toggle');
+    const toggle = page.locator('#sb-short-toggle');
     const before = (await toggle.innerText()).trim();
     const expected = before === 'ON' ? 'OFF' : 'ON';
 
@@ -141,9 +141,9 @@ test.describe('@fast Concise mode', () => {
     await expect(toggle).toHaveText(before, { timeout: 5_000 });
   });
 
-  test('concise toggle ON produces system message', async () => {
+  test('short toggle ON produces system message', async () => {
     const page = getPage();
-    const toggle = page.locator('#sb-concise-toggle');
+    const toggle = page.locator('#sb-short-toggle');
     const before = (await toggle.innerText()).trim();
 
     if (before === 'ON') {
@@ -155,30 +155,30 @@ test.describe('@fast Concise mode', () => {
     await toggle.click();
     await expect(toggle).toHaveText('ON', { timeout: 5_000 });
     // Check system message appeared
-    await expect(page.locator('#messages')).toContainText(/concise mode: on/i, { timeout: 5_000 });
+    await expect(page.locator('#messages')).toContainText(/short mode: on/i, { timeout: 5_000 });
 
     // Restore
     await toggle.click();
     await expect(toggle).toHaveText('OFF', { timeout: 5_000 });
   });
 
-  test('concise state survives injected state event', async () => {
+  test('short state survives injected state event', async () => {
     const page = getPage();
-    // Inject concise: true
-    await injectEvent({ type: 'state', concise: true });
-    await expect(page.locator('#sb-concise-toggle')).toHaveText('ON', { timeout: 3_000 });
+    // Inject short: true
+    await injectEvent({ type: 'state', short: true });
+    await expect(page.locator('#sb-short-toggle')).toHaveText('ON', { timeout: 3_000 });
 
-    // Inject concise: false
-    await injectEvent({ type: 'state', concise: false });
-    await expect(page.locator('#sb-concise-toggle')).toHaveText('OFF', { timeout: 3_000 });
+    // Inject short: false
+    await injectEvent({ type: 'state', short: false });
+    await expect(page.locator('#sb-short-toggle')).toHaveText('OFF', { timeout: 3_000 });
   });
 
-  test('concise toggle has correct CSS class when on', async () => {
+  test('short toggle has correct CSS class when on', async () => {
     const page = getPage();
-    await injectEvent({ type: 'state', concise: true });
-    await expect(page.locator('#sb-concise-toggle')).toHaveClass(/\bon\b/, { timeout: 3_000 });
+    await injectEvent({ type: 'state', short: true });
+    await expect(page.locator('#sb-short-toggle')).toHaveClass(/\bon\b/, { timeout: 3_000 });
 
-    await injectEvent({ type: 'state', concise: false });
-    await expect(page.locator('#sb-concise-toggle')).not.toHaveClass(/\bon\b/, { timeout: 3_000 });
+    await injectEvent({ type: 'state', short: false });
+    await expect(page.locator('#sb-short-toggle')).not.toHaveClass(/\bon\b/, { timeout: 3_000 });
   });
 });

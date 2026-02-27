@@ -128,20 +128,23 @@ function resolveHostPath(input: string): string {
   return resolve(input);
 }
 
+/** Capabilities that have an actual provider implementation. */
+const IMPLEMENTED_CAPS = new Set(['clipboard.read', 'clipboard.write']);
+
 /** Read capability permissions from the host daemon's config file. */
-function readCapabilities(): Record<string, string> {
+function readCapabilities(): Record<string, { grant: string; available: boolean }> {
   const configPath = join(homedir(), '.config', 'aigent', 'permissions.json');
+  let grants: Record<string, string>;
   try {
     const raw = readFileSync(configPath, 'utf-8');
     const parsed = JSON.parse(raw) as Record<string, { grant: string }>;
-    const result: Record<string, string> = {};
+    grants = {};
     for (const [cap, entry] of Object.entries(parsed)) {
-      result[cap] = entry.grant;
+      grants[cap] = entry.grant;
     }
-    return result;
   } catch {
-    // No config or invalid — return defaults
-    return {
+    // No config or invalid — use defaults
+    grants = {
       'clipboard.read': 'prompt',
       'clipboard.write': 'prompt',
       'screen.capture': 'prompt',
@@ -154,6 +157,11 @@ function readCapabilities(): Record<string, string> {
       'fs.write': 'deny',
     };
   }
+  const result: Record<string, { grant: string; available: boolean }> = {};
+  for (const [cap, grant] of Object.entries(grants)) {
+    result[cap] = { grant, available: IMPLEMENTED_CAPS.has(cap) };
+  }
+  return result;
 }
 
 /** Push current host state (capabilities) to all UI listeners. */
@@ -810,6 +818,23 @@ async function handleEditFileApproveReject(input: string): Promise<boolean> {
   return false;
 }
 
+// --- Classifier decision metadata ---
+// Shared with web-bridge so it can broadcast decisions to browser clients.
+export interface ClassifierDecision { tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
+const classifierDecisions = new Map<string, ClassifierDecision>();
+
+// Rolling buffer of recent conversation messages (last 2 rounds = up to 4 messages).
+// Used to give the Tier 3 classifier conversation context.
+const RECENT_MSG_LIMIT = 4;
+const recentMessages: Array<{ role: string; content: string }> = [];
+
+function getRecentContext(): string | undefined {
+  if (recentMessages.length === 0) return undefined;
+  return recentMessages
+    .map(m => `[${m.role}]: ${m.content.slice(0, 300)}`)
+    .join('\n');
+}
+
 // --- Exec command approval ---
 
 const pendingExecApprovals = new Map<string, { command: string; classifierReason?: string }>();
@@ -922,6 +947,7 @@ function handleAgentExecRequest(id: string, command: string): void {
     log.info('Exec blocked by Tier 1 (static deny)', { id, command, reason: tier1 });
     auditLog({ type: 'exec_tier1_block', detail: command, reason: tier1 });
     autoHandledExecIds.add(id);
+    classifierDecisions.set(id, { tier: 1, action: 'block', reason: tier1 });
     client!.send({ type: 'exec_response', id, ok: false, message: `Blocked (safety): ${tier1}` });
     injectSystemMessage(`[exec] Blocked by safety engine: ${tier1}\n  Command: ${command}`);
     return;
@@ -935,6 +961,7 @@ function handleAgentExecRequest(id: string, command: string): void {
     log.info('Exec auto-allowed (Tier 2)', { id, command });
     auditLog({ type: 'exec_tier2_allow', detail: command });
     autoHandledExecIds.add(id);
+    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'Allowed by permission policy' });
     client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by permission policy' });
     return;
   }
@@ -943,6 +970,7 @@ function handleAgentExecRequest(id: string, command: string): void {
     log.info('Exec auto-denied (Tier 2)', { id, command });
     auditLog({ type: 'exec_tier2_deny', detail: command });
     autoHandledExecIds.add(id);
+    classifierDecisions.set(id, { tier: 2, action: 'block', reason: 'Denied by permission policy' });
     client!.send({ type: 'exec_response', id, ok: false, message: 'Denied by permission policy' });
     injectSystemMessage(`[exec] Blocked by deny policy: ${command}`);
     return;
@@ -950,12 +978,14 @@ function handleAgentExecRequest(id: string, command: string): void {
 
   // --- Tier 3: Haiku classifier (async) ---
   if (isClassifierAvailable() && process.env['AIGENT_CLASSIFIER'] !== '0') {
-    classifyCommand(command, { cwd: process.cwd() })
+    const ctx = getRecentContext();
+    classifyCommand(command, { cwd: process.cwd(), ...(ctx ? { recentContext: ctx } : {}) })
       .then(result => {
         if (result.action === 'allow') {
           log.info('Exec auto-allowed (Tier 3 classifier)', { id, command, reason: result.reason });
           auditLog({ type: 'exec_tier3_allow', detail: command, reason: result.reason });
           autoHandledExecIds.add(id);
+          classifierDecisions.set(id, { tier: 3, action: 'allow', reason: result.reason });
           client!.send({ type: 'exec_response', id, ok: true, message: `Allowed by classifier: ${result.reason}` });
           return;
         }
@@ -964,6 +994,7 @@ function handleAgentExecRequest(id: string, command: string): void {
           log.info('Exec blocked (Tier 3 classifier)', { id, command, reason: result.reason });
           auditLog({ type: 'exec_tier3_block', detail: command, reason: result.reason });
           autoHandledExecIds.add(id);
+          classifierDecisions.set(id, { tier: 3, action: 'block', reason: result.reason });
           client!.send({ type: 'exec_response', id, ok: false, message: `Blocked by classifier: ${result.reason}` });
           injectSystemMessage(`[exec] Blocked by classifier: ${result.reason}\n  Command: ${command}`);
           return;
@@ -1221,8 +1252,19 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
 // --- File access approval (sensitive paths / out-of-project writes) ---
 
 const pendingFileAccessApprovals = new Map<string, { path: string; operation: 'read' | 'write' }>();
+const autoHandledFileAccessIds = new Set<string>();
 
 function handleAgentFileAccessRequest(id: string, path: string, operation: 'read' | 'write', reason: string): void {
+  // Reads are never destructive — auto-allow and broadcast the decision
+  if (operation === 'read') {
+    log.info('File read auto-allowed', { id, path });
+    auditLog({ type: 'file_read', detail: path });
+    autoHandledFileAccessIds.add(id);
+    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'File reads are always safe' });
+    client!.send({ type: 'file_access_response', id, ok: true, message: 'Auto-allowed: reads are non-destructive' });
+    return;
+  }
+
   pendingFileAccessApprovals.set(id, { path, operation });
   log.info('File access approval requested', { id, path, operation });
   injectSystemMessage(
@@ -1697,7 +1739,7 @@ client.sendCommand = (cmd: string) => {
 
 // Start web UI server before the server process so it's available during startup/restarts.
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds }).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });
@@ -1728,6 +1770,11 @@ client.on('connected', () => {
   setTimeout(() => emitHostState(), 100);
 });
 
+// Track recent conversation messages for classifier context
+client.on('message', (message: { role: string; content: string }) => {
+  recentMessages.push({ role: message.role, content: typeof message.content === 'string' ? message.content : '' });
+  while (recentMessages.length > RECENT_MSG_LIMIT) recentMessages.shift();
+});
 
 // Handle config write requests from the worker
 client.on('config_write_request', (id: string, file: string, content: string, reason: string) => {

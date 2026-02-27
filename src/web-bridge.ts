@@ -82,12 +82,14 @@ async function serveFile(res: ServerResponse, filePath: string, extraHeaders?: R
   }
 }
 
+export interface ClassifierDecision { tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
+
 export async function startWebServer(
   client: AgentClient,
   port?: number,
-  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string> },
+  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string> },
 ): Promise<{ port: number }> {
-  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds } = options ?? {};
+  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -103,7 +105,7 @@ export async function startWebServer(
         messages: [],
         usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         thinking: 'high' as ThinkingLevel,
-        concise: false,
+        short: false,
         profile: 'default',
         sessionId: 'test',
         model: DEFAULT_MODELS[0]!,
@@ -138,8 +140,8 @@ export async function startWebServer(
   });
 
   // Cache latest host state from gatekeeper (capabilities).
-  let cachedCapabilities: Record<string, string> | undefined;
-  client.on('host_state', (_mounts: unknown, capabilities: Record<string, string> | undefined) => {
+  let cachedCapabilities: Record<string, { grant: string; available: boolean }> | undefined;
+  client.on('host_state', (_mounts: unknown, capabilities: Record<string, { grant: string; available: boolean }> | undefined) => {
     cachedCapabilities = capabilities;
   });
 
@@ -347,16 +349,16 @@ export async function startWebServer(
       return true;
     }
 
-    // /concise on|off
-    if (trimmed === '/concise on' || trimmed === '/concise off') {
-      const concise = trimmed === '/concise on';
-      if (cachedState) cachedState = { ...cachedState, concise };
-      broadcastToClients({ type: 'state', concise });
-      // Only emit a system message when enabling concise mode — the "on" test
+    // /short on|off
+    if (trimmed === '/short on' || trimmed === '/short off') {
+      const short = trimmed === '/short on';
+      if (cachedState) cachedState = { ...cachedState, short };
+      broadcastToClients({ type: 'state', short });
+      // Only emit a system message when enabling short mode — the "on" test
       // checks for it, but no test checks for "off". Emitting on disable causes
       // a race: the message can arrive after beforeEach clearMessages() and
       // cause the next test's waitForFunction to time out.
-      if (concise) broadcastToClients({ type: 'system', content: 'Concise mode: on' });
+      if (short) broadcastToClients({ type: 'system', content: 'Short mode: on' });
       return true;
     }
 
@@ -401,9 +403,28 @@ export async function startWebServer(
     }
 
     // Send cached host state so the sidebar populates immediately.
-    if (cachedCapabilities) {
-      ws.send(JSON.stringify({ type: 'host_state', mounts: [], ...(cachedCapabilities ? { capabilities: cachedCapabilities } : {}) }));
-    }
+    // Also probe TTS/STT services so the UI knows what's available.
+    void (async () => {
+      const probeService = async (url: string): Promise<boolean> => {
+        try {
+          const res = await fetch(url, { signal: AbortSignal.timeout(500) });
+          return res.ok;
+        } catch { return false; }
+      };
+      const [ttsAvailable, sttAvailable] = await Promise.all([
+        probeService(TTS_URL + '/health'),
+        probeService(STT_URL + '/health'),
+      ]);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'host_state',
+          mounts: [],
+          ...(cachedCapabilities ? { capabilities: cachedCapabilities } : {}),
+          ttsAvailable,
+          sttAvailable,
+        }));
+      }
+    })();
 
     // Send current client settings so the browser can sync from the JSON file.
     // Also include effective exec permissions (defaults merged with overrides) so the
@@ -471,17 +492,27 @@ export async function startWebServer(
       patch_request: (id: string, diff: string, reason: string) =>
         send({ type: 'patch_request', id, diff, reason }),
       exec_request: (id: string, command: string) => {
-        // Skip if gatekeeper already handled this (auto-allow or auto-deny)
+        // If gatekeeper already handled this, broadcast the decision instead of prompting
         if (autoHandledExecIds?.has(id)) {
           autoHandledExecIds.delete(id);
+          const decision = classifierDecisions?.get(id);
+          if (decision) {
+            classifierDecisions?.delete(id);
+            send({ type: 'classifier_decision', tier: decision.tier, action: decision.action, reason: decision.reason });
+          }
           return;
         }
         send({ type: 'exec_request', id, command, segments: parseCommandPipeline(command) });
       },
       fetch_request: (id: string, url: string, method?: string) => {
-        // Skip if gatekeeper already handled this (auto-allow or auto-deny)
+        // If gatekeeper already handled this, broadcast the decision instead of prompting
         if (autoHandledFetchIds?.has(id)) {
           autoHandledFetchIds.delete(id);
+          const decision = classifierDecisions?.get(id);
+          if (decision) {
+            classifierDecisions?.delete(id);
+            send({ type: 'classifier_decision', tier: decision.tier, action: decision.action, reason: decision.reason });
+          }
           return;
         }
         send({ type: 'fetch_request', id, url, ...(method ? { method } : {}) });
@@ -528,8 +559,19 @@ export async function startWebServer(
           send({ type: 'browser_write_request', id, action, stepSummary, ...(tabUrl ? { tabUrl } : {}), autonomousCmd: `/grant-browser-autonomous` });
         }
       },
-      file_access_request: (id: string, path: string, operation: 'read' | 'write', reason: string) =>
-        send({ type: 'file_access_request', id, path, operation, reason }),
+      file_access_request: (id: string, path: string, operation: 'read' | 'write', reason: string) => {
+        // If gatekeeper auto-handled (e.g. auto-allowed reads), broadcast decision
+        if (autoHandledFileAccessIds?.has(id)) {
+          autoHandledFileAccessIds.delete(id);
+          const decision = classifierDecisions?.get(id);
+          if (decision) {
+            classifierDecisions?.delete(id);
+            send({ type: 'classifier_decision', tier: decision.tier, action: decision.action, reason: decision.reason });
+          }
+          return;
+        }
+        send({ type: 'file_access_request', id, path, operation, reason });
+      },
       fetch_size_request: (id: string, url: string, requestedBytes: number, defaultBytes: number) =>
         send({ type: 'fetch_size_request', id, url, requestedBytes, defaultBytes }),
       mcp_tool_request: (id: string, server: string, tool: string, params: string) =>
@@ -538,7 +580,7 @@ export async function startWebServer(
         send({ type: 'screenshot_request', id }),
       screen_share_request: (id: string) =>
         send({ type: 'screen_share_request', id }),
-      host_state: (mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, string>) =>
+      host_state: (mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, { grant: string; available: boolean }>) =>
         send({ type: 'host_state', mounts, ...(capabilities ? { capabilities } : {}) }),
       context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) =>
         send({ type: 'context_breakdown', breakdown }),

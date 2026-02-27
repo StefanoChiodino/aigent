@@ -27,7 +27,7 @@ const MODEL = 'claude-haiku-4-5-20251001';
 
 const SYSTEM_PROMPT = `You are a security classifier for an AI coding agent. Your job is to evaluate shell commands the agent wants to run.
 
-Evaluate the raw command below. Do NOT consider any explanation the agent may have given — judge the command itself.
+Evaluate the raw command below. You may also receive recent conversation context showing what the user and agent were discussing — use it to understand WHY the command is being run, but still judge the command on its own merits.
 
 Respond with ONLY a JSON object: {"action":"allow"|"block"|"ask","reason":"..."}
 
@@ -69,7 +69,7 @@ function pruneCache(): void {
 
 export async function classifyCommand(
   command: string,
-  context?: { cwd?: string; project?: string },
+  context?: { cwd?: string; project?: string; recentContext?: string },
 ): Promise<ClassifierResult> {
   // Check cache first
   const key = cacheKey(command, context?.cwd);
@@ -83,9 +83,12 @@ export async function classifyCommand(
   }
 
   try {
-    const userMessage = context?.cwd
+    let userMessage = context?.cwd
       ? `Working directory: ${context.cwd}\nCommand: ${command}`
       : `Command: ${command}`;
+    if (context?.recentContext) {
+      userMessage += `\n\nRecent conversation context:\n${context.recentContext}`;
+    }
 
     const response = await anthropicClient.messages.create({
       model: MODEL,

@@ -11,11 +11,13 @@ interface UIState {
   shortcutsOpen: boolean;
   ctxInspectorOpen: boolean;
   mountsList: MountInfo[];
-  capsList: Record<string, string>;
+  capsList: Record<string, { grant: string; available: boolean }>;
+  ttsAvailable: boolean;
+  sttAvailable: boolean;
   modelName: string;
   availableModels: string[];
   availableTools: string[];
-  conciseMode: boolean;
+  shortMode: boolean;
   thinkingLevel: string;
   lastEffortLevel: string;
   contextBreakdown: ContextBreakdown | null;
@@ -31,11 +33,13 @@ interface UIState {
   setShortcutsOpen: (open: boolean) => void;
   setCtxInspectorOpen: (open: boolean) => void;
   setMounts: (mounts: MountInfo[]) => void;
-  setCaps: (caps: Record<string, string>) => void;
+  setCaps: (caps: Record<string, { grant: string; available: boolean }>) => void;
+  setTtsAvailable: (v: boolean) => void;
+  setSttAvailable: (v: boolean) => void;
   setModelName: (name: string) => void;
   setAvailableModels: (models: string[]) => void;
   setAvailableTools: (tools: string[]) => void;
-  setConciseMode: (on: boolean) => void;
+  setShortMode: (on: boolean) => void;
   setThinkingLevel: (level: string) => void;
   setContextBreakdown: (bd: ContextBreakdown | null) => void;
   addAttachment: (att: PendingAttachment) => void;
@@ -55,10 +59,12 @@ export const useUIStore = create<UIState>((set, get) => ({
   ctxInspectorOpen: false,
   mountsList: [],
   capsList: {},
+  ttsAvailable: false,
+  sttAvailable: false,
   modelName: '',
   availableModels: [],
   availableTools: [],
-  conciseMode: false,
+  shortMode: false,
   thinkingLevel: 'high',
   lastEffortLevel: 'high',
   contextBreakdown: null,
@@ -102,10 +108,12 @@ export const useUIStore = create<UIState>((set, get) => ({
   setCtxInspectorOpen: (open) => set({ ctxInspectorOpen: open }),
   setMounts: (mounts) => set({ mountsList: mounts }),
   setCaps: (caps) => set({ capsList: caps }),
+  setTtsAvailable: (v) => set({ ttsAvailable: v }),
+  setSttAvailable: (v) => set({ sttAvailable: v }),
   setModelName: (name) => set({ modelName: name }),
   setAvailableModels: (models) => set({ availableModels: models }),
   setAvailableTools: (tools) => set({ availableTools: tools }),
-  setConciseMode: (on) => set({ conciseMode: on }),
+  setShortMode: (on) => set({ shortMode: on }),
   setThinkingLevel: (level) => set(s => ({
     thinkingLevel: level,
     lastEffortLevel: level !== 'off' ? level : s.lastEffortLevel,

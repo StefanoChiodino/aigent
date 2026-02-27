@@ -75,16 +75,16 @@ test.describe('@fast Slash command palette & commands', () => {
     await expect(page.locator('#messages')).toContainText(/reset|cleared|start/i, { timeout: 5_000 });
   });
 
-  test('/concise on runs and shows system message', async () => {
+  test('/short on runs and shows system message', async () => {
     const page = getPage();
     const input = page.locator('#input');
-    await input.fill('/concise on');
+    await input.fill('/short on');
     await input.press('Enter');
-    // System message or sidebar toggle should reflect concise mode
-    // The concise toggle in the sidebar should switch to ON
-    await expect(page.locator('#sb-concise-toggle')).toHaveText('ON', { timeout: 5_000 });
+    // System message or sidebar toggle should reflect short mode
+    // The short toggle in the sidebar should switch to ON
+    await expect(page.locator('#sb-short-toggle')).toHaveText('ON', { timeout: 5_000 });
     // Restore
-    await input.fill('/concise off');
+    await input.fill('/short off');
     await input.press('Enter');
   });
 

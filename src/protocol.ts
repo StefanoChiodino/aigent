@@ -96,7 +96,7 @@ export interface ServerState {
   messages: DisplayMessage[];
   usage: TokenUsage;
   thinking: ThinkingLevel;
-  concise: boolean;
+  short: boolean;
   profile: string;
   sessionId: string;
   model: string;
@@ -119,7 +119,7 @@ export type ServerEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
-  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string; concise?: boolean; availableModels?: string[] }
+  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string; short?: boolean; availableModels?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'edit_file_request'; id: string; path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
@@ -131,12 +131,13 @@ export type ServerEvent =
   | { type: 'mcp_tool_request'; id: string; server: string; tool: string; params: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
-  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, string> }
+  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string }
   | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; steps?: unknown[]; url?: string; autonomousCmd?: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
+  | { type: 'classifier_decision'; tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
   | { type: 'reset' }
   | { type: 'pong' };
 

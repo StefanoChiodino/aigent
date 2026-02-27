@@ -1075,6 +1075,16 @@ html, body {
   background: rgba(224, 160, 64, 0.1);
 }
 
+.cap-grant.cap-stub {
+  color: var(--text-dim);
+  background: transparent;
+  opacity: 0.5;
+}
+
+.cap-unavailable {
+  opacity: 0.4;
+}
+
 .cap-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1384,6 +1394,33 @@ html, body {
   min-width: 32px;
   text-align: right;
   flex-shrink: 0;
+}
+
+/* ── Sidebar device picker ─────────────────────────────── */
+
+.sb-device-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.sb-device-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 4px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+.sb-device-select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 /* ── Sidebar reasoning controls ──────────────────────────── */
@@ -2644,6 +2681,18 @@ html, body {
   flex: 1;
   min-width: 0;
 }
+
+.classifier-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  margin-left: 4px;
+  cursor: help;
+  opacity: 0.6;
+  transition: opacity var(--transition);
+}
+.classifier-badge:hover { opacity: 1; }
+.classifier-allow { opacity: 0.4; }
+.classifier-block { opacity: 0.8; }
 
 .trace-expand-hint {
   margin-left: auto;
@@ -4182,7 +4231,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 /* ── Demo mode ─────────────────────────────────────────────── */
 
 body[data-demo] #app {
-  padding-bottom: 44px;
+  padding-bottom: 72px;
 }
 
 body[data-demo]::after {
@@ -4221,12 +4270,53 @@ body[data-demo]::after {
   right: 0;
   z-index: 9999;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 16px 8px;
   background: rgba(12, 12, 20, 0.85);
   backdrop-filter: blur(8px);
   border-top: 1px solid var(--border-subtle);
+}
+
+.demo-sections {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 2px 0;
+}
+
+.demo-sections::-webkit-scrollbar { display: none; }
+
+.demo-section-pill {
+  font-size: 10px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+
+.demo-section-pill:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.demo-section-pill.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.demo-scrub-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .demo-scrub-btn {

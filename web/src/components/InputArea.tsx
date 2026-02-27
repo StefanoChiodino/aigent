@@ -155,7 +155,9 @@ export function InputArea() {
   const micSticky = useVoiceStore(s => s.micSticky);
   const setMicSticky = useVoiceStore(s => s.setMicSticky);
 
-  const [inputValue, setInputValue] = useState('');
+  const [inputValue, setInputValue] = useState(
+    () => sessionStorage.getItem('aigent-draft') ?? '',
+  );
   const [paletteSelected, setPaletteSelected] = useState(0);
   const [paletteHidden, setPaletteHidden] = useState(false);
   const [atTriggerPos, setAtTriggerPos] = useState(-1);
@@ -218,6 +220,12 @@ export function InputArea() {
     window.addEventListener('__test_reset_input', handler);
     return () => window.removeEventListener('__test_reset_input', handler);
   }, [abortMic]);
+
+  // Persist draft to sessionStorage so it survives page reloads
+  useEffect(() => {
+    if (inputValue) sessionStorage.setItem('aigent-draft', inputValue);
+    else sessionStorage.removeItem('aigent-draft');
+  }, [inputValue]);
 
   // Auto-grow textarea
   const autoGrow = useCallback(() => {

@@ -44,3 +44,11 @@ Completed items moved here to keep `TODO.md` focused on active work.
 - [x] **MCP tool name shortening** — investigated, closed as won't-fix. Savings <0.3% of context, prompt caching already mitigates cost, LLM semantic degradation risk outweighs benefit. See `docs/mcp-tool-shortening.md`.
 - [x] **Attached images persist in chat** — thumbnails generated client-side, stored in `DisplayMessage.attachments`, rendered in `Message.tsx`, persisted via Zustand localStorage. See `docs/image-handling.md`.
 - [x] **Agent spawn details** — model name and reasoning level shown in the expandable details panel of `spawn_agent` and `dispatch_task` tool traces.
+- [x] **Phase 3b — Autonomous mode + close_tab** — `browser.autonomous` grant (distinct from `browser.write`), `close_tab` action, "Go Autonomous" button in permission modal. Destructive action heuristics deferred. (2026-02-26)
+
+## UI Fixes (archived)
+
+- [x] **X button always in text box** — X button is now always inside the text box, visible whenever there's text, clears mic transcript too if recording.
+- [x] **Empty submit restarts mic** — empty submit now restarts mic when sticky mode is on.
+- [x] **diff2html line wrapping** — diff2html code lines now use `pre-wrap` so long lines wrap instead of scrolling horizontally.
+- [x] **TTS stop button + mic interrupts TTS** — (1) per-message TTSButton and `speakText` now set global `ttsPlaying` so the cancel button shows; (2) `startMic` now calls `ttsStopAll()` to interrupt TTS when user starts speaking.

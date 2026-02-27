@@ -128,6 +128,7 @@ Server process (spawned directly, no Docker)
 - [x] Phase 2 — Write: `run_script` (batched steps) + `navigate` action
 - [x] Phase 3a — Multi-tab + grants: `activate_tab`, `open_tab`, session-level `browser.write` grant
 - [x] Prompt injection defense: page content wrapped in untrusted markers
+- [x] Phase 3b — Autonomous mode: `browser.autonomous` grant, `close_tab` action, "Go Autonomous" button (2026-02-26)
 
 ### Web UI & Extension
 - [x] Replace sidepanel iframe with `chrome.windows.create({ type: 'popup' })`
@@ -144,7 +145,6 @@ Server process (spawned directly, no Docker)
 ## Next Up
 
 ### Browser Automation
-- [ ] Phase 3b — Autonomous mode: `browser.autonomous` grant, destructive action heuristics, `close_tab`
 - [ ] Phase 3c — Destructive action heuristics for browser actions
 - [ ] Headless browser (deferred) — Playwright fallback for unattended/CI runs
 - [ ] Computer-use loop (deferred) — screenshot + Anthropic computer-use API

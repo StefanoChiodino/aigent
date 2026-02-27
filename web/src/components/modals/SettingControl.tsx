@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { SettingDef } from '../../lib/settings-schema';
 
 interface SettingControlProps {
@@ -12,9 +12,27 @@ function StringListTextarea({ value, onChange }: { value: boolean | number | str
     try { return (JSON.parse(String(v)) as string[]).join('\n'); } catch { return ''; }
   };
   const [text, setText] = useState(() => toText(value));
+  const focused = useRef(false);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const textRef = useRef(text);
+  textRef.current = text;
 
-  // Sync from parent when external value changes (e.g. reset)
-  useEffect(() => { setText(toText(value)); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  const commit = useCallback((t: string) => {
+    const arr = t.split('\n').map(s => s.trim()).filter(Boolean);
+    onChangeRef.current(JSON.stringify(arr));
+  }, []);
+
+  // Sync from parent when external value changes (e.g. server push),
+  // but only when the user isn't actively editing.
+  useEffect(() => {
+    if (!focused.current) setText(toText(value));
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Commit unsaved text on unmount (e.g. modal closed while focused)
+  useEffect(() => () => {
+    if (focused.current) commit(textRef.current);
+  }, [commit]);
 
   return (
     <textarea
@@ -22,10 +40,11 @@ function StringListTextarea({ value, onChange }: { value: boolean | number | str
       rows={8}
       spellCheck={false}
       value={text}
+      onFocus={() => { focused.current = true; }}
       onChange={e => setText(e.target.value)}
       onBlur={() => {
-        const arr = text.split('\n').map(s => s.trim()).filter(Boolean);
-        onChange(JSON.stringify(arr));
+        focused.current = false;
+        commit(text);
       }}
     />
   );

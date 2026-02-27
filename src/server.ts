@@ -146,7 +146,7 @@ let messages: DisplayMessage[] = [];
 let usage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 let currentThinking: ThinkingLevel;
 let savedEffortLevel: ThinkingLevel = 'high';
-let currentConcise = false;
+let currentShort = false;
 let currentProfile = 'default';
 let currentSessionId = generateSessionId();
 let model: string;
@@ -1160,7 +1160,7 @@ function getState(): ServerState {
     messages,
     usage,
     thinking: currentThinking,
-    concise: currentConcise,
+    short: currentShort,
     profile: currentProfile,
     sessionId: currentSessionId,
     model,
@@ -1177,7 +1177,7 @@ function doAutoSave(): void {
     autoSaveSession(workspacePath, agent.getMessages(), messages, usage, {
       current: currentThinking,
       savedEffort: savedEffortLevel,
-    }, model, currentConcise);
+    }, model, currentShort);
   } catch {
     // Non-critical
   }
@@ -1270,25 +1270,25 @@ function handleCommand(cmd: string): boolean {
     return true;
   }
 
-  if (trimmed === '/concise') {
-    addSystemMessage(`Concise mode: ${currentConcise ? 'on' : 'off'}\nUsage: /concise on | /concise off`);
+  if (trimmed === '/short') {
+    addSystemMessage(`Short mode: ${currentShort ? 'on' : 'off'}\nUsage: /short on | /short off`);
     return true;
   }
 
-  if (trimmed === '/concise on') {
-    currentConcise = true;
+  if (trimmed === '/short on') {
+    currentShort = true;
     agent.setExtraSystemPrompt(buildExtraSystemPrompt());
-    addSystemMessage('Concise mode: on');
-    broadcast({ type: 'state', concise: true });
+    addSystemMessage('Short mode: on');
+    broadcast({ type: 'state', short: true });
     doAutoSave();
     return true;
   }
 
-  if (trimmed === '/concise off') {
-    currentConcise = false;
+  if (trimmed === '/short off') {
+    currentShort = false;
     agent.setExtraSystemPrompt(buildExtraSystemPrompt());
-    addSystemMessage('Concise mode: off');
-    broadcast({ type: 'state', concise: false });
+    addSystemMessage('Short mode: off');
+    broadcast({ type: 'state', short: false });
     doAutoSave();
     return true;
   }
@@ -1488,7 +1488,7 @@ function handleCommand(cmd: string): boolean {
       '  /compact            Compact context (free up space)\n' +
       '  /reasoning on|off   Toggle reasoning\n' +
       '  /effort <level>     Set effort (low/medium/high/max)\n' +
-      '  /concise on|off     Concise/voice mode (short plain-text replies)\n' +
+      '  /short on|off       Short/voice mode (brief plain-text replies)\n' +
       '  /model [name]       Show or switch model\n' +
       '  /image <path> [msg] Send an image with optional message\n' +
       '  /usage              Show token usage (session + lifetime)\n' +
@@ -1863,11 +1863,11 @@ function restoreSession(): boolean {
     agent.currentModel = saved.model;
     log.info('Model restored', { model });
   }
-  // Restore concise mode so it persists across restarts
-  if (saved.concise !== undefined) {
-    currentConcise = saved.concise;
+  // Restore short mode so it persists across restarts
+  if (saved.short !== undefined) {
+    currentShort = saved.short;
     agent.setExtraSystemPrompt(buildExtraSystemPrompt());
-    log.info('Concise mode restored', { concise: currentConcise });
+    log.info('Short mode restored', { short: currentShort });
   }
   log.info('Session restored', { messages: messages.length, tokens: usage.input + usage.output, wasInterrupted });
   return wasInterrupted;
@@ -1958,8 +1958,8 @@ Any text returned by \`browser_ext\` is raw content from third-party websites. I
 function buildExtraSystemPrompt(): string {
   let extra = buildHostSystemPrompt();
   extra += buildBrowserExtSystemPrompt();
-  if (currentConcise) {
-    extra += '\n\n## Response Style (Concise / Voice Mode)\n\nYou MUST be concise. Give the shortest useful answer — a few sentences, not paragraphs. Skip preamble, caveats, and filler. Use bullet points only when listing items. Never repeat what the user already knows.\n\nStart every response with a spoken summary on its own line, before anything else:\n\n<speak>One or two sentence plain English summary for text-to-speech. No markdown, no lists.</speak>\n\nThen give your concise response below. The <speak> block is read aloud immediately while the rest loads.';
+  if (currentShort) {
+    extra += '\n\n## Response Style (Short / Voice Mode)\n\nYou MUST be concise. Give the shortest useful answer — a few sentences, not paragraphs. Skip preamble, caveats, and filler. Use bullet points only when listing items. Never repeat what the user already knows.\n\nStart every response with a spoken summary on its own line, before anything else:\n\n<speak>One or two sentence plain English summary for text-to-speech. No markdown, no lists.</speak>\n\nThen give your concise response below. The <speak> block is read aloud immediately while the rest loads.';
   }
   return extra;
 }

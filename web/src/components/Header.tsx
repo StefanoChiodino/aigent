@@ -6,6 +6,7 @@ import { useVoiceStore } from '../stores/voice';
 import { useSettingsStore } from '../stores/settings';
 import { usePiP } from '../hooks/usePiP';
 import type { MountInfo, BackgroundTaskInfo } from '../types';
+import { CAP_INFO, GRANT_DESCRIPTIONS } from '../lib/capabilities';
 
 function modelDisplayName(id: string): string {
   const m = id.match(/^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/);
@@ -81,9 +82,11 @@ export function Header() {
   const setModelPickerOpen = useUIStore(s => s.setModelPickerOpen);
   const thinkingLevel = useUIStore(s => s.thinkingLevel);
   const lastEffortLevel = useUIStore(s => s.lastEffortLevel);
-  const conciseMode = useUIStore(s => s.conciseMode);
+  const shortMode = useUIStore(s => s.shortMode);
   const mountsList = useUIStore(s => s.mountsList);
   const capsList = useUIStore(s => s.capsList);
+  const ttsAvailable = useUIStore(s => s.ttsAvailable);
+  const sttAvailable = useUIStore(s => s.sttAvailable);
   const { setSettingsOpen, setShortcutsOpen, setCtxInspectorOpen } = useUIStore.getState();
 
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
@@ -277,19 +280,19 @@ export function Header() {
                   </div>
                 </div>
 
-                {/* Concise mode */}
+                {/* Short mode */}
                 <div className="hdr-overflow-section">
                   <div className="hdr-overflow-row">
-                    <span>Concise</span>
+                    <span>Short</span>
                     <button
-                      className={`sb-toggle${conciseMode ? ' on' : ''}`}
+                      className={`sb-toggle${shortMode ? ' on' : ''}`}
                       onClick={() => {
-                        const next = !conciseMode;
-                        send({ type: 'message', content: next ? '/concise on' : '/concise off' });
-                        setClientSetting('AIGENT_CONCISE', next);
+                        const next = !shortMode;
+                        send({ type: 'message', content: next ? '/short on' : '/short off' });
+                        setClientSetting('AIGENT_SHORT', next);
                       }}
                     >
-                      {conciseMode ? 'ON' : 'OFF'}
+                      {shortMode ? 'ON' : 'OFF'}
                     </button>
                   </div>
                 </div>
@@ -315,15 +318,39 @@ export function Header() {
                 )}
 
                 {/* Capabilities */}
-                {Object.keys(capsList).length > 0 && (
+                {(Object.keys(capsList).length > 0 || ttsAvailable || sttAvailable) && (
                   <div className="hdr-overflow-section">
                     <div className="hdr-overflow-label">Capabilities</div>
-                    {Object.entries(capsList).map(([cap, grant]) => (
-                      <div key={cap} className="hdr-overflow-item" style={{ fontSize: 11 }}>
-                        <span className={`cap-grant ${grant}`}>{grant === 'prompt' ? '?' : grant.slice(0, 3)}</span>
-                        <span>{cap}</span>
+                    {Object.entries(capsList).map(([cap, info]) => {
+                      const ci = CAP_INFO[cap];
+                      const label = ci?.label ?? cap;
+                      const desc = ci?.description ?? cap;
+                      const tooltip = info.available
+                        ? `${desc} — ${GRANT_DESCRIPTIONS[info.grant] ?? info.grant}`
+                        : `${desc} — Not yet implemented`;
+                      return (
+                        <div key={cap} className={`hdr-overflow-item${info.available ? '' : ' cap-unavailable'}`} style={{ fontSize: 11 }} title={tooltip}>
+                          {info.available ? (
+                            <span className={`cap-grant ${info.grant}`}>{info.grant === 'prompt' ? '?' : info.grant.slice(0, 3)}</span>
+                          ) : (
+                            <span className="cap-grant cap-stub">n/a</span>
+                          )}
+                          <span>{label}</span>
+                        </div>
+                      );
+                    })}
+                    {ttsAvailable && (
+                      <div className="hdr-overflow-item" style={{ fontSize: 11 }} title="Text-to-speech via edge-tts server">
+                        <span className="cap-grant allow">on</span>
+                        <span>TTS</span>
                       </div>
-                    ))}
+                    )}
+                    {sttAvailable && (
+                      <div className="hdr-overflow-item" style={{ fontSize: 11 }} title="Speech-to-text via Whisper server">
+                        <span className="cap-grant allow">on</span>
+                        <span>STT</span>
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -4,6 +4,7 @@ import { useUIStore } from '../stores/ui';
 import { useChatStore } from '../stores/chat';
 import { useVoiceStore } from '../stores/voice';
 import { useDemoPlaybackStore } from './demoStore';
+import type { DemoSection } from './demoStore';
 
 interface Snapshot {
   chat: Record<string, unknown>;
@@ -47,6 +48,12 @@ export class DemoPlaybackEngine {
   /** Effective step count (excludes the final 'loop' step) */
   readonly effectiveSteps: number;
 
+  /** Map from section id to step index, for URL fragment navigation */
+  readonly sectionIndex: Map<string, number> = new Map();
+
+  /** Map from step index to section id (only for steps that ARE a section label) */
+  private sectionByStep: Map<number, string> = new Map();
+
   constructor(scenario: DemoScenario, mockWs: MockWebSocket) {
     this.scenario = scenario;
     this.mockWs = mockWs;
@@ -62,13 +69,22 @@ export class DemoPlaybackEngine {
 
     // Pre-build label index: each step maps to the most recent label
     const labels: string[] = [];
+    const sections: DemoSection[] = [];
     let current = '';
     for (let i = 0; i < scenario.steps.length; i++) {
       const step = scenario.steps[i]!;
-      if (step.action === 'label') current = step.text;
+      if (step.action === 'label') {
+        current = step.text;
+        if (step.id) {
+          this.sectionIndex.set(step.id, i);
+          this.sectionByStep.set(i, step.id);
+          sections.push({ id: step.id, label: step.text, step: i });
+        }
+      }
       labels[i] = current;
     }
     store.setStepLabels(labels);
+    store.setSections(sections);
   }
 
   /** Whether current step should bail early (abort or seek in progress) */
@@ -139,6 +155,11 @@ export class DemoPlaybackEngine {
     }
   }
 
+  seekToSection(id: string): void {
+    const step = this.sectionIndex.get(id);
+    if (step !== undefined) this.seekTo(step);
+  }
+
   pause(): void {
     this._paused = true;
     useDemoPlaybackStore.getState().setPlaying(false);
@@ -183,6 +204,18 @@ export class DemoPlaybackEngine {
 
     this.stepIdx = target;
     useDemoPlaybackStore.getState().setCurrentStep(target);
+
+    // Update current section id and URL hash based on seek target
+    // Walk backward from target to find the most recent section
+    for (let i = target; i >= 0; i--) {
+      const sectionId = this.sectionByStep.get(i);
+      if (sectionId) {
+        useDemoPlaybackStore.getState().setCurrentSectionId(sectionId);
+        history.replaceState(null, '', `#${sectionId}`);
+        break;
+      }
+    }
+
     // Pause after seek so user can inspect
     this._paused = true;
     useDemoPlaybackStore.getState().setPlaying(false);
@@ -283,8 +316,8 @@ export class DemoPlaybackEngine {
         useVoiceStore.getState().setTtsAutoSpeak(step.on);
         break;
 
-      case 'set_concise':
-        useUIStore.getState().setConciseMode(step.on);
+      case 'set_short':
+        useUIStore.getState().setShortMode(step.on);
         break;
 
       case 'click': {
@@ -306,7 +339,11 @@ export class DemoPlaybackEngine {
         break;
 
       case 'label':
-        // No-op — label is used by scrubber for display
+        // Update URL hash when reaching a section label
+        if (step.id) {
+          useDemoPlaybackStore.getState().setCurrentSectionId(step.id);
+          history.replaceState(null, '', `#${step.id}`);
+        }
         break;
 
       case 'emit':
@@ -360,8 +397,8 @@ export class DemoPlaybackEngine {
         useVoiceStore.getState().setTtsAutoSpeak(step.on);
         break;
 
-      case 'set_concise':
-        useUIStore.getState().setConciseMode(step.on);
+      case 'set_short':
+        useUIStore.getState().setShortMode(step.on);
         break;
 
       case 'play_audio':
@@ -531,7 +568,7 @@ export class DemoPlaybackEngine {
     useVoiceStore.getState().setVadActive(false);
     useVoiceStore.getState().setTtsAutoSpeak(false);
     useVoiceStore.getState().setTtsPlaying(false);
-    useUIStore.getState().setConciseMode(false);
+    useUIStore.getState().setShortMode(false);
     if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
     speechSynthesis.cancel();
     this.currentInputText = '';

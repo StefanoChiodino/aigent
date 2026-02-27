@@ -126,7 +126,10 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
         useUIStore.getState().setError('Microphone not available (secure context required)');
         return;
       }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+      const micDevId = useVoiceStore.getState().micDeviceId;
+      const audioConstraints: MediaTrackConstraints = { channelCount: 1 };
+      if (micDevId) audioConstraints.deviceId = { exact: micDevId };
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       micStream.current = stream;
       const ctx = new AudioContext({ sampleRate: 16000 });
       micAudioCtx.current = ctx;

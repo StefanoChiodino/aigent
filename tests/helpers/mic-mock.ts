@@ -103,6 +103,24 @@ export async function installMicMock(page: Page) {
   });
 }
 
+/** Inject mock audio devices so enumerateDevices() returns them. */
+export async function mockEnumerateDevices(
+  page: Page,
+  devices: Array<{ deviceId: string; label: string; kind: string; groupId?: string }>,
+) {
+  await page.evaluate((devs) => {
+    (navigator.mediaDevices as any).enumerateDevices = () =>
+      Promise.resolve(devs.map(d => ({ ...d, groupId: d.groupId ?? '', toJSON: () => d })));
+  }, devices);
+}
+
+/** Fire the devicechange event so DevicePicker re-enumerates. */
+export async function fireDeviceChangeEvent(page: Page) {
+  await page.evaluate(() => {
+    navigator.mediaDevices.dispatchEvent(new Event('devicechange'));
+  });
+}
+
 /** Mock the /stt endpoint to return a canned transcription. */
 export async function mockSTT(page: Page, text: string) {
   await page.route('**/stt', route => route.fulfill({

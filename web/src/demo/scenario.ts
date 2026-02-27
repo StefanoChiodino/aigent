@@ -117,6 +117,18 @@ const RESPONSE_2 =
 const RESPONSE_3 =
   'Health endpoint looks good — status ok, uptime reporting correctly, rate limit headers active at 30/min. Ready for production.';
 
+const RESPONSE_4 =
+  "Done! I navigated to your app's checkout page and clicked the submit button. " +
+  'The form submitted successfully — the page redirected to `/order/confirmed` with ' +
+  'a 200 response. The confirmation page shows order #4821 with the correct total.';
+
+const THINKING_BROWSER =
+  "The user wants me to test the checkout flow in the browser. I need to:\n" +
+  "1. Navigate to the checkout page using the browser extension\n" +
+  "2. Click the submit button to test the form submission\n" +
+  "3. Verify the redirect and confirmation page\n\n" +
+  "I'll use browser_ext with run_script to execute the click action, then verify the result.";
+
 // Fake terminal screenshot (SVG data URL — shows a mini terminal with curl output)
 const SCREENSHOT_DATA_URL =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='130'%3E" +
@@ -156,7 +168,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 1: Connection & initial state
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'label', text: 'Connecting' },
+    { action: 'label', text: 'Connecting', id: 'connecting' },
     wait(800),
     emit({
       type: 'connected',
@@ -164,16 +176,16 @@ export const DEMO_SCENARIO: DemoScenario = {
         messages: [],
         usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         thinking: 'high',
-        concise: false,
+        short: false,
         profile: 'default',
         sessionId: 'demo-001',
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         availableModels: [
-          'claude-sonnet-4-20250514',
-          'claude-opus-4-20250514',
-          'claude-haiku-3-5-20241022',
+          'claude-sonnet-4-6',
+          'claude-opus-4-6',
+          'claude-haiku-4-5-20251001',
         ],
-        availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch'],
+        availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch', 'tree', 'patch', 'search_memory', 'browser_ext'],
         isLoading: false,
         tasks: [],
         pendingResults: 0,
@@ -184,14 +196,22 @@ export const DEMO_SCENARIO: DemoScenario = {
       mounts: [
         { hostPath: '~/projects/myapp', mountPath: '/mnt/myapp', mode: 'rw' },
       ],
-      capabilities: { clipboard: 'allow', audio: 'allow', screen: 'prompt' },
+      capabilities: {
+        'clipboard.read': { grant: 'allow', available: true },
+        'clipboard.write': { grant: 'allow', available: true },
+        'screen.capture': { grant: 'prompt', available: false },
+        'audio.play': { grant: 'prompt', available: false },
+        'notify': { grant: 'prompt', available: false },
+      },
+      ttsAvailable: true,
+      sttAvailable: true,
     }),
 
     // ════════════════════════════════════════════════════════════════════════
     //  PHASE 2: First exchange — read config, add health endpoint
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'label', text: 'User types a message' },
+    { action: 'label', text: 'User types a message', id: 'first-message' },
     wait(1500),
     { action: 'type_input', text: 'Read the main config file and add a health check endpoint', charDelayMs: 45 },
     wait(800),
@@ -212,12 +232,12 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(300),
 
     // Extended thinking
-    { action: 'label', text: 'Extended thinking' },
+    { action: 'label', text: 'Extended thinking', id: 'thinking' },
     { action: 'stream_thinking', text: THINKING_1, chunkSize: 6, intervalMs: 35 },
     wait(400),
 
     // Tool: read_file
-    { action: 'label', text: 'Tool: read file' },
+    { action: 'label', text: 'Tool: read file', id: 'tools' },
     emit({
       type: 'tool_start',
       name: 'read_file',
@@ -243,7 +263,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(300),
 
     // Permission: patch request (diff viewer)
-    { action: 'label', text: 'Permission: file edit' },
+    { action: 'label', text: 'Permission: file edit', id: 'permissions' },
     emit({
       type: 'patch_request',
       id: 'patch-001',
@@ -254,7 +274,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(500),
 
     // Streaming response
-    { action: 'label', text: 'Streaming response' },
+    { action: 'label', text: 'Streaming response', id: 'streaming' },
     { action: 'stream_text', text: RESPONSE_1, chunkSize: 4, intervalMs: 25 },
 
     // Finalize first exchange
@@ -287,7 +307,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 3: Brief pause, flash shortcuts modal
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'label', text: 'Keyboard shortcuts' },
+    { action: 'label', text: 'Keyboard shortcuts', id: 'shortcuts' },
     wait(3000),
     { action: 'open_modal', modal: 'shortcuts' },
     wait(2500),
@@ -299,7 +319,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  (Markdown-rich input showcases live syntax highlighting)
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'label', text: 'Markdown input' },
+    { action: 'label', text: 'Markdown input', id: 'second-message' },
     { action: 'type_input', text: 'Now **write tests** for it and add `express-rate-limit`. Check /src/server.ts and install the package if needed.', charDelayMs: 35 },
     wait(600),
     { action: 'submit_input' },
@@ -441,7 +461,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(300),
 
     // Background task: spawn a sub-agent for documentation
-    { action: 'label', text: 'Background sub-agent' },
+    { action: 'label', text: 'Background sub-agent', id: 'sub-agents' },
     emit({
       type: 'task_update',
       task: {
@@ -449,7 +469,7 @@ export const DEMO_SCENARIO: DemoScenario = {
         description: 'Updating API docs with /health endpoint',
         status: 'running',
         startedAt: new Date().toISOString(),
-        model: 'claude-haiku-3-5-20241022',
+        model: 'claude-haiku-4-5-20251001',
       },
     }),
     wait(500),
@@ -489,7 +509,7 @@ export const DEMO_SCENARIO: DemoScenario = {
         status: 'completed',
         startedAt: new Date(Date.now() - 8000).toISOString(),
         completedAt: new Date().toISOString(),
-        model: 'claude-haiku-3-5-20241022',
+        model: 'claude-haiku-4-5-20251001',
         inputTokens: 3200,
         outputTokens: 890,
         cost: 0.004,
@@ -531,7 +551,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 5: Flash settings modal & mount request
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'label', text: 'Settings panel' },
+    { action: 'label', text: 'Settings panel', id: 'settings' },
     wait(2500),
 
     // Settings modal
@@ -560,12 +580,20 @@ export const DEMO_SCENARIO: DemoScenario = {
         { hostPath: '~/projects/myapp', mountPath: '/mnt/myapp', mode: 'rw' },
         { hostPath: '~/projects/shared-lib', mountPath: '/mnt/shared-lib', mode: 'ro' },
       ],
-      capabilities: { clipboard: 'allow', audio: 'allow', screen: 'prompt' },
+      capabilities: {
+        'clipboard.read': { grant: 'allow', available: true },
+        'clipboard.write': { grant: 'allow', available: true },
+        'screen.capture': { grant: 'prompt', available: false },
+        'audio.play': { grant: 'prompt', available: false },
+        'notify': { grant: 'prompt', available: false },
+      },
+      ttsAvailable: true,
+      sttAvailable: true,
     }),
     wait(2000),
 
     // Context inspector — open, expand a couple of entries, then close
-    { action: 'label', text: 'Context inspector' },
+    { action: 'label', text: 'Context inspector', id: 'context-inspector' },
     { action: 'open_modal', modal: 'context' },
     wait(1500),
 
@@ -591,18 +619,99 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'close_modal', modal: 'context' },
 
     // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 5.5: Browser automation — run_script + navigate
+    // ════════════════════════════════════════════════════════════════════════
+
+    { action: 'label', text: 'Browser automation', id: 'browser-automation' },
+    wait(1500),
+
+    { action: 'type_input', text: 'Test the checkout flow — click submit and verify the confirmation page', charDelayMs: 40 },
+    wait(600),
+    { action: 'submit_input' },
+
+    emit({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: 'Test the checkout flow — click submit and verify the confirmation page',
+        timestamp: new Date().toISOString(),
+      },
+    }),
+
+    emit({ type: 'loading', isLoading: true }),
+    wait(300),
+
+    // Thinking about browser actions
+    { action: 'stream_thinking', text: THINKING_BROWSER, chunkSize: 8, intervalMs: 30 },
+    wait(300),
+
+    // Browser write request: run_script (with "Go Autonomous" button visible)
+    { action: 'label', text: 'Permission: browser action' },
+    emit({
+      type: 'browser_write_request',
+      id: 'browser-001',
+      action: 'run_script',
+      stepSummary: 'Click the "Place Order" button on checkout page',
+      tabUrl: 'http://localhost:3000/checkout',
+      autonomousCmd: '/grant browser.autonomous',
+    }),
+    { action: 'auto_approve', delayMs: 4500 },
+    wait(300),
+
+    // Browser action: navigate to verify
+    { action: 'label', text: 'Browser: navigate' },
+    emit({
+      type: 'browser_write_request',
+      id: 'browser-002',
+      action: 'navigate',
+      stepSummary: 'Navigate to /order/confirmed to verify redirect',
+      tabUrl: 'http://localhost:3000/checkout',
+    }),
+    { action: 'auto_approve', delayMs: 3000 },
+    wait(300),
+
+    // Streaming browser result
+    { action: 'stream_text', text: RESPONSE_4, chunkSize: 5, intervalMs: 22 },
+
+    // Finalize browser exchange
+    wait(200),
+    emit({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: RESPONSE_4,
+        timestamp: new Date().toISOString(),
+        elapsed: 3.6,
+      },
+    }),
+    emit({ type: 'loading', isLoading: false }),
+
+    // Usage update (accumulated)
+    emit({
+      type: 'usage',
+      usage: {
+        input: 32100,
+        output: 4580,
+        cacheRead: 20800,
+        cacheWrite: 11300,
+        cost: 0.105,
+        contextTokens: 36680,
+      },
+    }),
+
+    // ════════════════════════════════════════════════════════════════════════
     //  PHASE 6: Concise/voice mode — STT, screenshot, TTS audio playback
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'label', text: 'Concise mode' },
+    { action: 'label', text: 'Short mode', id: 'short-mode' },
     wait(2000),
 
-    // Toggle concise mode ON in the sidebar
-    { action: 'set_concise', on: true },
+    // Toggle short mode ON in the sidebar
+    { action: 'set_short', on: true },
     wait(1000),
 
     // Simulate STT: mic starts recording
-    { action: 'label', text: 'Voice input (STT)' },
+    { action: 'label', text: 'Voice input (STT)', id: 'voice-input' },
     { action: 'set_mic', state: 'recording', vadActive: false },
     wait(800),
 
@@ -654,7 +763,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     emit({ type: 'loading', isLoading: true }),
     wait(400),
 
-    // Short concise-mode response (no extended thinking in concise mode)
+    // Short-mode response (no extended thinking in short mode)
     { action: 'stream_text', text: RESPONSE_3, chunkSize: 8, intervalMs: 25 },
 
     // Finalize
@@ -672,24 +781,24 @@ export const DEMO_SCENARIO: DemoScenario = {
 
     // Play pre-recorded TTS audio (waits until playback finishes)
     // Drop your audio file at web/public/demo/response.mp3
-    { action: 'label', text: 'Voice output (TTS)' },
+    { action: 'label', text: 'Voice output (TTS)', id: 'voice-output' },
     { action: 'play_audio', src: './demo/response.mp3' },
 
     // Usage update (accumulated)
     emit({
       type: 'usage',
       usage: {
-        input: 34200,
-        output: 4920,
-        cacheRead: 22400,
-        cacheWrite: 11800,
-        cost: 0.112,
-        contextTokens: 39100,
+        input: 38400,
+        output: 5620,
+        cacheRead: 24800,
+        cacheWrite: 13600,
+        cost: 0.128,
+        contextTokens: 44020,
       },
     }),
 
-    // Disable concise mode for clean loop reset
-    { action: 'set_concise', on: false },
+    // Disable short mode for clean loop reset
+    { action: 'set_short', on: false },
 
     // ════════════════════════════════════════════════════════════════════════
     //  PHASE 7: Loop

@@ -51,7 +51,7 @@ export function useWebSocket(): void {
               : { ...event.state.usage, contextTokens: cached }
           );
           ui().setThinkingLevel(event.state.thinking);
-          ui().setConciseMode(event.state.concise ?? false);
+          ui().setShortMode(event.state.short ?? false);
           ui().setLoading(event.state.isLoading);
           chat().setTasks(event.state.tasks ?? []);
           ui().setError(null);
@@ -104,6 +104,10 @@ export function useWebSocket(): void {
 
         case 'tool_end':
           chat().finalizeToolBlock();
+          break;
+
+        case 'classifier_decision':
+          chat().setClassifierMeta({ tier: event.tier, action: event.action, reason: event.reason });
           break;
 
         case 'task_update': {
@@ -172,13 +176,15 @@ export function useWebSocket(): void {
         case 'state':
           if (event.thinking) ui().setThinkingLevel(event.thinking);
           if (event.model) ui().setModelName(event.model);
-          if (event.concise !== undefined) ui().setConciseMode(event.concise);
+          if (event.short !== undefined) ui().setShortMode(event.short);
           if (event.availableModels) ui().setAvailableModels(event.availableModels);
           break;
 
         case 'host_state':
           ui().setMounts(event.mounts as MountInfo[]);
           if (event.capabilities) ui().setCaps(event.capabilities);
+          if (event.ttsAvailable !== undefined) ui().setTtsAvailable(event.ttsAvailable);
+          if (event.sttAvailable !== undefined) ui().setSttAvailable(event.sttAvailable);
           break;
 
         case 'client_settings':

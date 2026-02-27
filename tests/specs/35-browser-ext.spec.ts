@@ -24,14 +24,14 @@ const TINY_PNG_B64 =
 test.describe('@fast Browser Extension — sidebar capabilities', () => {
   const getPage = useSharedPage();
 
-  test('host_state with browser-ext capability shows in caps list', async () => {
+  test('host_state with capability shows in caps list', async () => {
     const page = getPage();
     await injectEvent({
       type: 'host_state',
       mounts: [],
-      capabilities: { 'browser-ext': 'connected' },
+      capabilities: { 'clipboard.read': { grant: 'allow', available: true } },
     });
-    await expect(page.locator('#sb-caps-list')).toContainText(/browser|ext|connected/i, {
+    await expect(page.locator('#sb-caps-list')).toContainText(/Clipboard Read/i, {
       timeout: 3_000,
     });
   });
@@ -41,11 +41,14 @@ test.describe('@fast Browser Extension — sidebar capabilities', () => {
     await injectEvent({
       type: 'host_state',
       mounts: [],
-      capabilities: { 'browser-ext': 'connected', exec: 'always-allow', screen: 'prompt' },
+      capabilities: {
+        'clipboard.read': { grant: 'allow', available: true },
+        'screen.capture': { grant: 'prompt', available: false },
+      },
     });
     const list = page.locator('#sb-caps-list');
-    await expect(list).toContainText(/ext|browser/i, { timeout: 3_000 });
-    await expect(list).toContainText(/exec/i, { timeout: 3_000 });
+    await expect(list).toContainText(/Clipboard Read/i, { timeout: 3_000 });
+    await expect(list).toContainText(/Screenshot/i, { timeout: 3_000 });
   });
 
   test('clearing capabilities resets caps list to placeholder', async () => {
@@ -54,12 +57,12 @@ test.describe('@fast Browser Extension — sidebar capabilities', () => {
     await injectEvent({
       type: 'host_state',
       mounts: [],
-      capabilities: { 'browser-ext': 'connected' },
+      capabilities: { 'clipboard.read': { grant: 'allow', available: true } },
     });
-    await expect(page.locator('#sb-caps-list')).toContainText(/ext|browser/i, { timeout: 3_000 });
+    await expect(page.locator('#sb-caps-list')).toContainText(/Clipboard Read/i, { timeout: 3_000 });
 
-    // Now clear
-    await injectEvent({ type: 'host_state', mounts: [], capabilities: {} });
+    // Now clear (also reset ttsAvailable/sttAvailable which the server may have probed)
+    await injectEvent({ type: 'host_state', mounts: [], capabilities: {}, ttsAvailable: false, sttAvailable: false });
     // When capsList is empty the sidebar shows "--"
     await expect(page.locator('#sb-caps-list')).toContainText('--', { timeout: 3_000 });
   });
@@ -179,15 +182,15 @@ test.describe('@fast Browser Extension — browser_ext tool trace (screenshot)',
 test.describe('@fast Browser Extension — host_state with mounts', () => {
   const getPage = useSharedPage();
 
-  test('host_state with both mounts and browser-ext capability renders both', async () => {
+  test('host_state with both mounts and capability renders both', async () => {
     const page = getPage();
     await injectEvent({
       type: 'host_state',
       mounts: [{ hostPath: '/home/user/projects', containerPath: '/workspace', mode: 'rw' }],
-      capabilities: { 'browser-ext': 'connected' },
+      capabilities: { 'clipboard.read': { grant: 'allow', available: true } },
     });
     await expect(page.locator('#sb-mounts-list')).toContainText('projects', { timeout: 3_000 });
-    await expect(page.locator('#sb-caps-list')).toContainText(/ext|browser|connected/i, {
+    await expect(page.locator('#sb-caps-list')).toContainText(/Clipboard Read/i, {
       timeout: 3_000,
     });
   });

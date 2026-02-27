@@ -5,6 +5,8 @@ import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
 import { useSettingsStore } from '../stores/settings';
 import type { MountInfo, BackgroundTaskInfo } from '../types';
+import { CAP_INFO, GRANT_DESCRIPTIONS } from '../lib/capabilities';
+import { listAudioDevices, type AudioDevice } from '../lib/audio-devices';
 
 function modelDisplayName(id: string): string {
   const m = id.match(/^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/);
@@ -96,6 +98,45 @@ function TaskItem({ task, onOpen }: { task: BackgroundTaskInfo; onOpen: () => vo
   );
 }
 
+function DevicePicker({ kind, value, onChange }: {
+  kind: 'audioinput' | 'audiooutput';
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [devices, setDevices] = useState<AudioDevice[]>([]);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    void listAudioDevices(kind).then(setDevices);
+    // Re-enumerate when devices change (plug/unplug)
+    const cb = () => void listAudioDevices(kind).then(setDevices);
+    navigator.mediaDevices?.addEventListener('devicechange', cb);
+    return () => navigator.mediaDevices?.removeEventListener('devicechange', cb);
+  }, [kind]);
+
+  // Refresh device list when dropdown opens (labels may appear after mic permission)
+  useEffect(() => {
+    if (open) void listAudioDevices(kind).then(setDevices);
+  }, [open, kind]);
+
+  const selected = devices.find(d => d.deviceId === value) ?? devices[0];
+
+  return (
+    <select
+      className="sb-device-select"
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      onMouseDown={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+      title={selected?.label ?? 'Default'}
+    >
+      {devices.map(d => (
+        <option key={d.deviceId} value={d.deviceId}>{d.label}</option>
+      ))}
+    </select>
+  );
+}
+
 export function Sidebar() {
   const send = useConnectionStore(s => s.send);
 
@@ -104,11 +145,13 @@ export function Sidebar() {
 
   const mountsList = useUIStore(s => s.mountsList);
   const capsList = useUIStore(s => s.capsList);
+  const ttsAvailable = useUIStore(s => s.ttsAvailable);
+  const sttAvailable = useUIStore(s => s.sttAvailable);
   const modelName = useUIStore(s => s.modelName);
   const availableModels = useUIStore(s => s.availableModels);
   const thinkingLevel = useUIStore(s => s.thinkingLevel);
   const lastEffortLevel = useUIStore(s => s.lastEffortLevel);
-  const conciseMode = useUIStore(s => s.conciseMode);
+  const shortMode = useUIStore(s => s.shortMode);
   const setCtxInspectorOpen = useUIStore(s => s.setCtxInspectorOpen);
   const setTaskResultTask = useUIStore(s => s.setTaskResultTask);
   const modelPickerOpen = useUIStore(s => s.modelPickerOpen);
@@ -121,6 +164,10 @@ export function Sidebar() {
   const ttsRatePct = useVoiceStore(s => s.ttsRatePct);
   const setTtsAutoSpeak = useVoiceStore(s => s.setTtsAutoSpeak);
   const setTtsRatePct = useVoiceStore(s => s.setTtsRatePct);
+  const micDeviceId = useVoiceStore(s => s.micDeviceId);
+  const speakerDeviceId = useVoiceStore(s => s.speakerDeviceId);
+  const setMicDeviceId = useVoiceStore(s => s.setMicDeviceId);
+  const setSpeakerDeviceId = useVoiceStore(s => s.setSpeakerDeviceId);
 
   const ctxUsed = usage.contextTokens ?? 0;
   const cost = usage.cost ?? 0;
@@ -277,23 +324,35 @@ export function Sidebar() {
             />
             <span id="sb-tts-rate-label">{ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`}</span>
           </div>
+          {ttsAvailable && (
+            <div className="sb-device-row" style={{ marginTop: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Speaker</span>
+              <DevicePicker kind="audiooutput" value={speakerDeviceId} onChange={setSpeakerDeviceId} />
+            </div>
+          )}
+          {sttAvailable && (
+            <div className="sb-device-row" style={{ marginTop: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Mic</span>
+              <DevicePicker kind="audioinput" value={micDeviceId} onChange={setMicDeviceId} />
+            </div>
+          )}
         </div>
 
 
-        {/* Concise */}
+        {/* Short */}
         <div className="sidebar-section">
           <div className="sb-reasoning-controls">
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Concise mode</span>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Short mode</span>
             <button
-              id="sb-concise-toggle"
-              className={`sb-toggle${conciseMode ? ' on' : ''}`}
+              id="sb-short-toggle"
+              className={`sb-toggle${shortMode ? ' on' : ''}`}
               onClick={() => {
-                const next = !conciseMode;
-                send({ type: 'message', content: next ? '/concise on' : '/concise off' });
-                setClientSetting('AIGENT_CONCISE', next);
+                const next = !shortMode;
+                send({ type: 'message', content: next ? '/short on' : '/short off' });
+                setClientSetting('AIGENT_SHORT', next);
               }}
             >
-              {conciseMode ? 'ON' : 'OFF'}
+              {shortMode ? 'ON' : 'OFF'}
             </button>
           </div>
         </div>
@@ -313,18 +372,42 @@ export function Sidebar() {
         <div className="sidebar-section">
           <div className="sidebar-label">Capabilities</div>
           <div id="sb-caps-list">
-            {Object.keys(capsList).length === 0
+            {Object.keys(capsList).length === 0 && !ttsAvailable && !sttAvailable
               ? <span className="sidebar-value" style={{ fontSize: 11 }}>--</span>
-              : Object.entries(capsList).map(([cap, grant]) => (
-                  <div key={cap} className="cap-item">
-                    <span className={`cap-grant ${grant}`} title={grant}>
-                      {grant === 'prompt' ? '?' : grant.slice(0, 3)}
-                    </span>
-                    <span className="cap-name" title={cap}>
-                      {cap.replace('clipboard', 'clip').replace('screen', 'scr').replace('audio', 'aud')}
-                    </span>
-                  </div>
-                ))
+              : <>
+                  {Object.entries(capsList).map(([cap, info]) => {
+                    const ci = CAP_INFO[cap];
+                    const label = ci?.label ?? cap;
+                    const desc = ci?.description ?? cap;
+                    const tooltip = info.available
+                      ? `${desc} — ${GRANT_DESCRIPTIONS[info.grant] ?? info.grant}`
+                      : `${desc} — Not yet implemented`;
+                    return (
+                      <div key={cap} className={`cap-item${info.available ? '' : ' cap-unavailable'}`} title={tooltip}>
+                        {info.available ? (
+                          <span className={`cap-grant ${info.grant}`} title={GRANT_DESCRIPTIONS[info.grant] ?? info.grant}>
+                            {info.grant === 'prompt' ? '?' : info.grant.slice(0, 3)}
+                          </span>
+                        ) : (
+                          <span className="cap-grant cap-stub" title="Not yet implemented">n/a</span>
+                        )}
+                        <span className="cap-name">{label}</span>
+                      </div>
+                    );
+                  })}
+                  {ttsAvailable && (
+                    <div className="cap-item" title="Text-to-speech via edge-tts server">
+                      <span className="cap-grant allow" title="Available">on</span>
+                      <span className="cap-name">TTS</span>
+                    </div>
+                  )}
+                  {sttAvailable && (
+                    <div className="cap-item" title="Speech-to-text via Whisper server">
+                      <span className="cap-grant allow" title="Available">on</span>
+                      <span className="cap-name">STT</span>
+                    </div>
+                  )}
+                </>
             }
           </div>
         </div>

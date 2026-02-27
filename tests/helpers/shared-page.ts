@@ -34,6 +34,7 @@ export function useSharedPage(): () => Page {
     // Reset all Zustand stores (chat, UI, voice, connection, settings) and
     // dispatch __test_reset_input for local React component state.
     await page.evaluate(() => {
+      sessionStorage.removeItem('aigent-draft');
       const reset = (window as Record<string, unknown>).__testResetStores;
       if (typeof reset === 'function') reset();
     });

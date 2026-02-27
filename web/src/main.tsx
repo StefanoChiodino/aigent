@@ -1,3 +1,13 @@
+// In demo mode, clear persisted Zustand state BEFORE any store modules are
+// imported. Zustand persist middleware hydrates synchronously at import time,
+// so clearing inside a React effect is too late — the real session's messages
+// would already be loaded into the stores.
+if (import.meta.env.VITE_DEMO === 'true') {
+  localStorage.removeItem('aigent-chat');
+  localStorage.removeItem('aigent-client-settings');
+  localStorage.removeItem('aigent-voice');
+}
+
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './components/App';

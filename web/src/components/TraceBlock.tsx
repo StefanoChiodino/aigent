@@ -22,6 +22,13 @@ function prettyToolName(name: string): string {
   return name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function classifierBadge(meta: { tier: number; action: string; reason: string }): { icon: string; label: string } {
+  const tierLabel = `T${meta.tier}`;
+  if (meta.action === 'allow') return { icon: '🛡️', label: `${tierLabel}: ${meta.reason}` };
+  if (meta.action === 'block') return { icon: '🚫', label: `${tierLabel} blocked: ${meta.reason}` };
+  return { icon: '⚠️', label: `${tierLabel}: ${meta.reason}` };
+}
+
 /** Shorten a full model ID to a readable name, e.g. "claude-sonnet-4-6" → "sonnet 4.6" */
 function shortModelName(model: string): string {
   const m = model.replace(/^claude-/, '');
@@ -80,6 +87,14 @@ export function TraceBlock({ trace }: Props) {
         {trace.toolSummary && trace.toolSummary !== trace.toolName && (
           <span className="tool-summary">{trace.toolSummary}</span>
         )}
+        {trace.classifierMeta && (() => {
+          const badge = classifierBadge(trace.classifierMeta);
+          return (
+            <span className={`classifier-badge classifier-${trace.classifierMeta.action}`} title={badge.label}>
+              {badge.icon}
+            </span>
+          );
+        })()}
         <span className="trace-expand-hint">▸</span>
       </button>
       <div className={`tool-body${expanded ? '' : ' hidden'}`}>

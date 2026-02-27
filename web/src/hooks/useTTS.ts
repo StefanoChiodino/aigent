@@ -4,6 +4,15 @@ import { isDemo } from '../demo/useDemoMode';
 import { stripMarkdownForTTS, extractSpeakContent } from '../lib/markdown';
 import { useChatStore } from '../stores/chat';
 
+/** Apply the user's chosen speaker device to an HTMLAudioElement (if supported). */
+async function applySinkId(audio: HTMLAudioElement): Promise<void> {
+  const id = useVoiceStore.getState().speakerDeviceId;
+  if (!id) return; // '' = system default, no action needed
+  if (typeof (audio as any).setSinkId === 'function') {
+    try { await (audio as any).setSinkId(id); } catch { /* unsupported or device gone */ }
+  }
+}
+
 interface TTSControls {
   speakText: (text: string, onDone?: () => void) => void;
   stopAll: () => void;
@@ -79,7 +88,7 @@ export function useTTS(): TTSControls {
         const cleanup = () => { URL.revokeObjectURL(blobUrl); ttsAudio = null; resolve(); };
         audio.onended = cleanup;
         audio.onerror = cleanup;
-        void audio.play().catch(cleanup);
+        void applySinkId(audio).then(() => audio.play()).catch(cleanup);
       });
       if (!ttsChunkPlaying) break;
     }
@@ -211,6 +220,7 @@ export function useTTS(): TTSControls {
         useVoiceStore.getState().setTtsPlaying(false);
         onDone?.();
       };
+      await applySinkId(audio);
       void audio.play();
     }).catch((err: unknown) => {
       if (err instanceof Error && err.name === 'AbortError') return;

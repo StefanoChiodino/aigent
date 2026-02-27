@@ -35,11 +35,6 @@ export function useDemoMode(): void {
   useEffect(() => {
     if (!isDemo()) return;
 
-    // Clear persisted Zustand state to prevent cross-contamination
-    localStorage.removeItem('aigent-chat');
-    localStorage.removeItem('aigent-client-settings');
-    localStorage.removeItem('aigent-voice');
-
     // Set data attribute for CSS targeting (DEMO badge)
     document.body.setAttribute('data-demo', '');
 
@@ -48,13 +43,33 @@ export function useDemoMode(): void {
     engineRef.current = engine;
     demoEngine = engine;
 
+    // Read initial URL hash — if it matches a section, seek there after start
+    const initialHash = location.hash.slice(1); // strip leading #
+
     // Small delay to let React mount everything before starting playback
     const startTimer = setTimeout(() => {
-      void engine.play();
+      if (initialHash && engine.sectionIndex.has(initialHash)) {
+        // Seek to the section and auto-resume playback from there
+        engine.seekToSection(initialHash);
+        engine.resume();
+      } else {
+        void engine.play();
+      }
     }, 500);
+
+    // Listen for hash changes (user edits URL or clicks a link)
+    const onHashChange = () => {
+      const hash = location.hash.slice(1);
+      if (hash && engine.sectionIndex.has(hash)) {
+        engine.seekToSection(hash);
+        engine.resume();
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
 
     return () => {
       clearTimeout(startTimer);
+      window.removeEventListener('hashchange', onHashChange);
       engine.stop();
       demoEngine = null;
       useDemoPlaybackStore.getState().setCurrentStep(0);

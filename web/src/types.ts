@@ -18,6 +18,12 @@ export interface ThinkingTrace {
   running: boolean;
 }
 
+export interface ClassifierMeta {
+  tier: 1 | 2 | 3;
+  action: 'allow' | 'block' | 'ask';
+  reason: string;
+}
+
 export interface ToolTrace {
   id: string;
   type: 'tool';
@@ -28,6 +34,7 @@ export interface ToolTrace {
   running: boolean;
   model?: string;
   thinking?: string;
+  classifierMeta?: ClassifierMeta;
 }
 
 export interface DisplayAttachment {
@@ -63,7 +70,7 @@ export interface ServerState {
   messages: DisplayMessage[];
   usage: TokenUsage;
   thinking: string;
-  concise: boolean;
+  short: boolean;
   profile: string;
   sessionId: string;
   model: string;
@@ -117,7 +124,7 @@ export type ServerEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
-  | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string; concise?: boolean; availableModels?: string[] }
+  | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string; short?: boolean; availableModels?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string; durationMinutes?: number; fallbackHint?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
@@ -129,11 +136,12 @@ export type ServerEvent =
   | { type: 'mcp_tool_request'; id: string; server: string; tool: string; params: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
-  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, string> }
+  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; autonomousCmd?: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
+  | { type: 'classifier_decision'; tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
   | { type: 'reset' }
   | { type: 'pong' };
 
