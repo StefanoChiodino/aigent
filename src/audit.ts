@@ -14,7 +14,12 @@
 
 import { appendFileSync } from 'node:fs';
 
-const AUDIT_LOG_PATH = '/tmp/aigent-audit.log';
+let auditLogPath = '/tmp/aigent-audit.log';
+
+/** Override the audit log path — for test isolation only. */
+export function _setLogPathForTest(path: string): void {
+  auditLogPath = path;
+}
 
 export type AuditEventType =
   // Exec pipeline
@@ -65,7 +70,7 @@ export interface AuditEvent {
 export function auditLog(event: AuditEvent): void {
   try {
     const line = JSON.stringify({ ts: Date.now(), ...event }) + '\n';
-    appendFileSync(AUDIT_LOG_PATH, line, 'utf-8');
+    appendFileSync(auditLogPath, line, 'utf-8');
   } catch {
     // Audit logging must never crash the process
   }

@@ -169,6 +169,11 @@ export function loadWorkspaceContext(workspacePath: string): string {
   return `\n\n---\n# Workspace Context\n\nThe following files define who you are and what you know.\n\nConfig files (${configDir}/) are read-only in the sandbox. To edit them, use the\nrequest_config_write tool — the user will see a diff and approve or deny.\n\nMemory files (${workspacePath}/) are freely writable — update them as you learn.\n\n${sections.join('\n\n---\n\n')}`;
 }
 
+/** Reset the file cache — for test isolation only. */
+export function _clearCacheForTest(): void {
+  fileCache.clear();
+}
+
 /**
  * Get the current date string for memory file naming.
  */

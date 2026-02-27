@@ -1,11 +1,17 @@
 /**
- * Unit tests for src/tools.ts — fetch response parsing.
+ * Unit tests for src/tools.ts — curl parsing, name mapping, tool definitions, summarization.
  * Run with: node --import tsx/esm --test src/tools.test.ts
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCurlResponse } from './tools.js';
+import {
+  parseCurlResponse,
+  toClaudeCodeName,
+  fromClaudeCodeName,
+  getToolDefinitions,
+  summarizeToolCall,
+} from './tools.js';
 
 // ---------------------------------------------------------------------------
 // parseCurlResponse
@@ -88,5 +94,249 @@ describe('parseCurlResponse', () => {
     const raw = 'HTTP/2 200\r\ncontent-type: text/html\r\n\r\n   \n  \t  ';
     const result = parseCurlResponse(raw, true);
     assert.equal(result, '(empty response)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toClaudeCodeName / fromClaudeCodeName
+// ---------------------------------------------------------------------------
+
+describe('toClaudeCodeName', () => {
+  it('maps exec → Bash', () => assert.equal(toClaudeCodeName('exec'), 'Bash'));
+  it('maps read_file → Read', () => assert.equal(toClaudeCodeName('read_file'), 'Read'));
+  it('maps write_file → Write', () => assert.equal(toClaudeCodeName('write_file'), 'Write'));
+  it('maps edit_file → Edit', () => assert.equal(toClaudeCodeName('edit_file'), 'Edit'));
+  it('maps grep → Grep', () => assert.equal(toClaudeCodeName('grep'), 'Grep'));
+  it('maps glob → Glob', () => assert.equal(toClaudeCodeName('glob'), 'Glob'));
+  it('passes through unmapped names', () => assert.equal(toClaudeCodeName('fetch'), 'fetch'));
+  it('passes through dispatch_task', () => assert.equal(toClaudeCodeName('dispatch_task'), 'dispatch_task'));
+});
+
+describe('fromClaudeCodeName', () => {
+  it('maps Bash → exec (case-insensitive)', () => assert.equal(fromClaudeCodeName('Bash'), 'exec'));
+  it('maps bash → exec', () => assert.equal(fromClaudeCodeName('bash'), 'exec'));
+  it('maps Read → read_file', () => assert.equal(fromClaudeCodeName('Read'), 'read_file'));
+  it('maps Write → write_file', () => assert.equal(fromClaudeCodeName('Write'), 'write_file'));
+  it('maps Edit → edit_file', () => assert.equal(fromClaudeCodeName('Edit'), 'edit_file'));
+  it('maps Grep → grep', () => assert.equal(fromClaudeCodeName('Grep'), 'grep'));
+  it('maps Glob → glob', () => assert.equal(fromClaudeCodeName('Glob'), 'glob'));
+  it('passes through unmapped names', () => assert.equal(fromClaudeCodeName('fetch'), 'fetch'));
+});
+
+// ---------------------------------------------------------------------------
+// getToolDefinitions
+// ---------------------------------------------------------------------------
+
+describe('getToolDefinitions', () => {
+  it('returns 20 tools with internal names', () => {
+    const tools = getToolDefinitions(false);
+    assert.equal(tools.length, 20);
+  });
+
+  it('returns 20 tools with CC names', () => {
+    const tools = getToolDefinitions(true);
+    assert.equal(tools.length, 20);
+  });
+
+  it('internal names include exec, read_file, write_file', () => {
+    const names = getToolDefinitions(false).map((t) => t.name);
+    assert.ok(names.includes('exec'));
+    assert.ok(names.includes('read_file'));
+    assert.ok(names.includes('write_file'));
+  });
+
+  it('CC names include Bash, Read, Write', () => {
+    const names = getToolDefinitions(true).map((t) => t.name);
+    assert.ok(names.includes('Bash'));
+    assert.ok(names.includes('Read'));
+    assert.ok(names.includes('Write'));
+  });
+
+  it('every tool has name, description, and input_schema', () => {
+    for (const tool of getToolDefinitions(false)) {
+      assert.ok(tool.name, `tool should have a name`);
+      assert.ok(tool.description, `${tool.name} should have a description`);
+      assert.equal(tool.input_schema.type, 'object', `${tool.name} schema should be object`);
+    }
+  });
+
+  it('unmapped tools keep their name in CC mode', () => {
+    const internal = getToolDefinitions(false).map((t) => t.name);
+    const cc = getToolDefinitions(true).map((t) => t.name);
+    // fetch has no CC mapping, should stay the same
+    assert.ok(internal.includes('fetch'));
+    assert.ok(cc.includes('fetch'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// summarizeToolCall
+// ---------------------------------------------------------------------------
+
+describe('summarizeToolCall', () => {
+  it('exec: "$ command"', () => {
+    assert.equal(summarizeToolCall('exec', { command: 'ls -la' }, false), '$ ls -la');
+  });
+
+  it('exec: truncates long commands to 80 chars', () => {
+    const long = 'a'.repeat(100);
+    const result = summarizeToolCall('exec', { command: long }, false);
+    assert.equal(result, `$ ${'a'.repeat(80)}...`);
+  });
+
+  it('exec with cwd: includes directory', () => {
+    const result = summarizeToolCall('exec', { command: 'ls', cwd: '/tmp' }, false);
+    assert.equal(result, '$ ls (in /tmp)');
+  });
+
+  it('read_file: "read path"', () => {
+    assert.equal(summarizeToolCall('read_file', { path: 'foo.ts' }, false), 'read foo.ts');
+  });
+
+  it('read_file with offset+limit: includes range', () => {
+    const result = summarizeToolCall('read_file', { path: 'foo.ts', offset: 10, limit: 50 }, false);
+    assert.equal(result, 'read foo.ts [10:+50]');
+  });
+
+  it('write_file: "write path (N lines)"', () => {
+    const result = summarizeToolCall('write_file', { path: 'out.txt', content: 'a\nb\nc' }, false);
+    assert.equal(result, 'write out.txt (3 lines)');
+  });
+
+  it('edit_file: "edit path"', () => {
+    assert.equal(
+      summarizeToolCall('edit_file', { path: 'x.ts', old_text: 'a', new_text: 'b' }, false),
+      'edit x.ts',
+    );
+  });
+
+  it('list_files: "ls ." by default', () => {
+    assert.equal(summarizeToolCall('list_files', {}, false), 'ls .');
+  });
+
+  it('list_files with path', () => {
+    assert.equal(summarizeToolCall('list_files', { path: '/src' }, false), 'ls /src');
+  });
+
+  it('grep: includes pattern and path', () => {
+    assert.equal(summarizeToolCall('grep', { pattern: 'TODO' }, false), 'grep "TODO" .');
+  });
+
+  it('glob: includes pattern and path', () => {
+    assert.equal(summarizeToolCall('glob', { pattern: '*.ts' }, false), 'glob "*.ts" .');
+  });
+
+  it('fetch: "GET url"', () => {
+    assert.equal(
+      summarizeToolCall('fetch', { url: 'https://example.com' }, false),
+      'GET https://example.com',
+    );
+  });
+
+  it('fetch with method: "POST url"', () => {
+    assert.equal(
+      summarizeToolCall('fetch', { url: 'https://api.com/data', method: 'post' }, false),
+      'POST https://api.com/data',
+    );
+  });
+
+  it('fetch truncates long URLs to 60 chars', () => {
+    const longUrl = 'https://example.com/' + 'x'.repeat(60);
+    const result = summarizeToolCall('fetch', { url: longUrl }, false);
+    assert.ok(result.endsWith('...'));
+    // "GET " prefix + 60 chars + "..."
+    assert.ok(result.length <= 68);
+  });
+
+  it('tree: "tree ." by default', () => {
+    assert.equal(summarizeToolCall('tree', {}, false), 'tree .');
+  });
+
+  it('patch: "patch path (N edits)"', () => {
+    const edits = [{ old_text: 'a', new_text: 'b' }, { old_text: 'c', new_text: 'd' }];
+    assert.equal(summarizeToolCall('patch', { path: 'f.ts', edits }, false), 'patch f.ts (2 edits)');
+  });
+
+  it('screenshot: "screenshot"', () => {
+    assert.equal(summarizeToolCall('screenshot', {}, false), 'screenshot');
+  });
+
+  it('screenshot with region', () => {
+    assert.equal(summarizeToolCall('screenshot', { region: '0,0,100,100' }, false), 'screenshot (0,0,100,100)');
+  });
+
+  it('spawn_agent: truncates long task', () => {
+    const task = 'a'.repeat(80);
+    const result = summarizeToolCall('spawn_agent', { task }, false);
+    assert.ok(result.startsWith('spawn: '));
+    assert.ok(result.endsWith('...'));
+  });
+
+  it('dispatch_task: "dispatch: task"', () => {
+    assert.equal(summarizeToolCall('dispatch_task', { task: 'do stuff' }, false), 'dispatch: do stuff');
+  });
+
+  it('host: "host: capability"', () => {
+    assert.equal(summarizeToolCall('host', { capability: 'clipboard' }, false), 'host: clipboard');
+  });
+
+  it('host with reason', () => {
+    const result = summarizeToolCall('host', { capability: 'audio', reason: 'play a sound' }, false);
+    assert.equal(result, 'host: audio (play a sound)');
+  });
+
+  it('request_config_write: "config write: file"', () => {
+    assert.equal(
+      summarizeToolCall('request_config_write', { file: 'SOUL.md', content: '...', reason: '...' }, false),
+      'config write: SOUL.md',
+    );
+  });
+
+  it('switch_model: "switch model → name"', () => {
+    assert.equal(
+      summarizeToolCall('switch_model', { model: 'haiku' }, false),
+      'switch model → haiku',
+    );
+  });
+
+  it('search_memory: includes query', () => {
+    assert.equal(
+      summarizeToolCall('search_memory', { query: 'API keys' } as never, false),
+      'search memory: "API keys"',
+    );
+  });
+
+  it('request_screenshot: "screenshot from browser"', () => {
+    assert.equal(summarizeToolCall('request_screenshot', {}, false), 'screenshot from browser');
+  });
+
+  it('browser_ext activate_tab', () => {
+    assert.equal(
+      summarizeToolCall('browser_ext', { action: 'activate_tab', tabId: 5 }, false),
+      'browser: activate tab 5',
+    );
+  });
+
+  it('browser_ext extract_a11y with selector', () => {
+    assert.equal(
+      summarizeToolCall('browser_ext', { action: 'extract_a11y', rootSelector: '#main' }, false),
+      'browser: extract_a11y (#main)',
+    );
+  });
+
+  it('browser_ext open_tab with url', () => {
+    assert.equal(
+      summarizeToolCall('browser_ext', { action: 'open_tab', url: 'https://x.com' }, false),
+      'browser: open tab → https://x.com',
+    );
+  });
+
+  it('handles CC names when isOAuth=true', () => {
+    // 'Bash' should be translated to 'exec' internally
+    assert.equal(summarizeToolCall('Bash', { command: 'pwd' }, true), '$ pwd');
+  });
+
+  it('unknown tool returns raw name', () => {
+    assert.equal(summarizeToolCall('nonexistent_tool', {}, false), 'nonexistent_tool');
   });
 });

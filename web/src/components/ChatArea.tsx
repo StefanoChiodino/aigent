@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '../stores/chat';
 import { Message } from './Message';
 import { StreamingMessage } from './StreamingMessage';
@@ -6,10 +6,29 @@ import { StreamingMessage } from './StreamingMessage';
 export function ChatArea() {
   const messages = useChatStore(s => s.messages);
   const streamingActive = useChatStore(s => s.streaming.active);
+  const streamingTextLen = useChatStore(s => s.streaming.text.length);
+  const traceCount = useChatStore(s => s.streaming.traces.length);
   const endRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLElement>(null);
+  const userScrolledUp = useRef(false);
+
+  const handleScroll = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    // "near bottom" = within 150px of the bottom edge
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+    userScrolledUp.current = !atBottom;
+  }, []);
+
+  // Reset scroll lock when a new response starts
+  useEffect(() => {
+    if (streamingActive) userScrolledUp.current = false;
+  }, [streamingActive]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'instant' });
+    if (!userScrolledUp.current) {
+      endRef.current?.scrollIntoView({ behavior: 'instant' });
+    }
   });
 
   // Group consecutive system messages
@@ -28,7 +47,7 @@ export function ChatArea() {
   }
 
   return (
-    <main id="messages">
+    <main id="messages" ref={containerRef} onScroll={handleScroll}>
       {messages.length === 0 && !streamingActive && (
         <div id="empty-state">
           <div className="empty-icon">🤖</div>
