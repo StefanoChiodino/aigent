@@ -150,11 +150,13 @@ function tryConnect(): boolean {
 
 function generateSimulated(isWorking: boolean, isPlaying: boolean): void {
   // Phase advances faster when working or playing
-  const speed = isPlaying ? 0.14 : isWorking ? 0.08 : 0.03;
+  const speed = isPlaying ? 0.14 : isWorking ? 0.08 : 0.005;
   simPhase += speed;
 
   // Amplitude: playing > working > idle
-  const amp = isPlaying ? 0.7 : isWorking ? 0.45 : 0.2;
+  // Idle is near-zero so visualizers are nearly still when silent —
+  // makes the contrast when speech kicks in dramatic and fun.
+  const amp = isPlaying ? 0.7 : isWorking ? 0.45 : 0.04;
 
   // Frequency data — sine waves with harmonic layering
   for (let i = 0; i < BIN_COUNT; i++) {
@@ -167,7 +169,7 @@ function generateSimulated(isWorking: boolean, isPlaying: boolean): void {
     const normalized = (base + 1) * 0.5; // 0-1
     // Lower frequencies are louder (natural rolloff)
     const rolloff = 1 - frac * 0.6;
-    const noise = Math.random() * 0.08;
+    const noise = Math.random() * (isPlaying ? 0.08 : isWorking ? 0.04 : 0.01);
     const val = (normalized * amp * rolloff + noise) * 255;
     freqBuf[i] = Math.max(0, Math.min(255, val));
   }

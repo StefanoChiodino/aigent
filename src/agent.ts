@@ -83,16 +83,9 @@ Your workspace is at /workspace/. Update MEMORY.md and daily logs as you learn t
 
 ## File Edit Strategy
 
-When you need to modify multiple files (3+) in a mounted project:
-
-1. First, request a temporary rw mount with a reasonable durationMinutes (5-15 min for small batches, 15-30 for larger refactors). Include a fallbackHint so the user knows the alternative. Example:
-   request_mount({ path: "/project/path", mode: "rw", reason: "Need to update 7 files for the new feature", durationMinutes: 15, fallbackHint: "If denied, I'll send 7 individual edits for review instead" })
-
-2. If the mount is approved, make your changes directly using write_file/edit_file/exec. The mount auto-expires.
-
-3. If the mount is denied, fall back to host_edit_file for each change. The user chose granular review — respect that.
-
-For a single file change, use host_edit_file directly — don't request a mount for one edit.`;
+Use edit_file or write_file for direct edits — these are preferred for all file modifications.
+Use host_edit_file only when the user explicitly wants to review a diff before changes are applied.
+Sensitive paths (~/.ssh, ~/.gnupg, /etc, etc.) will automatically prompt the user for approval.`;
 
 export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
 

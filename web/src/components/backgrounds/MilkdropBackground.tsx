@@ -116,22 +116,32 @@ export function MilkdropBackground() {
     window.addEventListener('resize', resize);
 
     let time = 0;
+    let lastDrawTime = 0;
 
-    function draw() {
+    function draw(now: number) {
       const w = window.innerWidth;
       const h = window.innerHeight;
       const working = isWorkingRef.current;
       const audio = getAudioFrame();
 
-      // Time progression: faster with audio/working
-      const speed = audio.isPlaying ? 0.025 : working ? 0.012 : 0.005;
+      const isStandby = !audio.isPlaying && !working;
+
+      // On standby, throttle to ~10fps to reduce flicker
+      if (isStandby && now - lastDrawTime < 100) {
+        animRef.current = requestAnimationFrame(draw);
+        return;
+      }
+      lastDrawTime = now;
+
+      // Time progression: faster with audio/working, barely drifting on standby
+      const speed = audio.isPlaying ? 0.025 : working ? 0.012 : 0.0005;
       time += speed;
 
       // Audio modulation parameters
-      const warpAmp = 0.8 + audio.bassEnergy * 2.5;
+      const warpAmp = audio.isPlaying ? 0.8 + audio.bassEnergy * 2.5 : working ? 0.8 : 0.15;
       const colorSpeed = 0.3 + audio.trebleEnergy * 1.5;
-      const noiseFreq = 1.5 + audio.midEnergy * 2.0;
-      const brightness = audio.isPlaying ? 0.7 : working ? 0.45 : 0.25;
+      const noiseFreq = audio.isPlaying ? 1.5 + audio.midEnergy * 2.0 : working ? 1.5 : 0.8;
+      const brightness = audio.isPlaying ? 0.7 : working ? 0.45 : 0.15;
 
       const imgData = oCtx!.createImageData(offW, offH);
       const data = imgData.data;
@@ -153,17 +163,19 @@ export function MilkdropBackground() {
           angle = ((angle % segAngle) + segAngle) % segAngle;
           if (angle > segAngle / 2) angle = segAngle - angle; // mirror within segment
 
-          // Warp polar coordinates with noise
-          const warpX = fbm(r * noiseFreq + time, angle * 2 + time * 0.3, 3) * warpAmp;
-          const warpY = fbm(angle * 2 + time * 0.5, r * noiseFreq - time * 0.2, 3) * warpAmp;
+          // Warp polar coordinates with noise (fewer octaves on standby)
+          const warpOct = isStandby ? 2 : 3;
+          const warpX = fbm(r * noiseFreq + time, angle * 2 + time * 0.3, warpOct) * warpAmp;
+          const warpY = fbm(angle * 2 + time * 0.5, r * noiseFreq - time * 0.2, warpOct) * warpAmp;
 
-          // Sample noise at warped position
-          const n1 = fbm(r * 3 + warpX + time * 0.4, angle * 3 + warpY, 4);
-          const n2 = fbm(r * 2 - warpY + time * 0.3, angle * 2 + warpX + time * 0.2, 3);
+          // Sample noise at warped position (fewer octaves on standby)
+          const sampleOct = isStandby ? 2 : 4;
+          const n1 = fbm(r * 3 + warpX + time * 0.4, angle * 3 + warpY, sampleOct);
+          const n2 = fbm(r * 2 - warpY + time * 0.3, angle * 2 + warpX + time * 0.2, isStandby ? 2 : 3);
 
           // Map noise to HSL color
           const hue = ((n1 + 0.5) * 180 + time * colorSpeed * 60 + r * 120) % 360;
-          const sat = 60 + n2 * 40;
+          const sat = isStandby ? 50 + n2 * 30 : 60 + n2 * 40;
           const light = (n1 + 0.5) * 50 * brightness + 10;
 
           // HSL to RGB (inline for performance)
@@ -208,7 +220,6 @@ export function MilkdropBackground() {
     }
 
     animRef.current = requestAnimationFrame(draw);
-
     return () => {
       window.removeEventListener('resize', resize);
       cancelAnimationFrame(animRef.current);

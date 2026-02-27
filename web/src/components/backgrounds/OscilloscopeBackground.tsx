@@ -73,10 +73,10 @@ export function OscilloscopeBackground() {
       tCtx!.fillStyle = `rgba(0, 0, 0, ${fadeAlpha})`;
       tCtx!.fillRect(0, 0, w, h);
 
-      phase += audio.isPlaying ? 0.03 : working ? 0.015 : 0.008;
+      phase += audio.isPlaying ? 0.03 : working ? 0.015 : 0.002;
 
       const centerY = h * 0.5;
-      const amplitude = h * (audio.isPlaying ? 0.3 : working ? 0.15 : 0.08);
+      const amplitude = h * (audio.isPlaying ? 0.3 : working ? 0.15 : 0.02);
       const waveData = audio.waveformData;
       const binCount = waveData.length;
 

@@ -1,8 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useUIStore } from '../../stores/ui';
 import { useConnectionStore } from '../../stores/connection';
 
-export function QuestionModal() {
+/**
+ * Inline question form rendered inside InputArea (above the input row).
+ * Replaces the input row when a user_question is at the front of the permQueue.
+ */
+export function QuestionForm() {
   const permQueue = useUIStore(s => s.permQueue);
   const resolveQuestionRequest = useUIStore(s => s.resolveQuestionRequest);
   const send = useConnectionStore(s => s.send);
@@ -12,7 +16,6 @@ export function QuestionModal() {
 
   const [freeText, setFreeText] = useState('');
   const [selectedOptions, setSelectedOptions] = useState<Set<string>>(new Set());
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Reset form state when question changes
   useEffect(() => {
@@ -25,7 +28,6 @@ export function QuestionModal() {
     if (!isQuestion || !req) return;
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
-      // Allow Escape from anywhere, but Enter only from non-textarea elements
       if (e.key === 'Escape') {
         e.preventDefault();
         handleDismiss();
@@ -68,81 +70,78 @@ export function QuestionModal() {
       });
     } else {
       setSelectedOptions(new Set([label]));
-      // Clear free text when an option is selected in single-select mode
       if (allowFreeText) setFreeText('');
     }
   }
 
   return (
-    <div id="question-overlay">
-      <div id="question-card">
-        <div className="question-icon">&#x2753;</div>
-        <div className="question-title">Question from Agent</div>
-        <div className="question-text">{req.detail}</div>
+    <div id="question-inline">
+      <div className="question-header">
+        <span className="question-icon">&#x2753;</span>
+        <span className="question-title">Question from Agent</span>
+      </div>
+      <div className="question-text">{req.detail}</div>
 
-        {hasOptions && (
-          <div className="question-options">
-            {options.map((opt) => (
-              <label
-                key={opt.label}
-                className={`question-option${selectedOptions.has(opt.label) ? ' selected' : ''}`}
-              >
-                <input
-                  type={multiSelect ? 'checkbox' : 'radio'}
-                  name="question-option"
-                  checked={selectedOptions.has(opt.label)}
-                  onChange={() => toggleOption(opt.label)}
-                />
-                <div className="question-option-content">
-                  <div className="question-option-label">{opt.label}</div>
-                  {opt.description && (
-                    <div className="question-option-desc">{opt.description}</div>
-                  )}
-                </div>
-              </label>
-            ))}
-          </div>
-        )}
-
-        {allowFreeText && (
-          <textarea
-            ref={textareaRef}
-            className="question-freetext"
-            placeholder={hasOptions ? 'Or type your own answer...' : 'Type your answer...'}
-            value={freeText}
-            onChange={(e) => {
-              setFreeText(e.target.value);
-              // Clear option selection when typing in single-select mode
-              if (!multiSelect && selectedOptions.size > 0) {
-                setSelectedOptions(new Set());
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                handleSubmit();
-              }
-            }}
-            rows={3}
-            autoFocus={!hasOptions}
-          />
-        )}
-
-        <div className="question-actions">
-          <button
-            className="perm-btn perm-approve"
-            onClick={handleSubmit}
-            disabled={!canSubmit}
-          >
-            Submit
-          </button>
-          <button
-            className="perm-btn perm-deny"
-            onClick={handleDismiss}
-          >
-            Dismiss
-          </button>
+      {hasOptions && (
+        <div className="question-options">
+          {options.map((opt) => (
+            <label
+              key={opt.label}
+              className={`question-option${selectedOptions.has(opt.label) ? ' selected' : ''}`}
+            >
+              <input
+                type={multiSelect ? 'checkbox' : 'radio'}
+                name="question-option"
+                checked={selectedOptions.has(opt.label)}
+                onChange={() => toggleOption(opt.label)}
+              />
+              <div className="question-option-content">
+                <div className="question-option-label">{opt.label}</div>
+                {opt.description && (
+                  <div className="question-option-desc">{opt.description}</div>
+                )}
+              </div>
+            </label>
+          ))}
         </div>
+      )}
+
+      {allowFreeText && (
+        <textarea
+          className="question-freetext"
+          placeholder={hasOptions ? 'Or type your own answer...' : 'Type your answer...'}
+          value={freeText}
+          onChange={(e) => {
+            setFreeText(e.target.value);
+            if (!multiSelect && selectedOptions.size > 0) {
+              setSelectedOptions(new Set());
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+              e.preventDefault();
+              handleSubmit();
+            }
+          }}
+          rows={2}
+          autoFocus={!hasOptions}
+        />
+      )}
+
+      <div className="question-actions">
+        <button
+          className="perm-btn perm-approve"
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+        >
+          Submit
+        </button>
+        <button
+          className="perm-btn perm-deny"
+          onClick={handleDismiss}
+        >
+          Dismiss
+        </button>
       </div>
     </div>
   );

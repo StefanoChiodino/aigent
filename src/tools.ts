@@ -1,7 +1,7 @@
 import { execSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { sanitizedEnv, validateFetchUrl, validateFetchUrlDns, checkCommandSafety, validateReadonlyCommand, checkSensitivePath, checkPathConfinement } from './safety.js';
+import { sanitizedEnv, validateFetchUrl, validateFetchUrlDns, checkCommandSafety, validateReadonlyCommand, checkSensitivePath } from './safety.js';
 import { auditLog } from './audit.js';
 import type { ToolContentBlock, ImageMediaType } from './provider.js';
 import { createLogger } from './logger.js';
@@ -579,9 +579,9 @@ const requestConfigWriteTool: ToolDef = {
 const hostEditFileTool: ToolDef = {
   name: 'host_edit_file',
   description:
-    'Make targeted str_replace edits to a file on the host filesystem. The user sees a diff ' +
-    'and approves or denies before anything is written. Use this instead of requesting a full rw mount ' +
-    'for single-file changes, or as the fallback when a temporary rw mount request is denied. ' +
+    'Make targeted str_replace edits to a file with user review. The user sees a diff ' +
+    'and approves or denies before anything is written. Use this when the user wants to review ' +
+    'changes before they are applied — otherwise prefer edit_file for direct edits. ' +
     'Each edit finds old_str verbatim in the file and replaces it with new_str. ' +
     'If old_str appears more than once and no index is given, the call fails immediately with the ' +
     'line numbers of all matches so you can retry with the correct index (0-based). ' +
@@ -591,7 +591,7 @@ const hostEditFileTool: ToolDef = {
     properties: {
       path: {
         type: 'string',
-        description: 'Absolute container path of the file to edit (mirrors host path exactly).',
+        description: 'Absolute path of the file to edit.',
       },
       edits: {
         type: 'array',
@@ -1059,7 +1059,6 @@ export async function executeTool(
     case 'write_file': {
       const { path, content } = input as WriteFileInput;
       const absPath = resolve(path);
-      const projectRoot = process.env['AIGENT_WORKSPACE'] ?? process.cwd();
 
       // Tier 1: hard-block writes to credentials and system interfaces
       const sensitivityLevel = checkSensitivePath(absPath);
@@ -1068,12 +1067,8 @@ export async function executeTool(
         return `Access denied: ${absPath} is a protected path`;
       }
 
-      // Path confinement: block writes outside project root (prompt user)
-      const confinementErr = checkPathConfinement(absPath, projectRoot);
-      if (confinementErr || sensitivityLevel === 'prompt') {
-        if (confinementErr) {
-          auditLog({ type: 'file_traversal_block', detail: absPath, reason: confinementErr });
-        }
+      // Tier 2: prompt for sensitive paths (home dir, system dirs)
+      if (sensitivityLevel === 'prompt') {
         const { requestFileApproval } = await import('./server.js');
         const approval = await requestFileApproval(absPath, 'write', signal);
         auditLog({ type: approval.ok ? 'file_user_approve' : 'file_user_deny', detail: absPath, approved: approval.ok });
@@ -1095,7 +1090,6 @@ export async function executeTool(
     case 'edit_file': {
       const { path, old_text, new_text } = input as EditFileInput;
       const absPath = resolve(path);
-      const projectRoot = process.env['AIGENT_WORKSPACE'] ?? process.cwd();
 
       // Tier 1: hard-block edits to credentials and system interfaces
       const sensitivityLevel = checkSensitivePath(absPath);
@@ -1104,12 +1098,8 @@ export async function executeTool(
         return `Access denied: ${absPath} is a protected path`;
       }
 
-      // Path confinement: block edits outside project root (prompt user)
-      const confinementErr = checkPathConfinement(absPath, projectRoot);
-      if (confinementErr || sensitivityLevel === 'prompt') {
-        if (confinementErr) {
-          auditLog({ type: 'file_traversal_block', detail: absPath, reason: confinementErr });
-        }
+      // Tier 2: prompt for sensitive paths (home dir, system dirs)
+      if (sensitivityLevel === 'prompt') {
         const { requestFileApproval } = await import('./server.js');
         const approval = await requestFileApproval(absPath, 'write', signal);
         auditLog({ type: approval.ok ? 'file_user_approve' : 'file_user_deny', detail: absPath, approved: approval.ok });

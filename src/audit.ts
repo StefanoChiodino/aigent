@@ -38,7 +38,6 @@ export type AuditEventType =
   | 'file_sensitive_prompt'
   | 'file_user_approve'
   | 'file_user_deny'
-  | 'file_traversal_block'
   // Fetch
   | 'fetch_ssrf_block'
   | 'fetch_dns_block'

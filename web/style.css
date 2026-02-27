@@ -3203,45 +3203,43 @@ html, body {
   border-color: rgba(224, 160, 64, 0.6);
 }
 
-/* ── Question Modal ── */
+/* ── Question Inline Form (in InputArea) ── */
 
-#question-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
+#question-inline {
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  background: var(--bg-secondary);
+  animation: slideUp 0.2s ease;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.question-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  animation: fadeIn 0.2s ease;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-#question-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 24px;
-  max-width: 500px;
-  width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
-  animation: scaleIn 0.2s ease;
-}
-
-.question-icon { font-size: 1.5rem; margin-bottom: 8px; }
+.question-icon { font-size: 1.1rem; }
 
 .question-title {
-  font-size: 1.1rem;
+  font-size: 0.9rem;
   font-weight: 600;
-  margin-bottom: 12px;
   color: var(--text-primary);
 }
 
 .question-text {
-  font-size: 0.95rem;
-  line-height: 1.5;
-  margin-bottom: 16px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  margin-bottom: 12px;
   color: var(--text-secondary);
   white-space: pre-wrap;
 }
@@ -3249,15 +3247,15 @@ html, body {
 .question-options {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 12px;
 }
 
 .question-option {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
@@ -3294,7 +3292,7 @@ html, body {
 
 .question-freetext {
   width: 100%;
-  padding: 10px;
+  padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-primary);
@@ -3302,7 +3300,7 @@ html, body {
   font-family: inherit;
   font-size: 0.9rem;
   resize: vertical;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
   box-sizing: border-box;
 }
 

@@ -7,7 +7,6 @@
  * - Command safety checks (warn on destructive patterns)
  * - Sensitive path detection (block access to credentials, system dirs)
  * - DNS rebinding protection (resolve hostname before fetch)
- * - Path confinement (block traversal outside project root)
  */
 
 import { homedir } from 'node:os';
@@ -566,20 +565,6 @@ export function checkSensitivePath(absPath: string): SensitivePathLevel {
     if (check(absPath, home)) return 'prompt';
   }
   return null;
-}
-
-// --- Path confinement ---
-
-/**
- * Check that a resolved absolute path stays within the project root.
- * Returns null if safe, or a human-readable reason if outside project root.
- * Used to block path traversal attacks (../../etc/hosts).
- */
-export function checkPathConfinement(absPath: string, projectRoot: string): string | null {
-  // Normalize: ensure projectRoot ends without trailing slash for consistent prefix check
-  const root = projectRoot.endsWith('/') ? projectRoot.slice(0, -1) : projectRoot;
-  if (absPath === root || absPath.startsWith(root + '/')) return null;
-  return `Path ${absPath} is outside project root ${root}`;
 }
 
 // --- DNS rebinding SSRF protection ---

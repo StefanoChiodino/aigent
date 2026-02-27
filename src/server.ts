@@ -752,7 +752,13 @@ export function requestUserQuestion(
       finish({ answer: '', dismissed: true });
     }, 300_000); // 5 minute timeout
 
-    const entry: typeof pendingUserQuestionRequests extends Map<string, infer V> ? V : never = {
+    const entry: {
+      question: string;
+      options?: { label: string; description?: string }[];
+      multiSelect?: boolean;
+      allowFreeText?: boolean;
+      resolve: (response: { answer: string; selectedOptions?: string[]; dismissed: boolean }) => void;
+    } = {
       question,
       resolve: (response) => {
         clearTimeout(timer);
@@ -1845,7 +1851,7 @@ function handleClient(socket: Socket): void {
           case 'browser_ext_result':
             resolveBrowserExtRequest(cmd.id, cmd);
             break;
-          case 'user_question_response':
+          case 'user_question_response': {
             const questionResponse: { answer: string; selectedOptions?: string[]; dismissed: boolean } = {
               answer: cmd.answer,
               dismissed: cmd.dismissed,
@@ -1853,6 +1859,7 @@ function handleClient(socket: Socket): void {
             if (cmd.selectedOptions !== undefined) questionResponse.selectedOptions = cmd.selectedOptions;
             resolveUserQuestionRequest(cmd.id, questionResponse);
             break;
+          }
           case 'context_breakdown_request':
             try {
               send(socket, { type: 'context_breakdown', breakdown: agent.getContextBreakdown() });

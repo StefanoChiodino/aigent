@@ -65,10 +65,10 @@ export function CircularSpectrumBackground() {
       const maxBarLen = minDim * 0.25;
 
       // Rotation speed: faster when playing or working
-      const rotSpeed = audio.isPlaying ? 0.008 : working ? 0.004 : 0.001;
+      const rotSpeed = audio.isPlaying ? 0.008 : working ? 0.004 : 0.0003;
       rotation += rotSpeed;
 
-      pulsePhase += audio.isPlaying ? 0.06 : working ? 0.03 : 0.015;
+      pulsePhase += audio.isPlaying ? 0.06 : working ? 0.03 : 0.005;
 
       // Map frequency bins to bars
       const binCount = audio.frequencyData.length;

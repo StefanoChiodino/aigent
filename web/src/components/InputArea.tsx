@@ -3,6 +3,7 @@ import { useConnectionStore } from '../stores/connection';
 import { isDemo } from '../demo/useDemoMode';
 import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
+import { QuestionForm } from './modals/QuestionModal';
 import { useMic } from '../hooks/useMic';
 import { useTTS } from '../hooks/useTTS';
 import { captureScreenshot, registerScreenCapCallback, startScreenShare, stopScreenShare } from '../lib/screen';
@@ -641,6 +642,8 @@ export function InputArea() {
         onComplete={handleAtComplete}
         onItemsChange={useCallback((items: AtItem[]) => { atItemsRef.current = items; }, [])}
       />
+
+      <QuestionForm />
 
       <div id="input-row">
         <input

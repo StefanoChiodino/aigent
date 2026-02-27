@@ -389,9 +389,9 @@ All security decisions are appended as JSON-lines to `/tmp/aigent-audit.log`:
 
 Event types cover the full pipeline: exec (tier1/2/3/user), file (read/write/block), fetch (ssrf/dns/size/allow), and MCP tool calls.
 
-### Path confinement
+### Sensitive path protection
 
-File reads and writes are checked for path traversal (`../../etc/hosts`). Sensitive paths (`~/.ssh`, `/proc`, `/sys`, credential files) are hard-blocked or require user approval.
+Sensitive paths (`~/.ssh`, `~/.gnupg`, `~/.aws`, `/proc`, `/sys`, credential files) are hard-blocked. System directories (`/etc`, `/usr`, `/var`) and broad home-directory access require user approval.
 
 ---
 
