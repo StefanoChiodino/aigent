@@ -69,6 +69,22 @@ export function useWebSocket(): void {
           ui().setModelName(event.state.model);
           ui().setAvailableModels(event.state.availableModels ?? []);
           ui().setAvailableTools(event.state.availableTools ?? []);
+
+          // Apply browser-persisted model/short if they differ from server state.
+          // The browser's settings store (localStorage) is the source of truth for
+          // these because the user last changed them from this browser.
+          {
+            const savedModel = settings().getClientSetting('AIGENT_MODEL');
+            const savedShort = settings().getClientSetting('AIGENT_SHORT');
+            if (savedModel && typeof savedModel === 'string' && savedModel !== event.state.model) {
+              ui().setModelName(savedModel);
+              send({ type: 'message', content: `/model ${savedModel}` });
+            }
+            if (typeof savedShort === 'boolean' && savedShort !== (event.state.short ?? false)) {
+              ui().setShortMode(savedShort);
+              send({ type: 'message', content: savedShort ? '/short on' : '/short off' });
+            }
+          }
           break;
         }
 

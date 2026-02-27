@@ -48,11 +48,6 @@ vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
 });
 vi.spyOn(document.body, 'appendChild').mockImplementation(node => node as Node);
 
-vi.mock('../stores/settings', () => ({
-  useSettingsStore: (sel: (s: { getClientSetting: (k: string) => unknown }) => unknown) =>
-    sel({ getClientSetting: () => null }),
-}));
-
 const { usePiP, __resetForTest } = await import('../hooks/usePiP');
 
 describe('usePiP', () => {

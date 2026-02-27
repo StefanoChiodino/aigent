@@ -8,9 +8,6 @@
  *
  * Strategy: inject a stub via addInitScript (runs before any JS) so that when
  * usePiP() checks for PiP support it returns true, and the Float button renders.
- *
- * PiP mode (auto/manual) is now a settings-panel dropdown (AIGENT_PIP_MODE),
- * no longer sidebar pills.
  */
 
 import { test, expect, type Page } from '@playwright/test';
@@ -60,39 +57,4 @@ test.describe('PiP UI', () => {
     await expect(floatBtn).toBeVisible({ timeout: 3_000 });
   });
 
-  // ── Settings store ─────────────────────────────────────────────────────────────
-
-  test('AIGENT_PIP_MODE defaults to "manual" in settings store', async () => {
-    const mode = await page.evaluate(() => {
-      const s = (window as Record<string, unknown>).__zustand_settings as {
-        getState: () => { getClientSetting: (k: string) => unknown };
-      } | undefined;
-      return s?.getState().getClientSetting('AIGENT_PIP_MODE');
-    });
-    expect(mode).toBe('manual');
-  });
-
-  test('setClientSetting persists AIGENT_PIP_MODE changes', async () => {
-    await page.evaluate(() => {
-      const s = (window as Record<string, unknown>).__zustand_settings as {
-        getState: () => { setClientSetting: (k: string, v: string) => void };
-      } | undefined;
-      s?.getState().setClientSetting('AIGENT_PIP_MODE', 'auto');
-    });
-    const stored = await page.evaluate(() => {
-      const s = (window as Record<string, unknown>).__zustand_settings as {
-        getState: () => { getClientSetting: (k: string) => unknown };
-      } | undefined;
-      return s?.getState().getClientSetting('AIGENT_PIP_MODE');
-    });
-    expect(stored).toBe('auto');
-
-    // Reset back to manual
-    await page.evaluate(() => {
-      const s = (window as Record<string, unknown>).__zustand_settings as {
-        getState: () => { setClientSetting: (k: string, v: string) => void };
-      } | undefined;
-      s?.getState().setClientSetting('AIGENT_PIP_MODE', 'manual');
-    });
-  });
 });
