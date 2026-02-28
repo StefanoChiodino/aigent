@@ -115,4 +115,38 @@ describe('compactConversation', () => {
       }
     }
   });
+
+  it('handles assistant messages with empty text content (toolCalls only)', async () => {
+    // Reproduce edge case where assistant message has no text, only toolCalls.
+    // messagesToSummaryInput should not crash and should include the tool info.
+    const messages: ProviderMessage[] = [
+      { role: 'user', content: 'Do a task' },
+    ];
+    for (let i = 0; i < 6; i++) {
+      messages.push({
+        role: 'assistant',
+        content: '', // empty text — only toolCalls
+        toolCalls: [{ id: `c${i}`, name: 'read_file', input: { path: `file${i}.ts` } }],
+      });
+      messages.push({
+        role: 'tool_result',
+        results: [{ id: `c${i}`, content: `contents of file${i}.ts` }],
+      });
+    }
+
+    const { messages: result, summary } = await compactConversation(mockProvider(), 'test', messages);
+    assert.ok(summary.length > 0, 'should produce a summary');
+    assert.ok(result.length < messages.length, 'should compact messages');
+  });
+
+  it('produces no summary for a single 2-message exchange', async () => {
+    // Only 1 user turn — too short to compact
+    const messages: ProviderMessage[] = [
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi' },
+    ];
+    const { messages: result, summary } = await compactConversation(mockProvider(), 'test', messages);
+    assert.equal(summary, '');
+    assert.deepEqual(result, messages);
+  });
 });

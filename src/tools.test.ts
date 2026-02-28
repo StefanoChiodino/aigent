@@ -336,6 +336,44 @@ describe('summarizeToolCall', () => {
     assert.equal(summarizeToolCall('Bash', { command: 'pwd' }, true), '$ pwd');
   });
 
+  it('host_edit_file: "edit path (N edit)"', () => {
+    assert.equal(
+      summarizeToolCall('host_edit_file', { path: 'src/foo.ts', edits: [{ old_str: 'a', new_str: 'b' }] }, false),
+      'edit src/foo.ts (1 edit)',
+    );
+  });
+
+  it('host_edit_file: plural edits', () => {
+    const edits = [{ old_str: 'a', new_str: 'b' }, { old_str: 'c', new_str: 'd' }];
+    assert.equal(
+      summarizeToolCall('host_edit_file', { path: 'foo.ts', edits }, false),
+      'edit foo.ts (2 edits)',
+    );
+  });
+
+  it('host_edit_file: zero edits', () => {
+    assert.equal(
+      summarizeToolCall('host_edit_file', { path: 'foo.ts', edits: [] }, false),
+      'edit foo.ts (0 edits)',
+    );
+  });
+
+  it('ask_user: shows question as summary', () => {
+    assert.equal(
+      summarizeToolCall('ask_user', { question: 'What color?' }, false),
+      'ask: What color?',
+    );
+  });
+
+  it('ask_user: truncates long questions to 60 chars', () => {
+    const long = 'x'.repeat(80);
+    const result = summarizeToolCall('ask_user', { question: long }, false);
+    assert.ok(result.startsWith('ask: '));
+    assert.ok(result.endsWith('...'));
+    // "ask: " + 60 chars + "..."
+    assert.ok(result.length <= 68);
+  });
+
   it('unknown tool returns raw name', () => {
     assert.equal(summarizeToolCall('nonexistent_tool', {}, false), 'nonexistent_tool');
   });

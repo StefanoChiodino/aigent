@@ -104,4 +104,36 @@ describe('handleEditFileRequest with autoApply', () => {
     // File should NOT be modified
     assert.equal(readFileSync(tempFile, 'utf-8'), 'line one\nline two\nline three\n');
   });
+
+  it('second edit fails: file is NOT modified (atomic — write only on full success)', () => {
+    // If any edit fails during resolution, we return before writing to disk.
+    // The operation is atomic — either all edits succeed or none are written.
+    const ctx = makeCtx();
+    handleEditFileRequest(ctx, 'id-5', tempFile, [
+      { old_str: 'line one', new_str: 'LINE ONE' },   // would succeed
+      { old_str: 'nonexistent', new_str: 'NOPE' },    // fails
+    ], 'test reason', true);
+
+    const resp = ctx.sent[0] as { type: string; ok: boolean; message: string };
+    assert.equal(resp.ok, false);
+    assert.match(resp.message, /old_str not found/);
+    // File must be untouched — first edit was NOT written because second failed
+    assert.equal(readFileSync(tempFile, 'utf-8'), 'line one\nline two\nline three\n');
+  });
+
+  it('queued patch_request emits with id, diff, and reason args', () => {
+    const ctx = makeCtx();
+    handleEditFileRequest(ctx, 'id-6', tempFile, [
+      { old_str: 'line one', new_str: 'LINE ONE' },
+      { old_str: 'line two', new_str: 'LINE TWO' },
+    ], 'update content');
+
+    assert.equal(ctx.emitted.length, 1);
+    const event = ctx.emitted[0] as { event: string; args: unknown[] };
+    assert.equal(event.event, 'patch_request');
+    // args: [id, diff, reason]
+    assert.equal(event.args[0], 'id-6');
+    assert.ok(typeof event.args[1] === 'string', 'second arg should be the diff string');
+    assert.equal(event.args[2], 'update content');
+  });
 });

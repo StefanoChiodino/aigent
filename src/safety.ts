@@ -102,7 +102,12 @@ export function validateFetchUrl(url: string): string | null {
     return 'Invalid URL';
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  // parsed.hostname returns bracketed form for IPv6: "[::1]", "[fe80::1]", etc.
+  // Strip brackets before testing so PRIVATE_RANGES patterns work correctly.
+  const rawHostname = parsed.hostname.toLowerCase();
+  const hostname = rawHostname.startsWith('[') && rawHostname.endsWith(']')
+    ? rawHostname.slice(1, -1)
+    : rawHostname;
 
   // Check blocked hostnames
   if (BLOCKED_HOSTS.includes(hostname)) {
