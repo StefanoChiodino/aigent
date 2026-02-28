@@ -1205,22 +1205,6 @@ html, body {
   white-space: nowrap;
 }
 
-.task-result-close {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  color: var(--text-secondary, #6c7086);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  line-height: 1;
-}
-
-.task-result-close:hover {
-  color: var(--text-primary, #cdd6f4);
-  background: rgba(255,255,255,0.08);
-}
 
 .task-result-body {
   flex: 1;
@@ -1234,11 +1218,34 @@ html, body {
   word-break: break-word;
 }
 
+.task-result-body.message-content {
+  font-family: inherit;
+  font-size: 13px;
+}
+
 .task-result-footer {
   padding: 10px 16px;
   border-top: 1px solid var(--border, rgba(255,255,255,0.1));
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+}
+
+.task-result-defer {
+  background: none;
+  color: var(--text-secondary, #6c7086);
+  border: 1px solid var(--border, rgba(255,255,255,0.15));
+  border-radius: 6px;
+  padding: 6px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.task-result-defer:hover {
+  color: var(--text-primary, #cdd6f4);
+  border-color: rgba(255,255,255,0.3);
 }
 
 .task-result-discuss {

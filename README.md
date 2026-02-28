@@ -147,6 +147,11 @@ Dispatched via the `dispatch_task` tool. Shown in the sidebar with:
 
 Background tasks can use cheaper models (e.g. Haiku for read-only work) to keep costs down. Multiple tasks run in parallel; completed results are injected into the conversation when the agent is next idle.
 
+Tasks with `delivery: user-pull` pop up a result panel when completed. The panel renders the result as markdown. Two actions are available:
+
+- **Discuss with agent** — closes the panel and sends a short reference message (the agent reads the full result from context, not pasted inline)
+- **Defer** — closes the panel without sending anything; reopen it later by clicking the task in the sidebar
+
 ![Background tasks in sidebar](docs/screenshots/tasks.png)
 
 ### Tool visibility

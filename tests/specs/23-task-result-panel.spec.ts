@@ -1,8 +1,13 @@
 /**
- * 23 — Task result panel: "Discuss with agent" button
+ * 23 — Task result panel: Defer / "Discuss with agent" button
  *
  * 14-task-updates.spec.ts covers open/close. This file adds the
- * "Discuss with agent" button behaviour and panel content details.
+ * "Discuss with agent" and "Defer" button behaviour and panel content details.
+ *
+ * Changes from original behaviour:
+ * - X close button replaced by "Defer" button (keeps task available in sidebar)
+ * - "Discuss" sends only a short reference to the task description, not the full result body
+ * - Result body is rendered as markdown (bold, code, etc.)
  */
 
 import { test, expect } from '@playwright/test';
@@ -40,12 +45,36 @@ test.describe('@fast Task Result Panel', () => {
     await expect(page.locator('.task-result-body')).toContainText('No issues found in the codebase.');
   });
 
+  test('result panel renders markdown in the body', async () => {
+    const page = getPage();
+    await openResultPanel(page, 'trp-md', 'Markdown test', '**bold result**');
+    // Bold should be rendered as <strong>, not raw asterisks
+    const body = page.locator('.task-result-body');
+    await expect(body).toContainText('bold result');
+    const strong = body.locator('strong');
+    await expect(strong).toBeVisible();
+  });
+
   test('result panel has a Discuss button', async () => {
     const page = getPage();
     await openResultPanel(page, 'trp-3', 'Discuss test', 'Some result.');
     const btn = page.locator('.task-result-discuss');
     await expect(btn).toBeVisible();
     await expect(btn).toContainText(/discuss/i);
+  });
+
+  test('result panel has a Defer button', async () => {
+    const page = getPage();
+    await openResultPanel(page, 'trp-defer', 'Defer test', 'Some result.');
+    const btn = page.locator('.task-result-defer');
+    await expect(btn).toBeVisible();
+    await expect(btn).toContainText(/defer/i);
+  });
+
+  test('panel has no close (×) button', async () => {
+    const page = getPage();
+    await openResultPanel(page, 'trp-noclose', 'No close test', 'Result.');
+    await expect(page.locator('.task-result-close')).toHaveCount(0);
   });
 
   // ── Discuss button ────────────────────────────────────────────────────────────
@@ -64,27 +93,27 @@ test.describe('@fast Task Result Panel', () => {
     await page.locator('.task-result-discuss').click();
 
     // The message sent should mention the task description
-    // Wait for it to appear as a user message in the chat
     const msgs = page.locator('#messages .message.user');
     await expect(msgs.last()).toContainText(desc, { timeout: 5_000 });
   });
 
-  test('clicking Discuss sends a message containing the result text', async () => {
+  test('clicking Discuss does NOT paste the full result body into the chat message', async () => {
     const page = getPage();
-    const result = 'Unique-result-content-xyz';
+    const result = 'Unique-result-content-xyz-should-not-appear';
     await openResultPanel(page, 'trp-6', 'Result content test', result);
     await page.locator('.task-result-discuss').click();
 
+    // The sent message should NOT contain the raw result text (just a short reference)
     const msgs = page.locator('#messages .message.user');
-    await expect(msgs.last()).toContainText(result, { timeout: 5_000 });
+    await expect(msgs.last()).not.toContainText(result, { timeout: 5_000 });
   });
 
-  // ── Close button ──────────────────────────────────────────────────────────────
+  // ── Defer button ──────────────────────────────────────────────────────────────
 
-  test('close button hides the panel', async () => {
+  test('Defer button hides the panel', async () => {
     const page = getPage();
-    await openResultPanel(page, 'trp-7', 'Close button test', 'Result.');
-    await page.locator('.task-result-close').click();
+    await openResultPanel(page, 'trp-7', 'Defer button test', 'Result.');
+    await page.locator('.task-result-defer').click();
     await expect(page.locator('#task-result-panel')).toHaveClass(/\bhidden\b/, { timeout: 2_000 });
   });
 
@@ -100,8 +129,8 @@ test.describe('@fast Task Result Panel', () => {
     await openResultPanel(page, 'trp-8a', 'First task', 'First result.');
     await expect(page.locator('.task-result-title')).toHaveText('First task');
 
-    // Close and open second task
-    await page.locator('.task-result-close').click();
+    // Defer and open second task
+    await page.locator('.task-result-defer').click();
 
     await injectEvent({
       type: 'task_update',
