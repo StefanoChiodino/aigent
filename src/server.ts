@@ -526,6 +526,14 @@ async function processAgentTurn(
     isLoading = false;
     isProcessingTaskResult = false;
     broadcast({ type: 'loading', isLoading: false });
+
+    // If messages were queued while this turn was running (e.g. during a task
+    // result turn), kick off the queue drain.  Use queueMicrotask so the
+    // finally block finishes first — processQueue's guard prevents re-entry
+    // when we're already inside the loop.
+    if (messageQueue.length > 0 && !processingQueue) {
+      queueMicrotask(() => void processQueue());
+    }
   }
 }
 

@@ -56,6 +56,12 @@ Completed items moved here to keep `TODO.md` focused on active work.
 
 - [x] **README: "Extending with MCP"** — README has a full MCP section with `mcp.json` format, example GitHub server config, and tool prefixing explanation.
 
+## Active Bugs (archived)
+
+- [x] **Message queue drain bug** — server-side queue existed but messages queued during an agent turn (especially task result turns) were never drained. Fixed: `processAgentTurn` now kicks off `processQueue()` in its `finally` block when queued messages exist. (2026-02-28)
+
+- [x] **Settings don't persist reliably** — thinking level was never saved to browser localStorage or synced on reconnect. Fixed: `state` events (from `/reasoning`, `/effort`, `/model`, `/short` commands and `switch_model` tool) now persist model, thinking, and short mode to `clientSettings` (localStorage). On reconnect, browser syncs saved values to server — but only when explicitly set (schema defaults don't override server env vars or autosave). (2026-02-28)
+
 ## UI Fixes (archived)
 
 - [x] **X button always in text box** — X button is now always inside the text box, visible whenever there's text, clears mic transcript too if recording.

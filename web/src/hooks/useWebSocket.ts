@@ -70,19 +70,29 @@ export function useWebSocket(): void {
           ui().setAvailableModels(event.state.availableModels ?? []);
           ui().setAvailableTools(event.state.availableTools ?? []);
 
-          // Apply browser-persisted model/short if they differ from server state.
+          // Apply browser-persisted settings if they differ from server state.
           // The browser's settings store (localStorage) is the source of truth for
           // these because the user last changed them from this browser.
+          // Only override the server when there's an explicitly saved value (i.e. the
+          // key exists in localStorage) — schema defaults must NOT override server
+          // state, since the server may have been configured via env vars or autosave.
           {
-            const savedModel = settings().getClientSetting('AIGENT_MODEL');
-            const savedShort = settings().getClientSetting('AIGENT_SHORT');
-            if (savedModel && typeof savedModel === 'string' && savedModel !== event.state.model) {
-              ui().setModelName(savedModel);
-              send({ type: 'message', content: `/model ${savedModel}` });
+            const cs = settings().clientSettings;
+            if ('AIGENT_MODEL' in cs && typeof cs['AIGENT_MODEL'] === 'string' && cs['AIGENT_MODEL'] !== event.state.model) {
+              ui().setModelName(cs['AIGENT_MODEL']);
+              send({ type: 'message', content: `/model ${cs['AIGENT_MODEL']}` });
             }
-            if (typeof savedShort === 'boolean' && savedShort !== (event.state.short ?? false)) {
-              ui().setShortMode(savedShort);
-              send({ type: 'message', content: savedShort ? '/short on' : '/short off' });
+            if ('AIGENT_SHORT' in cs && typeof cs['AIGENT_SHORT'] === 'boolean' && cs['AIGENT_SHORT'] !== (event.state.short ?? false)) {
+              ui().setShortMode(cs['AIGENT_SHORT']);
+              send({ type: 'message', content: cs['AIGENT_SHORT'] ? '/short on' : '/short off' });
+            }
+            if ('AIGENT_THINKING' in cs && typeof cs['AIGENT_THINKING'] === 'string' && cs['AIGENT_THINKING'] !== event.state.thinking) {
+              ui().setThinkingLevel(cs['AIGENT_THINKING']);
+              if (cs['AIGENT_THINKING'] === 'off') {
+                send({ type: 'message', content: '/reasoning off' });
+              } else {
+                send({ type: 'message', content: `/effort ${cs['AIGENT_THINKING']}` });
+              }
             }
           }
           break;
@@ -194,9 +204,18 @@ export function useWebSocket(): void {
           break;
 
         case 'state':
-          if (event.thinking) ui().setThinkingLevel(event.thinking);
-          if (event.model) ui().setModelName(event.model);
-          if (event.short !== undefined) ui().setShortMode(event.short);
+          if (event.thinking) {
+            ui().setThinkingLevel(event.thinking);
+            settings().setClientSetting('AIGENT_THINKING', event.thinking);
+          }
+          if (event.model) {
+            ui().setModelName(event.model);
+            settings().setClientSetting('AIGENT_MODEL', event.model);
+          }
+          if (event.short !== undefined) {
+            ui().setShortMode(event.short);
+            settings().setClientSetting('AIGENT_SHORT', event.short);
+          }
           if (event.availableModels) ui().setAvailableModels(event.availableModels);
           break;
 

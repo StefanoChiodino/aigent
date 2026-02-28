@@ -4,10 +4,7 @@
 
 ## Active Bugs
 
-- [ ] **Message queueing — not implemented** — README describes this as if it exists ("Queued messages appear as dismissable chips above the input"), but the feature is not implemented — only a demo scenario stub exists. Needs: queue data structure in connection/UI store, chip UI above input bar, auto-send on agent idle, cancel support.
-  - Sub-bug once implemented: **queued message lost on cancel** — if a message is queued and the run is cancelled, it must not be silently dropped.
-
-- [ ] **Settings don't persist reliably** — model, short mode, and other settings seem to reset. Client settings persist via zustand `persist` to localStorage, but confirm server-side settings (model, reasoning level) round-trip correctly after restart.
+- [ ] **Message queue chip UI** — server-side queueing works (messages queued while agent is busy are auto-drained when the turn completes), but the web UI has no visual indicator. README describes dismissable queue chips above the input bar — needs: chip display, per-message cancel, count badge.
 
 ## Bugs / Quick Fixes
 
