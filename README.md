@@ -151,7 +151,7 @@ Background tasks can use cheaper models (e.g. Haiku for read-only work) to keep 
 
 ### Tool visibility
 
-Tool calls are shown inline in the chat — name, input summary, and output excerpt. Collapsed by default; click to expand and see the full input and output.
+Tool calls are shown inline in the chat — name, input summary, and output excerpt. Collapsed by default; click to expand and see the full input and output. Tools that return images (screenshots, clipboard, browser captures) display them inline in the trace block — click to open full-size in a new tab.
 
 ![Expanded tool call blocks with input and output](docs/screenshots/tool-calls.png)
 

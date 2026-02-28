@@ -130,6 +130,33 @@ const THINKING_BROWSER =
   "3. Verify the redirect and confirmation page\n\n" +
   "I'll use browser_ext with run_script to execute the click action, then verify the result.";
 
+// Fake browser confirmation page screenshot (SVG → base64 for tool_images)
+const CONFIRMATION_SCREENSHOT_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="360" height="200">' +
+  '<rect width="360" height="200" fill="#1e1e2e" rx="8"/>' +
+  '<rect width="360" height="28" fill="#313244" rx="8"/>' +
+  '<rect y="22" width="360" height="6" fill="#313244"/>' +
+  '<circle cx="16" cy="14" r="5" fill="#f38ba8"/>' +
+  '<circle cx="32" cy="14" r="5" fill="#a6e3a1"/>' +
+  '<circle cx="48" cy="14" r="5" fill="#f9e2af"/>' +
+  '<text x="120" y="18" fill="#cdd6f4" font-family="sans-serif" font-size="10" text-anchor="middle">' +
+  'localhost:3000/order/confirmed</text>' +
+  '<text x="180" y="70" fill="#a6e3a1" font-family="sans-serif" font-size="18" font-weight="bold" text-anchor="middle">' +
+  'Order Confirmed</text>' +
+  '<text x="180" y="100" fill="#cdd6f4" font-family="sans-serif" font-size="12" text-anchor="middle">' +
+  'Order #4821 &#8212; $127.50</text>' +
+  '<rect x="60" y="120" width="240" height="1" fill="#45475a"/>' +
+  '<text x="180" y="148" fill="#6c7086" font-family="sans-serif" font-size="10" text-anchor="middle">' +
+  'Payment processed successfully</text>' +
+  '<text x="180" y="168" fill="#6c7086" font-family="sans-serif" font-size="10" text-anchor="middle">' +
+  'Confirmation email sent to user@example.com</text>' +
+  '</svg>';
+
+// Base64-encode the SVG for tool_images (which expects raw base64, not data URLs)
+const CONFIRMATION_SCREENSHOT_B64 = typeof btoa !== 'undefined'
+  ? btoa(CONFIRMATION_SCREENSHOT_SVG)
+  : Buffer.from(CONFIRMATION_SCREENSHOT_SVG).toString('base64');
+
 // Fake terminal screenshot (SVG data URL — shows a mini terminal with curl output)
 const SCREENSHOT_DATA_URL =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='130'%3E" +
@@ -767,6 +794,23 @@ export const DEMO_SCENARIO: DemoScenario = {
       tabUrl: 'http://localhost:3000/checkout',
     }),
     { action: 'auto_approve', delayMs: 3000 },
+    wait(300),
+
+    // Browser screenshot — verify confirmation page visually
+    { action: 'label', text: 'Browser: screenshot' },
+    emit({
+      type: 'tool_start',
+      name: 'browser_ext',
+      summary: 'Screenshot /order/confirmed',
+      input: JSON.stringify({ action: 'screenshot', tabId: 0 }),
+    }),
+    wait(400),
+    emit({ type: 'tool_output', content: 'Screenshot captured (360×200, 2.4 KB)' }),
+    emit({
+      type: 'tool_images',
+      images: [{ mediaType: 'image/svg+xml', data: CONFIRMATION_SCREENSHOT_B64 }],
+    }),
+    emit({ type: 'tool_end' }),
     wait(300),
 
     // Streaming browser result
