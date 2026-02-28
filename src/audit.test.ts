@@ -9,6 +9,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { auditLog, _setLogPathForTest } from './audit.js';
+import { reqContext } from './req-context.js';
 
 // ---------------------------------------------------------------------------
 // auditLog
@@ -77,5 +78,25 @@ describe('auditLog', () => {
     assert.doesNotThrow(() => {
       auditLog({ type: 'exec_tier2_allow', detail: 'test' });
     });
+  });
+
+  it('includes reqId from AsyncLocalStorage when not explicitly provided', async () => {
+    await reqContext.run({ reqId: 'ctx123' }, () => {
+      auditLog({ type: 'exec_tier2_allow', detail: 'ls' });
+    });
+    const parsed = JSON.parse(readFileSync(logPath, 'utf-8').trim());
+    assert.equal(parsed.reqId, 'ctx123');
+  });
+
+  it('includes explicit reqId from event', () => {
+    auditLog({ type: 'exec_tier2_allow', detail: 'ls', reqId: 'explicit' });
+    const parsed = JSON.parse(readFileSync(logPath, 'utf-8').trim());
+    assert.equal(parsed.reqId, 'explicit');
+  });
+
+  it('omits reqId when not in context and not provided', () => {
+    auditLog({ type: 'exec_tier2_allow', detail: 'ls' });
+    const parsed = JSON.parse(readFileSync(logPath, 'utf-8').trim());
+    assert.equal(parsed.reqId, undefined);
   });
 });

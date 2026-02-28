@@ -20,6 +20,8 @@
  * Set AIGENT_LOG_LEVEL=WARN for finer control.
  */
 
+import { getReqId } from './req-context.js';
+
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
 const LEVEL_ORDER: Record<LogLevel, number> = {
@@ -51,7 +53,9 @@ function formatKV(data?: Record<string, unknown>): string {
 function emit(level: LogLevel, component: string, msg: string, data?: Record<string, unknown>): void {
   if (LEVEL_ORDER[level] < LEVEL_ORDER[MIN_LEVEL]) return;
   const ts = new Date().toISOString();
-  console.error(`${ts} [${level}] [${component}] ${msg}${formatKV(data)}`);
+  const rid = getReqId();
+  const prefix = rid ? `[${rid}] ` : '';
+  console.error(`${ts} [${level}] [${component}] ${prefix}${msg}${formatKV(data)}`);
 }
 
 export interface Logger {

@@ -24,6 +24,7 @@ import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type Exe
 import { initClassifier, classifyCommand, classifyFileAccess, isClassifierAvailable } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
 import { auditLog } from './audit.js';
+import { rotateIfNeeded } from './log-rotate.js';
 import { validateBrowserUrls } from './browser-safety.js';
 import { readSettingsSync, writeSettingsSync, getSettingsPath } from './settings-file.js';
 import {
@@ -1843,6 +1844,7 @@ gatekeeperArgs = parseArgs();
 // The TUI writes directly via process.stdout.write(); everything else must go to the log file.
 // Without this, stray writes (from libraries, Node internals, child process output) corrupt the terminal.
 const LOG_PATH = process.env['AIGENT_LOG'] ?? '/tmp/aigent-gatekeeper.log';
+rotateIfNeeded(LOG_PATH);
 const logStream = createWriteStream(LOG_PATH, { flags: 'a' });
 
 console.log = (...args: unknown[]) => { logStream.write(args.join(' ') + '\n'); };

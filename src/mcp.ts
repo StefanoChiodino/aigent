@@ -22,6 +22,7 @@ import { sanitizedEnv } from './safety.js';
 import { join } from 'node:path';
 import type { ToolDef } from './tools.js';
 import { createLogger } from './logger.js';
+import { getReqId } from './req-context.js';
 
 const log = createLogger('mcp');
 
@@ -188,7 +189,12 @@ class MCPClient {
 
       this.pending.set(id, { resolve, reject, timer });
 
-      const request: JsonRpcRequest = { jsonrpc: '2.0', id, method, params };
+      // Include reqId in _meta for cross-process tracing (MCP servers may log it)
+      const rid = getReqId();
+      const enrichedParams = rid
+        ? { ...params, _meta: { ...((params?._meta ?? {}) as Record<string, unknown>), reqId: rid } }
+        : params;
+      const request: JsonRpcRequest = { jsonrpc: '2.0', id, method, params: enrichedParams };
       const body = JSON.stringify(request);
       const header = `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n`;
       this.process!.stdin!.write(header + body);

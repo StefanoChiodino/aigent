@@ -116,6 +116,7 @@ export interface ChatCallbacks {
   onCompact?: (summary: string) => void;
   onDispatchTask?: (input: Record<string, unknown>) => string; // returns task ID
   onModelSwitch?: (model: string, reason?: string) => void;
+  onToolComplete?: (info: { tool: string; input: string; ms: string; ok: boolean }) => void;
   signal?: AbortSignal;
 }
 
@@ -328,6 +329,7 @@ export class Agent {
           }
           const toolMs = (performance.now() - toolStart).toFixed(0);
           log.info('Tool executed', { tool: toolName, ms: toolMs });
+          callbacks?.onToolComplete?.({ tool: toolName, input: truncatedInput, ms: toolMs, ok: true });
 
           // Broadcast tool result to UI: images and text for non-streaming tools.
           if (typeof result !== 'string') {
@@ -365,6 +367,8 @@ export class Agent {
             const e = toolErr as { message?: string; name?: string };
             const errMsg = e.name === 'AbortError' ? 'Aborted by user' : (e.message ?? 'Tool execution failed');
             results.push({ id: tc.id, content: errMsg });
+            const failedToolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
+            callbacks?.onToolComplete?.({ tool: failedToolName, input: '(not executed)', ms: '0', ok: false });
           }
         }
         // Push tool results before re-throwing so history stays consistent

@@ -13,8 +13,13 @@
  */
 
 import { appendFileSync } from 'node:fs';
+import { getReqId } from './req-context.js';
+import { rotateIfNeeded } from './log-rotate.js';
 
 let auditLogPath = '/tmp/aigent-audit.log';
+
+// Rotate audit log at startup (fire-and-forget)
+try { rotateIfNeeded(auditLogPath); } catch { /* non-critical */ }
 
 /** Override the audit log path — for test isolation only. */
 export function _setLogPathForTest(path: string): void {
@@ -78,6 +83,8 @@ export interface AuditEvent {
   reason?: string;
   /** For user-approval events: was the action approved? */
   approved?: boolean;
+  /** Correlation ID for tracing across processes. Auto-read from AsyncLocalStorage if omitted. */
+  reqId?: string;
 }
 
 /**
@@ -86,8 +93,14 @@ export interface AuditEvent {
  */
 export function auditLog(event: AuditEvent): void {
   try {
-    const line = JSON.stringify({ ts: Date.now(), ...event }) + '\n';
-    appendFileSync(auditLogPath, line, 'utf-8');
+    const rid = event.reqId ?? getReqId();
+    const obj: Record<string, unknown> = { ts: Date.now() };
+    if (rid) obj.reqId = rid;
+    obj.type = event.type;
+    obj.detail = event.detail;
+    if (event.reason !== undefined) obj.reason = event.reason;
+    if (event.approved !== undefined) obj.approved = event.approved;
+    appendFileSync(auditLogPath, JSON.stringify(obj) + '\n', 'utf-8');
   } catch {
     // Audit logging must never crash the process
   }

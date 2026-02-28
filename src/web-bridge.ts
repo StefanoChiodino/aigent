@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { AgentClient } from './client.js';
 import { extensionBridge } from './ext-bridge.js';
-import type { ServerEvent, ServerState } from './protocol.js';
+import type { ServerEvent, ServerState, BackgroundTaskInfo } from './protocol.js';
 import type { ThinkingLevel } from './agent.js';
 import type { ExecPermissions, FetchPermissions, BrowserPermissions } from './safety.js';
 import { classifyBrowserAction } from './safety.js';
@@ -134,6 +134,17 @@ export async function startWebServer(
   });
   client.on('state', (partial: { thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string }) => {
     if (cachedState) cachedState = { ...cachedState, ...partial };
+  });
+  client.on('task_update', (task: BackgroundTaskInfo) => {
+    if (!cachedState) return;
+    const idx = cachedState.tasks.findIndex(t => t.id === task.id);
+    if (idx >= 0) {
+      const next = [...cachedState.tasks];
+      next[idx] = task;
+      cachedState = { ...cachedState, tasks: next };
+    } else {
+      cachedState = { ...cachedState, tasks: [...cachedState.tasks, task] };
+    }
   });
 
   // Cache latest host state from gatekeeper (capabilities).
@@ -766,10 +777,16 @@ export async function startWebServer(
                 ...(cmd.images ? { images: cmd.images } : {}),
                 ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
                 ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
+                ...(cmd.reqId ? { reqId: cmd.reqId } : {}),
               });
             } else {
-              // Text only — use sendMessage so gatekeeper intercepts slash commands
-              client.sendMessage(cmd.content, cmd.thinkingOverride);
+              // Text only — send directly so reqId is preserved (sendMessage doesn't forward it)
+              client.send({
+                type: 'message',
+                content: cmd.content,
+                ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
+                ...(cmd.reqId ? { reqId: cmd.reqId } : {}),
+              });
             }
             break;
           case 'cancel':

@@ -20,6 +20,8 @@ import { computeCost } from './pricing.js';
 import { distillToMemory } from './compact.js';
 import { loadMCP, type MCPManager } from './mcp.js';
 import { createLogger } from './logger.js';
+import { reqContext, getReqId } from './req-context.js';
+import { appendToolLog } from './tool-log.js';
 import { execReadonlyTool, fetchReadonlyTool, getToolDefinitions } from './tools.js';
 import type { ProviderToolDef } from './provider.js';
 import { PendingRequestBroker } from './pending-request.js';
@@ -511,6 +513,9 @@ async function processAgentTurn(
         broadcast({ type: 'state', model: newModel });
         doAutoSave();
       },
+      onToolComplete: (info) => {
+        appendToolLog(join(workspacePath, 'memory'), info, getReqId());
+      },
     });
 
     if (!controller.signal.aborted) {
@@ -622,8 +627,12 @@ function dispatchBackgroundTask(input: {
 }): string {
   const taskId = taskQueue.register(input.task, input.delivery ?? 'agent-batch', input.context);
 
+  // Capture parent reqId before the IIFE detaches from the async context
+  const parentReqId = getReqId();
+  const taskReqId = parentReqId ? `${parentReqId}.${taskId.slice(0, 4)}` : undefined;
+
   // Fire and forget — run the sub-agent in the background
-  void (async () => {
+  const runTask = async () => {
     try {
       const taskModel = input.model ?? model;
       taskQueue.setModel(taskId, taskModel);
@@ -736,7 +745,14 @@ function dispatchBackgroundTask(input: {
       log.error('Dispatch error', { taskId, error: e.message });
       taskQueue.fail(taskId, e.message ?? 'unknown error', { model: input.model ?? model });
     }
-  })();
+  };
+
+  // Wrap in request context with derived reqId for log correlation
+  if (taskReqId) {
+    void reqContext.run({ reqId: taskReqId }, runTask);
+  } else {
+    void runTask();
+  }
 
   return taskId;
 }
@@ -834,7 +850,7 @@ function handleCommand(cmd: string): boolean {
 
 // --- Message processing ---
 
-interface QueuedMessage { id: number; content: string | UserContent; displayText?: string; displayAttachments?: DisplayAttachment[]; thinkingOverride?: ThinkingLevel | undefined }
+interface QueuedMessage { id: number; content: string | UserContent; displayText?: string; displayAttachments?: DisplayAttachment[]; thinkingOverride?: ThinkingLevel | undefined; reqId?: string }
 const messageQueue: QueuedMessage[] = [];
 let processingQueue = false;
 let queueIdCounter = 0;
@@ -848,21 +864,30 @@ function broadcastQueueUpdate(): void {
 }
 
 async function processMessage(msg: QueuedMessage): Promise<void> {
-  // Apply one-shot thinking override if requested (Ctrl+Enter toggle)
-  const savedThinking = msg.thinkingOverride ? agent.thinkingLevel : undefined;
-  if (msg.thinkingOverride) {
-    agent.thinkingLevel = msg.thinkingOverride;
-  }
-  try {
-    await processAgentTurn(msg.content, {
-      ...(msg.displayText ? { displayText: msg.displayText } : {}),
-      ...(msg.displayAttachments ? { displayAttachments: msg.displayAttachments } : {}),
-    });
-  } finally {
-    // Restore previous thinking level after one-shot override
-    if (savedThinking !== undefined) {
-      agent.thinkingLevel = savedThinking;
+  const runTurn = async () => {
+    // Apply one-shot thinking override if requested (Ctrl+Enter toggle)
+    const savedThinking = msg.thinkingOverride ? agent.thinkingLevel : undefined;
+    if (msg.thinkingOverride) {
+      agent.thinkingLevel = msg.thinkingOverride;
     }
+    try {
+      await processAgentTurn(msg.content, {
+        ...(msg.displayText ? { displayText: msg.displayText } : {}),
+        ...(msg.displayAttachments ? { displayAttachments: msg.displayAttachments } : {}),
+      });
+    } finally {
+      // Restore previous thinking level after one-shot override
+      if (savedThinking !== undefined) {
+        agent.thinkingLevel = savedThinking;
+      }
+    }
+  };
+
+  // Wrap in request context so all downstream logs/audit entries include the reqId
+  if (msg.reqId) {
+    await reqContext.run({ reqId: msg.reqId }, runTurn);
+  } else {
+    await runTurn();
   }
 }
 
@@ -1025,6 +1050,7 @@ function handleClient(socket: Socket): void {
               ...(displayText ? { displayText } : {}),
               ...(displayAttachments ? { displayAttachments } : {}),
               ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
+              ...('reqId' in cmd && cmd.reqId ? { reqId: cmd.reqId } : {}),
             };
             if (isLoading) {
               messageQueue.push(queued);

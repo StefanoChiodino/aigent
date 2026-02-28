@@ -9,6 +9,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createLogger } from './logger.js';
+import { reqContext } from './req-context.js';
 
 // ---------------------------------------------------------------------------
 // createLogger
@@ -112,5 +113,23 @@ describe('createLogger', () => {
     assert.equal(result, 'async-result');
     assert.equal(captured.length, 1);
     assert.ok(captured[0]!.includes('async-op'));
+  });
+
+  it('includes [reqId] when inside a request context', async () => {
+    const log = createLogger('test');
+    await reqContext.run({ reqId: 'abc123' }, () => {
+      log.info('Hello');
+    });
+    assert.equal(captured.length, 1);
+    assert.ok(captured[0]!.includes('[abc123]'));
+    assert.match(captured[0]!, /\[test\] \[abc123\] Hello$/);
+  });
+
+  it('omits reqId when outside a request context', () => {
+    const log = createLogger('test');
+    log.info('Hello');
+    assert.equal(captured.length, 1);
+    assert.ok(!captured[0]!.includes('[abc123]'));
+    assert.match(captured[0]!, /\[test\] Hello$/);
   });
 });

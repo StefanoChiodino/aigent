@@ -194,4 +194,50 @@ test.describe('@fast Task Updates', () => {
     await panel.locator('.task-result-defer').click();
     await expect(panel).toHaveClass(/\bhidden\b/, { timeout: 3_000 });
   });
+
+  // ── Tasks Inspector ─────────────────────────────────────────────────────────
+
+  test('task_update populates taskHistory for the inspector', async () => {
+    const page = getPage();
+    await injectEvent({
+      type: 'task_update',
+      task: {
+        id: 'ti1',
+        description: 'Inspector test task',
+        status: 'completed',
+        startedAt: NOW,
+        completedAt: NOW,
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens: 1000,
+        outputTokens: 500,
+        cost: 0.002,
+        delivery: 'agent-batch',
+        result: 'Task completed successfully.',
+      },
+    });
+
+    // Open the tasks inspector
+    await page.locator('#sb-tasks-section .sidebar-label').click();
+    const inspector = page.locator('.tski-modal');
+    await expect(inspector).toBeVisible({ timeout: 3_000 });
+    await expect(inspector).toContainText('Inspector test task');
+
+    // Close it
+    await page.locator('.tski-close').click();
+    await expect(inspector).not.toBeVisible({ timeout: 3_000 });
+  });
+
+  test('tasks survive browser reconnect via cachedState', async () => {
+    const page = getPage();
+    // Inject a running task
+    await injectEvent({
+      type: 'task_update',
+      task: { id: 'tr1', description: 'Reconnect survivor', status: 'running', startedAt: NOW },
+    });
+    await expect(page.locator('#sb-tasks-list')).toContainText('Reconnect survivor', { timeout: 3_000 });
+
+    // Verify the task is visible
+    const taskItem = page.locator('#sb-tasks-list .task-item').filter({ hasText: 'Reconnect survivor' });
+    await expect(taskItem).toBeVisible({ timeout: 3_000 });
+  });
 });

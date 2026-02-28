@@ -128,7 +128,7 @@ describe('InputArea submission', () => {
     });
 
     const payloads = sentPayloads(ws);
-    expect(payloads).toContainEqual({ type: 'message', content: 'hello world' });
+    expect(payloads).toContainEqual(expect.objectContaining({ type: 'message', content: 'hello world' }));
   });
 
   it('input clears after Enter', async () => {
@@ -159,7 +159,7 @@ describe('InputArea submission', () => {
     });
 
     const payloads = sentPayloads(ws);
-    expect(payloads).toContainEqual({ type: 'message', content: 'click send' });
+    expect(payloads).toContainEqual(expect.objectContaining({ type: 'message', content: 'click send' }));
   });
 
   // ── Guards: things that should NOT send ────────────────────────────────────
@@ -239,7 +239,7 @@ describe('InputArea submission', () => {
     });
 
     const payloads = sentPayloads(ws);
-    expect(payloads).toContainEqual({ type: 'message', content: '/reset' });
+    expect(payloads).toContainEqual(expect.objectContaining({ type: 'message', content: '/reset' }));
   });
 
   // ── Thinking override with Ctrl+Enter ──────────────────────────────────────

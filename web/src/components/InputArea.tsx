@@ -294,7 +294,8 @@ export function InputArea() {
       return;
     }
 
-    const msg: Record<string, unknown> = { type: 'message', content: text };
+    const reqId = Math.random().toString(16).slice(2, 8);
+    const msg: Record<string, unknown> = { type: 'message', content: text, reqId };
     if (pendingAttachments.length > 0) {
       msg.attachments = pendingAttachments.map(a => ({
         name: a.name, mediaType: a.mediaType, data: a.data,
