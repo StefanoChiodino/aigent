@@ -4032,6 +4032,29 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   letter-spacing: 0.5px;
 }
 
+.tski-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tski-clear {
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+
+.tski-clear:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+  border-color: var(--text-dim);
+}
+
 .tski-close {
   display: inline-flex;
   align-items: center;
@@ -4079,7 +4102,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 
 .tski-col-headers {
   display: grid;
-  grid-template-columns: 24px 1fr 90px 70px 60px 24px;
+  grid-template-columns: 24px 1fr 80px 90px 70px 60px 24px;
   gap: 8px;
   padding: 8px 16px;
   font-size: 10px;
@@ -4097,7 +4120,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 
 .tski-row {
   display: grid;
-  grid-template-columns: 24px 1fr 90px 70px 60px 24px;
+  grid-template-columns: 24px 1fr 80px 90px 70px 60px 24px;
   gap: 8px;
   padding: 8px 16px;
   font-size: 12px;
@@ -4126,6 +4149,12 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
+}
+
+.tski-date {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .tski-model {

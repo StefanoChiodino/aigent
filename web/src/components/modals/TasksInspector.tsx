@@ -165,6 +165,7 @@ export function TasksInspector() {
   const open = useUIStore(s => s.tasksInspectorOpen);
   const setOpen = useUIStore(s => s.setTasksInspectorOpen);
   const taskHistory = useChatStore(s => s.taskHistory);
+  const clearTaskHistory = useChatStore(s => s.clearTaskHistory);
 
   const close = useCallback(() => setOpen(false), [setOpen]);
 
@@ -192,7 +193,12 @@ export function TasksInspector() {
       <div className="tski-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="tski-header">
           <span className="tski-header-label">Tasks Inspector</span>
-          <button className="tski-close" onClick={close} title="Close (Esc)">&times;</button>
+          <div className="tski-header-actions">
+            {taskHistory.length > 0 && (
+              <button className="tski-clear" onClick={clearTaskHistory} title="Clear task history">Clear</button>
+            )}
+            <button className="tski-close" onClick={close} title="Close (Esc)">&times;</button>
+          </div>
         </div>
         <div className="tski-summary">
           {taskHistory.length} task{taskHistory.length !== 1 ? 's' : ''}
