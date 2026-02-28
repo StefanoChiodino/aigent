@@ -8,9 +8,7 @@
 
 ## Bugs / Quick Fixes
 
-- [ ] **Reasoning toggle on incompatible models** — UI allows enabling reasoning on models that don't support it (e.g. Haiku); disable the toggle or warn when selected model doesn't support thinking.
-
-- [ ] **TraceInspector not wired up** — `web/src/components/modals/TraceInspector.tsx` exists but `traceInspectorTrace` / `setTraceInspectorTrace` are missing from the UI store and the component isn't mounted in App.tsx.
+(none currently)
 
 ---
 

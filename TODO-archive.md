@@ -62,6 +62,10 @@ Completed items moved here to keep `TODO.md` focused on active work.
 
 - [x] **Settings don't persist reliably** — thinking level was never saved to browser localStorage or synced on reconnect. Fixed: `state` events (from `/reasoning`, `/effort`, `/model`, `/short` commands and `switch_model` tool) now persist model, thinking, and short mode to `clientSettings` (localStorage). On reconnect, browser syncs saved values to server — but only when explicitly set (schema defaults don't override server env vars or autosave). (2026-02-28)
 
+- [x] **Reasoning toggle on incompatible models** — toggle and effort pills now disabled with hint when current model isn't Opus. (2026-02-28)
+
+- [x] **TraceInspector not wired up** — mounted in App.tsx via createPortal; TraceBlock expanded body now opens the inspector on click. Store state already existed. (2026-02-28)
+
 ## UI Fixes (archived)
 
 - [x] **X button always in text box** — X button is now always inside the text box, visible whenever there's text, clears mic transcript too if recording.

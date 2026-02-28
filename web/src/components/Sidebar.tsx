@@ -220,11 +220,17 @@ export function Sidebar() {
         {/* Reasoning */}
         <div className="sidebar-section">
           <div className="sidebar-label">Reasoning</div>
+          {(() => {
+            // Only Opus models support extended thinking
+            const supportsThinking = !!modelName && /opus/i.test(modelName);
+            return <>
           <div className="sb-reasoning-controls">
             <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Extended thinking</span>
             <button
               id="sb-reasoning-toggle"
-              className={`sb-toggle${reasoningOn ? ' on' : ''}`}
+              className={`sb-toggle${reasoningOn ? ' on' : ''}${!supportsThinking ? ' disabled' : ''}`}
+              disabled={!supportsThinking}
+              title={!supportsThinking ? 'Reasoning requires an Opus model' : undefined}
               onClick={() => {
                 const nextOff = reasoningOn;
                 send({ type: 'message', content: nextOff ? '/reasoning off' : '/reasoning on' });
@@ -234,7 +240,12 @@ export function Sidebar() {
               {reasoningOn ? 'ON' : 'OFF'}
             </button>
           </div>
-          <div id="sb-effort-pills" className={`sb-pills${!reasoningOn ? ' disabled' : ''}`} style={{ marginTop: 6 }}>
+          {!supportsThinking && (
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+              Requires Opus model
+            </div>
+          )}
+          <div id="sb-effort-pills" className={`sb-pills${!reasoningOn || !supportsThinking ? ' disabled' : ''}`} style={{ marginTop: 6 }}>
             {effortLevels.map(level => (
               <button
                 key={level}
@@ -249,6 +260,8 @@ export function Sidebar() {
               </button>
             ))}
           </div>
+            </>;
+          })()}
         </div>
 
         {/* Context meter */}

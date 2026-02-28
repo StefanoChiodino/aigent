@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useUIStore } from '../stores/ui';
 import type { TraceEntry } from '../types';
 
 function toolIcon(name: string): string {
@@ -44,6 +45,7 @@ interface Props {
 
 export function TraceBlock({ trace }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const openInspector = () => useUIStore.getState().setTraceInspectorTrace(trace);
 
   if (trace.type === 'thinking') {
     return (
@@ -55,7 +57,7 @@ export function TraceBlock({ trace }: Props) {
             <>💭 Reasoned <span className="trace-expand-hint">▸</span></>
           )}
         </button>
-        <div className={`thinking-body${expanded ? '' : ' hidden'}`}>
+        <div className={`thinking-body${expanded ? '' : ' hidden'}`} onClick={openInspector} style={{ cursor: expanded ? 'pointer' : undefined }}>
           {trace.text}
         </div>
       </div>
@@ -97,7 +99,7 @@ export function TraceBlock({ trace }: Props) {
         })()}
         <span className="trace-expand-hint">▸</span>
       </button>
-      <div className={`tool-body${expanded ? '' : ' hidden'}`}>
+      <div className={`tool-body${expanded ? '' : ' hidden'}`} onClick={openInspector} style={{ cursor: expanded ? 'pointer' : undefined }}>
         {hasAgentMeta && (
           <div className="agent-meta">
             {trace.model && (
