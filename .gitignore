@@ -5,6 +5,7 @@ workspace/
 stt/.venv/
 tts/.venv/
 settings.json
+*.test-backup
 .claude/settings.local.json
 test-results/
 tests/test-results/

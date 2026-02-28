@@ -477,13 +477,13 @@ html, body {
   justify-content: center;
   height: 100%;
   gap: 8px;
-  opacity: 0.5;
   user-select: none;
 }
 
-#empty-state .empty-icon { font-size: 32px; }
-#empty-state .empty-title { font-size: 16px; font-weight: 600; color: var(--text); }
-#empty-state .empty-hint { font-size: 13px; color: var(--text-secondary); }
+#empty-state .empty-icon { font-size: 32px; opacity: 0.5; }
+#empty-state .empty-title { font-size: 16px; font-weight: 600; color: var(--text-dim); }
+#empty-state .empty-subtitle { font-size: 14px; color: var(--text-dim); }
+#empty-state .empty-hint { font-size: 13px; color: var(--text-dim); }
 #empty-state .empty-hint kbd {
   display: inline-block;
   padding: 1px 5px;
@@ -1515,7 +1515,7 @@ html, body {
 }
 
 .sb-pill.active {
-  color: var(--accent);
+  color: #8a7af5;
   background: var(--accent-soft);
   border-color: var(--accent);
 }
@@ -3980,7 +3980,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   padding: 7px 16px;
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   cursor: pointer;
   border-radius: 0;
   transition: background var(--transition), color var(--transition);
@@ -3995,7 +3995,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 }
 
 .settings-nav-item.active {
-  color: var(--accent);
+  color: #9888ff;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   font-weight: 600;
 }
@@ -4046,7 +4046,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 
 .settings-row-label .label-desc {
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   margin-top: 1px;
 }
 

@@ -16,6 +16,7 @@ export type DemoStep =
   | { action: 'set_tts_auto'; on: boolean }
   | { action: 'set_short'; on: boolean }
   | { action: 'play_audio'; src: string }
+  | { action: 'speak_tts'; text: string; voice?: string }
   | { action: 'click'; selector: string }
   | { action: 'set_theme'; theme: string }
   | { action: 'close_pip' }

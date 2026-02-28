@@ -910,10 +910,9 @@ export const DEMO_SCENARIO: DemoScenario = {
     }),
     emit({ type: 'loading', isLoading: false }),
 
-    // Play pre-recorded TTS audio (waits until playback finishes)
-    // Drop your audio file at web/public/demo/response.mp3
+    // Agent speaks the response via edge-tts (default voice, no static file needed)
     { action: 'label', text: 'Voice output (TTS)', id: 'voice-output' },
-    { action: 'play_audio', src: './demo/response.mp3' },
+    { action: 'speak_tts', text: 'Health endpoint checks out — status ok, rate limiting active.' },
 
     // Usage update (accumulated)
     emit({

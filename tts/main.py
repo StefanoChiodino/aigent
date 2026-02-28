@@ -12,11 +12,13 @@ Usage:
     --host    127.0.0.1
     --port    8766
 
-POST /synthesize[?rate=+25%]
+POST /synthesize[?rate=+25%&voice=en-US-GuyNeural]
     Content-Type: text/plain
     Body: text to speak (plain text, markdown stripped by caller)
     Response: audio/mpeg (MP3)
-    Optional query param: rate — overrides the server default for this request
+    Optional query params:
+        rate  — overrides the server default speech rate for this request
+        voice — overrides the server default voice for this request
 
 GET /health
     Response: {"status": "ok", "voice": "..."}
@@ -53,10 +55,10 @@ _pitch: str = "+0Hz"
 
 # ── Synthesis ─────────────────────────────────────────────────
 
-async def _synthesize(text: str, rate: str) -> bytes:
+async def _synthesize(text: str, rate: str, voice: str | None = None) -> bytes:
     """Synthesize text using edge-tts and return MP3 bytes."""
     buf = io.BytesIO()
-    communicate = edge_tts.Communicate(text, _voice, rate=rate, pitch=_pitch)
+    communicate = edge_tts.Communicate(text, voice or _voice, rate=rate, pitch=_pitch)
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
             buf.write(chunk["data"])
@@ -84,9 +86,10 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        # Per-request rate override via ?rate=+25%
+        # Per-request overrides via query params
         params = parse_qs(parsed.query)
         rate = params.get("rate", [_rate])[0]
+        voice = params.get("voice", [None])[0]
 
         length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(length)
@@ -102,9 +105,10 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             t0 = time.time()
-            audio = asyncio.run(_synthesize(text, rate))
+            audio = asyncio.run(_synthesize(text, rate, voice))
             elapsed = time.time() - t0
-            print(f"[{elapsed:.2f}s] {len(audio):,} bytes, {len(text)} chars, rate={rate}", flush=True)
+            used_voice = voice or _voice
+            print(f"[{elapsed:.2f}s] {len(audio):,} bytes, {len(text)} chars, voice={used_voice}, rate={rate}", flush=True)
 
             self.send_response(200)
             self.send_header("Content-Type", "audio/mpeg")

@@ -107,7 +107,7 @@ export function SettingControl({ def, value, onChange }: SettingControlProps) {
             step={def.step}
             onChange={e => { const n = Number(e.target.value); if (!isNaN(n)) onChange(n); }}
           />
-          {def.unit && <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>{def.unit}</span>}
+          {def.unit && <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{def.unit}</span>}
         </span>
       );
 

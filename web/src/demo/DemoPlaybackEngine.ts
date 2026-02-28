@@ -27,41 +27,8 @@ const CURSOR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="2
   <path d="M5 3l14 10-6.5 1.5L16 21l-3 1.5-3.5-6.5L4 18z"/>
 </svg>`;
 
-/**
- * Pick a SpeechSynthesis voice that differs from the browser default.
- * Prefers a male English voice or different locale; falls back to any non-default.
- */
-function pickAlternateVoice(preferredName?: string): SpeechSynthesisVoice | null {
-  const voices = speechSynthesis.getVoices();
-  if (voices.length === 0) return null;
-
-  // If a specific voice name was requested, find it
-  if (preferredName) {
-    const match = voices.find(v => v.name === preferredName);
-    if (match) return match;
-  }
-
-  const defaultVoice = voices.find(v => v.default) ?? voices[0]!;
-
-  // Prefer English voices that aren't the default
-  const enVoices = voices.filter(v => v.lang.startsWith('en') && v !== defaultVoice);
-
-  // Try to find one with a different gender hint (name containing "Male"/"Guy"/"David"/"James")
-  const maleHints = /\b(male|guy|david|james|mark|daniel|ryan|thomas)\b/i;
-  const male = enVoices.find(v => maleHints.test(v.name));
-  if (male) return male;
-
-  // Try a different English locale (en-GB if default is en-US, etc.)
-  const diffLocale = enVoices.find(v => v.lang !== defaultVoice.lang);
-  if (diffLocale) return diffLocale;
-
-  // Any non-default English voice
-  if (enVoices.length > 0) return enVoices[0]!;
-
-  // Any non-default voice at all
-  const any = voices.find(v => v !== defaultVoice);
-  return any ?? null;
-}
+/** Default alternate voice for simulated STT — must differ from the main TTS voice (en-US-AvaNeural). */
+const STT_SIM_VOICE = 'en-US-AndrewNeural';
 
 export class DemoPlaybackEngine {
   private scenario: DemoScenario;
@@ -302,6 +269,7 @@ export class DemoPlaybackEngine {
       case 'wait': break;
       case 'label': break;
       case 'play_audio': break;
+      case 'speak_tts': break;
 
       case 'emit':
         this.mockWs.emit(step.event);
@@ -458,6 +426,10 @@ export class DemoPlaybackEngine {
         await this.playAudio(step.src);
         break;
 
+      case 'speak_tts':
+        await this.speakViaTts(step.text, step.voice);
+        break;
+
       case 'click':
         await this.animatedClick(step.selector);
         break;
@@ -542,13 +514,61 @@ export class DemoPlaybackEngine {
   }
 
   /**
-   * Simulate voice input: speak text with an alternate voice via SpeechSynthesis,
-   * animate mic recording/VAD/transcribing states, then type the "transcribed" text.
+   * Speak text via edge-tts (default voice) and play the audio.
+   * Used for the agent's TTS response in the demo — no static file needed.
+   * Falls back to browser SpeechSynthesis if TTS server is unavailable.
+   */
+  private async speakViaTts(text: string, voiceName?: string): Promise<void> {
+    if (this.shouldStop()) return;
+
+    useVoiceStore.getState().setTtsPlaying(true);
+    let played = false;
+    try {
+      const params = new URLSearchParams();
+      if (voiceName) params.set('voice', voiceName);
+      const qs = params.toString();
+      const res = await fetch(`/tts${qs ? `?${qs}` : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: text,
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        await new Promise<void>((resolve) => {
+          const audio = new Audio(url);
+          this.currentAudio = audio;
+          const done = () => { this.currentAudio = null; URL.revokeObjectURL(url); resolve(); };
+          audio.onended = done;
+          audio.onerror = done;
+          void audio.play().catch(done);
+        });
+        played = true;
+      }
+    } catch { /* TTS server unavailable */ }
+
+    // Fallback: browser SpeechSynthesis
+    if (!played && !this.shouldStop()) {
+      await new Promise<void>((resolve) => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
+        speechSynthesis.speak(utterance);
+      });
+    }
+
+    useVoiceStore.getState().setTtsPlaying(false);
+  }
+
+  /**
+   * Simulate voice input: generate speech with edge-tts (alternate voice),
+   * play the audio while animating mic/VAD states, then "transcribe" the text into input.
+   * Falls back to browser SpeechSynthesis if TTS server is unavailable.
    */
   private async executeTtsToStt(text: string, voiceName?: string): Promise<void> {
     if (this.shouldStop()) return;
 
-    const voice = pickAlternateVoice(voiceName);
+    const voice = voiceName ?? STT_SIM_VOICE;
 
     // Start "recording"
     useVoiceStore.getState().setMicState('recording');
@@ -556,18 +576,41 @@ export class DemoPlaybackEngine {
     await this.delay(400);
     if (this.shouldStop()) return;
 
-    // Speak the text with the alternate voice and show VAD active
+    // Generate audio with edge-tts using a different voice
     useVoiceStore.getState().setVadActive(true);
+    let played = false;
+    try {
+      const qs = `?voice=${encodeURIComponent(voice)}&rate=${encodeURIComponent('+0%')}`;
+      const res = await fetch(`/tts${qs}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: text,
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        await new Promise<void>((resolve) => {
+          const audio = new Audio(url);
+          this.currentAudio = audio;
+          const done = () => { this.currentAudio = null; URL.revokeObjectURL(url); resolve(); };
+          audio.onended = done;
+          audio.onerror = done;
+          void audio.play().catch(done);
+        });
+        played = true;
+      }
+    } catch { /* TTS server unavailable — fall through to SpeechSynthesis fallback */ }
 
-    await new Promise<void>((resolve) => {
-      const utterance = new SpeechSynthesisUtterance(text);
-      if (voice) utterance.voice = voice;
-      utterance.rate = 1.0;
-      const done = () => resolve();
-      utterance.onend = done;
-      utterance.onerror = done;
-      speechSynthesis.speak(utterance);
-    });
+    // Fallback: browser SpeechSynthesis if /tts failed
+    if (!played && !this.shouldStop()) {
+      await new Promise<void>((resolve) => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
+        speechSynthesis.speak(utterance);
+      });
+    }
     if (this.shouldStop()) return;
 
     // Speech ended — VAD goes silent

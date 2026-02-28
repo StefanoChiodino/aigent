@@ -22,7 +22,7 @@ const LOG_FILE = '/tmp/aigent-test-gatekeeper.log';
 const AUTOSAVE = resolve(ROOT, 'workspace/.autosave.json');
 const AUTOSAVE_BACKUP = `${AUTOSAVE}.test-backup`;
 const SETTINGS = resolve(ROOT, 'settings.json');
-const SETTINGS_BACKUP = `${SETTINGS}.test-backup`;
+const SETTINGS_BACKUP = '/tmp/aigent-settings.json.test-backup';
 const TEST_SETTINGS = '/tmp/aigent-test-settings.json';
 
 export default async function globalSetup() {
