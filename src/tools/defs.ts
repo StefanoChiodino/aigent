@@ -521,6 +521,58 @@ const askUserTool: ToolDef = {
   },
 };
 
+const logEpisodeTool: ToolDef = {
+  name: 'log_episode',
+  description:
+    'Record a structured episode — what was attempted, how it went, and what was learned. ' +
+    'Episodes build the agent\'s experience database for learning from past work.\n\n' +
+    'WHEN TO USE:\n' +
+    '- After completing a significant task\n' +
+    '- When a task fails and you want to record why\n' +
+    '- When you learn something reusable across future tasks\n' +
+    '- At natural topic shifts within a session\n\n' +
+    'Domain should be a short freeform tag (e.g. "debugging", "web-ui", "writing", "agent-dev").',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      domain: { type: 'string', description: 'Freeform domain tag (e.g. "debugging", "web-ui", "writing", "agent-dev")' },
+      task: { type: 'string', description: 'Short description of what was attempted (1-2 sentences)' },
+      outcome: { type: 'string', enum: ['completed', 'partial', 'abandoned', 'failed'], description: 'How the task ended' },
+      friction: { type: 'string', description: 'What was hard, what went wrong, what the user corrected. Omit if smooth.' },
+      lessons: {
+        type: 'array', items: { type: 'string' },
+        description: 'Extracted insights reusable across future tasks. Each lesson should be a standalone sentence.',
+      },
+      tags: {
+        type: 'array', items: { type: 'string' },
+        description: 'Freeform tags for retrieval (e.g. "typescript", "css", "performance")',
+      },
+    },
+    required: ['domain', 'task', 'outcome'],
+  },
+};
+
+const queryEpisodesTool: ToolDef = {
+  name: 'query_episodes',
+  description:
+    'Search and filter past episode records. Episodes are structured records of task outcomes — ' +
+    'domain, outcome, friction, lessons, cost. Use this to recall past experience, identify patterns, ' +
+    'or check if you\'ve encountered a similar task before.\n\n' +
+    'Returns episodes in reverse chronological order (most recent first).',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      domain: { type: 'string', description: 'Filter by domain tag (exact match)' },
+      outcome: { type: 'string', enum: ['completed', 'partial', 'abandoned', 'failed'], description: 'Filter by outcome' },
+      tags: { type: 'array', items: { type: 'string' }, description: 'Filter by tags (match ANY)' },
+      since: { type: 'string', description: 'Only episodes after this date (ISO 8601 or YYYY-MM-DD)' },
+      until: { type: 'string', description: 'Only episodes before this date (ISO 8601 or YYYY-MM-DD)' },
+      limit: { type: 'number', description: 'Max results to return (default: 20, max: 200)' },
+    },
+    required: [],
+  },
+};
+
 // --- Tool registry ---
 
 export const internalTools: ToolDef[] = [
@@ -528,6 +580,7 @@ export const internalTools: ToolDef[] = [
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
   hostTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
   searchMemoryTool, browserExtTool, askUserTool,
+  logEpisodeTool, queryEpisodesTool,
 ];
 
 export function getToolDefinitions(useClaudeCodeNames: boolean): ToolDef[] {

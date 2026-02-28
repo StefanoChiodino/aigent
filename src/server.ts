@@ -65,6 +65,10 @@ let isProcessingTaskResult = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
 
+// --- Episode tracking ---
+let sessionToolsUsed: string[] = [];
+let sessionStartedAt: string = new Date().toISOString();
+
 // --- Permission request brokers ---
 // Each broker manages one category of pending request (exec, fetch, etc.).
 // See pending-request.ts for the generic implementation.
@@ -303,6 +307,31 @@ export function requestUserQuestion(
   return promise;
 }
 
+// --- Episode session context (for log_episode tool) ---
+
+export function getCurrentSessionContext(): {
+  sessionStartedAt: string;
+  toolsUsed: string[];
+  turns: number;
+  model: string;
+  profile: string;
+  sessionId: string;
+  usage: TokenUsage;
+  workspacePath: string;
+} {
+  const userTurns = messages.filter(m => m.role === 'user').length;
+  return {
+    sessionStartedAt,
+    toolsUsed: [...new Set(sessionToolsUsed)],
+    turns: userTurns,
+    model,
+    profile: currentProfile,
+    sessionId: currentSessionId,
+    usage,
+    workspacePath,
+  };
+}
+
 // --- Background task queue ---
 
 import { TaskQueue } from './tasks.js';
@@ -515,6 +544,7 @@ async function processAgentTurn(
       },
       onToolComplete: (info) => {
         appendToolLog(join(workspacePath, 'memory'), info, getReqId());
+        sessionToolsUsed.push(info.tool);
       },
     });
 
@@ -838,6 +868,12 @@ function getCommandContext(): CommandContext {
     get isLoading() { return isLoading; },
     get workspacePath() { return workspacePath; },
     get availableModels() { return AVAILABLE_MODELS; },
+    get toolsUsed() { return [...new Set(sessionToolsUsed)]; },
+    get sessionStartedAt() { return sessionStartedAt; },
+    resetSessionTracking() {
+      sessionToolsUsed = [];
+      sessionStartedAt = new Date().toISOString();
+    },
     addSystemMessage,
     broadcast,
     doAutoSave,
@@ -1393,6 +1429,13 @@ try {
 }
 
 restoreSession();
+
+// Rotate episodes file at startup if needed
+try {
+  const { rotateEpisodesIfNeeded } = await import('./episodes.js');
+  rotateEpisodesIfNeeded(workspacePath);
+} catch { /* non-critical */ }
+
 const server = startServer();
 log.info('Listening', { socket: SOCKET_PATH });
 
@@ -1461,6 +1504,24 @@ async function shutdown(): Promise<void> {
   // state is preserved even if docker SIGKILL arrives during distillation.
   saveLifetimeUsage(workspacePath, usage);
   doAutoSave();
+
+  // Auto-log episode if agent didn't explicitly log one
+  try {
+    const { autoLogEpisode, wasSessionLogged } = await import('./episodes.js');
+    if (!wasSessionLogged(currentSessionId)) {
+      autoLogEpisode({
+        messages,
+        usage,
+        model,
+        profile: currentProfile,
+        sessionId: currentSessionId,
+        workspacePath,
+        toolsUsed: sessionToolsUsed,
+        sessionStartedAt,
+        source: 'auto-shutdown',
+      });
+    }
+  } catch { /* non-critical */ }
 
   // Distill conversation to MEMORY.md — give it up to 30s before forcing exit.
   const agentMessages = agent?.getMessages() ?? [];

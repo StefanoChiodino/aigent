@@ -73,6 +73,16 @@
 
 ---
 
+## Continuous Learning (new track — see `docs/design-continuous-learning.md`)
+
+- [x] **Episode logging** — `src/episodes.ts`: Episode interface, NDJSON storage (`workspace/episodes.ndjson`), `log_episode` + `query_episodes` tools, auto-log on `/reset` and shutdown, domain inference, session tracking, 10MB rotation. 37 unit tests.
+- [ ] **Reflection agent** — background agent at session end: extracts structured episodes, mines patterns across recent history, proposes improvements (MEMORY.md updates, TODO items, auto-fixes).
+- [ ] **Self-play harness** — launch isolated test instance (different port, clean workspace), drive via browser extension, evaluate results. Task library format: prompt + setup script + eval criteria.
+- [ ] **Feedback collection** — `ask_user` integration for lightweight ratings after complex tasks. `user_rating` field in episode records. Trend queries by domain.
+- [ ] **Semantic episode retrieval** — embeddings over episode summaries (local model or Anthropic voyage + SQLite-vec). Proactive surfacing of relevant past experience before starting similar tasks.
+
+---
+
 ## Future / Low Priority
 
 - [ ] **Packaging / installer** — single-binary or packaged installer; consider Tauri or Electron.

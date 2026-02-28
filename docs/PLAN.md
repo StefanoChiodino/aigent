@@ -154,9 +154,16 @@ Server process (spawned directly, no Docker)
 - [ ] Headless browser (deferred) — Playwright fallback for unattended/CI runs
 - [ ] Computer-use loop (deferred) — screenshot + Anthropic computer-use API
 
+### Continuous Learning (primary track — see `docs/design-continuous-learning.md`)
+- [x] Episode logging — `src/episodes.ts`, NDJSON storage, `log_episode` + `query_episodes` tools, auto-log on reset/shutdown
+- [ ] Reflection agent — background agent at session boundaries, pattern extraction, auto-improvements
+- [ ] Self-play harness — isolated test instance + browser-driven evaluation + task library
+- [ ] Feedback collection — lightweight user ratings, trend tracking by domain
+- [ ] Semantic episode retrieval — embeddings + vector search over episode history
+
 ### Memory System
 - [ ] Haiku-filtered retrieval — when keyword results are noisy, Haiku filters to relevant chunks
-- [ ] RAG with local embeddings — if/when logs span 6+ months
+- [ ] RAG with local embeddings — if/when logs span 6+ months (may be subsumed by episode retrieval)
 
 ### Web UI
 - [ ] PWA manifest + service worker for installable mobile app

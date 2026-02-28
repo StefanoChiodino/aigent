@@ -7,7 +7,7 @@
 
 import { execSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { sanitizedEnv, validateFetchUrl, validateFetchUrlDns, checkCommandSafety, validateReadonlyCommand, checkSensitivePath } from '../safety.js';
 import { auditLog } from '../audit.js';
 import type { ToolContentBlock, ImageMediaType } from '../provider.js';
@@ -68,8 +68,10 @@ interface HostEditFileInput { path: string; edits: Array<{ old_str: string; new_
 interface SwitchModelInput { model: string; reason?: string }
 interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: Record<string, unknown>[]; url?: string }
 interface AskUserInput { question: string; options?: { label: string; description?: string }[]; multi_select?: boolean }
+interface LogEpisodeInput { domain: string; task: string; outcome: 'completed' | 'partial' | 'abandoned' | 'failed'; friction?: string; lessons?: string[]; tags?: string[] }
+interface QueryEpisodesInput { domain?: string; outcome?: 'completed' | 'partial' | 'abandoned' | 'failed'; tags?: string[]; since?: string; until?: string; limit?: number }
 
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput | AskUserInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput | AskUserInput | LogEpisodeInput | QueryEpisodesInput;
 
 // --- Tool summarization ---
 
@@ -165,6 +167,19 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       const { question } = input as AskUserInput;
       const short = question.length > 60 ? question.slice(0, 60) + '...' : question;
       return `ask: ${short}`;
+    }
+    case 'log_episode': {
+      const { domain, task, outcome } = input as LogEpisodeInput;
+      const short = task.length > 50 ? task.slice(0, 50) + '...' : task;
+      return `episode: ${domain} [${outcome}] ${short}`;
+    }
+    case 'query_episodes': {
+      const { domain, outcome, since } = input as QueryEpisodesInput;
+      const parts: string[] = [];
+      if (domain) parts.push(domain);
+      if (outcome) parts.push(outcome);
+      if (since) parts.push(`since ${since}`);
+      return `query episodes${parts.length ? ': ' + parts.join(', ') : ''}`;
     }
     default:
       return name;
@@ -661,6 +676,71 @@ export async function executeTool(
       if (res.dismissed) return 'User dismissed the question without answering.';
       if (res.selectedOptions && res.selectedOptions.length > 0) return `User selected: ${res.selectedOptions.join(', ')}`;
       return `User responded: ${res.answer}`;
+    }
+
+    case 'log_episode': {
+      const { domain, task, outcome, friction, lessons, tags } = input as LogEpisodeInput;
+      const { appendEpisode, generateEpisodeId, markSessionLogged } = await import('../episodes.js');
+      const { getCurrentSessionContext } = await import('../server.js');
+      const ctx = getCurrentSessionContext();
+
+      const episode = {
+        id: generateEpisodeId(),
+        startedAt: ctx.sessionStartedAt,
+        endedAt: new Date().toISOString(),
+        domain,
+        task,
+        outcome,
+        friction: friction ?? null,
+        lessons: lessons ?? [],
+        tags: tags ?? [],
+        userRating: null,
+        toolsUsed: ctx.toolsUsed,
+        turns: ctx.turns,
+        model: ctx.model,
+        cost: {
+          inputTokens: ctx.usage.input,
+          outputTokens: ctx.usage.output,
+          cacheReadTokens: ctx.usage.cacheRead,
+          cacheWriteTokens: ctx.usage.cacheWrite,
+          estimatedUSD: ctx.usage.cost ?? 0,
+        },
+        source: 'agent' as const,
+        profile: ctx.profile,
+        sessionId: ctx.sessionId,
+      };
+
+      appendEpisode(ctx.workspacePath, episode);
+      markSessionLogged(ctx.sessionId);
+      return `Episode logged: ${domain} [${outcome}] — "${task}"`;
+    }
+
+    case 'query_episodes': {
+      const { domain, outcome, tags, since, until, limit } = input as QueryEpisodesInput;
+      const { queryEpisodes } = await import('../episodes.js');
+      const wsp = process.env['AIGENT_WORKSPACE'] ?? join(process.cwd(), 'workspace');
+      const episodes = queryEpisodes(wsp, {
+        domain, outcome, tags, since, until,
+        limit: Math.min(limit ?? 20, 200),
+      });
+
+      if (episodes.length === 0) return 'No episodes found matching the query.';
+
+      const lines = episodes.map(ep => {
+        const date = ep.endedAt.slice(0, 10);
+        const cost = ep.cost.estimatedUSD < 0.01
+          ? `$${ep.cost.estimatedUSD.toFixed(3)}`
+          : `$${ep.cost.estimatedUSD.toFixed(2)}`;
+        const lessonsStr = ep.lessons.length > 0
+          ? `\n  Lessons: ${ep.lessons.join('; ')}`
+          : '';
+        const frictionStr = ep.friction
+          ? `\n  Friction: ${ep.friction}`
+          : '';
+        return `[${date}] ${ep.domain} [${ep.outcome}] ${ep.task} (${ep.turns} turns, ${cost})${frictionStr}${lessonsStr}`;
+      });
+
+      return `${episodes.length} episode(s) found:\n\n${lines.join('\n\n')}`;
     }
 
     default:

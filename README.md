@@ -266,7 +266,7 @@ Key settings groups:
 
 ---
 
-## Tools (23)
+## Tools (25)
 
 | Tool | Description |
 |------|-------------|
@@ -293,6 +293,8 @@ Key settings groups:
 | `search_memory` | Keyword search across past session logs (zero LLM cost) |
 | `browser_ext` | Interact with Chrome via the aigent extension (a11y tree, screenshots, tab control, script execution) |
 | `ask_user` | Present a question to the user with optional multiple-choice options (free-text input always available) |
+| `log_episode` | Record a structured episode — what was attempted, outcome, friction, lessons learned |
+| `query_episodes` | Search and filter past episode records by domain, outcome, tags, date range |
 
 ---
 

@@ -45,6 +45,9 @@ export interface CommandContext {
   get isLoading(): boolean;
   get workspacePath(): string;
   get availableModels(): string[];
+  get toolsUsed(): string[];
+  get sessionStartedAt(): string;
+  resetSessionTracking(): void;
 
   // Helpers
   addSystemMessage(content: string): void;
@@ -131,6 +134,26 @@ const commands: CommandDef[] = [
   {
     match: '/reset',
     execute: (_input, ctx) => {
+      // Auto-log episode before reset (fire-and-forget)
+      const userMsgCount = ctx.messages.filter(m => m.role === 'user').length;
+      if (userMsgCount >= 2) {
+        void import('./episodes.js').then(({ autoLogEpisode, wasSessionLogged }) => {
+          if (!wasSessionLogged(ctx.currentSessionId)) {
+            autoLogEpisode({
+              messages: ctx.messages,
+              usage: ctx.usage,
+              model: ctx.model,
+              profile: ctx.currentProfile,
+              sessionId: ctx.currentSessionId,
+              workspacePath: ctx.workspacePath,
+              toolsUsed: ctx.toolsUsed,
+              sessionStartedAt: ctx.sessionStartedAt,
+              source: 'auto-reset',
+            });
+          }
+        }).catch(() => {});
+      }
+
       const messagesToDistill = ctx.agent.getMessages();
       if (messagesToDistill.length >= 4) {
         ctx.addSystemMessage('Distilling session to memory...');
@@ -141,6 +164,7 @@ const commands: CommandDef[] = [
       ctx.agent.reset();
       ctx.messages = [];
       ctx.usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+      ctx.resetSessionTracking();
       clearAutoSave(ctx.workspacePath);
       ctx.broadcast({ type: 'reset' });
       ctx.addSystemMessage('Conversation reset.');
