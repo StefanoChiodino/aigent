@@ -1,13 +1,15 @@
 /**
- * TaskResultPanel — markdown rendering, Defer button, Discuss button.
+ * TaskResultPanel — task inspect modal for all delivery modes.
  *
  * Behaviour under test:
  * - Panel is hidden when taskResultTask is null
- * - Shows task description and renders result as markdown
- * - Defer button clears the task (hides panel) without sending a message
- * - Discuss button clears the task AND sends a short reference message
- *   (does NOT paste the full result body)
- * - No legacy close (×) button
+ * - Shows task description and metadata
+ * - Renders result as markdown when available
+ * - user-pull completed tasks: Defer + Discuss buttons
+ * - agent-review / other tasks: only a Close button, no Discuss button
+ * - Close (×) button always present
+ * - Defer/Close button clears the task without sending a message
+ * - Discuss button clears the task AND sends a short reference message (not the full result)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -74,6 +76,22 @@ describe('TaskResultPanel', () => {
     expect(screen.getByText('Security scan')).toBeTruthy();
   });
 
+  it('has a close (×) button', async () => {
+    render(<TaskResultPanel />);
+    await act(async () => {
+      useUIStore.getState().setTaskResultTask(makeTask());
+    });
+    expect(document.querySelector('.task-result-close')).not.toBeNull();
+  });
+
+  it('shows metadata row', async () => {
+    render(<TaskResultPanel />);
+    await act(async () => {
+      useUIStore.getState().setTaskResultTask(makeTask({ id: 'task-abc', model: 'claude-haiku-4-5-20251001' }));
+    });
+    expect(screen.getByText('task-abc')).toBeTruthy();
+  });
+
   it('renders result body as markdown (bold)', async () => {
     render(<TaskResultPanel />);
     await act(async () => {
@@ -92,7 +110,17 @@ describe('TaskResultPanel', () => {
     expect(body?.innerHTML).toContain('<code>npm test</code>');
   });
 
-  it('has a Defer button', async () => {
+  it('shows empty-state placeholder when result is absent', async () => {
+    render(<TaskResultPanel />);
+    await act(async () => {
+      useUIStore.getState().setTaskResultTask(makeTask({ result: undefined, delivery: 'agent-review' }));
+    });
+    const body = document.querySelector('.task-result-empty');
+    expect(body).not.toBeNull();
+  });
+
+  // user-pull completed task
+  it('has a Defer button for user-pull completed task', async () => {
     render(<TaskResultPanel />);
     await act(async () => {
       useUIStore.getState().setTaskResultTask(makeTask());
@@ -100,7 +128,7 @@ describe('TaskResultPanel', () => {
     expect(screen.getByText('Defer')).toBeTruthy();
   });
 
-  it('has a Discuss button', async () => {
+  it('has a Discuss button for user-pull completed task', async () => {
     render(<TaskResultPanel />);
     await act(async () => {
       useUIStore.getState().setTaskResultTask(makeTask());
@@ -108,12 +136,23 @@ describe('TaskResultPanel', () => {
     expect(screen.getByText('Discuss with agent')).toBeTruthy();
   });
 
-  it('has no close (×) button', async () => {
+  // agent-review task
+  it('shows only Close button (no Discuss) for agent-review task', async () => {
     render(<TaskResultPanel />);
     await act(async () => {
-      useUIStore.getState().setTaskResultTask(makeTask());
+      useUIStore.getState().setTaskResultTask(makeTask({ delivery: 'agent-review', result: 'some result' }));
     });
-    expect(document.querySelector('.task-result-close')).toBeNull();
+    expect(screen.getByText('Close')).toBeTruthy();
+    expect(screen.queryByText('Discuss with agent')).toBeNull();
+  });
+
+  it('shows only Close button (no Discuss) for running task', async () => {
+    render(<TaskResultPanel />);
+    await act(async () => {
+      useUIStore.getState().setTaskResultTask(makeTask({ status: 'running', result: undefined, completedAt: undefined }));
+    });
+    expect(screen.getByText('Close')).toBeTruthy();
+    expect(screen.queryByText('Discuss with agent')).toBeNull();
   });
 
   it('Defer hides the panel without sending a message', async () => {
@@ -123,6 +162,18 @@ describe('TaskResultPanel', () => {
     });
     await act(async () => {
       screen.getByText('Defer').click();
+    });
+    expect(useUIStore.getState().taskResultTask).toBeNull();
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('Close button hides the panel without sending a message (agent-review)', async () => {
+    render(<TaskResultPanel />);
+    await act(async () => {
+      useUIStore.getState().setTaskResultTask(makeTask({ delivery: 'agent-review', result: 'x' }));
+    });
+    await act(async () => {
+      screen.getByText('Close').click();
     });
     expect(useUIStore.getState().taskResultTask).toBeNull();
     expect(ws.send).not.toHaveBeenCalled();

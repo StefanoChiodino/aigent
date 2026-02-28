@@ -1164,7 +1164,7 @@ html, body {
   color: var(--accent, #7cb4ff);
 }
 
-/* ── Task result panel (user-pull) ───────────────────────────── */
+/* ── Task result / inspect panel ────────────────────────────── */
 
 .task-result-panel {
   position: fixed;
@@ -1262,6 +1262,93 @@ html, body {
 
 .task-result-discuss:hover {
   opacity: 0.85;
+}
+
+/* Backdrop — shown when panel is visible */
+.task-result-panel:not(.hidden)::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: -1;
+}
+
+/* Close (×) button in header */
+.task-result-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #6c7086);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.task-result-close:hover {
+  color: var(--text-primary, #cdd6f4);
+}
+
+/* Metadata grid */
+.task-inspect-meta {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.task-inspect-meta-row {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.tim-key {
+  color: var(--text-dim, #585b70);
+  width: 56px;
+  flex-shrink: 0;
+  text-align: right;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tim-val {
+  color: var(--text-secondary, #a6adc8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tim-monospace {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+.tim-status-running   { color: var(--accent, #7cb4ff); }
+.tim-status-completed { color: var(--success, #a6e3a1); }
+.tim-status-failed    { color: var(--error, #f38ba8); }
+.tim-status-cancelled { color: var(--text-dim, #585b70); }
+
+/* Empty / no-result placeholder */
+.task-result-empty {
+  color: var(--text-dim, #585b70);
+  font-size: 12px;
+  font-style: italic;
+  white-space: normal;
+}
+
+/* Make every task item in the sidebar look hoverable */
+.task-item-clickable {
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+
+.task-item-clickable:hover {
+  background: rgba(255,255,255,0.05);
 }
 
 /* ── Sidebar model picker ────────────────────────────────── */
