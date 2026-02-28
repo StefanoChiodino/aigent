@@ -31,7 +31,7 @@ export type ClientCommand =
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
   | { type: 'host_state' }
   | { type: 'context_breakdown_request' }
-  | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string }
+  | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; error?: string }
   | { type: 'browser_write_response'; id: string; ok: boolean; message: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'user_question_response'; id: string; answer: string; selectedOptions?: string[]; dismissed: boolean }

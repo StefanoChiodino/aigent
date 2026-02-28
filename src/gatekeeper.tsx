@@ -1659,6 +1659,7 @@ function summariseBrowserWriteAction(action: 'run_script' | 'navigate' | 'open_t
     else if ('pressKey' in s) verbs.push(`pressKey ${s['pressKey']}`);
     else if ('hover' in s) verbs.push(`hover ${s['hover']}`);
     else if ('extractA11y' in s) verbs.push('extractA11y');
+    else if ('screenshot' in s) verbs.push('screenshot');
   }
 
   const MAX_LEN = 80;
@@ -1715,19 +1716,7 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
   if (pending.url !== undefined) params.url = pending.url;
 
   extensionBridge.request(pending.action, params).then((result) => {
-    const msg: Extract<import('./protocol.js').ClientCommand, { type: 'browser_ext_result' }> = {
-      type: 'browser_ext_result', id, ok: result.ok,
-    };
-    if (result.treeText !== undefined) msg.treeText = result.treeText;
-    if (result.dataUrl !== undefined) msg.dataUrl = result.dataUrl;
-    if (result.tabs !== undefined) msg.tabs = result.tabs;
-    if (result.stepsCompleted !== undefined) msg.stepsCompleted = result.stepsCompleted;
-    if (result.totalSteps !== undefined) msg.totalSteps = result.totalSteps;
-    if (result.finalUrl !== undefined) msg.finalUrl = result.finalUrl;
-    if (result.finalTitle !== undefined) msg.finalTitle = result.finalTitle;
-    if (result.newTabId !== undefined) msg.newTabId = result.newTabId;
-    if (result.error !== undefined) msg.error = result.error;
-    client!.send(msg);
+    sendBrowserExtResult(id, result);
   }).catch((err: Error) => {
     client!.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
   });
@@ -1736,7 +1725,7 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
 }
 
 /** Relay a browser extension result (used by both approval handler and auto-approval path). */
-function sendBrowserExtResult(id: string, result: { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string }): void {
+function sendBrowserExtResult(id: string, result: { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; error?: string }): void {
   const msg: Extract<import('./protocol.js').ClientCommand, { type: 'browser_ext_result' }> = {
     type: 'browser_ext_result', id, ok: result.ok,
   };
@@ -1748,6 +1737,7 @@ function sendBrowserExtResult(id: string, result: { ok: boolean; treeText?: stri
   if (result.finalUrl !== undefined) msg.finalUrl = result.finalUrl;
   if (result.finalTitle !== undefined) msg.finalTitle = result.finalTitle;
   if (result.newTabId !== undefined) msg.newTabId = result.newTabId;
+  if (result.screenshots !== undefined) msg.screenshots = result.screenshots;
   if (result.error !== undefined) msg.error = result.error;
   client!.send(msg);
 }

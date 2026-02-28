@@ -76,7 +76,7 @@ const execBroker = new PendingRequestBroker<{ command: string }, OkAlwaysAllow>(
   timeoutResponse: { ok: false, alwaysAllow: false, message: 'Exec approval request timed out (60s)' },
 });
 
-type BrowserExtResponse = { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string };
+type BrowserExtResponse = { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; error?: string };
 
 const browserExtBroker = new PendingRequestBroker<
   { action: string; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string },
@@ -191,6 +191,21 @@ export async function requestBrowserExt(
     const parts: string[] = [`Script completed: ${response.stepsCompleted ?? '?'}/${response.totalSteps ?? '?'} steps`];
     if (response.finalUrl) parts.push(`Final URL: ${response.finalUrl}`);
     if (response.finalTitle) parts.push(`Final title: ${response.finalTitle}`);
+    // Return screenshots as image content blocks alongside the text summary
+    if (response.screenshots && response.screenshots.length > 0) {
+      const blocks: import('./provider.js').ToolContentBlock[] = [
+        { type: 'text' as const, text: parts.join('\n') },
+      ];
+      for (const ss of response.screenshots) {
+        const [header, b64] = ss.dataUrl.split(',');
+        const rawType = header?.replace('data:', '').replace(';base64', '') ?? 'image/png';
+        const mediaType: import('./provider.js').ImageMediaType =
+          (rawType === 'image/png' || rawType === 'image/jpeg' || rawType === 'image/gif' || rawType === 'image/webp')
+            ? rawType : 'image/png';
+        blocks.push({ type: 'image' as const, mediaType, data: b64 ?? '' });
+      }
+      return blocks;
+    }
     return parts.join('\n');
   }
   if (action === 'activate_tab') return `Switched to tab: ${response.finalUrl ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`;

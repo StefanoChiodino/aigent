@@ -118,6 +118,7 @@ export function Sidebar() {
   const capsList = useUIStore(s => s.capsList);
   const ttsAvailable = useUIStore(s => s.ttsAvailable);
   const sttAvailable = useUIStore(s => s.sttAvailable);
+  const extensionConnected = useUIStore(s => s.extensionConnected);
   const modelName = useUIStore(s => s.modelName);
   const availableModels = useUIStore(s => s.availableModels);
   const thinkingLevel = useUIStore(s => s.thinkingLevel);
@@ -346,7 +347,7 @@ export function Sidebar() {
         <div className="sidebar-section">
           <div className="sidebar-label">Capabilities</div>
           <div id="sb-caps-list">
-            {Object.keys(capsList).length === 0 && !ttsAvailable && !sttAvailable
+            {Object.keys(capsList).length === 0 && !ttsAvailable && !sttAvailable && !extensionConnected
               ? <span className="sidebar-value" style={{ fontSize: 11 }}>--</span>
               : <>
                   {Object.entries(capsList).map(([cap, info]) => {
@@ -377,6 +378,12 @@ export function Sidebar() {
                     <div className="cap-item" title="Speech-to-text via Whisper server">
                       <span className="cap-grant allow" title="Available">on</span>
                       <span className="cap-name">STT</span>
+                    </div>
+                  )}
+                  {extensionConnected && (
+                    <div className="cap-item" title="Chrome extension connected — browser tools available">
+                      <span className="cap-grant allow" title="Connected">on</span>
+                      <span className="cap-name">Browser</span>
                     </div>
                   )}
                 </>

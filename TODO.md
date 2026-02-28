@@ -43,8 +43,8 @@
 
 ## UI / UX
 
-- [ ] **Browser extension** — see `docs/design-browser-extension.md` for full design. Live session automation (already logged in), a11y-tree-driven, batched action scripts, gatekeeper-bridged.
-- [ ] **Browser a11y tree** — covered in extension design; `extract_a11y` returns structured element tree, ~800–2000 tokens vs ~20k for raw HTML.
+- [x] **Browser extension** — fully implemented through Phase 3c. Live session automation, a11y-tree-driven, batched action scripts, gatekeeper-bridged. Extension auth (shared secret), SSRF validation on navigate, destructive action heuristics, audit logging, sidebar connection indicator, mid-script screenshot steps.
+- [x] **Browser a11y tree** — `extract_a11y` returns structured element tree (~800–2000 tokens), inline `extractA11y` and `screenshot` steps available mid-script.
 
 ---
 

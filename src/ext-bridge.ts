@@ -34,6 +34,7 @@ interface ExtResponse {
   finalUrl?: string;
   finalTitle?: string;
   newTabId?: number;
+  screenshots?: Array<{ stepIndex: number; dataUrl: string }>;
   error?: string;
 }
 

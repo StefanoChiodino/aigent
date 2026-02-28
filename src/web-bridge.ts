@@ -660,6 +660,7 @@ export async function startWebServer(
                   else if ('pressKey' in s) verbs.push(`pressKey ${s['pressKey']}`);
                   else if ('hover' in s) verbs.push(`hover ${s['hover']}`);
                   else if ('extractA11y' in s) verbs.push('extractA11y');
+                  else if ('screenshot' in s) verbs.push('screenshot');
                 }
                 let summary = verbs.slice(0, 5).join(', ');
                 const extra = verbs.length - 5;

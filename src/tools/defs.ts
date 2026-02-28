@@ -479,7 +479,7 @@ const browserExtTool: ToolDef = {
       url: { type: 'string', description: 'URL to navigate to. Only used with the `navigate` action.' },
       steps: {
         type: 'array',
-        description: 'Array of browser steps for `run_script`. Each step is an object with exactly one action key. Supported keys: navigate (string url), click (string css selector), fill (string selector) + value (string), clear (string selector), select (string selector) + option (string), check (string selector) + checked (boolean), scroll ("up"|"down"|"top"|"bottom"|string selector), wait (number ms), waitFor (string selector), pressKey (string key), hover (string selector), extractA11y (true).',
+        description: 'Array of browser steps for `run_script`. Each step is an object with exactly one action key. Supported keys: navigate (string url), click (string css selector), fill (string selector) + value (string), clear (string selector), select (string selector) + option (string), check (string selector) + checked (boolean), scroll ("up"|"down"|"top"|"bottom"|string selector), wait (number ms), waitFor (string selector), pressKey (string key), hover (string selector), extractA11y (true), screenshot (true).',
         items: { type: 'object' as const },
       },
     },

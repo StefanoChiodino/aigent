@@ -55,6 +55,12 @@ Completed items moved here to keep `TODO.md` focused on active work.
 - [x] **Attached images persist in chat** — thumbnails generated client-side, stored in `DisplayMessage.attachments`, rendered in `Message.tsx`, persisted via Zustand localStorage. See `docs/image-handling.md`.
 - [x] **Agent spawn details** — model name and reasoning level shown in the expandable details panel of `spawn_agent` and `dispatch_task` tool traces.
 - [x] **Phase 3b — Autonomous mode + close_tab** — `browser.autonomous` grant (distinct from `browser.write`), `close_tab` action, "Go Autonomous" button in permission modal. Destructive action heuristics deferred. (2026-02-26)
+- [x] **Phase 3c — Destructive action heuristics** — `DESTRUCTIVE_PATTERNS` regex list (submit, delete, purchase, etc.) checks click targets and navigate URLs. Even with `browser.write` granted, destructive actions require per-action confirmation (unless `browser.autonomous` active). Warning icon in permission modal, "Always Allow" hidden for destructive requests. (2026-02-28)
+- [x] **Extension authentication** — shared secret via `crypto.randomUUID()`, served at `GET /ext/secret`, validated on WebSocket upgrade via query param. Extension re-fetches secret on each reconnect. (2026-02-28)
+- [x] **SSRF validation for navigate URLs** — `validateFetchUrl()` applied to navigate, open_tab, and run_script navigate steps. Blocks private IPs, localhost, cloud metadata. (2026-02-28)
+- [x] **Browser extension audit logging** — `browser_ext_read`, `browser_ext_write_grant`, `browser_ext_write_prompt`, `browser_ext_user_approve`, `browser_ext_user_deny`, `browser_ext_destructive_prompt`, `browser_ext_ssrf_block` event types in audit log. (2026-02-28)
+- [x] **Extension connection indicator** — sidebar Capabilities section shows "Browser" with green "on" badge when Chrome extension is connected. `host_state` event carries `extensionConnected` flag. (2026-02-28)
+- [x] **Mid-script screenshot step** — `{ screenshot: true }` step type in `run_script`. Background worker captures via `captureVisibleTab` (pause-resume pattern like navigation). Screenshots returned as image content blocks. (2026-02-28)
 
 ## Extensibility & Docs
 
