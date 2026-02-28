@@ -117,7 +117,7 @@ export function SettingsModal() {
                       : (serverSettings[def.key] ?? def.default ?? '');
                     const isStacked = def.type === 'string-list';
                     return (
-                      <div key={def.key} className={`settings-row${isStacked ? ' settings-row--stacked' : ''}`}>
+                      <div key={def.key} className={`settings-row${isStacked ? ' settings-row--stacked' : ''}${def.danger ? ' settings-row--danger' : ''}`}>
                         <div className="settings-row-label">
                           <div className="label-text">{def.label}</div>
                           {def.desc && <div className="label-desc">{def.desc}</div>}

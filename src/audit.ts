@@ -32,6 +32,7 @@ export type AuditEventType =
   | 'exec_tier3_ask'
   | 'exec_user_approve'
   | 'exec_user_deny'
+  | 'exec_yolo_allow'
   // File access
   | 'file_read'
   | 'file_read_block'
@@ -41,6 +42,8 @@ export type AuditEventType =
   | 'file_sensitive_prompt'
   | 'file_user_approve'
   | 'file_user_deny'
+  | 'file_read_yolo_allow'
+  | 'file_write_yolo_allow'
   // Fetch
   | 'fetch_ssrf_block'
   | 'fetch_dns_block'
@@ -48,6 +51,7 @@ export type AuditEventType =
   | 'fetch_user_approve'
   | 'fetch_user_deny'
   | 'fetch_allow'
+  | 'fetch_yolo_allow'
   // MCP
   | 'mcp_tool_prompt'
   | 'mcp_tool_allow'

@@ -49,6 +49,7 @@ export interface SettingDef {
   scope: 'server' | 'client';
   restartRequired?: boolean;
   placeholder?: string;
+  danger?: boolean;
 }
 
 export const SETTINGS_SCHEMA: SettingDef[] = [
@@ -327,6 +328,16 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
+    key: 'exec_perm_yolo',
+    label: 'YOLO mode',
+    desc: 'Auto-approve ALL commands. Tier 1 hard deny (shell injection, credential access, privilege escalation) is still enforced.',
+    group: 'Permissions',
+    type: 'toggle',
+    default: false,
+    scope: 'client',
+    danger: true,
+  },
+  {
     key: 'exec_perm_alwaysAllow',
     label: 'Always Allow',
     desc: 'One pattern per line. "ls" = ls and ls <args>. "git *" = any git subcommand. "*" = allow all. "?" = single char.',
@@ -354,6 +365,16 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
+    key: 'fetch_perm_yolo',
+    label: 'YOLO mode',
+    desc: 'Auto-approve ALL fetch requests. SSRF protection (private IPs, metadata endpoints) is still enforced.',
+    group: 'Fetch Permissions',
+    type: 'toggle',
+    default: false,
+    scope: 'client',
+    danger: true,
+  },
+  {
     key: 'fetch_perm_alwaysAllow',
     label: 'Always Allow',
     desc: 'One pattern per line. "example.com" = hostname. "*.example.com" = subdomains. "https://api.example.com/v1/*" = URL prefix. "*" = allow all.',
@@ -370,6 +391,16 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     type: 'string-list',
     default: '[]',
     scope: 'client',
+  },
+  {
+    key: 'file_perm_yolo',
+    label: 'YOLO mode',
+    desc: 'Auto-approve ALL file read/write requests. Hard-deny paths (~/.ssh, ~/.gnupg, ~/.aws, /proc, /sys) are still enforced.',
+    group: 'File Permissions',
+    type: 'toggle',
+    default: false,
+    scope: 'client',
+    danger: true,
   },
   {
     key: 'file_perm_readWrite',

@@ -44,7 +44,7 @@ export function QuestionForm() {
 
   const options = req.questionOptions ?? [];
   const multiSelect = req.questionMultiSelect ?? false;
-  const allowFreeText = req.questionAllowFreeText ?? (options.length === 0);
+  const allowFreeText = true; // Always show free-text — user should never be locked into predefined choices
   const hasOptions = options.length > 0;
 
   const canSubmit = (hasOptions && selectedOptions.size > 0) ||

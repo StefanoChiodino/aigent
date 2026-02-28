@@ -4182,6 +4182,25 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   width: 100%;
 }
 
+/* Danger setting — red accent for YOLO mode toggles */
+.settings-row--danger {
+  border-left: 3px solid #e53935;
+  padding-left: 12px;
+  background: rgba(229, 57, 53, 0.06);
+  border-radius: 4px;
+}
+.settings-row--danger .label-text {
+  color: #e53935;
+  font-weight: 700;
+}
+.settings-row--danger .label-desc {
+  color: #ff7043;
+}
+.settings-row--danger .settings-toggle input:checked + .settings-toggle-track {
+  background: #e53935;
+  border-color: #c62828;
+}
+
 .settings-string-list {
   width: 100%;
   min-height: 120px;

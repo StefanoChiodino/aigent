@@ -492,7 +492,8 @@ const askUserTool: ToolDef = {
   description:
     'Present a question to the user and wait for their response. Use this when you need specific ' +
     'input, confirmation, or a choice from the user before proceeding. You can present free-text ' +
-    'questions or multiple-choice options.\n\n' +
+    'questions or multiple-choice options. A free-text input is always shown alongside options ' +
+    'so the user can type a custom answer.\n\n' +
     'WHEN TO USE:\n' +
     '- You need clarification before taking an action\n' +
     '- You want to offer the user a choice between approaches\n' +
@@ -504,7 +505,7 @@ const askUserTool: ToolDef = {
     properties: {
       question: { type: 'string', description: 'The question to ask the user. Be specific and concise.' },
       options: {
-        type: 'array', description: 'Optional list of predefined choices. Omit for free-text input.',
+        type: 'array', description: 'Optional list of predefined choices. A free-text input is always shown alongside these.',
         items: {
           type: 'object',
           properties: {
@@ -515,7 +516,6 @@ const askUserTool: ToolDef = {
         },
       },
       multi_select: { type: 'boolean', description: 'If true and options provided, allow selecting multiple. Default: false.' },
-      allow_free_text: { type: 'boolean', description: 'If true, show a free-text input (in addition to or instead of options). Default: true when no options, false when options provided.' },
     },
     required: ['question'],
   },

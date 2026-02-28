@@ -213,7 +213,7 @@ export const DEMO_SCENARIO: DemoScenario = {
           'claude-opus-4-6',
           'claude-haiku-4-5-20251001',
         ],
-        availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch', 'tree', 'patch', 'search_memory', 'switch_model', 'dispatch_task', 'request_mount', 'request_config_write', 'browser_ext'],
+        availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch', 'tree', 'patch', 'search_memory', 'switch_model', 'dispatch_task', 'request_mount', 'request_config_write', 'browser_ext', 'ask_user'],
         isLoading: false,
         tasks: [],
         pendingResults: 0,
@@ -343,6 +343,25 @@ export const DEMO_SCENARIO: DemoScenario = {
         contextTokens: 14327,
       },
     }),
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 2.5: Ask user — agent asks for clarification
+    // ════════════════════════════════════════════════════════════════════════
+
+    { action: 'label', text: 'Question: user input', id: 'ask-user' },
+    wait(1500),
+    emit({
+      type: 'user_question_request',
+      id: 'question-001',
+      question: 'How should the health endpoint handle failures from downstream services?',
+      options: [
+        { label: 'Return 503', description: 'Return HTTP 503 with { status: "degraded" } when any dependency is unreachable' },
+        { label: 'Always 200', description: 'Always return 200 but include per-dependency status in the response body' },
+        { label: 'Separate endpoints', description: 'Add /health/live (always 200) and /health/ready (checks dependencies)' },
+      ],
+    }),
+    { action: 'auto_approve', delayMs: 5000 },
+    wait(500),
 
     // ════════════════════════════════════════════════════════════════════════
     //  PHASE 3: Slash command palette, effort level, shortcuts modal

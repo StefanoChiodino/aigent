@@ -67,7 +67,7 @@ interface RequestConfigWriteInput { file: string; content: string; reason: strin
 interface HostEditFileInput { path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
 interface SwitchModelInput { model: string; reason?: string }
 interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: Record<string, unknown>[]; url?: string }
-interface AskUserInput { question: string; options?: { label: string; description?: string }[]; multi_select?: boolean; allow_free_text?: boolean }
+interface AskUserInput { question: string; options?: { label: string; description?: string }[]; multi_select?: boolean }
 
 type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput | AskUserInput;
 
@@ -646,9 +646,9 @@ export async function executeTool(
     }
 
     case 'ask_user': {
-      const { question, options, multi_select, allow_free_text } = input as AskUserInput;
+      const { question, options, multi_select } = input as AskUserInput;
       const { requestUserQuestion } = await import('../server.js');
-      const res = await requestUserQuestion(question, options, multi_select, allow_free_text, signal);
+      const res = await requestUserQuestion(question, options, multi_select, undefined, signal);
       if (res.dismissed) return 'User dismissed the question without answering.';
       if (res.selectedOptions && res.selectedOptions.length > 0) return `User selected: ${res.selectedOptions.join(', ')}`;
       return `User responded: ${res.answer}`;

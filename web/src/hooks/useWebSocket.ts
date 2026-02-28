@@ -344,7 +344,7 @@ export function useWebSocket(): void {
             detail: event.question,
             questionOptions: event.options,
             questionMultiSelect: event.multiSelect,
-            questionAllowFreeText: event.allowFreeText ?? (event.options ? false : true),
+            questionAllowFreeText: true, // Always show free-text input
             approveCmd: '',
             denyCmd: '',
           });

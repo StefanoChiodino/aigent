@@ -496,6 +496,15 @@ function handleEditFileRequest(
   edits: Array<{ old_str: string; new_str: string; index?: number }>,
   reason: string,
 ): void {
+  // --- YOLO mode: auto-approve host_edit_file writes ---
+  if (readSettingsSync()['file_perm_yolo'] === true) {
+    const hostPath = resolveHostPath(containerPath);
+    log.info('Edit auto-allowed (YOLO mode)', { id, path: hostPath });
+    auditLog({ type: 'file_write_yolo_allow', detail: hostPath });
+    _handleEditFileRequest(getConfigWriteContext(), id, containerPath, edits, reason, true);
+    return;
+  }
+
   // Check file permissions — auto-apply if allowed, block if denied
   const filePerms = readFilePermissions();
   const hostPath = resolveHostPath(containerPath);
@@ -576,6 +585,7 @@ function readExecPermissions(): ExecPermissions {
 
 function broadcastUpdatedPermissions(): void {
   if (!client) return;
+  const settings = readSettingsSync();
   const execPerms = readExecPermissions();
   const fetchPerms = readFetchPermissions();
   const filePerms = readFilePermissions();
@@ -583,11 +593,14 @@ function broadcastUpdatedPermissions(): void {
     exec_perm_alwaysAllow: JSON.stringify(execPerms.alwaysAllow),
     exec_perm_alwaysClassify: JSON.stringify(execPerms.alwaysClassify),
     exec_perm_deny: JSON.stringify(execPerms.deny),
+    exec_perm_yolo: settings['exec_perm_yolo'] === true,
     fetch_perm_alwaysAllow: JSON.stringify(fetchPerms.alwaysAllow),
     fetch_perm_deny: JSON.stringify(fetchPerms.deny),
+    fetch_perm_yolo: settings['fetch_perm_yolo'] === true,
     file_perm_readWrite: JSON.stringify(filePerms.readWrite),
     file_perm_readOnly: JSON.stringify(filePerms.readOnly),
     file_perm_deny: JSON.stringify(filePerms.deny),
+    file_perm_yolo: settings['file_perm_yolo'] === true,
   });
 }
 
@@ -703,6 +716,16 @@ function handleAgentExecRequest(id: string, command: string): void {
     return;
   }
 
+  // --- YOLO mode: auto-approve everything that passed Tier 1 ---
+  if (readSettingsSync()['exec_perm_yolo'] === true) {
+    log.info('Exec auto-allowed (YOLO mode)', { id, command });
+    auditLog({ type: 'exec_yolo_allow', detail: command });
+    autoHandledExecIds.add(id);
+    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'YOLO mode' });
+    client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed (YOLO mode)' });
+    return;
+  }
+
   // --- Tier 2: Static allow/deny (from settings.json) ---
   const permissions = readExecPermissions();
   const level = checkExecPermission(command, permissions);
@@ -815,7 +838,7 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingExecApprovals.get(id);
     if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending exec request: ${id}`);
+      // Request was already auto-resolved by flushPendingExecApprovals() — silently ignore
       return true;
     }
 
@@ -854,7 +877,7 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingExecApprovals.get(id);
     if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending exec request: ${id}`);
+      // Request was already auto-resolved by flushPendingExecApprovals() — silently ignore
       return true;
     }
 
@@ -1001,6 +1024,15 @@ function addPathToFileReadOnly(pattern: string): void {
 }
 
 function handleAgentFetchRequest(id: string, url: string, method?: string): void {
+  // --- YOLO mode: auto-approve all fetch requests ---
+  if (readSettingsSync()['fetch_perm_yolo'] === true) {
+    log.info('Fetch auto-allowed (YOLO mode)', { id, url });
+    auditLog({ type: 'fetch_yolo_allow', detail: url });
+    autoHandledFetchIds.add(id);
+    client!.send({ type: 'fetch_response', id, ok: true, message: 'Allowed (YOLO mode)' });
+    return;
+  }
+
   const permissions = readFetchPermissions();
   const level = checkFetchPermission(url, permissions);
 
@@ -1106,6 +1138,17 @@ const pendingFileAccessApprovals = new Map<string, { path: string; operation: 'r
 const autoHandledFileAccessIds = new Set<string>();
 
 function handleAgentFileAccessRequest(id: string, path: string, operation: 'read' | 'write', reason: string): void {
+  // --- YOLO mode: auto-approve all file access ---
+  if (readSettingsSync()['file_perm_yolo'] === true) {
+    const auditType = operation === 'read' ? 'file_read' : 'file_write';
+    log.info(`File ${operation} auto-allowed (YOLO mode)`, { id, path });
+    auditLog({ type: `${auditType}_yolo_allow`, detail: path });
+    autoHandledFileAccessIds.add(id);
+    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'YOLO mode' });
+    client!.send({ type: 'file_access_response', id, ok: true, message: 'Allowed (YOLO mode)' });
+    return;
+  }
+
   // Check file permissions (deny/readOnly/readWrite) for all operations
   const filePerms = readFilePermissions();
   const level = checkFilePermission(path, filePerms, operation);
