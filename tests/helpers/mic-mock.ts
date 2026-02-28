@@ -2,11 +2,11 @@
  * Shared microphone mock for Playwright e2e tests.
  *
  * Provides a mock implementation of getUserMedia, AudioContext, and
- * ScriptProcessorNode so tests can drive the mic lifecycle without
+ * AudioWorkletNode so tests can drive the mic lifecycle without
  * actual hardware (headless Chromium has no real microphone).
  *
  * Exposes `window.__micMock` with controls:
- *   - fireAudioFrame(rms): simulate an onaudioprocess event
+ *   - fireAudioFrame(rms): simulate an AudioWorklet port message
  *   - getState(): returns { processorCreated, sourceConnected, … }
  */
 
@@ -23,7 +23,7 @@ export async function installMicMock(page: Page) {
       processorDisconnected: false,
       streamStopped: false,
       contextClosed: false,
-      onAudioProcess: null as ((e: { inputBuffer: { getChannelData: (ch: number) => Float32Array } }) => void) | null,
+      workletModuleLoaded: false,
       sampleRate: 16000,
     };
 
@@ -37,17 +37,23 @@ export async function installMicMock(page: Page) {
       getAudioTracks: () => [mockTrack],
     };
 
-    const mockProcessor = {
-      onaudioprocess: null as ((e: unknown) => void) | null,
-      connect: () => { mockState.processorConnected = true; },
-      disconnect: () => { mockState.processorDisconnected = true; },
-      addEventListener: () => {},
-      removeEventListener: () => {},
+    const mockPort = {
+      onmessage: null as ((e: MessageEvent) => void) | null,
+      postMessage: () => {},
     };
 
     const mockSource = {
-      connect: () => { mockState.sourceConnected = true; },
+      connect: (_dest: unknown) => { mockState.sourceConnected = true; mockState.processorConnected = true; },
       disconnect: () => {},
+    };
+
+    // @ts-expect-error override for testing
+    window.AudioWorkletNode = class MockAudioWorkletNode {
+      port = mockPort;
+      connect() {}
+      disconnect() { mockState.processorDisconnected = true; }
+      addEventListener() {}
+      removeEventListener() {}
     };
 
     // @ts-expect-error override for testing
@@ -57,11 +63,15 @@ export async function installMicMock(page: Page) {
       currentTime = 0;
       state = 'running';
 
+      audioWorklet = {
+        addModule: (_url: string) => {
+          mockState.workletModuleLoaded = true;
+          mockState.processorCreated = true;
+          return Promise.resolve();
+        },
+      };
+
       createMediaStreamSource() { return mockSource; }
-      createScriptProcessor() {
-        mockState.processorCreated = true;
-        return mockProcessor;
-      }
       createOscillator() {
         return {
           connect: () => {},
@@ -89,14 +99,14 @@ export async function installMicMock(page: Page) {
     // @ts-expect-error test mock
     window.__micMock = {
       state: mockState,
-      mockProcessor,
+      mockPort,
       fireAudioFrame(rms: number) {
-        const handler = mockProcessor.onaudioprocess;
+        const handler = mockPort.onmessage;
         if (!handler) return;
         const bufferSize = 4096;
-        const data = new Float32Array(bufferSize);
-        for (let i = 0; i < bufferSize; i++) data[i] = rms;
-        handler({ inputBuffer: { getChannelData: () => data } });
+        const samples = new Float32Array(bufferSize);
+        for (let i = 0; i < bufferSize; i++) samples[i] = rms;
+        handler(new MessageEvent('message', { data: { samples, rms } }));
       },
       getState() { return { ...mockState }; },
     };

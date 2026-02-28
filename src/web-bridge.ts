@@ -38,7 +38,7 @@ async function writeClientSettings(updates: ClientSettings): Promise<void> {
     for (const [k, v] of Object.entries(updates)) {
       // Deep-merge nested permission objects so gatekeeper-added entries survive
       // a browser POST that only intends to update one sub-field.
-      if ((k === 'exec_permissions' || k === 'fetch_permissions') &&
+      if ((k === 'exec_permissions' || k === 'fetch_permissions' || k === 'file_permissions') &&
           v !== null && typeof v === 'object' &&
           merged[k] !== null && typeof merged[k] === 'object') {
         const existing = merged[k] as Record<string, unknown>;
@@ -82,9 +82,9 @@ export interface ClassifierDecision { tier: 1 | 2 | 3; action: 'allow' | 'block'
 export async function startWebServer(
   client: AgentClient,
   port?: number,
-  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string> },
+  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; onSettingsChanged?: () => void },
 ): Promise<{ port: number }> {
-  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds } = options ?? {};
+  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, onSettingsChanged } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -229,15 +229,18 @@ export async function startWebServer(
       req.on('end', async () => {
         try {
           const body = Buffer.concat(chunks);
+          log.info(`STT request: ${body.length} bytes`);
           const sttRes = await fetch(`${STT_URL}/transcribe`, {
             method: 'POST',
             headers: { 'Content-Type': 'audio/wav', 'Content-Length': String(body.length) },
             body,
           });
           const text = await sttRes.text();
+          log.info(`STT response: ${sttRes.status} — ${text.slice(0, 100)}`);
           res.writeHead(sttRes.ok ? 200 : 502, { 'Content-Type': 'application/json' });
           res.end(text);
-        } catch {
+        } catch (err) {
+          log.warn(`STT proxy error: ${err}`);
           res.writeHead(503, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'STT service unavailable' }));
         }
@@ -263,6 +266,9 @@ export async function startWebServer(
             // behavior (zustand/localStorage), not server-side settings writes.
             if (!TEST_MODE) {
               await writeClientSettings(updates);
+              try { onSettingsChanged?.(); } catch (err) {
+                log.error('onSettingsChanged callback failed', { error: String(err) });
+              }
             }
             res.writeHead(204); res.end();
           } catch {

@@ -86,10 +86,10 @@ function TaskItem({ task, onOpen }: { task: BackgroundTaskInfo; onOpen: () => vo
 
   return (
     <div
-      className={`task-item${isUserPullDone ? ' task-item-pull' : ''}`}
-      title={isUserPullDone ? 'Click to view result' : undefined}
-      onClick={isUserPullDone ? onOpen : undefined}
-      style={isUserPullDone ? { cursor: 'pointer' } : undefined}
+      className={`task-item task-item-clickable${isUserPullDone ? ' task-item-pull' : ''}`}
+      title="Click to inspect task"
+      onClick={onOpen}
+      style={{ cursor: 'pointer' }}
     >
       <span className={`task-status ${task.status}`} title={task.status}>{statusChar}</span>
       <span className="task-desc" title={task.description}>{task.description}</span>

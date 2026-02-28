@@ -78,7 +78,7 @@ HARD LIMIT: Your entire response (speak block + body) must be under 100 words. N
 
 FORMAT — every single response, no exceptions:
 
-<speak>One or two natural sentences. Plain English. No markdown, no code, no lists.</speak>
+<speak>One short sentence — the absolute minimum needed to convey the key point. Plain English. No markdown.</speak>
 
 Optional: 1-3 sentences of additional detail. No more.
 
@@ -88,33 +88,31 @@ Check the routes file at src/routes/weather.ts for the full implementation.
 
 RULES:
 1. <speak>...</speak> MUST be the very first thing in every response. No thinking-out-loud before it. No preamble.
-2. The speak content is 1-2 sentences max — it will be read aloud to a human.
-3. After the speak block: at most 1-3 brief sentences. If the speak block fully answers the question, stop there.
-4. When using tools, still begin your final text response with <speak>.
-5. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.
-6. NEVER include long-form content in your response — no blockquotes, no before/after comparisons, no full paragraphs of quoted text. If the user needs to see content, write it to a file or use a tool. Your text response stays short.
-7. This applies even when showing diffs, edits, rewrites, or comparisons. Describe the change in 1-2 sentences; do not reproduce the content.`;
+2. The speak content must be ONE short sentence — never more. It will be read aloud. Keep it under 20 words.
+3. The <speak> block must always be shorter than the body text that follows. If the full response is already one short sentence, the <speak> block should be a brief phrase or the same sentence — never longer.
+4. After the speak block: at most 1-3 brief sentences. If the speak block fully answers the question, stop there.
+5. When using tools, still begin your final text response with <speak>.
+6. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.
+7. NEVER include long-form content in your response — no blockquotes, no before/after comparisons, no full paragraphs of quoted text. If the user needs to see content, write it to a file or use a tool. Your text response stays short.
+8. This applies even when showing diffs, edits, rewrites, or comparisons. Describe the change in 1 sentence; do not reproduce the content.`;
 
 /**
  * If short mode is on but the model omitted the <speak> tag, synthesize one
- * from the first 1-2 sentences so TTS and the speak-preview icon still work.
+ * from the first sentence so TTS and the speak-preview icon still work.
  */
 export function ensureSpeakTag(text: string, shortMode: boolean): string {
   if (!shortMode) return text;
   if (text.includes('<speak>')) return text;
-  // Extract first 1-2 sentences for the speak block
+  // Extract the first sentence for the speak block
   const stripped = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '').trim();
   const sentenceEnd = /[.!?]\s+/g;
   let end = 0;
-  let count = 0;
   let m: RegExpExecArray | null;
-  while ((m = sentenceEnd.exec(stripped)) !== null) {
+  if ((m = sentenceEnd.exec(stripped)) !== null) {
     end = m.index + 1; // include the punctuation
-    count++;
-    if (count >= 2) break;
   }
-  // If no sentence boundary found, take up to 200 chars
-  const summary = end > 0 ? stripped.slice(0, end).trim() : stripped.slice(0, 200).trim();
+  // If no sentence boundary found, take up to 100 chars
+  const summary = end > 0 ? stripped.slice(0, end).trim() : stripped.slice(0, 100).trim();
   if (!summary) return text;
   return `<speak>${summary}</speak>\n\n${text}`;
 }

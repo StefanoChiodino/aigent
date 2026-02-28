@@ -171,4 +171,77 @@ describe('Permission approval flow', () => {
     expect(useUIStore.getState().permQueue).toHaveLength(1);
     expect(useUIStore.getState().permShowing).toBe(true);
   });
+
+  // ── Race: perm_dismissed then resolvePermRequest ───────────────────────
+  //
+  // Simulates the race condition that caused "No pending X request" errors:
+  // 1. A request is queued (modal shows)
+  // 2. Server auto-resolves it → dismissPermRequests removes it from the queue
+  // 3. User had already clicked Approve → resolvePermRequest fires on the
+  //    now-empty queue
+  //
+  // Expected: no command sent (empty queue is a no-op), no crash.
+
+  it('resolvePermRequest after dismissPermRequests sends no command', () => {
+    enqueue({
+      type: 'fetch',
+      id: 'race-f1',
+      approveCmd: '/approve-fetch race-f1',
+      denyCmd: '/deny-fetch race-f1',
+    });
+
+    // Server auto-resolves — dismiss the request from the queue
+    useUIStore.getState().dismissPermRequests(['race-f1']);
+    expect(useUIStore.getState().permQueue).toHaveLength(0);
+
+    // User clicks Approve just after the dismiss arrived
+    const send = useConnectionStore.getState().send;
+    useUIStore.getState().resolvePermRequest(send, true);
+
+    // Queue was already empty — no command should be sent
+    expect(ws.send).not.toHaveBeenCalled();
+    expect(useUIStore.getState().permShowing).toBe(false);
+  });
+
+  it('resolvePermRequest deny after dismissPermRequests sends no command', () => {
+    enqueue({
+      type: 'exec',
+      id: 'race-e1',
+      approveCmd: '/approve-exec race-e1',
+      denyCmd: '/deny-exec race-e1',
+    });
+
+    useUIStore.getState().dismissPermRequests(['race-e1']);
+
+    const send = useConnectionStore.getState().send;
+    useUIStore.getState().resolvePermRequest(send, false);
+
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('dismissing first of two queued requests then resolving acts on the second', () => {
+    enqueue({
+      type: 'fetch',
+      id: 'race-f2',
+      approveCmd: '/approve-fetch race-f2',
+      denyCmd: '/deny-fetch race-f2',
+    });
+    enqueue({
+      type: 'exec',
+      id: 'race-e2',
+      approveCmd: '/approve-exec race-e2',
+      denyCmd: '/deny-exec race-e2',
+    });
+
+    // First request is auto-resolved before user clicks
+    useUIStore.getState().dismissPermRequests(['race-f2']);
+
+    // User clicks Approve — now the second request is at the front
+    const send = useConnectionStore.getState().send;
+    useUIStore.getState().resolvePermRequest(send, true);
+
+    const payloads = sentPayloads(ws);
+    expect(payloads).toContainEqual({ type: 'command', cmd: '/approve-exec race-e2' });
+    expect(useUIStore.getState().permQueue).toHaveLength(0);
+  });
 });

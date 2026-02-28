@@ -4,7 +4,7 @@
  *
  * These tests mock the browser MediaDevices and AudioContext APIs since
  * headless Chromium doesn't have a real microphone. The mock simulates the
- * onaudioprocess callback flow so we can verify the full mic lifecycle.
+ * AudioWorklet port message flow so we can verify the full mic lifecycle.
  */
 
 import { test, expect } from '@playwright/test';
@@ -407,7 +407,7 @@ test.describe('@mic Microphone UI state, controls, and VAD feedback', () => {
 
   // ── Mock state verification ─────────────────────────────────────────────────
 
-  test('starting mic creates AudioContext and ScriptProcessor', async () => {
+  test('starting mic creates AudioContext and AudioWorkletNode', async () => {
     const page = getPage();
     await installMicMock(page);
     const mic = page.locator('#mic');

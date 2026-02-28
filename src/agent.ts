@@ -384,10 +384,29 @@ export class Agent {
       this.messages.push({ role: 'tool_result', results });
     }
 
-    // Hit iteration limit — compact before returning to salvage context
+    // Hit iteration limit — ask the model to summarize progress and next steps
+    // rather than returning a bare error string. This gives the user a useful
+    // handoff message and naturally chunks the work.
     this.thinking = savedThinking; // restore thinking level
-    await this.compact(callbacks);
-    return '[agent hit maximum tool-use iterations]';
+    try {
+      this.messages.push({
+        role: 'user',
+        content: 'You have reached the maximum number of tool-use iterations for this turn. Summarize what you have completed so far, what is still outstanding, and what the user should ask next to continue.',
+      });
+      const handoff = await this.provider.sendMessage(
+        this.systemPromptParts,
+        this.messages,
+        [], // no tools — just produce text
+        { model: this.model, maxTokens: this.maxTokens, thinking: 'off' },
+        { onText: callbacks?.onText, onThinking: callbacks?.onThinking },
+      );
+      this.messages.push({ role: 'assistant', content: handoff.text });
+      await this.compact(callbacks);
+      return handoff.text;
+    } catch {
+      await this.compact(callbacks);
+      return '[agent hit maximum tool-use iterations]';
+    }
   }
 
   /**

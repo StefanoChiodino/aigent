@@ -22,7 +22,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
   const micStream = useRef<MediaStream | null>(null);
   const micSamples = useRef<Float32Array[]>([]);
   const micSource = useRef<MediaStreamAudioSourceNode | null>(null);
-  const micProcessor = useRef<ScriptProcessorNode | null>(null);
+  const micProcessor = useRef<AudioWorkletNode | null>(null);
   const micChunkTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const micSilenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const micReqSeq = useRef(0);
@@ -145,26 +145,24 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
 
       const source = ctx.createMediaStreamSource(stream);
       micSource.current = source;
-      const proc = ctx.createScriptProcessor(4096, 1, 1);
-      micProcessor.current = proc;
 
-      proc.onaudioprocess = (e) => {
-        const input = e.inputBuffer.getChannelData(0);
-        const copy = new Float32Array(input.length);
-        copy.set(input);
+      await ctx.audioWorklet.addModule('/mic-processor.js');
+      const worklet = new AudioWorkletNode(ctx, 'mic-processor');
+      micProcessor.current = worklet;
 
-        // VAD — compute RMS
-        let sum = 0;
-        for (let i = 0; i < copy.length; i++) sum += copy[i]! * copy[i]!;
-        const rms = Math.sqrt(sum / copy.length);
+      worklet.port.onmessage = (e: MessageEvent<{ samples: Float32Array; rms: number }>) => {
+        const { samples: copy, rms } = e.data;
 
+        // Always accumulate audio — the STT model handles silence natively.
+        // VAD is only used for visual feedback (pulse) and auto-send timing.
+        micSamples.current.push(copy);
+
+        // VAD — rms is pre-computed on the audio thread (visual feedback only)
         const silenceThresh = silenceThreshold();
         const loudFramesNeeded = loudFrames();
         const silenceTail = silenceTailMs();
 
         if (rms > silenceThresh) {
-          // Speech detected — accumulate audio
-          micSamples.current.push(copy);
           micLastSpeechTime.current = Date.now();
           // Cancel any pending auto-send timer when speech resumes
           if (micSilenceTimer.current !== null) {
@@ -180,8 +178,6 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
             ttsStopAll();
           }
         } else {
-          // Keep a short tail of silence after speech so words don't get clipped
-          if (vadSpeaking.current) micSamples.current.push(copy);
           vadLoudFrames.current = 0;
           if (vadSpeaking.current && Date.now() - micLastSpeechTime.current > silenceTail) {
             vadSpeaking.current = false;
@@ -202,8 +198,9 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
         }
       };
 
-      source.connect(proc);
-      proc.connect(ctx.destination);
+      // Connect source to worklet — output is not routed to destination since
+      // we only use the audio thread for sample collection, not playback.
+      source.connect(worklet);
 
       micLastSpeechTime.current = Date.now();
 

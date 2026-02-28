@@ -226,6 +226,36 @@ describe('permission sub-object writes', () => {
     assert.deepEqual(perms['alwaysAllow'], ['api.example.com']);
   });
 
+  it('file_permissions readWrite update preserves readOnly and deny (deep-merge)', () => {
+    writeFileSync(testFile, JSON.stringify({
+      file_permissions: {
+        readWrite: ['/home/user/project/**'],
+        readOnly: ['~/configs/**'],
+        deny: ['/etc/**'],
+      },
+    }));
+
+    // Simulate browser POST of { file_permissions: { readWrite: ['/tmp/**'] } }
+    // This mirrors the deep-merge pattern in web-bridge writeClientSettings
+    writeSettingsSync('test', (current) => {
+      const merged: Record<string, unknown> = { ...current };
+      const k = 'file_permissions';
+      const incoming = { readWrite: ['/tmp/**'] };
+      if (merged[k] !== null && typeof merged[k] === 'object') {
+        merged[k] = { ...(merged[k] as Record<string, unknown>), ...incoming };
+      } else {
+        merged[k] = incoming;
+      }
+      return merged;
+    });
+
+    const settings = readSettingsSync();
+    const perms = settings['file_permissions'] as Record<string, unknown>;
+    assert.deepEqual(perms['readWrite'], ['/tmp/**']);
+    assert.deepEqual(perms['readOnly'], ['~/configs/**'], 'readOnly must survive readWrite update');
+    assert.deepEqual(perms['deny'], ['/etc/**'], 'deny must survive readWrite update');
+  });
+
   it('file_permissions alwaysAllow is stored as-is', () => {
     writeFileSync(testFile, JSON.stringify({
       file_permissions: {

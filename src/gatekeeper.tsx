@@ -583,6 +583,14 @@ function readExecPermissions(): ExecPermissions {
   }
 }
 
+/** Called by web-bridge when POST /settings completes — re-evaluate all pending approvals. */
+function handleSettingsChanged(): void {
+  broadcastUpdatedPermissions();
+  flushPendingExecApprovals();
+  flushPendingFetchApprovals();
+  flushPendingFileAccessApprovals();
+}
+
 function broadcastUpdatedPermissions(): void {
   if (!client) return;
   const settings = readSettingsSync();
@@ -686,15 +694,17 @@ function addPatternsToAlwaysAllow(patterns: string[]): void {
 /** Re-check pending exec approvals against updated permissions and auto-resolve matches. */
 function flushPendingExecApprovals(): void {
   if (pendingExecApprovals.size === 0) return;
+  const yolo = readSettingsSync()['exec_perm_yolo'] === true;
   const permissions = readExecPermissions();
   const dismissed: string[] = [];
   for (const [id, pending] of pendingExecApprovals) {
-    const level = checkExecPermission(pending.command, permissions);
-    if (level === 'allow' && !shouldForceClassify(pending.command, permissions.alwaysClassify)) {
-      log.info('Flush: auto-approving pending exec', { id, command: pending.command });
+    const shouldAllow = yolo || (checkExecPermission(pending.command, permissions) === 'allow' && !shouldForceClassify(pending.command, permissions.alwaysClassify));
+    if (shouldAllow) {
+      const reason = yolo ? 'YOLO mode' : 'updated permission policy';
+      log.info('Flush: auto-approving pending exec', { id, command: pending.command, reason });
       auditLog({ type: 'exec_tier2_allow', detail: pending.command });
       pendingExecApprovals.delete(id);
-      client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by updated permission policy' });
+      client!.send({ type: 'exec_response', id, ok: true, message: `Allowed by ${reason}` });
       dismissed.push(id);
     }
   }
@@ -945,14 +955,37 @@ function addToFetchAlwaysAllow(pattern: string): void {
 /** Re-check pending fetch approvals against updated permissions and auto-resolve matches. */
 function flushPendingFetchApprovals(): void {
   if (pendingFetchApprovals.size === 0) return;
+  const yolo = readSettingsSync()['fetch_perm_yolo'] === true;
   const permissions = readFetchPermissions();
   const dismissed: string[] = [];
   for (const [id, pending] of pendingFetchApprovals) {
-    const level = checkFetchPermission(pending.url, permissions);
-    if (level === 'allow') {
-      log.info('Flush: auto-approving pending fetch', { id, url: pending.url });
+    const shouldAllow = yolo || checkFetchPermission(pending.url, permissions) === 'allow';
+    if (shouldAllow) {
+      const reason = yolo ? 'YOLO mode' : 'updated permission policy';
+      log.info('Flush: auto-approving pending fetch', { id, url: pending.url, reason });
       pendingFetchApprovals.delete(id);
-      client!.send({ type: 'fetch_response', id, ok: true, message: 'Allowed by updated permission policy' });
+      client!.send({ type: 'fetch_response', id, ok: true, message: `Allowed by ${reason}` });
+      dismissed.push(id);
+    }
+  }
+  if (dismissed.length > 0 && client) {
+    client.emit('perm_dismissed', dismissed);
+  }
+}
+
+/** Re-check pending file access approvals against updated permissions and auto-resolve matches. */
+function flushPendingFileAccessApprovals(): void {
+  if (pendingFileAccessApprovals.size === 0) return;
+  const yolo = readSettingsSync()['file_perm_yolo'] === true;
+  const permissions = readFilePermissions();
+  const dismissed: string[] = [];
+  for (const [id, pending] of pendingFileAccessApprovals) {
+    const shouldAllow = yolo || checkFilePermission(pending.path, permissions, pending.operation) === 'allow';
+    if (shouldAllow) {
+      const reason = yolo ? 'YOLO mode' : 'updated file permission policy';
+      log.info('Flush: auto-approving pending file access', { id, path: pending.path, operation: pending.operation, reason });
+      pendingFileAccessApprovals.delete(id);
+      client!.send({ type: 'file_access_response', id, ok: true, message: `Allowed by ${reason}` });
       dismissed.push(id);
     }
   }
@@ -1001,6 +1034,7 @@ function addPathToFileReadWrite(pattern: string): void {
     });
     log.info('Added path to file read-write', { pattern });
     broadcastUpdatedPermissions();
+    flushPendingFileAccessApprovals();
   } catch (err) {
     log.error('Failed to update file permissions', { error: String(err) });
   }
@@ -1018,6 +1052,7 @@ function addPathToFileReadOnly(pattern: string): void {
     });
     log.info('Added path to file read-only', { pattern });
     broadcastUpdatedPermissions();
+    flushPendingFileAccessApprovals();
   } catch (err) {
     log.error('Failed to update file permissions', { error: String(err) });
   }
@@ -1742,7 +1777,7 @@ client.sendCommand = (cmd: string) => {
 
 // Start web UI server before the server process so it's available during startup/restarts.
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds }).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, onSettingsChanged: handleSettingsChanged }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });

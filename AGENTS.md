@@ -2,7 +2,7 @@
 
 ## General workflow
 
-Stick to this general plan for any non-trivial change:
+MANDATORY PLAN FOR ALL CHANGES:
 1. Investigate, explore, discover
 2. Write new docs, or update existing ones
 3. Create a plan for your changes for me to review

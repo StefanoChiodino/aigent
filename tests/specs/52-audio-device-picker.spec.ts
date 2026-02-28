@@ -216,16 +216,21 @@ test.describe('@fast Audio device picker', () => {
       };
       (window as any).__capturedConstraints = () => capturedConstraints;
 
-      // Minimal AudioContext mock
+      // Minimal AudioContext + AudioWorkletNode mock
+      (window as any).AudioWorkletNode = class {
+        port = { onmessage: null, postMessage: () => {} };
+        connect() {}
+        disconnect() {}
+        addEventListener() {}
+        removeEventListener() {}
+      };
       (window as any).AudioContext = class {
         sampleRate = 16000;
         destination = {};
         currentTime = 0;
         state = 'running';
+        audioWorklet = { addModule: () => Promise.resolve() };
         createMediaStreamSource() { return { connect: () => {}, disconnect: () => {} }; }
-        createScriptProcessor() {
-          return { onaudioprocess: null, connect: () => {}, disconnect: () => {}, addEventListener: () => {}, removeEventListener: () => {} };
-        }
         createOscillator() { return { connect: () => {}, frequency: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} }, start: () => {}, stop: () => {}, onended: null }; }
         createGain() { return { connect: () => {}, gain: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} } }; }
         close() { return Promise.resolve(); }
@@ -265,15 +270,20 @@ test.describe('@fast Audio device picker', () => {
       };
       (window as any).__capturedConstraints = () => capturedConstraints;
 
+      (window as any).AudioWorkletNode = class {
+        port = { onmessage: null, postMessage: () => {} };
+        connect() {}
+        disconnect() {}
+        addEventListener() {}
+        removeEventListener() {}
+      };
       (window as any).AudioContext = class {
         sampleRate = 16000;
         destination = {};
         currentTime = 0;
         state = 'running';
+        audioWorklet = { addModule: () => Promise.resolve() };
         createMediaStreamSource() { return { connect: () => {}, disconnect: () => {} }; }
-        createScriptProcessor() {
-          return { onaudioprocess: null, connect: () => {}, disconnect: () => {}, addEventListener: () => {}, removeEventListener: () => {} };
-        }
         createOscillator() { return { connect: () => {}, frequency: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} }, start: () => {}, stop: () => {}, onended: null }; }
         createGain() { return { connect: () => {}, gain: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} } }; }
         close() { return Promise.resolve(); }

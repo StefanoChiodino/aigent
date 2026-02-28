@@ -103,4 +103,44 @@ test.describe('@fast YOLO Mode', () => {
 
     await page.locator('#settings-close').click();
   });
+
+  // ── perm_dismissed dismisses pending permission popups ─────────────────
+
+  test('perm_dismissed removes exec permission popup', async () => {
+    const page = getPage();
+
+    // Inject an exec_request — a permission popup should appear
+    await injectEvent({
+      type: 'exec_request',
+      id: 'yolo-flush-exec-1',
+      command: 'rm -rf /tmp/test',
+    });
+    await expect(page.locator('#perm-overlay')).toBeVisible({ timeout: 3_000 });
+
+    // Server flushes the pending request (e.g. because YOLO was just enabled)
+    await injectEvent({
+      type: 'perm_dismissed',
+      ids: ['yolo-flush-exec-1'],
+    });
+    await expect(page.locator('#perm-overlay')).not.toBeVisible({ timeout: 3_000 });
+  });
+
+  test('perm_dismissed removes file_access permission popup', async () => {
+    const page = getPage();
+
+    await injectEvent({
+      type: 'file_access_request',
+      id: 'yolo-flush-file-1',
+      path: '/etc/passwd',
+      operation: 'read',
+      reason: 'Agent needs to read config',
+    });
+    await expect(page.locator('#perm-overlay')).toBeVisible({ timeout: 3_000 });
+
+    await injectEvent({
+      type: 'perm_dismissed',
+      ids: ['yolo-flush-file-1'],
+    });
+    await expect(page.locator('#perm-overlay')).not.toBeVisible({ timeout: 3_000 });
+  });
 });

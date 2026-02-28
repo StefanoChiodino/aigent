@@ -52,6 +52,9 @@ test:
 test-web:
 	npx vitest run --config web/vite.config.ts
 
+test-web-coverage:
+	npx vitest run --config web/vite.config.ts --coverage
+
 test-e2e:
 	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep-invert "@live|screenshot:"
 
