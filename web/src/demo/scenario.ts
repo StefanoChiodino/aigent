@@ -858,9 +858,23 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'type_input', text: '@', charDelayMs: 0 },
     wait(2500),
 
+    // File browser — type "@~/" to browse home directory
+    { action: 'label', text: 'File browser', id: 'file-browser' },
+    { action: 'type_input', text: '@~/', charDelayMs: 100 },
+    wait(2500),
+    // Navigate deeper into projects/
+    { action: 'type_input', text: '@~/projects/', charDelayMs: 60 },
+    wait(2000),
+    // Navigate into myapp/
+    { action: 'type_input', text: '@~/projects/myapp/', charDelayMs: 50 },
+    wait(2000),
+    // Filter by typing partial filename
+    { action: 'type_input', text: '@~/projects/myapp/pkg', charDelayMs: 80 },
+    wait(2000),
+
     // Simulate STT: TTS speaks with an alternate voice, mic animates, text "transcribed"
     { action: 'label', text: 'Voice input (STT)', id: 'voice-input' },
-    { action: 'tts_to_stt', text: 'Does the endpoint look right?' },
+    { action: 'tts_to_stt', text: 'Does the endpoint look right?', src: './demo/user-input.mp3' },
     wait(400),
 
     // Attach a fake screenshot
@@ -912,7 +926,7 @@ export const DEMO_SCENARIO: DemoScenario = {
 
     // Agent speaks the response via edge-tts (default voice, no static file needed)
     { action: 'label', text: 'Voice output (TTS)', id: 'voice-output' },
-    { action: 'speak_tts', text: 'Health endpoint checks out — status ok, rate limiting active.' },
+    { action: 'speak_tts', text: 'Health endpoint checks out — status ok, rate limiting active.', src: './demo/agent-response.mp3' },
 
     // Usage update (accumulated)
     emit({

@@ -39,8 +39,11 @@ export function buildSettingsPayload(key: string, value: boolean | number | stri
   if (key === 'fetch_perm_deny') {
     return { fetch_permissions: { deny: getList(key) } };
   }
-  if (key === 'file_perm_alwaysAllow') {
-    return { file_permissions: { alwaysAllow: getList(key) } };
+  if (key === 'file_perm_readWrite') {
+    return { file_permissions: { readWrite: getList(key) } };
+  }
+  if (key === 'file_perm_readOnly') {
+    return { file_permissions: { readOnly: getList(key) } };
   }
   if (key === 'file_perm_deny') {
     return { file_permissions: { deny: getList(key) } };

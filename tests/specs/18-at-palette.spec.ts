@@ -212,3 +212,197 @@ test.describe('@fast At Mention Palette', () => {
     await expect(msg.locator('.at-mention')).toBeVisible();
   });
 });
+
+// ── File browser (path mode) ─────────────────────────────────────────────────
+
+function mockFilesRoute(page: import('@playwright/test').Page) {
+  return page.route('**/files**', route => {
+    const url = new URL(route.request().url());
+    const dir = url.searchParams.get('dir');
+    const entries: Record<string, { name: string; isDir: boolean }[]> = {
+      '~/': [
+        { name: 'Documents', isDir: true },
+        { name: 'projects', isDir: true },
+        { name: 'notes.md', isDir: false },
+      ],
+      '~/Documents/': [
+        { name: 'report.pdf', isDir: false },
+        { name: 'photos', isDir: true },
+      ],
+      '/': [
+        { name: 'etc', isDir: true },
+        { name: 'usr', isDir: true },
+      ],
+      './': [
+        { name: 'src', isDir: true },
+        { name: 'package.json', isDir: false },
+        { name: 'tsconfig.json', isDir: false },
+      ],
+    };
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ entries: entries[dir ?? ''] ?? [] }),
+    });
+  });
+}
+
+test.describe('@fast At Palette File Browser', () => {
+  const getPage = useSharedPage();
+
+  test('typing @~/ triggers path mode and shows directory entries', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.click();
+    await input.type('@~/');
+
+    const palette = page.locator('#at-palette');
+    await expectVisible(palette);
+    await expect(palette).toContainText('Documents', { timeout: 3_000 });
+    await expect(palette).toContainText('projects');
+    await expect(palette).toContainText('notes.md');
+  });
+
+  test('path mode hides static @mention items', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.type('@~/');
+
+    const palette = page.locator('#at-palette');
+    await expectVisible(palette);
+    await expect(palette).not.toContainText('screen');
+    await expect(palette).not.toContainText('clipboard');
+  });
+
+  test('selecting a directory navigates into it (palette stays open)', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.type('@~/');
+
+    const palette = page.locator('#at-palette');
+    await expect(palette).toContainText('Documents', { timeout: 3_000 });
+
+    // Select the first item (Documents — a directory) via Enter
+    await input.press('Enter');
+
+    // Palette should still be visible
+    await expectVisible(palette);
+    // Input should now contain @~/Documents/
+    await expect(input).toHaveValue('@~/Documents/');
+    // Should show contents of ~/Documents/
+    await expect(palette).toContainText('report.pdf', { timeout: 3_000 });
+  });
+
+  test('selecting a file inserts path and closes palette', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.type('@~/');
+
+    const palette = page.locator('#at-palette');
+    await expect(palette).toContainText('notes.md', { timeout: 3_000 });
+
+    // Move down to notes.md (3rd item: Documents, projects, notes.md)
+    await input.press('ArrowDown');
+    await input.press('ArrowDown');
+    await input.press('Enter');
+    await expectHidden(palette);
+    // File path inserted without @, with trailing space
+    await expect(input).toHaveValue('~/notes.md ');
+  });
+
+  test('typing @/ shows absolute path browser', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.type('@/');
+
+    const palette = page.locator('#at-palette');
+    await expectVisible(palette);
+    await expect(palette).toContainText('etc', { timeout: 3_000 });
+    await expect(palette).toContainText('usr');
+  });
+
+  test('typing @./ shows relative path browser', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.type('@./');
+
+    const palette = page.locator('#at-palette');
+    await expectVisible(palette);
+    await expect(palette).toContainText('src', { timeout: 3_000 });
+    await expect(palette).toContainText('package.json');
+  });
+
+  test('filter narrows results within a directory (fuzzy, case-insensitive)', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.type('@~/Doc');
+
+    const palette = page.locator('#at-palette');
+    await expectVisible(palette);
+    await expect(palette).toContainText('Documents', { timeout: 3_000 });
+    // projects and notes.md should not match "Doc"
+    await expect(palette).not.toContainText('projects');
+    await expect(palette).not.toContainText('notes');
+  });
+
+  test('directories show folder icon, files show file icon', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.type('@~/');
+
+    const palette = page.locator('#at-palette');
+    await expect(palette).toContainText('Documents', { timeout: 3_000 });
+    const icons = await palette.locator('.at-item-icon').allTextContents();
+    expect(icons).toContain('📁');
+    expect(icons).toContain('📄');
+  });
+
+  test('Tab also completes directory navigation', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.type('@~/');
+
+    const palette = page.locator('#at-palette');
+    await expect(palette).toContainText('Documents', { timeout: 3_000 });
+
+    // Tab on directory should navigate into it
+    await input.press('Tab');
+    await expectVisible(palette);
+    await expect(input).toHaveValue('@~/Documents/');
+  });
+
+  test('empty directory hides palette', async () => {
+    const page = getPage();
+    await page.route('**/files**', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ entries: [] }),
+    }));
+    const input = page.locator('#input');
+    await input.type('@~/nonexistent/');
+    // Wait for the fetch to complete
+    await page.waitForTimeout(200);
+    await expectHidden(page.locator('#at-palette'));
+  });
+
+  test('section header shows current directory path', async () => {
+    const page = getPage();
+    await mockFilesRoute(page);
+    const input = page.locator('#input');
+    await input.type('@~/');
+
+    const palette = page.locator('#at-palette');
+    await expect(palette).toContainText('Documents', { timeout: 3_000 });
+    // Section header should show the directory path
+    await expect(palette.locator('.at-palette-section')).toContainText('~/');
+  });
+});

@@ -34,6 +34,7 @@ export type AuditEventType =
   | 'exec_user_deny'
   // File access
   | 'file_read'
+  | 'file_read_block'
   | 'file_write'
   | 'file_write_block'
   | 'file_sensitive_block'

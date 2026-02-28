@@ -7,8 +7,9 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import { resolve, join, extname } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { AgentClient } from './client.js';
@@ -271,6 +272,51 @@ export async function startWebServer(
         });
         return;
       }
+    }
+
+    // Directory listing for @ palette file browser.
+    // Accepts ?dir=<path>, resolves ~ and ., returns { entries: [{ name, isDir }] }.
+    if (req.method === 'GET' && (url === '/files' || url.startsWith('/files?'))) {
+      const params = new URL(url, 'http://localhost').searchParams;
+      const dirParam = params.get('dir') ?? '';
+      if (!dirParam) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing dir parameter' }));
+        return;
+      }
+
+      let resolvedDir: string;
+      if (dirParam === '~' || dirParam.startsWith('~/')) {
+        resolvedDir = dirParam === '~' ? homedir() : join(homedir(), dirParam.slice(2));
+      } else if (dirParam === '.' || dirParam.startsWith('./')) {
+        resolvedDir = dirParam === '.' ? process.cwd() : resolve(process.cwd(), dirParam);
+      } else {
+        resolvedDir = resolve(dirParam);
+      }
+
+      try {
+        const raw = await readdir(resolvedDir, { withFileTypes: true });
+        const entries = await Promise.all(
+          raw.filter(e => !e.name.startsWith('.')).map(async (e) => {
+            let isDir = e.isDirectory();
+            if (e.isSymbolicLink()) {
+              try { isDir = (await stat(join(resolvedDir, e.name))).isDirectory(); }
+              catch { /* broken symlink — treat as file */ }
+            }
+            return { name: e.name, isDir };
+          }),
+        );
+        entries.sort((a, b) => {
+          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+          return a.name.localeCompare(b.name);
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ entries: entries.slice(0, 200) }));
+      } catch {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ entries: [] }));
+      }
+      return;
     }
 
     // Static files from web/ — strip query string before resolving path

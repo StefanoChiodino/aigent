@@ -472,69 +472,107 @@ describe('checkFetchPermission (custom permissions)', () => {
 describe('checkFilePermission (with DEFAULT_FILE_PERMISSIONS)', () => {
   const perms = DEFAULT_FILE_PERMISSIONS;
 
-  it('prompts for any path by default', () => assert.equal(checkFilePermission('/home/user/file.txt', perms), 'prompt'));
-  it('prompts for /tmp path by default', () => assert.equal(checkFilePermission('/tmp/test.txt', perms), 'prompt'));
+  it('prompts for any path by default (read)', () => assert.equal(checkFilePermission('/home/user/file.txt', perms, 'read'), 'prompt'));
+  it('prompts for any path by default (write)', () => assert.equal(checkFilePermission('/home/user/file.txt', perms, 'write'), 'prompt'));
+  it('prompts for /tmp path by default', () => assert.equal(checkFilePermission('/tmp/test.txt', perms, 'read'), 'prompt'));
+  it('denies default deny paths (read)', () => assert.equal(checkFilePermission(`${homedir()}/.ssh/id_rsa`, perms, 'read'), 'deny'));
+  it('denies default deny paths (write)', () => assert.equal(checkFilePermission(`${homedir()}/.ssh/id_rsa`, perms, 'write'), 'deny'));
 });
 
-describe('checkFilePermission (custom permissions)', () => {
-  it('allows path matching alwaysAllow glob', () => {
-    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
-    assert.equal(checkFilePermission('/home/user/project/src/file.ts', perms), 'allow');
+describe('checkFilePermission (readWrite permissions)', () => {
+  it('allows path matching readWrite glob (read)', () => {
+    const perms = { readWrite: ['/home/user/project/**'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission('/home/user/project/src/file.ts', perms, 'read'), 'allow');
+  });
+
+  it('allows path matching readWrite glob (write)', () => {
+    const perms = { readWrite: ['/home/user/project/**'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission('/home/user/project/src/file.ts', perms, 'write'), 'allow');
   });
 
   it('allows deeply nested files with ** glob', () => {
-    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
-    assert.equal(checkFilePermission('/home/user/project/a/b/c/d.txt', perms), 'allow');
+    const perms = { readWrite: ['/home/user/project/**'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission('/home/user/project/a/b/c/d.txt', perms, 'write'), 'allow');
   });
 
   it('does not allow path outside the allowed directory', () => {
-    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
-    assert.equal(checkFilePermission('/home/user/other/file.txt', perms), 'prompt');
+    const perms = { readWrite: ['/home/user/project/**'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission('/home/user/other/file.txt', perms, 'write'), 'prompt');
   });
 
   it('allows exact path match', () => {
-    const perms = { alwaysAllow: ['/home/user/specific-file.txt'], deny: [] };
-    assert.equal(checkFilePermission('/home/user/specific-file.txt', perms), 'allow');
-  });
-
-  it('denies path matching deny pattern', () => {
-    const perms = { alwaysAllow: [], deny: ['/etc/**'] };
-    assert.equal(checkFilePermission('/etc/passwd', perms), 'deny');
-  });
-
-  it('deny overrides alwaysAllow', () => {
-    const perms = { alwaysAllow: ['/home/user/**'], deny: ['/home/user/secret/**'] };
-    assert.equal(checkFilePermission('/home/user/secret/keys.txt', perms), 'deny');
+    const perms = { readWrite: ['/home/user/specific-file.txt'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission('/home/user/specific-file.txt', perms, 'write'), 'allow');
   });
 
   it('wildcard * allows everything', () => {
-    const perms = { alwaysAllow: ['*'], deny: [] };
-    assert.equal(checkFilePermission('/any/path/whatsoever.txt', perms), 'allow');
+    const perms = { readWrite: ['*'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission('/any/path/whatsoever.txt', perms, 'write'), 'allow');
   });
 
   it('case-insensitive matching', () => {
-    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
-    assert.equal(checkFilePermission('/Home/User/Project/file.txt', perms), 'allow');
+    const perms = { readWrite: ['/home/user/project/**'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission('/Home/User/Project/file.txt', perms, 'write'), 'allow');
   });
 
   it('matches dotfiles with dot: true', () => {
-    const perms = { alwaysAllow: ['/home/user/project/**'], deny: [] };
-    assert.equal(checkFilePermission('/home/user/project/.hidden', perms), 'allow');
+    const perms = { readWrite: ['/home/user/project/**'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission('/home/user/project/.hidden', perms, 'write'), 'allow');
   });
 
-  it('expands ~ in allow patterns to home directory', () => {
-    const perms = { alwaysAllow: ['~/project/**'], deny: [] };
-    assert.equal(checkFilePermission(`${homedir()}/project/file.ts`, perms), 'allow');
+  it('expands ~ in readWrite patterns to home directory', () => {
+    const perms = { readWrite: ['~/project/**'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission(`${homedir()}/project/file.ts`, perms, 'write'), 'allow');
+  });
+});
+
+describe('checkFilePermission (readOnly permissions)', () => {
+  it('allows reads for readOnly paths', () => {
+    const perms = { readWrite: [], readOnly: ['/etc/**'], deny: [] };
+    assert.equal(checkFilePermission('/etc/hosts', perms, 'read'), 'allow');
+  });
+
+  it('denies writes for readOnly paths', () => {
+    const perms = { readWrite: [], readOnly: ['/etc/**'], deny: [] };
+    assert.equal(checkFilePermission('/etc/hosts', perms, 'write'), 'deny');
+  });
+
+  it('readOnly with tilde expansion', () => {
+    const perms = { readWrite: [], readOnly: ['~/configs/**'], deny: [] };
+    assert.equal(checkFilePermission(`${homedir()}/configs/app.toml`, perms, 'read'), 'allow');
+    assert.equal(checkFilePermission(`${homedir()}/configs/app.toml`, perms, 'write'), 'deny');
+  });
+});
+
+describe('checkFilePermission (deny + precedence)', () => {
+  it('denies path matching deny pattern (read)', () => {
+    const perms = { readWrite: [], readOnly: [], deny: ['/etc/**'] };
+    assert.equal(checkFilePermission('/etc/passwd', perms, 'read'), 'deny');
+  });
+
+  it('denies path matching deny pattern (write)', () => {
+    const perms = { readWrite: [], readOnly: [], deny: ['/etc/**'] };
+    assert.equal(checkFilePermission('/etc/passwd', perms, 'write'), 'deny');
+  });
+
+  it('deny overrides readWrite', () => {
+    const perms = { readWrite: ['/home/user/**'], readOnly: [], deny: ['/home/user/secret/**'] };
+    assert.equal(checkFilePermission('/home/user/secret/keys.txt', perms, 'write'), 'deny');
+  });
+
+  it('deny overrides readOnly', () => {
+    const perms = { readWrite: [], readOnly: ['/home/user/**'], deny: ['/home/user/secret/**'] };
+    assert.equal(checkFilePermission('/home/user/secret/keys.txt', perms, 'read'), 'deny');
   });
 
   it('expands ~ in deny patterns to home directory', () => {
-    const perms = { alwaysAllow: ['*'], deny: ['~/secret/**'] };
-    assert.equal(checkFilePermission(`${homedir()}/secret/keys.txt`, perms), 'deny');
+    const perms = { readWrite: ['*'], readOnly: [], deny: ['~/secret/**'] };
+    assert.equal(checkFilePermission(`${homedir()}/secret/keys.txt`, perms, 'read'), 'deny');
   });
 
   it('does not expand ~ in the middle of a pattern', () => {
-    const perms = { alwaysAllow: ['/home/~/project/**'], deny: [] };
-    assert.equal(checkFilePermission('/home/user/project/file.ts', perms), 'prompt');
+    const perms = { readWrite: ['/home/~/project/**'], readOnly: [], deny: [] };
+    assert.equal(checkFilePermission('/home/user/project/file.ts', perms, 'write'), 'prompt');
   });
 });
 

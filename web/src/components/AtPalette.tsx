@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AtItem } from '../types';
+import { isDemo } from '../demo/useDemoMode';
 
 const STATIC_AT_ITEMS: AtItem[] = [
   { icon: '🖥️', label: 'screen',    desc: 'Share your screen',       insert: '@screen' },
@@ -8,8 +9,70 @@ const STATIC_AT_ITEMS: AtItem[] = [
 ];
 
 export function getAtStaticMatches(query: string): AtItem[] {
-  return STATIC_AT_ITEMS.filter(item => item.label.toLowerCase().includes(query.toLowerCase()));
+  const q = query.toLowerCase();
+  return STATIC_AT_ITEMS.filter(item => item.label.toLowerCase().includes(q));
 }
+
+// ── Path mode helpers ────────────────────────────────────────────────────────
+
+/** True if the query looks like a filesystem path (@~/, @/, @./) */
+function isPathMode(query: string): boolean {
+  return query === '~' || query === '.' || query === '..'
+    || query.startsWith('~/') || query.startsWith('/') || query.startsWith('./');
+}
+
+/** Split a path query into directory (for server fetch) and filter (for client matching). */
+function parsePathQuery(query: string): { dir: string; filter: string } {
+  const lastSlash = query.lastIndexOf('/');
+  if (lastSlash === -1) return { dir: query, filter: '' };
+  return { dir: query.slice(0, lastSlash + 1), filter: query.slice(lastSlash + 1) };
+}
+
+/** Case-insensitive fuzzy subsequence test — same algorithm as highlightMatch. */
+function fuzzyMatch(text: string, query: string): boolean {
+  if (!query) return true;
+  const lower = text.toLowerCase();
+  const q = query.toLowerCase();
+  let qi = 0;
+  for (let i = 0; i < lower.length && qi < q.length; i++) {
+    if (lower[i] === q[qi]) qi++;
+  }
+  return qi === q.length;
+}
+
+// ── Demo mock data ───────────────────────────────────────────────────────────
+
+const MOCK_FS: Record<string, { name: string; isDir: boolean }[]> = {
+  '~/': [
+    { name: 'Documents', isDir: true },
+    { name: 'projects', isDir: true },
+    { name: 'Downloads', isDir: true },
+    { name: 'notes.md', isDir: false },
+  ],
+  '~/projects/': [
+    { name: 'myapp', isDir: true },
+    { name: 'shared-lib', isDir: true },
+    { name: 'README.md', isDir: false },
+  ],
+  '~/projects/myapp/': [
+    { name: 'src', isDir: true },
+    { name: 'package.json', isDir: false },
+    { name: 'tsconfig.json', isDir: false },
+  ],
+};
+
+function makeDirItems(entries: { name: string; isDir: boolean }[], dir: string): AtItem[] {
+  return entries.map(e => ({
+    icon: e.isDir ? '📁' : '📄',
+    label: e.name,
+    desc: dir,
+    insert: dir + e.name + (e.isDir ? '/' : ''),
+    isFile: !e.isDir,
+    isDir: e.isDir,
+  }));
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 interface AtPaletteProps {
   triggerPos: number;
@@ -25,19 +88,44 @@ export const AtPalette = React.memo(function AtPalette({
   triggerPos, query, mountsAvailable, selected, onSelect, onComplete, onItemsChange,
 }: AtPaletteProps) {
   const [fileItems, setFileItems] = useState<AtItem[]>([]);
-  const lastQuery = useRef('');
+  const lastDirRef = useRef('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const pathMode = triggerPos !== -1 && isPathMode(query);
+  const { dir: pathDir, filter: pathFilter } = pathMode ? parsePathQuery(query) : { dir: '', filter: '' };
+
+  // Fetch directory listing (path mode) or mount search (mount mode)
   useEffect(() => {
-    if (!mountsAvailable || triggerPos === -1) {
-      setFileItems([]);
-      return;
+    if (triggerPos === -1) { setFileItems([]); return; }
+
+    if (pathMode) {
+      // Path mode — fetch directory listing from /files?dir=
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(async () => {
+        timerRef.current = null;
+        if (pathDir === lastDirRef.current) return;
+        lastDirRef.current = pathDir;
+        if (isDemo()) {
+          setFileItems(makeDirItems(MOCK_FS[pathDir] ?? [], pathDir));
+          return;
+        }
+        try {
+          const resp = await fetch(`/files?dir=${encodeURIComponent(pathDir)}`);
+          if (!resp.ok) { setFileItems([]); return; }
+          const data = await resp.json() as { entries: { name: string; isDir: boolean }[] };
+          setFileItems(makeDirItems(data.entries, pathDir));
+        } catch { setFileItems([]); }
+      }, 120);
+      return () => { if (timerRef.current) clearTimeout(timerRef.current); };
     }
+
+    // Mount search mode (existing)
+    if (!mountsAvailable) { setFileItems([]); return; }
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(async () => {
       timerRef.current = null;
-      if (query === lastQuery.current) return;
-      lastQuery.current = query;
+      if (query === lastDirRef.current) return;
+      lastDirRef.current = query;
       try {
         const resp = await fetch(`/files?q=${encodeURIComponent(query)}`);
         if (!resp.ok) return;
@@ -51,18 +139,22 @@ export const AtPalette = React.memo(function AtPalette({
         })));
       } catch { /* unavailable */ }
     }, 120);
-
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [query, mountsAvailable, triggerPos]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, mountsAvailable, triggerPos, pathMode, pathDir]);
 
-  const staticItems = triggerPos !== -1
-    ? STATIC_AT_ITEMS.filter(item => item.label.toLowerCase().includes(query.toLowerCase()))
+  // Static items: hidden when in path mode
+  const staticItems = triggerPos !== -1 && !pathMode
+    ? STATIC_AT_ITEMS.filter(item => fuzzyMatch(item.label, query))
     : [];
-  const allItems = [...staticItems, ...fileItems];
-  // Hidden when no trigger, OR when there are no items to show
-  // Use triggerPos as primary gate so stale fileItems don't keep palette visible
-  const isHidden = triggerPos === -1 || (staticItems.length === 0 && fileItems.length === 0);
-  // Clamp selection to valid range
+
+  // Filter file items by the filter portion in path mode
+  const filteredFiles = pathMode && pathFilter
+    ? fileItems.filter(item => fuzzyMatch(item.label, pathFilter))
+    : fileItems;
+
+  const allItems = [...staticItems, ...filteredFiles];
+  const isHidden = triggerPos === -1 || allItems.length === 0;
   const clampedSelected = allItems.length > 0 ? Math.min(selected, allItems.length - 1) : selected;
 
   // Notify parent of current items for keyboard Tab completion
@@ -73,6 +165,8 @@ export const AtPalette = React.memo(function AtPalette({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allItems.length, isHidden]);
 
+  const displayQuery = pathMode ? pathFilter : query;
+
   return (
     <div id="at-palette" className={isHidden ? 'hidden' : ''}>
       {staticItems.length > 0 && (
@@ -82,7 +176,7 @@ export const AtPalette = React.memo(function AtPalette({
             <AtPaletteItem
               key={item.insert}
               item={item}
-              query={query}
+              query={displayQuery}
               idx={i}
               selected={clampedSelected}
               onSelect={onSelect}
@@ -91,14 +185,14 @@ export const AtPalette = React.memo(function AtPalette({
           ))}
         </>
       )}
-      {fileItems.length > 0 && (
+      {filteredFiles.length > 0 && (
         <>
-          <div className="at-palette-section">Files</div>
-          {fileItems.map((item, i) => (
+          <div className="at-palette-section">{pathMode ? pathDir : 'Files'}</div>
+          {filteredFiles.map((item, i) => (
             <AtPaletteItem
               key={item.insert}
               item={item}
-              query={query}
+              query={displayQuery}
               idx={staticItems.length + i}
               selected={clampedSelected}
               onSelect={onSelect}
@@ -144,8 +238,8 @@ function AtPaletteItem({ item, query, idx, selected, onSelect, onComplete }: {
   item: AtItem; query: string; idx: number; selected: number;
   onSelect: (i: number) => void; onComplete: (item: AtItem) => void;
 }) {
-  const displayLabel = item.isFile ? (item.label.split('/').pop() ?? item.label) : item.label;
-  const displayDesc  = item.isFile ? item.label : item.desc;
+  const displayLabel = (item.isFile || item.isDir) ? item.label : item.label;
+  const displayDesc  = (item.isFile || item.isDir) ? item.desc : item.desc;
   return (
     <div
       className={`at-palette-item${idx === selected ? ' selected' : ''}`}
@@ -155,7 +249,7 @@ function AtPaletteItem({ item, query, idx, selected, onSelect, onComplete }: {
       <span className="at-item-icon">{item.icon}</span>
       <span className="at-item-text">
         <span className="at-item-label">{highlightMatch(displayLabel, query)}</span>
-        <span className="at-item-desc">{item.isFile ? highlightMatch(displayDesc, query) : displayDesc}</span>
+        <span className="at-item-desc">{(item.isFile || item.isDir) ? highlightMatch(displayDesc, query) : displayDesc}</span>
       </span>
     </div>
   );

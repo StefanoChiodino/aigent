@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
 import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, parseCommandPipeline, shouldForceClassify } from './safety.js';
-import { initClassifier, classifyCommand, isClassifierAvailable } from './classifier.js';
+import { initClassifier, classifyCommand, classifyFileAccess, isClassifierAvailable } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
 import { auditLog } from './audit.js';
 import { readSettingsSync, writeSettingsSync, getSettingsPath } from './settings-file.js';
@@ -499,7 +499,7 @@ function handleEditFileRequest(
   // Check file permissions — auto-apply if allowed, block if denied
   const filePerms = readFilePermissions();
   const hostPath = resolveHostPath(containerPath);
-  const level = checkFilePermission(hostPath, filePerms);
+  const level = checkFilePermission(hostPath, filePerms, 'write');
 
   if (level === 'deny') {
     log.info('Edit auto-denied by file permission policy', { id, path: hostPath });
@@ -585,7 +585,8 @@ function broadcastUpdatedPermissions(): void {
     exec_perm_deny: JSON.stringify(execPerms.deny),
     fetch_perm_alwaysAllow: JSON.stringify(fetchPerms.alwaysAllow),
     fetch_perm_deny: JSON.stringify(fetchPerms.deny),
-    file_perm_alwaysAllow: JSON.stringify(filePerms.alwaysAllow),
+    file_perm_readWrite: JSON.stringify(filePerms.readWrite),
+    file_perm_readOnly: JSON.stringify(filePerms.readOnly),
     file_perm_deny: JSON.stringify(filePerms.deny),
   });
 }
@@ -902,11 +903,18 @@ function readFilePermissions(): FilePermissions {
     const settings = readSettingsSync();
     const perms = settings['file_permissions'];
     if (!perms || typeof perms !== 'object') return DEFAULT_FILE_PERMISSIONS;
-    const p = perms as Partial<FilePermissions>;
-    return {
-      alwaysAllow: Array.isArray(p.alwaysAllow)
+    const p = perms as Partial<FilePermissions> & { alwaysAllow?: string[] };
+    // Backward compat: if readWrite is missing but legacy alwaysAllow exists, use it
+    const readWrite = Array.isArray(p.readWrite)
+      ? p.readWrite
+      : Array.isArray(p.alwaysAllow)
         ? p.alwaysAllow
-        : DEFAULT_FILE_PERMISSIONS.alwaysAllow,
+        : DEFAULT_FILE_PERMISSIONS.readWrite;
+    return {
+      readWrite,
+      readOnly: Array.isArray(p.readOnly)
+        ? p.readOnly
+        : DEFAULT_FILE_PERMISSIONS.readOnly,
       deny: Array.isArray(p.deny)
         ? [...new Set([...DEFAULT_FILE_PERMISSIONS.deny, ...p.deny])]
         : DEFAULT_FILE_PERMISSIONS.deny,
@@ -916,17 +924,34 @@ function readFilePermissions(): FilePermissions {
   }
 }
 
-function addPathToFileAlwaysAllow(pattern: string): void {
+function addPathToFileReadWrite(pattern: string): void {
   try {
-    writeSettingsSync('gatekeeper:addToFileAlwaysAllow', (settings) => {
+    writeSettingsSync('gatekeeper:addToFileReadWrite', (settings) => {
       const perms = (settings['file_permissions'] as Partial<FilePermissions> | undefined) ?? {};
-      const current = Array.isArray(perms.alwaysAllow) ? [...perms.alwaysAllow] : [...DEFAULT_FILE_PERMISSIONS.alwaysAllow];
+      const current = Array.isArray(perms.readWrite) ? [...perms.readWrite] : [...DEFAULT_FILE_PERMISSIONS.readWrite];
       if (!current.includes(pattern)) {
         current.push(pattern);
       }
-      return { ...settings, file_permissions: { ...DEFAULT_FILE_PERMISSIONS, ...perms, alwaysAllow: current } };
+      return { ...settings, file_permissions: { ...DEFAULT_FILE_PERMISSIONS, ...perms, readWrite: current } };
     });
-    log.info('Added path to file always-allow', { pattern });
+    log.info('Added path to file read-write', { pattern });
+    broadcastUpdatedPermissions();
+  } catch (err) {
+    log.error('Failed to update file permissions', { error: String(err) });
+  }
+}
+
+function addPathToFileReadOnly(pattern: string): void {
+  try {
+    writeSettingsSync('gatekeeper:addToFileReadOnly', (settings) => {
+      const perms = (settings['file_permissions'] as Partial<FilePermissions> | undefined) ?? {};
+      const current = Array.isArray(perms.readOnly) ? [...perms.readOnly] : [...DEFAULT_FILE_PERMISSIONS.readOnly];
+      if (!current.includes(pattern)) {
+        current.push(pattern);
+      }
+      return { ...settings, file_permissions: { ...DEFAULT_FILE_PERMISSIONS, ...perms, readOnly: current } };
+    });
+    log.info('Added path to file read-only', { pattern });
     broadcastUpdatedPermissions();
   } catch (err) {
     log.error('Failed to update file permissions', { error: String(err) });
@@ -1039,47 +1064,92 @@ const pendingFileAccessApprovals = new Map<string, { path: string; operation: 'r
 const autoHandledFileAccessIds = new Set<string>();
 
 function handleAgentFileAccessRequest(id: string, path: string, operation: 'read' | 'write', reason: string): void {
-  // Reads are never destructive — auto-allow and broadcast the decision
-  if (operation === 'read') {
-    log.info('File read auto-allowed', { id, path });
-    auditLog({ type: 'file_read', detail: path });
-    autoHandledFileAccessIds.add(id);
-    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'File reads are always safe' });
-    client!.send({ type: 'file_access_response', id, ok: true, message: 'Auto-allowed: reads are non-destructive' });
-    return;
-  }
-
-  // Check file permissions (allow/deny patterns) before prompting
+  // Check file permissions (deny/readOnly/readWrite) for all operations
   const filePerms = readFilePermissions();
-  const level = checkFilePermission(path, filePerms);
+  const level = checkFilePermission(path, filePerms, operation);
+
   if (level === 'allow') {
-    log.info('File write auto-allowed by permission policy', { id, path });
-    auditLog({ type: 'file_write', detail: path, reason: 'allowed by file_permissions' });
+    const auditType = operation === 'read' ? 'file_read' : 'file_write';
+    log.info(`File ${operation} auto-allowed by permission policy`, { id, path });
+    auditLog({ type: auditType, detail: path, reason: 'allowed by file_permissions' });
     autoHandledFileAccessIds.add(id);
     classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'Allowed by file_permissions' });
     client!.send({ type: 'file_access_response', id, ok: true, message: 'Allowed by file permission policy' });
     return;
   }
   if (level === 'deny') {
-    log.info('File write auto-denied by permission policy', { id, path });
-    auditLog({ type: 'file_write_block', detail: path, reason: 'denied by file_permissions' });
+    const auditType = operation === 'read' ? 'file_read_block' : 'file_write_block';
+    log.info(`File ${operation} auto-denied by permission policy`, { id, path });
+    auditLog({ type: auditType, detail: path, reason: 'denied by file_permissions' });
     autoHandledFileAccessIds.add(id);
     classifierDecisions.set(id, { tier: 2, action: 'block', reason: 'Denied by file_permissions' });
     client!.send({ type: 'file_access_response', id, ok: false, message: 'Denied by file permission policy' });
-    injectSystemMessage(`[file] Blocked by deny policy: ${path}`);
+    injectSystemMessage(`[file] Blocked by ${operation === 'write' ? 'deny/read-only' : 'deny'} policy: ${path}`);
     return;
   }
 
+  // --- Tier 3: Haiku file access classifier (async) ---
+  if (isClassifierAvailable() && process.env['AIGENT_CLASSIFIER'] !== '0') {
+    const ctx = getRecentContext();
+    classifyFileAccess(path, operation, { cwd: process.cwd(), ...(ctx ? { recentContext: ctx } : {}) })
+      .then(result => {
+        if (result.action === 'allow') {
+          const auditType = operation === 'read' ? 'file_read' : 'file_write';
+          log.info(`File ${operation} auto-allowed (Tier 3 classifier)`, { id, path, reason: result.reason });
+          auditLog({ type: auditType, detail: path, reason: `classifier: ${result.reason}` });
+          autoHandledFileAccessIds.add(id);
+          classifierDecisions.set(id, { tier: 3, action: 'allow', reason: result.reason });
+          client!.send({ type: 'file_access_response', id, ok: true, message: `Allowed by classifier: ${result.reason}` });
+          return;
+        }
+
+        if (result.action === 'block') {
+          const auditType = operation === 'read' ? 'file_read_block' : 'file_write_block';
+          log.info(`File ${operation} blocked (Tier 3 classifier)`, { id, path, reason: result.reason });
+          auditLog({ type: auditType, detail: path, reason: `classifier: ${result.reason}` });
+          autoHandledFileAccessIds.add(id);
+          classifierDecisions.set(id, { tier: 3, action: 'block', reason: result.reason });
+          client!.send({ type: 'file_access_response', id, ok: false, message: `Blocked by classifier: ${result.reason}` });
+          injectSystemMessage(`[file] Blocked by classifier: ${result.reason}\n  Path: ${path}`);
+          return;
+        }
+
+        // 'ask' — prompt the user with the classifier's assessment
+        promptUserForFileAccess(id, path, operation, reason, result.reason, result.suggestedPatterns);
+      })
+      .catch(() => {
+        // Classifier failed — fall back to user prompt
+        promptUserForFileAccess(id, path, operation, reason);
+      });
+    return;
+  }
+
+  // No classifier — fall back to user prompt
+  promptUserForFileAccess(id, path, operation, reason);
+}
+
+function promptUserForFileAccess(
+  id: string,
+  path: string,
+  operation: 'read' | 'write',
+  reason: string,
+  classifierReason?: string,
+  suggestedPatterns?: string[],
+): void {
   pendingFileAccessApprovals.set(id, { path, operation });
-  log.info('File access approval requested', { id, path, operation });
-  injectSystemMessage(
-    `Agent wants to ${operation.toUpperCase()} file outside project or in a sensitive location:\n` +
+  log.info('File access approval requested', { id, path, operation, classifierReason, suggestedPatterns });
+  let msg = `Agent wants to ${operation.toUpperCase()} file outside project or in a sensitive location:\n` +
     `  Path: ${path}\n` +
-    `  Reason: "${reason}"\n\n` +
-    `  Reply: /approve-file ${id} or /deny-file ${id}\n` +
-    `  To always allow this file: /approve-file ${id} --always\n` +
-    `  To always allow this directory: /approve-file ${id} --always-dir`
-  );
+    `  Reason: "${reason}"\n`;
+  if (classifierReason) {
+    msg += `  Classifier: ${classifierReason}\n`;
+  }
+  msg += `\n  Reply: /approve-file ${id} or /deny-file ${id}\n` +
+    `  To always allow this file (read-write): /approve-file ${id} --always\n` +
+    `  To always allow this directory (read-write): /approve-file ${id} --always-dir\n` +
+    `  To allow read-only: /approve-file ${id} --read-only\n` +
+    `  To allow read-only for directory: /approve-file ${id} --read-only-dir`;
+  injectSystemMessage(msg);
 }
 
 function handleFileAccessApproveReject(input: string): boolean {
@@ -1110,21 +1180,30 @@ function handleFileAccessApproveReject(input: string): boolean {
   pendingFileAccessApprovals.delete(id);
 
   if (cmd === '/approve-file') {
-    const alwaysAllow = parts.includes('--always') || parts.includes('--always-dir');
-    const alwaysDir = parts.includes('--always-dir');
+    const isReadOnly = parts.includes('--read-only') || parts.includes('--read-only-dir');
+    const isDir = parts.includes('--always-dir') || parts.includes('--read-only-dir');
+    const isPersistent = parts.includes('--always') || isDir || isReadOnly;
 
-    if (alwaysDir) {
+    if (isDir) {
       const dirPattern = dirname(pending.path) + '/**';
-      addPathToFileAlwaysAllow(dirPattern);
-      injectSystemMessage(`Approved and directory added to always-allow: ${dirPattern}`);
-    } else if (alwaysAllow) {
-      addPathToFileAlwaysAllow(pending.path);
-      injectSystemMessage(`Approved and path added to always-allow: ${pending.path}`);
+      if (isReadOnly) {
+        addPathToFileReadOnly(dirPattern);
+        injectSystemMessage(`Approved and directory added to read-only: ${dirPattern}`);
+      } else {
+        addPathToFileReadWrite(dirPattern);
+        injectSystemMessage(`Approved and directory added to read-write: ${dirPattern}`);
+      }
+    } else if (isReadOnly) {
+      addPathToFileReadOnly(pending.path);
+      injectSystemMessage(`Approved and path added to read-only: ${pending.path}`);
+    } else if (isPersistent) {
+      addPathToFileReadWrite(pending.path);
+      injectSystemMessage(`Approved and path added to read-write: ${pending.path}`);
     } else {
       injectSystemMessage(`Approved (once): ${pending.path}`);
     }
 
-    log.info('File access approved', { id, path: pending.path, alwaysAllow, alwaysDir });
+    log.info('File access approved', { id, path: pending.path, persistent: isPersistent, readOnly: isReadOnly, dir: isDir });
     client!.send({ type: 'file_access_response', id, ok: true, message: 'Approved by user' });
   } else {
     log.info('File access denied', { id, path: pending.path });

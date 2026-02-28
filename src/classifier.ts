@@ -67,10 +67,11 @@ export function isClassifierAvailable(): boolean {
   return anthropicClient !== null;
 }
 
-/** Test-only: inject a fake client and clear cache. */
+/** Test-only: inject a fake client and clear all caches. */
 export function _resetForTest(fakeClient?: Anthropic | null): void {
   anthropicClient = fakeClient ?? null;
   cache.clear();
+  fileAccessCache.clear();
 }
 
 function cacheKey(command: string, cwd?: string): string {
@@ -131,6 +132,91 @@ export async function classifyCommand(
     // Fail open — let the user decide
     const msg = err instanceof Error ? err.message : String(err);
     log.error('Classifier API error', { error: msg, command });
+    return { action: 'ask', reason: 'Classifier unavailable — please review manually' };
+  }
+}
+
+// --- File access classifier ---
+
+const FILE_ACCESS_SYSTEM_PROMPT = `You are a security classifier for an AI coding agent. Your job is to evaluate file access requests the agent makes.
+
+Evaluate the file path and operation below. You may also receive recent conversation context — use it to understand WHY the access is requested, but still judge the path on its own merits.
+
+Respond with ONLY a JSON object: {"action":"allow"|"block"|"ask","reason":"..."}
+
+Guidelines:
+- "allow": Source code, config files, docs, project files, temp files, package manifests, build outputs, log files
+- "block": Credential files (private keys, tokens, passwords), sensitive dot-directories (~/.ssh, ~/.gnupg, ~/.aws), database files with credentials
+- "ask": Ambiguous — home directory files outside the project, system configs (/etc), unfamiliar paths
+
+For reads: err toward "allow" — reading files is rarely dangerous.
+For writes: be more cautious — err toward "ask" when uncertain.
+
+When you classify as "allow" or "ask", also suggest 1-2 glob patterns for an auto-allow list.
+Pattern rules:
+- Use "**" to match directory trees (e.g. "~/project/**")
+- Use "*" to match filenames (e.g. "/tmp/*")
+- "~" expands to the user's home directory
+- NEVER suggest patterns for credential paths
+- NEVER suggest overly broad patterns (e.g. just "*" or "~/**")
+
+Include them as: {"action":"...","reason":"...","suggested_patterns":["pattern1"]}
+The suggested_patterns field is optional — omit it if no safe patterns apply.`;
+
+const fileAccessCache = new Map<string, CacheEntry>();
+
+function fileAccessCacheKey(path: string, operation: string): string {
+  return `file::${operation}::${path}`;
+}
+
+function pruneFileAccessCache(): void {
+  if (fileAccessCache.size <= CACHE_MAX) return;
+  const entries = [...fileAccessCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+  const toRemove = entries.slice(0, entries.length - CACHE_MAX);
+  for (const [key] of toRemove) fileAccessCache.delete(key);
+}
+
+export async function classifyFileAccess(
+  path: string,
+  operation: 'read' | 'write',
+  context?: { cwd?: string; recentContext?: string },
+): Promise<ClassifierResult> {
+  const key = fileAccessCacheKey(path, operation);
+  const cached = fileAccessCache.get(key);
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
+    return cached.result;
+  }
+
+  if (!anthropicClient) {
+    return { action: 'ask', reason: 'Classifier not initialized' };
+  }
+
+  try {
+    let userMessage = `Operation: ${operation}\nPath: ${path}`;
+    if (context?.cwd) userMessage += `\nWorking directory: ${context.cwd}`;
+    if (context?.recentContext) {
+      userMessage += `\n\nRecent conversation context:\n${context.recentContext}`;
+    }
+
+    const response = await anthropicClient.messages.create({
+      model: MODEL,
+      max_tokens: 256,
+      system: FILE_ACCESS_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userMessage }],
+    });
+
+    const text = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+
+    const result = parseClassifierResponse(text);
+    fileAccessCache.set(key, { result, ts: Date.now() });
+    pruneFileAccessCache();
+    return result;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error('File access classifier API error', { error: msg, path, operation });
     return { action: 'ask', reason: 'Classifier unavailable — please review manually' };
   }
 }

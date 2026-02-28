@@ -287,15 +287,21 @@ export function checkFetchPermission(
 // --- File path permissions ---
 
 export interface FilePermissions {
-  alwaysAllow: string[]; // file path glob patterns (e.g. "/home/user/project/**")
-  deny: string[];
+  readWrite: string[];  // paths where agent can both read and write
+  readOnly: string[];   // paths where agent can read but not write
+  deny: string[];       // paths blocked for both read and write
 }
 
 export type FilePermissionLevel = 'allow' | 'prompt' | 'deny';
 
 export const DEFAULT_FILE_PERMISSIONS: FilePermissions = {
-  alwaysAllow: [],
-  deny: [],
+  readWrite: [],
+  readOnly: [],
+  deny: [
+    '~/.ssh/**',
+    '~/.gnupg/**',
+    '~/.aws/**',
+  ],
 };
 
 /**
@@ -320,17 +326,23 @@ function matchFilePattern(path: string, pattern: string): boolean {
 
 /**
  * Check what permission level a file path requires given user-configured permissions.
- * Evaluation order: deny → alwaysAllow → prompt → default(prompt)
+ * Evaluation order: deny → readOnly (allow reads, deny writes) → readWrite → prompt
  */
 export function checkFilePermission(
   path: string,
   permissions: FilePermissions,
+  operation: 'read' | 'write',
 ): FilePermissionLevel {
   const normalizedPath = path.toLowerCase();
   for (const pattern of permissions.deny) {
     if (matchFilePattern(normalizedPath, pattern.toLowerCase())) return 'deny';
   }
-  for (const pattern of permissions.alwaysAllow) {
+  for (const pattern of permissions.readOnly) {
+    if (matchFilePattern(normalizedPath, pattern.toLowerCase())) {
+      return operation === 'read' ? 'allow' : 'deny';
+    }
+  }
+  for (const pattern of permissions.readWrite) {
     if (matchFilePattern(normalizedPath, pattern.toLowerCase())) return 'allow';
   }
   return 'prompt';

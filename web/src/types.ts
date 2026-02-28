@@ -197,6 +197,7 @@ export interface AtItem {
   desc: string;
   insert: string;
   isFile?: boolean;
+  isDir?: boolean;
 }
 
 export interface MountInfo {

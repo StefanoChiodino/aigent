@@ -265,7 +265,7 @@ export function InputArea() {
       setAtQuery('');
     } else {
       setAtTriggerPos(trigPos);
-      setAtQuery(text.slice(trigPos + 1, caret).toLowerCase());
+      setAtQuery(text.slice(trigPos + 1, caret));
     }
   }, []);
 
@@ -561,6 +561,20 @@ export function InputArea() {
 
   const handleAtComplete = (item: AtItem) => {
     const caret = inputRef.current?.selectionStart ?? inputValue.length;
+
+    if (item.isDir) {
+      // Directory navigation — keep palette open, update query to new dir path
+      const dirPath = item.insert; // e.g. "~/Documents/"
+      const newVal = inputValue.slice(0, atTriggerPos) + '@' + dirPath + inputValue.slice(caret);
+      setInputValue(newVal);
+      // Don't reset atTriggerPos — palette stays open
+      setAtQuery(dirPath);
+      setAtSelected(0);
+      pendingCaretRef.current = atTriggerPos + 1 + dirPath.length; // +1 for @
+      return;
+    }
+
+    // File or static item — close palette, insert token
     const token = item.insert;
     const newVal = inputValue.slice(0, atTriggerPos) + token + ' ' + inputValue.slice(caret);
     setInputValue(newVal);
