@@ -437,12 +437,48 @@ A DNS lookup follows the static check to catch DNS rebinding attacks. Responses 
 All security decisions are appended as JSON-lines to `/tmp/aigent-audit.log`:
 
 ```json
-{"ts":1708952400123,"type":"exec_tier1_block","detail":"rm -rf /","reason":"rm on root filesystem"}
-{"ts":1708952410456,"type":"exec_tier2_allow","detail":"git status"}
-{"ts":1708952420789,"type":"exec_user_approve","detail":"npm install","approved":true}
+{"ts":1708952400123,"reqId":"f9d8e7","type":"exec_tier1_block","detail":"rm -rf /","reason":"rm on root filesystem"}
+{"ts":1708952410456,"reqId":"f9d8e7","type":"exec_tier2_allow","detail":"git status"}
+{"ts":1708952420789,"reqId":"f9d8e7","type":"exec_user_approve","detail":"npm install","approved":true}
 ```
 
-Event types cover the full pipeline: exec (tier1/2/3/user), file (read/write/block), fetch (ssrf/dns/size/allow), and MCP tool calls.
+Event types cover the full pipeline: exec (tier1/2/3/user), file (read/write/block), fetch (ssrf/dns/size/allow), and MCP tool calls. Each entry includes a `reqId` correlation ID when available, linking it to the originating user message.
+
+**Log rotation:** Both the audit log and the gatekeeper log (`/tmp/aigent-gatekeeper.log`) are automatically rotated on startup when they exceed 5 MB. Two rotations are kept (`.1`, `.2`).
+
+### Request tracing (`reqId`)
+
+Every user message generates a 6-character hex correlation ID that flows through the entire stack:
+
+```
+Browser UI  →  Web bridge  →  Agent server  →  Agent  →  Tools  →  MCP servers
+   f9d8e7       f9d8e7          f9d8e7        f9d8e7    f9d8e7    _meta.reqId
+```
+
+- **Structured logs** are prefixed with `[reqId]`: `2024-01-15T10:30:45.123Z [INFO] [server] [f9d8e7] Agent turn start`
+- **Audit log** entries include `"reqId":"f9d8e7"` for filtering with `jq`
+- **Background tasks** get a derived ID: `f9d8e7.tk01` (parent + task ID prefix)
+- **MCP servers** receive the ID in the JSON-RPC `_meta` parameter
+
+Use `grep` or `jq` to trace a single request across all logs:
+
+```bash
+grep 'f9d8e7' /tmp/aigent-gatekeeper.log
+jq 'select(.reqId == "f9d8e7")' /tmp/aigent-audit.log
+```
+
+### Tool call history
+
+Tool executions are logged to the daily session log (`workspace/memory/YYYY-MM-DD.md`) as a markdown table, surviving context compaction:
+
+```markdown
+## Tool Calls
+
+| Time | Tool | Input | Duration | Status | Req |
+|------|------|-------|----------|--------|-----|
+| 14:23:05 | exec | {"command":"git status"} | 120ms | ok | f9d8e7 |
+| 14:23:08 | read_file | {"path":"/src/agent.ts"} | 3ms | ok | f9d8e7 |
+```
 
 ### Sensitive path protection
 
