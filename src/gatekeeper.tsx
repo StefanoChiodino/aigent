@@ -19,7 +19,7 @@ import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
-import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, parseCommandPipeline, shouldForceClassify } from './safety.js';
+import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, checkMCPPermission, DEFAULT_MCP_PERMISSIONS, type MCPPermissions, parseCommandPipeline, shouldForceClassify, validateFetchUrl } from './safety.js';
 import { initClassifier, classifyCommand, classifyFileAccess, isClassifierAvailable } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
 import { auditLog } from './audit.js';
@@ -585,6 +585,7 @@ function handleSettingsChanged(): void {
   flushPendingExecApprovals();
   flushPendingFetchApprovals();
   flushPendingFileAccessApprovals();
+  flushPendingMCPApprovals();
 }
 
 function broadcastUpdatedPermissions(): void {
@@ -593,6 +594,7 @@ function broadcastUpdatedPermissions(): void {
   const execPerms = readExecPermissions();
   const fetchPerms = readFetchPermissions();
   const filePerms = readFilePermissions();
+  const mcpPerms = readMCPPermissions();
   client.emit('permissions_updated', {
     exec_perm_alwaysAllow: JSON.stringify(execPerms.alwaysAllow),
     exec_perm_alwaysClassify: JSON.stringify(execPerms.alwaysClassify),
@@ -605,6 +607,7 @@ function broadcastUpdatedPermissions(): void {
     file_perm_readOnly: JSON.stringify(filePerms.readOnly),
     file_perm_deny: JSON.stringify(filePerms.deny),
     file_perm_yolo: settings['file_perm_yolo'] === true,
+    mcp_perm_servers: JSON.stringify(mcpPerms.servers),
   });
 }
 
@@ -1386,15 +1389,74 @@ function handleFetchSizeApproveReject(input: string): boolean {
 // --- MCP tool approval ---
 
 const pendingMcpToolApprovals = new Map<string, { server: string; tool: string; params: string }>();
+const autoHandledMcpIds = new Set<string>();
+
+function readMCPPermissions(): MCPPermissions {
+  try {
+    const settings = readSettingsSync();
+    const perms = settings['mcp_permissions'];
+    if (!perms || typeof perms !== 'object') return DEFAULT_MCP_PERMISSIONS;
+    const p = perms as Partial<MCPPermissions>;
+    return {
+      servers: (p.servers && typeof p.servers === 'object') ? p.servers : {},
+    };
+  } catch {
+    return DEFAULT_MCP_PERMISSIONS;
+  }
+}
+
+function addMCPToolToAlwaysAllow(server: string, tool: string): void {
+  try {
+    writeSettingsSync('gatekeeper:addToMCPAlwaysAllow', (settings) => {
+      const perms = (settings['mcp_permissions'] as Partial<MCPPermissions> | undefined) ?? {};
+      const servers = (perms.servers && typeof perms.servers === 'object') ? { ...perms.servers } : {};
+      const existing = servers[server];
+      const serverPerms = existing ? { ...existing } : { default: 'prompt' as const };
+      const tools = serverPerms.tools ? { ...serverPerms.tools } : {};
+      tools[tool] = 'allow';
+      serverPerms.tools = tools;
+      servers[server] = serverPerms;
+      return { ...settings, mcp_permissions: { servers } };
+    });
+    log.info('Added MCP tool to always-allow', { server, tool });
+    broadcastUpdatedPermissions();
+    flushPendingMCPApprovals();
+  } catch (err) {
+    log.error('Failed to update MCP permissions', { error: String(err) });
+  }
+}
 
 function handleAgentMcpToolRequest(id: string, server: string, tool: string, params: string): void {
+  const permissions = readMCPPermissions();
+  const level = checkMCPPermission(server, tool, permissions);
+
+  if (level === 'allow') {
+    log.info('MCP tool auto-allowed', { id, server, tool });
+    auditLog({ type: 'mcp_tool_allow', detail: `${server}/${tool}` });
+    autoHandledMcpIds.add(id);
+    client!.send({ type: 'mcp_tool_response', id, ok: true, message: 'Allowed by permission policy' });
+    return;
+  }
+
+  if (level === 'deny') {
+    log.info('MCP tool auto-denied', { id, server, tool });
+    auditLog({ type: 'mcp_tool_deny', detail: `${server}/${tool}` });
+    autoHandledMcpIds.add(id);
+    client!.send({ type: 'mcp_tool_response', id, ok: false, message: 'Denied by permission policy' });
+    injectSystemMessage(`[mcp] Blocked by deny policy: ${server}/${tool}`);
+    return;
+  }
+
+  // 'prompt' — store and forward to web UI for user approval
   pendingMcpToolApprovals.set(id, { server, tool, params });
   log.info('MCP tool approval requested', { id, server, tool });
+  auditLog({ type: 'mcp_tool_prompt', detail: `${server}/${tool}` });
   const paramsPreview = params.length > 200 ? params.slice(0, 200) + '\n  ...' : params;
   injectSystemMessage(
     `Agent wants to call MCP tool: ${server}/${tool}\n` +
     `  Parameters:\n${paramsPreview}\n\n` +
-    `  Reply: /approve-mcp ${id} or /deny-mcp ${id}`
+    `  Reply: /approve-mcp ${id} or /deny-mcp ${id}\n` +
+    `  To always allow this tool: /approve-mcp ${id} --always`
   );
 }
 
@@ -1404,7 +1466,8 @@ function handleMcpToolApproveReject(input: string): boolean {
 
   if (cmd !== '/approve-mcp' && cmd !== '/deny-mcp') return false;
 
-  let id = parts[1];
+  const hasAlways = parts.includes('--always');
+  let id = parts.find(p => p !== cmd && p !== '--always');
   if (!id && pendingMcpToolApprovals.size === 1) {
     id = pendingMcpToolApprovals.keys().next().value as string;
   }
@@ -1424,15 +1487,40 @@ function handleMcpToolApproveReject(input: string): boolean {
   pendingMcpToolApprovals.delete(id);
 
   if (cmd === '/approve-mcp') {
-    log.info('MCP tool approved', { id, server: pending.server, tool: pending.tool });
-    injectSystemMessage(`Approved MCP tool: ${pending.server}/${pending.tool}`);
+    log.info('MCP tool approved', { id, server: pending.server, tool: pending.tool, always: hasAlways });
+    auditLog({ type: 'mcp_user_approve', detail: `${pending.server}/${pending.tool}` });
+    injectSystemMessage(`Approved MCP tool: ${pending.server}/${pending.tool}${hasAlways ? ' (always)' : ''}`);
     client!.send({ type: 'mcp_tool_response', id, ok: true, message: 'Approved by user' });
+    if (hasAlways) {
+      addMCPToolToAlwaysAllow(pending.server, pending.tool);
+    }
   } else {
     log.info('MCP tool denied', { id, server: pending.server, tool: pending.tool });
+    auditLog({ type: 'mcp_user_deny', detail: `${pending.server}/${pending.tool}` });
     injectSystemMessage(`Denied MCP tool: ${pending.server}/${pending.tool}`);
     client!.send({ type: 'mcp_tool_response', id, ok: false, message: 'Denied by user' });
   }
   return true;
+}
+
+/** Re-check pending MCP tool approvals against updated permissions and auto-resolve matches. */
+function flushPendingMCPApprovals(): void {
+  if (pendingMcpToolApprovals.size === 0) return;
+  const permissions = readMCPPermissions();
+  const dismissed: string[] = [];
+  for (const [id, pending] of pendingMcpToolApprovals) {
+    const level = checkMCPPermission(pending.server, pending.tool, permissions);
+    if (level === 'allow') {
+      log.info('Flush: auto-approving pending MCP tool', { id, server: pending.server, tool: pending.tool });
+      auditLog({ type: 'mcp_tool_allow', detail: `${pending.server}/${pending.tool}` });
+      pendingMcpToolApprovals.delete(id);
+      client!.send({ type: 'mcp_tool_response', id, ok: true, message: 'Allowed by permission policy' });
+      dismissed.push(id);
+    }
+  }
+  if (dismissed.length > 0 && client) {
+    client.emit('perm_dismissed', dismissed);
+  }
 }
 
 // --- Browser write approval ---
@@ -1451,6 +1539,101 @@ const browserWriteGranted = { value: false };
 const browserAutonomousGranted = { value: false };
 // IDs auto-handled (grant active) before web-bridge listener fires — web-bridge skips these
 const autoHandledBrowserWriteIds = new Set<string>();
+
+// --- Destructive action heuristics (Phase 3c) ---
+
+const DESTRUCTIVE_PATTERNS = [
+  /\bsubmit\b/i, /\bsend\b/i, /\bdelete\b/i, /\bremove\b/i,
+  /\bpurchase\b/i, /\bbuy\b/i, /\bconfirm\b/i, /\bpay\b/i,
+  /\bpublish\b/i, /\bpost\b/i, /\bdeploy\b/i,
+];
+
+/** Check if a string matches any destructive pattern. Returns the first match or null. */
+function matchDestructive(text: string): string | null {
+  for (const pat of DESTRUCTIVE_PATTERNS) {
+    const m = pat.exec(text);
+    if (m) return m[0].toLowerCase();
+  }
+  return null;
+}
+
+/**
+ * Scan browser action steps for destructive click targets.
+ * Returns a list of matched destructive keywords found in the steps.
+ */
+function detectDestructiveSteps(action: string, steps?: unknown[], url?: string): string[] {
+  const matches: string[] = [];
+
+  // Check navigate / open_tab URLs for destructive path segments
+  if (url && (action === 'navigate' || action === 'open_tab')) {
+    try {
+      const parsed = new URL(url);
+      const m = matchDestructive(parsed.pathname);
+      if (m) matches.push(`navigate → "${m}" in URL path`);
+    } catch { /* invalid URL — will be caught by SSRF check */ }
+  }
+
+  if (!steps || !Array.isArray(steps)) return matches;
+
+  for (const step of steps) {
+    const s = step as Record<string, unknown>;
+
+    // Check click steps
+    if ('click' in s && typeof s['click'] === 'string') {
+      const selector = s['click'];
+      const by = (s['by'] as string) ?? 'css';
+
+      if (by === 'text' || by === 'aria') {
+        // The selector IS the visible label / aria-label
+        const m = matchDestructive(selector);
+        if (m) matches.push(`click "${selector}" (${m})`);
+      } else {
+        // CSS selector — check for embedded labels and submit types
+        const m = matchDestructive(selector);
+        if (m) matches.push(`click ${selector} (${m})`);
+        if (/\[type=["']?submit["']?\]/i.test(selector)) {
+          matches.push(`click ${selector} (submit)`);
+        }
+      }
+    }
+
+    // Check navigate steps within run_script
+    if ('navigate' in s && typeof s['navigate'] === 'string') {
+      try {
+        const parsed = new URL(s['navigate'] as string);
+        const m = matchDestructive(parsed.pathname);
+        if (m) matches.push(`navigate → "${m}" in URL path`);
+      } catch { /* ignore invalid */ }
+    }
+  }
+
+  return matches;
+}
+
+/**
+ * Validate all URLs in a browser action against SSRF rules.
+ * Returns null if safe, or an error message if blocked.
+ */
+function validateBrowserUrls(action: string, steps?: unknown[], url?: string): string | null {
+  // Check top-level URL (navigate / open_tab)
+  if (url && (action === 'navigate' || action === 'open_tab')) {
+    const err = validateFetchUrl(url);
+    if (err) return err;
+  }
+
+  // Check navigate steps within run_script
+  if (steps && Array.isArray(steps)) {
+    for (const step of steps) {
+      const s = step as Record<string, unknown>;
+      if ('navigate' in s && typeof s['navigate'] === 'string') {
+        const err = validateFetchUrl(s['navigate'] as string);
+        if (err) return `Step navigate blocked: ${err}`;
+      }
+    }
+  }
+
+  return null;
+}
 
 function summariseBrowserWriteAction(action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab', steps?: unknown[], url?: string, tabId?: number): string {
   if (action === 'navigate') return `Navigate to ${url ?? '(no url)'}`;
@@ -1508,12 +1691,14 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
   pendingBrowserWriteApprovals.delete(id);
 
   if (cmd === '/deny-browser-write') {
+    auditLog({ type: 'browser_ext_user_deny', detail: `${pending.action}`, approved: false });
     injectSystemMessage(`Browser write denied: ${id}`);
     client!.send({ type: 'browser_ext_result', id, ok: false, error: 'User denied browser write action' });
     return true;
   }
 
   // Approve — relay to extension
+  auditLog({ type: 'browser_ext_user_approve', detail: `${pending.action}`, approved: true });
   const alwaysAllow = parts.includes('--always');
   if (alwaysAllow) {
     browserWriteGranted.value = true;
@@ -1773,7 +1958,7 @@ client.sendCommand = (cmd: string) => {
 
 // Start web UI server before the server process so it's available during startup/restarts.
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, onSettingsChanged: handleSettingsChanged }).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged: handleSettingsChanged }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });
@@ -1850,9 +2035,42 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
   const isWriteAction = action === 'run_script' || action === 'navigate' || action === 'open_tab' || action === 'close_tab';
 
   if (isWriteAction) {
+    // SSRF check — block navigate/open_tab to private IPs, localhost, metadata endpoints
+    const ssrfErr = validateBrowserUrls(action, steps, url);
+    if (ssrfErr) {
+      auditLog({ type: 'browser_ext_ssrf_block', detail: `${action}${url ? ` ${url}` : ''}`, reason: ssrfErr });
+      client.send({ type: 'browser_ext_result', id, ok: false, error: `Blocked: ${ssrfErr}` });
+      return;
+    }
+
     // Check session-level browser write grant — auto-approve if granted
     if (browserWriteGranted.value) {
+      // Phase 3c: even with write grant, destructive actions require confirmation
+      // unless autonomous mode is active
+      if (!browserAutonomousGranted.value) {
+        const destructiveMatches = detectDestructiveSteps(action, steps, url);
+        if (destructiveMatches.length > 0) {
+          const detail = destructiveMatches.join(', ');
+          auditLog({ type: 'browser_ext_destructive_prompt', detail: `${action}: ${detail}` });
+          log.info('Destructive browser action flagged for confirmation', { id, action, matches: destructiveMatches });
+          const stepSummary = summariseBrowserWriteAction(action, steps, url, tabId);
+          pendingBrowserWriteApprovals.set(id, {
+            action,
+            ...(tabId !== undefined ? { tabId } : {}),
+            ...(steps !== undefined ? { steps } : {}),
+            ...(url !== undefined ? { url } : {}),
+          });
+          injectSystemMessage(
+            `⚠ Potentially destructive browser action: ${detail}\n` +
+            `Agent wants to: ${stepSummary}\n` +
+            `  Reply: /approve-browser-write ${id} or /deny-browser-write ${id}`
+          );
+          return;
+        }
+      }
+
       log.info('Browser write auto-approved by session grant', { id, action });
+      auditLog({ type: 'browser_ext_write_grant', detail: `${action}${url ? ` ${url}` : ''}` });
       autoHandledBrowserWriteIds.add(id);
       const params: Record<string, unknown> = {};
       if (tabId !== undefined) params.tabId = tabId;
@@ -1867,6 +2085,7 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
     }
 
     // Not granted — queue for user approval
+    auditLog({ type: 'browser_ext_write_prompt', detail: `${action}${url ? ` ${url}` : ''}` });
     const stepSummary = summariseBrowserWriteAction(action, steps, url, tabId);
     pendingBrowserWriteApprovals.set(id, {
       action,
@@ -1890,6 +2109,7 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
   }
 
   // Read-only actions (extract_a11y, screenshot, list_tabs, activate_tab): relay directly
+  auditLog({ type: 'browser_ext_read', detail: action });
   const params: Record<string, unknown> = {};
   if (tabId !== undefined) params.tabId = tabId;
   if (rootSelector !== undefined) params.rootSelector = rootSelector;

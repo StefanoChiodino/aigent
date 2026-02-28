@@ -672,27 +672,36 @@ export function checkSensitivePath(absPath: string): SensitivePathLevel {
 
 // --- DNS rebinding SSRF protection ---
 
+/** Result of DNS validation — either an error or the resolved IPs for curl pinning. */
+export interface DnsValidationResult {
+  error?: string;
+  resolvedIps?: string[];
+  hostname?: string;
+}
+
 /**
  * Async extension of validateFetchUrl that also resolves the hostname's DNS
  * to catch DNS rebinding attacks (hostname passes static check but resolves to
  * a private/internal IP at connection time).
  *
- * Returns null if safe, or an error string if blocked.
+ * Returns resolved IPs on success (for --resolve pinning) or an error string.
  */
-export async function validateFetchUrlDns(url: string): Promise<string | null> {
+export async function validateFetchUrlDns(url: string): Promise<DnsValidationResult> {
   // Static checks first (protocol, private IP literals, blocked hostnames)
   const staticErr = validateFetchUrl(url);
-  if (staticErr) return staticErr;
+  if (staticErr) return { error: staticErr };
 
   let hostname: string;
   try {
     hostname = new URL(url).hostname;
   } catch {
-    return 'Invalid URL';
+    return { error: 'Invalid URL' };
   }
 
   // Skip DNS lookup for IP literals — already checked by PRIVATE_RANGES regexes above
-  if (/^[\d.]+$/.test(hostname) || /^[0-9a-fA-F:]+$/.test(hostname)) return null;
+  if (/^[\d.]+$/.test(hostname) || /^[0-9a-fA-F:]+$/.test(hostname)) {
+    return { resolvedIps: [], hostname };
+  }
 
   try {
     // Resolve both A and AAAA records
@@ -707,13 +716,42 @@ export async function validateFetchUrlDns(url: string): Promise<string | null> {
     for (const addr of addrs) {
       for (const range of PRIVATE_RANGES) {
         if (range.test(addr)) {
-          return `Blocked: ${hostname} resolves to private/internal IP ${addr} (DNS rebinding protection)`;
+          return { error: `Blocked: ${hostname} resolves to private/internal IP ${addr} (DNS rebinding protection)` };
         }
       }
     }
+    return { resolvedIps: addrs, hostname };
   } catch {
     // DNS resolution failed — let the fetch fail at the network layer naturally
+    return { resolvedIps: [], hostname };
   }
+}
 
-  return null;
+// --- MCP tool permissions ---
+
+export interface MCPPermissions {
+  servers: Record<string, {
+    default: 'allow' | 'deny' | 'prompt';
+    tools?: Record<string, 'allow' | 'deny' | 'prompt'>;
+  }>;
+}
+
+export type MCPPermissionLevel = 'allow' | 'prompt' | 'deny';
+
+export const DEFAULT_MCP_PERMISSIONS: MCPPermissions = { servers: {} };
+
+/**
+ * Check what permission level an MCP tool call requires.
+ * Evaluation order: per-tool override → server default → global default (prompt).
+ */
+export function checkMCPPermission(
+  server: string,
+  tool: string,
+  permissions: MCPPermissions,
+): MCPPermissionLevel {
+  const serverPerms = permissions.servers[server];
+  if (!serverPerms) return 'prompt';
+  const toolLevel = serverPerms.tools?.[tool];
+  if (toolLevel) return toolLevel;
+  return serverPerms.default ?? 'prompt';
 }

@@ -53,6 +53,7 @@ export function useWebSocket(): void {
           ui().setThinkingLevel(event.state.thinking);
           ui().setShortMode(event.state.short ?? false);
           ui().setLoading(event.state.isLoading);
+          ui().setQueuedMessages(event.state.queue ?? []);
           chat().setTasks(event.state.tasks ?? []);
           ui().setError(null);
           // If the server is mid-turn, start (or keep) the stream so
@@ -203,6 +204,10 @@ export function useWebSocket(): void {
           ui().setError(event.message);
           break;
 
+        case 'queue_update':
+          ui().setQueuedMessages(event.queue);
+          break;
+
         case 'state':
           if (event.thinking) {
             ui().setThinkingLevel(event.thinking);
@@ -331,6 +336,7 @@ export function useWebSocket(): void {
             body: paramsPreview,
             approveCmd: `/approve-mcp ${event.id}`,
             denyCmd: `/deny-mcp ${event.id}`,
+            alwaysAllowCmd: `/approve-mcp ${event.id} --always`,
           });
           playPermissionSound();
           break;

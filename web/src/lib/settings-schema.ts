@@ -430,6 +430,15 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
+    key: 'mcp_perm_servers',
+    label: 'Server permissions',
+    desc: 'JSON mapping server names to permission config. Example: {"github": {"default": "allow", "tools": {"delete_repo": "deny"}}}. Levels: "allow", "deny", "prompt" (default).',
+    group: 'MCP Permissions',
+    type: 'text',
+    default: '{}',
+    scope: 'client',
+  },
+  {
     key: 'debug_browser_errors',
     label: 'Relay browser errors to server',
     desc: 'Capture console.warn/error, uncaught exceptions and unhandled rejections — send them to the server log and show in chat.',

@@ -38,7 +38,7 @@ async function writeClientSettings(updates: ClientSettings): Promise<void> {
     for (const [k, v] of Object.entries(updates)) {
       // Deep-merge nested permission objects so gatekeeper-added entries survive
       // a browser POST that only intends to update one sub-field.
-      if ((k === 'exec_permissions' || k === 'fetch_permissions' || k === 'file_permissions') &&
+      if ((k === 'exec_permissions' || k === 'fetch_permissions' || k === 'file_permissions' || k === 'mcp_permissions') &&
           v !== null && typeof v === 'object' &&
           merged[k] !== null && typeof merged[k] === 'object') {
         const existing = merged[k] as Record<string, unknown>;
@@ -82,9 +82,9 @@ export interface ClassifierDecision { tier: 1 | 2 | 3; action: 'allow' | 'block'
 export async function startWebServer(
   client: AgentClient,
   port?: number,
-  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; onSettingsChanged?: () => void },
+  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; autoHandledMcpIds?: Set<string>; onSettingsChanged?: () => void },
 ): Promise<{ port: number }> {
-  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, onSettingsChanged } = options ?? {};
+  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -109,6 +109,7 @@ export async function startWebServer(
         isLoading: false,
         tasks: [],
         pendingResults: 0,
+        queue: [],
       }
     : null;
   client.on('connected', (state) => { cachedState = state; });
@@ -654,8 +655,10 @@ export async function startWebServer(
       },
       fetch_size_request: (id: string, url: string, requestedBytes: number, defaultBytes: number) =>
         send({ type: 'fetch_size_request', id, url, requestedBytes, defaultBytes }),
-      mcp_tool_request: (id: string, server: string, tool: string, params: string) =>
-        send({ type: 'mcp_tool_request', id, server, tool, params }),
+      mcp_tool_request: (id: string, server: string, tool: string, params: string) => {
+        if (autoHandledMcpIds?.has(id)) { autoHandledMcpIds.delete(id); return; }
+        send({ type: 'mcp_tool_request', id, server, tool, params });
+      },
       screenshot_request: (id: string) =>
         send({ type: 'screenshot_request', id }),
       screen_share_request: (id: string) =>
@@ -664,6 +667,10 @@ export async function startWebServer(
         send({ type: 'host_state', ...(capabilities ? { capabilities } : {}) }),
       context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) =>
         send({ type: 'context_breakdown', breakdown }),
+      queue_update: (queue: import('./protocol.js').QueuedMessageInfo[]) => {
+        if (cachedState) cachedState = { ...cachedState, queue };
+        send({ type: 'queue_update', queue });
+      },
       user_question_request: (id: string, question: string, options?: { label: string; description?: string }[], multiSelect?: boolean, allowFreeText?: boolean) =>
         send({
           type: 'user_question_request',
@@ -715,6 +722,9 @@ export async function startWebServer(
             break;
           case 'cancel':
             client.cancel();
+            break;
+          case 'cancel_queued':
+            client.send(cmd);
             break;
           case 'command':
             client.sendCommand(cmd.cmd);

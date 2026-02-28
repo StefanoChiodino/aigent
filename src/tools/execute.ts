@@ -388,10 +388,10 @@ export async function executeTool(
         auditLog({ type: 'fetch_ssrf_block', detail: url, reason: ssrfErr });
         return ssrfErr;
       }
-      const dnsErr = await validateFetchUrlDns(url);
-      if (dnsErr) {
-        auditLog({ type: 'fetch_dns_block', detail: url, reason: dnsErr });
-        return dnsErr;
+      const dnsResult = await validateFetchUrlDns(url);
+      if (dnsResult.error) {
+        auditLog({ type: 'fetch_dns_block', detail: url, reason: dnsResult.error });
+        return dnsResult.error;
       }
       const { requestFetchApproval, requestFetchSizeApproval, FETCH_DEFAULT_BYTES, FETCH_MAX_BYTES_HARD } = await import('../server.js');
       const fetchApproval = await requestFetchApproval(url, method, signal);
@@ -421,6 +421,15 @@ export async function executeTool(
           for (const [k, v] of Object.entries(reqHeaders)) args.push('-H', `${k}: ${v}`);
         }
         if (reqBody) args.push('-d', reqBody);
+        // Pin curl to the already-validated IPs to close the TOCTOU window
+        if (dnsResult.resolvedIps && dnsResult.resolvedIps.length > 0) {
+          const parsed = new URL(url);
+          const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+          for (const ip of dnsResult.resolvedIps) {
+            const resolveIp = ip.includes(':') ? `[${ip}]` : ip;
+            args.push('--resolve', `${parsed.hostname}:${port}:${resolveIp}`);
+          }
+        }
         args.push(url);
         const raw = execSync(`curl ${args.map((a) => JSON.stringify(a)).join(' ')}`, {
           encoding: 'utf-8', timeout: 35_000, maxBuffer: max_bytes + 10_000,

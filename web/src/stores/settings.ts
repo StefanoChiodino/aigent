@@ -48,6 +48,14 @@ export function buildSettingsPayload(key: string, value: boolean | number | stri
   if (key === 'file_perm_deny') {
     return { file_permissions: { deny: getList(key) } };
   }
+  if (key === 'mcp_perm_servers') {
+    try {
+      const servers = JSON.parse(String(all[key] ?? '{}'));
+      return { mcp_permissions: { servers } };
+    } catch {
+      return {};
+    }
+  }
   if (key.startsWith('tools_')) {
     return {
       tools: {
@@ -97,7 +105,7 @@ export const useSettingsStore = create<SettingsState>()(
       mergeClientSettings: (updates) => set(s => {
         const merged: SettingsValues = { ...s.clientSettings };
         for (const [k, v] of Object.entries(updates)) {
-          if (k.startsWith('exec_perm_') || k.startsWith('fetch_perm_') || k.startsWith('file_perm_')) {
+          if (k.startsWith('exec_perm_') || k.startsWith('fetch_perm_') || k.startsWith('file_perm_') || k.startsWith('mcp_perm_')) {
             merged[k] = v; // gatekeeper is authoritative
           } else if (!(k in s.clientSettings)) {
             merged[k] = v; // fill in missing keys only

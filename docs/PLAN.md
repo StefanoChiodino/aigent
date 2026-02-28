@@ -114,6 +114,8 @@ Server process (spawned directly, no Docker)
 - [x] src/safety.ts: sanitizedEnv(), validateFetchUrl(), checkCommandSafety(), checkTier1Deny(), checkExecPermission()
 - [x] Env sanitization applied to exec, grep, glob, fetch, MCP servers
 - [x] SSRF protection: private IPs, localhost, metadata endpoints blocked
+- [x] SSRF TOCTOU fix: curl pinned to resolved IPs via --resolve flag
+- [x] MCP per-server permission model: allow/deny/prompt per server and tool, "Always Allow" button, audit logging
 - [x] Close stdin on all spawned processes (prevents sudo/passwd hangs)
 - [x] Exec permission learning: --always flag promotes commands to static allow list
 - [x] --always-deny: promote commands to static deny list

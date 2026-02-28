@@ -4,7 +4,7 @@
 
 ## Active Bugs
 
-- [ ] **Message queue chip UI** — server-side queueing works (messages queued while agent is busy are auto-drained when the turn completes), but the web UI has no visual indicator. README describes dismissable queue chips above the input bar — needs: chip display, per-message cancel, count badge.
+(none currently)
 
 ## Bugs / Quick Fixes
 
@@ -14,9 +14,9 @@
 
 ## Security & Safety
 
-- [ ] **SSRF: pin curl to resolved IP** — `validateFetchUrlDns()` already resolves the hostname and checks the IP; remaining gap is passing `--resolve host:port:IP` to curl to prevent TOCTOU rebinding between the DNS check and the actual request.
+- [x] **SSRF: pin curl to resolved IP** — `validateFetchUrlDns()` now returns resolved IPs; curl receives `--resolve host:port:IP` flags to close the TOCTOU window.
 
-- [ ] **MCP server permission model** — optional `permissions` block per server in `mcp.json`; default: `prompt` for all calls.
+- [x] **MCP server permission model** — per-server/tool allow/deny/prompt in `settings.json` (`mcp_permissions`); "Always Allow" button in modal; audit logging; settings UI.
 
 - [ ] **Self-mod policy** — explicit allow/prompt list of paths the agent may edit autonomously vs. paths requiring diff review.
 
@@ -61,7 +61,7 @@
 
 ## Extensibility & Docs
 
-- [ ] **README: MCP permissions** — document permission model once implemented.
+- [x] **README: MCP permissions** — documented in README.md under MCP section.
 - [ ] **CONTRIBUTING.md** — explain workflow, code style, PR expectations, how to add tools.
 
 ---

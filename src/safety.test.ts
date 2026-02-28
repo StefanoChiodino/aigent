@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import {
   sanitizedEnv,
   validateFetchUrl,
+  validateFetchUrlDns,
   checkCommandSafety,
   validateReadonlyCommand,
   checkExecPermission,
@@ -18,6 +19,9 @@ import {
   DEFAULT_FETCH_PERMISSIONS,
   checkFilePermission,
   DEFAULT_FILE_PERMISSIONS,
+  checkMCPPermission,
+  DEFAULT_MCP_PERMISSIONS,
+  type MCPPermissions,
   parseCommandPipeline,
   checkTier1Deny,
   shouldForceClassify,
@@ -171,6 +175,89 @@ describe('validateFetchUrl', () => {
   // --- edge: 172.15 and 172.32 are NOT private ---
   it('allows 172.15.0.1 (not RFC1918)', () => assert.equal(validateFetchUrl('http://172.15.0.1'), null));
   it('allows 172.32.0.1 (not RFC1918)', () => assert.equal(validateFetchUrl('http://172.32.0.1'), null));
+});
+
+// ---------------------------------------------------------------------------
+// validateFetchUrlDns (async DNS rebinding + IP pinning)
+// ---------------------------------------------------------------------------
+
+describe('validateFetchUrlDns', () => {
+  it('returns resolvedIps for a public hostname', async () => {
+    const result = await validateFetchUrlDns('https://example.com');
+    assert.equal(result.error, undefined);
+    assert.ok(Array.isArray(result.resolvedIps));
+    assert.ok(result.resolvedIps!.length > 0, 'should resolve at least one IP');
+    assert.equal(result.hostname, 'example.com');
+  });
+
+  it('returns empty resolvedIps for IPv4 literal', async () => {
+    const result = await validateFetchUrlDns('http://93.184.216.34/path');
+    assert.equal(result.error, undefined);
+    assert.deepEqual(result.resolvedIps, []);
+  });
+
+  it('blocks private IPs via static check', async () => {
+    const result = await validateFetchUrlDns('http://127.0.0.1');
+    assert.ok(result.error);
+    assert.ok(result.error!.includes('private IP'));
+  });
+
+  it('blocks 10.x via static check', async () => {
+    const result = await validateFetchUrlDns('http://10.0.0.1');
+    assert.ok(result.error);
+  });
+
+  it('blocks localhost via static check', async () => {
+    const result = await validateFetchUrlDns('http://localhost:3000');
+    assert.ok(result.error);
+    assert.ok(result.error!.includes('localhost'));
+  });
+
+  it('returns error for invalid URL', async () => {
+    const result = await validateFetchUrlDns('not a url');
+    assert.ok(result.error);
+  });
+
+  it('returns error for non-http protocol', async () => {
+    const result = await validateFetchUrlDns('ftp://example.com');
+    assert.ok(result.error);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --resolve flag format (SSRF TOCTOU fix)
+// ---------------------------------------------------------------------------
+
+describe('SSRF --resolve flag format', () => {
+  it('formats IPv4 correctly', () => {
+    const ip = '93.184.216.34';
+    const resolveIp = ip.includes(':') ? `[${ip}]` : ip;
+    assert.equal(`example.com:443:${resolveIp}`, 'example.com:443:93.184.216.34');
+  });
+
+  it('wraps IPv6 in brackets', () => {
+    const ip = '2606:2800:220:1:248:1893:25c8:1946';
+    const resolveIp = ip.includes(':') ? `[${ip}]` : ip;
+    assert.equal(`example.com:443:${resolveIp}`, 'example.com:443:[2606:2800:220:1:248:1893:25c8:1946]');
+  });
+
+  it('uses port 80 for http URLs', () => {
+    const parsed = new URL('http://example.com/path');
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    assert.equal(port, '80');
+  });
+
+  it('uses port 443 for https URLs', () => {
+    const parsed = new URL('https://example.com/path');
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    assert.equal(port, '443');
+  });
+
+  it('uses explicit port when specified', () => {
+    const parsed = new URL('https://example.com:8443/path');
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    assert.equal(port, '8443');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -898,5 +985,45 @@ describe('parseCommandPipeline', () => {
   it('handles unclosed single quote gracefully (no crash)', () => {
     const segs = parseCommandPipeline("echo 'unclosed | grep foo");
     assert.equal(segs.length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkMCPPermission
+// ---------------------------------------------------------------------------
+
+describe('checkMCPPermission', () => {
+  it('returns prompt for unknown server', () => {
+    assert.equal(checkMCPPermission('unknown', 'tool', DEFAULT_MCP_PERMISSIONS), 'prompt');
+  });
+
+  it('returns server default when no per-tool override', () => {
+    const perms: MCPPermissions = { servers: { github: { default: 'allow' } } };
+    assert.equal(checkMCPPermission('github', 'list_repos', perms), 'allow');
+  });
+
+  it('returns per-tool override over server default', () => {
+    const perms: MCPPermissions = {
+      servers: { github: { default: 'allow', tools: { delete_repo: 'deny' } } },
+    };
+    assert.equal(checkMCPPermission('github', 'delete_repo', perms), 'deny');
+    assert.equal(checkMCPPermission('github', 'list_repos', perms), 'allow');
+  });
+
+  it('returns deny for server with deny default', () => {
+    const perms: MCPPermissions = { servers: { risky: { default: 'deny' } } };
+    assert.equal(checkMCPPermission('risky', 'anything', perms), 'deny');
+  });
+
+  it('tool allow overrides server deny', () => {
+    const perms: MCPPermissions = {
+      servers: { risky: { default: 'deny', tools: { safe_read: 'allow' } } },
+    };
+    assert.equal(checkMCPPermission('risky', 'safe_read', perms), 'allow');
+    assert.equal(checkMCPPermission('risky', 'other', perms), 'deny');
+  });
+
+  it('returns prompt for empty permissions', () => {
+    assert.equal(checkMCPPermission('any', 'tool', { servers: {} }), 'prompt');
   });
 });

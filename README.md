@@ -337,6 +337,27 @@ Add external tool servers in `workspace/mcp.json`:
 
 Tools are automatically prefixed `mcp_<server>_<name>` and appear alongside built-in tools. The MCP client uses JSON-RPC 2.0 over stdio.
 
+#### MCP permissions
+
+By default, every MCP tool call prompts for user approval. Configure per-server and per-tool permissions in the Settings panel under **MCP Permissions**, or directly in `settings.json`:
+
+```json
+{
+  "mcp_permissions": {
+    "servers": {
+      "github": {
+        "default": "allow",
+        "tools": {
+          "delete_repo": "deny"
+        }
+      }
+    }
+  }
+}
+```
+
+Permission levels: `"allow"` (auto-approve), `"deny"` (auto-block), `"prompt"` (ask the user, default). Per-tool overrides take precedence over the server default. Clicking **Always Allow** on an MCP approval modal adds that tool to the allow list.
+
 ---
 
 ## Chrome extension
