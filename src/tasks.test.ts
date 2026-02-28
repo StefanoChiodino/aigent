@@ -54,10 +54,10 @@ describe('TaskQueue', () => {
       assert.equal(updates[0]!.description, 'my task');
     });
 
-    it('truncates description at 80 chars', () => {
+    it('preserves full description', () => {
       const long = 'x'.repeat(100);
       queue.register(long);
-      assert.equal(updates[0]!.description, 'x'.repeat(80) + '...');
+      assert.equal(updates[0]!.description, long);
     });
 
     it('defaults delivery to agent-review', () => {

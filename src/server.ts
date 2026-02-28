@@ -547,6 +547,7 @@ function dispatchBackgroundTask(input: {
   void (async () => {
     try {
       const taskModel = input.model ?? model;
+      taskQueue.setModel(taskId, taskModel);
       const taskThinking: ThinkingLevel = input.thinking ?? thinkingForModel(taskModel);
       const maxIter = Math.min(input.max_iterations ?? 25, 50);
       const capabilities = new Set(input.capabilities ?? []);

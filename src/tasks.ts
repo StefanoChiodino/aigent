@@ -74,7 +74,7 @@ export class TaskQueue {
     const id = this.nextId();
     const task: InternalTask = {
       id,
-      description: description.length > 80 ? description.slice(0, 80) + '...' : description,
+      description,
       status: 'running',
       startedAt: new Date().toISOString(),
       delivery,
@@ -83,6 +83,17 @@ export class TaskQueue {
     log.info('Task registered', { id, description: task.description, delivery });
     this.opts.onTaskUpdate?.({ id, description: task.description, status: 'running', startedAt: task.startedAt, delivery });
     return id;
+  }
+
+  /** Update the model for a running task (so the UI can show it immediately). */
+  setModel(id: string, model: string): void {
+    const task = this.tasks.get(id);
+    if (!task) return;
+    task.model = model;
+    this.opts.onTaskUpdate?.({
+      id: task.id, description: task.description, status: task.status,
+      startedAt: task.startedAt, delivery: task.delivery, model,
+    });
   }
 
   /** Mark a task as completed and queue its result. */
