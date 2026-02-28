@@ -61,7 +61,7 @@ interface GlobInput { pattern: string; path?: string; max_results?: number }
 interface PatchInput { path: string; edits: Array<{ old_text: string; new_text: string }> }
 interface ScreenshotInput { region?: string }
 interface SpawnAgentInput { task: string; context?: string; model?: string; max_iterations?: number }
-interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number; delivery?: 'agent-review' | 'user-pull' }
+interface DispatchTaskInput { task: string; context?: string; model?: string; max_iterations?: number; delivery?: 'agent-batch' | 'agent-review' | 'user-pull' }
 interface HostInput { capability: string; params?: Record<string, unknown>; reason?: string }
 interface RequestConfigWriteInput { file: string; content: string; reason: string }
 interface HostEditFileInput { path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }

@@ -60,8 +60,13 @@ describe('TaskQueue', () => {
       assert.equal(updates[0]!.description, long);
     });
 
-    it('defaults delivery to agent-review', () => {
+    it('defaults delivery to agent-batch', () => {
       queue.register('task');
+      assert.equal(updates[0]!.delivery, 'agent-batch');
+    });
+
+    it('accepts agent-review delivery', () => {
+      queue.register('task', 'agent-review');
       assert.equal(updates[0]!.delivery, 'agent-review');
     });
 
@@ -299,6 +304,86 @@ describe('TaskQueue', () => {
       const running = queue.getRunning();
       assert.equal(running.length, 1);
       assert.equal(running[0]!.id, id1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // peekNext
+  // -------------------------------------------------------------------------
+
+  describe('peekNext', () => {
+    it('returns null when queue is empty', () => {
+      assert.equal(queue.peekNext(), null);
+    });
+
+    it('returns next result without removing it', () => {
+      const id = queue.register('task');
+      queue.complete(id, 'result');
+      assert.equal(queue.peekNext()!.result, 'result');
+      assert.equal(queue.peekNext()!.result, 'result'); // still there
+      assert.equal(queue.pendingCount, 1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // hasBatchPending / drainBatch / readyForBatchDelivery
+  // -------------------------------------------------------------------------
+
+  describe('batch helpers', () => {
+    it('hasBatchPending returns false when no batch results', () => {
+      const id = queue.register('task', 'agent-review');
+      queue.complete(id, 'result');
+      assert.equal(queue.hasBatchPending(), false);
+    });
+
+    it('hasBatchPending returns true for agent-batch results', () => {
+      const id = queue.register('task', 'agent-batch');
+      queue.complete(id, 'result');
+      assert.equal(queue.hasBatchPending(), true);
+    });
+
+    it('drainBatch returns only agent-batch results', () => {
+      const id1 = queue.register('review task', 'agent-review');
+      const id2 = queue.register('batch task 1', 'agent-batch');
+      const id3 = queue.register('batch task 2', 'agent-batch');
+      queue.complete(id1, 'review result');
+      queue.complete(id2, 'batch result 1');
+      queue.complete(id3, 'batch result 2');
+
+      const batch = queue.drainBatch();
+      assert.equal(batch.length, 2);
+      assert.equal(batch[0]!.description, 'batch task 1');
+      assert.equal(batch[1]!.description, 'batch task 2');
+
+      // agent-review result is still in the queue
+      assert.equal(queue.pendingCount, 1);
+      assert.equal(queue.drainNext()!.description, 'review task');
+    });
+
+    it('drainBatch returns empty array when no batch results', () => {
+      const id = queue.register('task', 'agent-review');
+      queue.complete(id, 'result');
+      assert.deepEqual(queue.drainBatch(), []);
+      assert.equal(queue.pendingCount, 1); // agent-review still there
+    });
+
+    it('readyForBatchDelivery returns false while tasks still running', () => {
+      const id1 = queue.register('done', 'agent-batch');
+      queue.register('still running', 'agent-batch'); // registered but not completed
+      queue.complete(id1, 'result');
+      assert.equal(queue.readyForBatchDelivery(), false);
+    });
+
+    it('readyForBatchDelivery returns true when all tasks done', () => {
+      const id1 = queue.register('task 1', 'agent-batch');
+      const id2 = queue.register('task 2', 'agent-batch');
+      queue.complete(id1, 'result 1');
+      queue.complete(id2, 'result 2');
+      assert.equal(queue.readyForBatchDelivery(), true);
+    });
+
+    it('readyForBatchDelivery returns false when no batch results', () => {
+      assert.equal(queue.readyForBatchDelivery(), false);
     });
   });
 

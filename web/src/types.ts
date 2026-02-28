@@ -63,7 +63,7 @@ export interface BackgroundTaskInfo {
   inputTokens?: number;
   outputTokens?: number;
   cost?: number;
-  delivery?: 'agent-review' | 'user-pull';
+  delivery?: 'agent-review' | 'user-pull' | 'agent-batch';
   result?: string;
 }
 
@@ -145,6 +145,7 @@ export type ServerEvent =
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'classifier_decision'; tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
   | { type: 'user_question_request'; id: string; question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean; allowFreeText?: boolean }
+  | { type: 'perm_dismissed'; ids: string[] }
   | { type: 'reset' }
   | { type: 'pong' };
 

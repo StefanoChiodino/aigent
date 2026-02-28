@@ -202,8 +202,8 @@ const dispatchTaskTool: ToolDef = {
         description: 'Capabilities to grant the background agent. Default: read-only filesystem, no network.\n  net_ro  — fetch URLs (GET/HEAD only)\n  net_rw  — fetch URLs (all HTTP methods)\n  fs_write — write/edit files + full shell exec',
       },
       delivery: {
-        type: 'string', enum: ['agent-review', 'user-pull'],
-        description: 'How the result is delivered when the task completes.\n  agent-review (default) — result is injected into the conversation at the next natural pause; you review and summarize it for the user.\n  user-pull — result sits as a notification in the sidebar; the user clicks it when ready to discuss.\nChoose agent-review when the result feeds the current conversation (e.g. research you dispatched mid-chat).\nChoose user-pull for long-running background work the user will want to review on their own terms.',
+        type: 'string', enum: ['agent-batch', 'agent-review', 'user-pull'],
+        description: 'How the result is delivered when the task completes.\n  agent-batch (default) — results accumulate until all dispatched tasks finish, then delivered as a single batched review. Saves LLM calls when dispatching multiple tasks in parallel.\n  agent-review — result is immediately injected into the conversation at the next natural pause; use when the result feeds directly into your next step.\n  user-pull — result sits as a notification in the sidebar; the user clicks it when ready to discuss.',
       },
     },
     required: ['task'],

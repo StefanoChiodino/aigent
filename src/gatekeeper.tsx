@@ -624,6 +624,7 @@ function addCommandToAlwaysAllow(command: string): void {
     });
     log.info('Added command to always-allow', { command, patterns });
     broadcastUpdatedPermissions();
+    flushPendingExecApprovals();
   } catch (err) {
     log.error('Failed to update exec permissions', { error: String(err) });
   }
@@ -663,8 +664,29 @@ function addPatternsToAlwaysAllow(patterns: string[]): void {
     });
     log.info('Added classifier-suggested patterns to always-allow', { patterns });
     broadcastUpdatedPermissions();
+    flushPendingExecApprovals();
   } catch (err) {
     log.error('Failed to update exec permissions', { error: String(err) });
+  }
+}
+
+/** Re-check pending exec approvals against updated permissions and auto-resolve matches. */
+function flushPendingExecApprovals(): void {
+  if (pendingExecApprovals.size === 0) return;
+  const permissions = readExecPermissions();
+  const dismissed: string[] = [];
+  for (const [id, pending] of pendingExecApprovals) {
+    const level = checkExecPermission(pending.command, permissions);
+    if (level === 'allow' && !shouldForceClassify(pending.command, permissions.alwaysClassify)) {
+      log.info('Flush: auto-approving pending exec', { id, command: pending.command });
+      auditLog({ type: 'exec_tier2_allow', detail: pending.command });
+      pendingExecApprovals.delete(id);
+      client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by updated permission policy' });
+      dismissed.push(id);
+    }
+  }
+  if (dismissed.length > 0 && client) {
+    client.emit('perm_dismissed', dismissed);
   }
 }
 
@@ -891,8 +913,28 @@ function addToFetchAlwaysAllow(pattern: string): void {
     });
     log.info('Added pattern to fetch always-allow', { pattern });
     broadcastUpdatedPermissions();
+    flushPendingFetchApprovals();
   } catch (err) {
     log.error('Failed to update fetch permissions', { error: String(err) });
+  }
+}
+
+/** Re-check pending fetch approvals against updated permissions and auto-resolve matches. */
+function flushPendingFetchApprovals(): void {
+  if (pendingFetchApprovals.size === 0) return;
+  const permissions = readFetchPermissions();
+  const dismissed: string[] = [];
+  for (const [id, pending] of pendingFetchApprovals) {
+    const level = checkFetchPermission(pending.url, permissions);
+    if (level === 'allow') {
+      log.info('Flush: auto-approving pending fetch', { id, url: pending.url });
+      pendingFetchApprovals.delete(id);
+      client!.send({ type: 'fetch_response', id, ok: true, message: 'Allowed by updated permission policy' });
+      dismissed.push(id);
+    }
+  }
+  if (dismissed.length > 0 && client) {
+    client.emit('perm_dismissed', dismissed);
   }
 }
 

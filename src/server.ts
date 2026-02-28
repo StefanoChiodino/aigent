@@ -303,46 +303,102 @@ const taskQueue = new TaskQueue({
 });
 
 /**
- * Process completed task results one at a time.
- * Each result triggers a full agent turn so the main agent can reason about
- * the findings and present them to the user.
+ * Process completed task results.
  *
- * Results appear as system messages (not user messages), then the agent
- * is asked to review and summarize.
+ * Three delivery modes:
+ *   agent-review  — immediate: one LLM turn per result (for results the agent needs right away)
+ *   agent-batch   — batched: accumulate results, deliver in one LLM turn when all tasks finish
+ *   user-pull     — sidebar only: no LLM involvement
+ *
+ * A 60-second timeout ensures batched results don't wait forever if a task hangs.
  */
+let batchDeliveryTimer: ReturnType<typeof setTimeout> | null = null;
+const BATCH_TIMEOUT_MS = 60_000;
+
 async function processTaskResults(): Promise<void> {
+  // Phase 1: process immediate-delivery results (agent-review, user-pull)
   while (taskQueue.hasPendingResults()) {
-    const result = taskQueue.drainNext();
-    if (!result) break;
+    const next = taskQueue.peekNext();
+    if (!next) break;
 
     // Yield to user messages — they take priority
     if (isLoading || messageQueue.length > 0) break;
 
-    // user-pull tasks are surfaced via the sidebar — the agent is not involved
-    if (result.delivery === 'user-pull') {
+    // user-pull: sidebar only — skip
+    if (next.delivery === 'user-pull') {
+      taskQueue.drainNext();
       taskQueue.prune();
       continue;
     }
 
-    const statusLabel = result.status === 'completed' ? 'completed' : 'FAILED';
-    const secs = ((new Date(result.completedAt).getTime() - new Date(result.startedAt).getTime()) / 1000).toFixed(1);
-    // Now trigger an agent turn to process the result.
-    // The agent sees it as a user message asking for review.
+    // agent-batch: don't process individually, let them accumulate
+    if (next.delivery === 'agent-batch') {
+      // Start batch timer if not already running
+      if (!batchDeliveryTimer && taskQueue.runningCount > 0) {
+        batchDeliveryTimer = setTimeout(() => {
+          batchDeliveryTimer = null;
+          if (!isLoading && !processingQueue) {
+            void processTaskResults();
+          }
+        }, BATCH_TIMEOUT_MS);
+      }
+      break; // stop processing immediate results — let batch accumulate
+    }
+
+    // agent-review: process immediately (one LLM turn per result)
+    taskQueue.drainNext();
+    const statusLabel = next.status === 'completed' ? 'completed' : 'FAILED';
+    const secs = ((new Date(next.completedAt).getTime() - new Date(next.startedAt).getTime()) / 1000).toFixed(1);
     const reviewPrompt = [
       `A background task just completed. Here are the results:`,
       '',
-      `Task: ${result.description}`,
+      `Task: ${next.description}`,
       `Status: ${statusLabel}`,
       `Duration: ${secs}s`,
       '',
-      result.result,
+      next.result,
       '',
       'Summarize the key findings and let me know if anything needs my attention.',
     ].join('\n');
 
     await processAgentTurn(reviewPrompt, { isTaskResult: true });
+    taskQueue.prune();
+  }
 
-    // Prune old tasks periodically
+  // Phase 2: deliver batched results when all tasks are done (or timer fired)
+  if (taskQueue.readyForBatchDelivery()) {
+    if (batchDeliveryTimer) {
+      clearTimeout(batchDeliveryTimer);
+      batchDeliveryTimer = null;
+    }
+
+    if (isLoading || messageQueue.length > 0) return;
+
+    const batchResults = taskQueue.drainBatch();
+    if (batchResults.length === 0) return;
+
+    const sections = batchResults.map((r, i) => {
+      const statusLabel = r.status === 'completed' ? 'completed' : 'FAILED';
+      const secs = ((new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime()) / 1000).toFixed(1);
+      return [
+        `---`,
+        `Task ${i + 1}/${batchResults.length}: ${r.description}`,
+        `Status: ${statusLabel} | Duration: ${secs}s`,
+        '',
+        r.result,
+      ].join('\n');
+    });
+
+    const batchPrompt = [
+      `${batchResults.length} background task${batchResults.length > 1 ? 's have' : ' has'} completed. Here are all the results:`,
+      '',
+      ...sections,
+      '',
+      '---',
+      'Review the results and let me know if anything needs my attention.',
+    ].join('\n');
+
+    await processAgentTurn(batchPrompt, { isTaskResult: true });
     taskQueue.prune();
   }
 }
@@ -432,7 +488,7 @@ async function processAgentTurn(
       onCompact: (summary) => {
         addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
       },
-      onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; thinking?: ThinkingLevel; max_iterations?: number; capabilities?: string[]; delivery?: 'agent-review' | 'user-pull' }),
+      onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; thinking?: ThinkingLevel; max_iterations?: number; capabilities?: string[]; delivery?: 'agent-batch' | 'agent-review' | 'user-pull' }),
       onModelSwitch: (newModel, reason) => {
         model = newModel;
         agent.currentModel = newModel;
@@ -539,9 +595,9 @@ function dispatchBackgroundTask(input: {
   thinking?: ThinkingLevel;
   max_iterations?: number;
   capabilities?: string[];
-  delivery?: 'agent-review' | 'user-pull';
+  delivery?: 'agent-batch' | 'agent-review' | 'user-pull';
 }): string {
-  const taskId = taskQueue.register(input.task, input.delivery ?? 'agent-review');
+  const taskId = taskQueue.register(input.task, input.delivery ?? 'agent-batch');
 
   // Fire and forget — run the sub-agent in the background
   void (async () => {
@@ -792,6 +848,10 @@ async function processQueue(): Promise<void> {
 }
 
 function handleCancel(): void {
+  if (batchDeliveryTimer) {
+    clearTimeout(batchDeliveryTimer);
+    batchDeliveryTimer = null;
+  }
   if (isLoading && abortController) {
     abortController.abort();
     abortController = null;

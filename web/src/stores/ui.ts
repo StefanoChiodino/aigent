@@ -27,6 +27,7 @@ interface UIState {
   setError: (msg: string | null) => void;
   setLoading: (loading: boolean) => void;
   enqueuePermRequest: (req: PermRequest) => void;
+  dismissPermRequests: (ids: string[]) => void;
   resolvePermRequest: (send: (data: Record<string, unknown>) => void, approve: boolean, alwaysAllow?: boolean, alwaysDomain?: boolean) => void;
   resolveQuestionRequest: (send: (data: Record<string, unknown>) => void, answer: string, selectedOptions?: string[], dismissed?: boolean) => void;
   setModelPickerOpen: (open: boolean) => void;
@@ -78,6 +79,12 @@ export const useUIStore = create<UIState>((set, get) => ({
   enqueuePermRequest: (req) => set(s => {
     const queue = [...s.permQueue, req];
     return { permQueue: queue, permShowing: true };
+  }),
+
+  dismissPermRequests: (ids) => set(s => {
+    const idSet = new Set(ids);
+    const queue = s.permQueue.filter(r => !idSet.has(r.id));
+    return { permQueue: queue, permShowing: queue.length > 0 };
   }),
 
   resolvePermRequest: (send, approve, alwaysAllow = false, alwaysDomain = false) => {

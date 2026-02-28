@@ -437,6 +437,55 @@ export async function startWebServer(
     return true;
   }
 
+  // --- TTS/STT service availability probing ---
+  // Probe services and cache the result.  Re-probes periodically so that
+  // services that start after the gatekeeper are discovered automatically.
+  let cachedTtsAvailable = false;
+  let cachedSttAvailable = false;
+
+  const probeService = async (url: string): Promise<boolean> => {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(800) });
+      return res.ok;
+    } catch { return false; }
+  };
+
+  /** Probe TTS/STT and broadcast to the given WS (or all clients if omitted). */
+  async function sendServiceAvailability(ws?: WebSocket): Promise<void> {
+    const [tts, stt] = await Promise.all([
+      probeService(TTS_URL + '/health'),
+      probeService(STT_URL + '/health'),
+    ]);
+    cachedTtsAvailable = tts;
+    cachedSttAvailable = stt;
+    const msg = JSON.stringify({
+      type: 'host_state',
+      mounts: [],
+      ...(cachedCapabilities ? { capabilities: cachedCapabilities } : {}),
+      ttsAvailable: tts,
+      sttAvailable: stt,
+    });
+    if (ws) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(msg);
+    } else {
+      for (const c of wss.clients) {
+        if (c.readyState === WebSocket.OPEN) c.send(msg);
+      }
+    }
+  }
+
+  // Re-probe every 15s until both services are discovered, then stop.
+  const reprobe = setInterval(async () => {
+    if (cachedTtsAvailable && cachedSttAvailable) {
+      clearInterval(reprobe);
+      return;
+    }
+    if (wss.clients.size === 0) return;  // no clients to notify
+    await sendServiceAvailability();
+  }, 15_000);
+  // Don't hold the process open for the re-probe timer.
+  reprobe.unref();
+
   wss.on('connection', (ws: WebSocket) => {
     log.info('Web client connected');
 
@@ -447,28 +496,7 @@ export async function startWebServer(
     }
 
     // Send cached host state so the sidebar populates immediately.
-    // Also probe TTS/STT services so the UI knows what's available.
-    void (async () => {
-      const probeService = async (url: string): Promise<boolean> => {
-        try {
-          const res = await fetch(url, { signal: AbortSignal.timeout(500) });
-          return res.ok;
-        } catch { return false; }
-      };
-      const [ttsAvailable, sttAvailable] = await Promise.all([
-        probeService(TTS_URL + '/health'),
-        probeService(STT_URL + '/health'),
-      ]);
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-          type: 'host_state',
-          mounts: [],
-          ...(cachedCapabilities ? { capabilities: cachedCapabilities } : {}),
-          ttsAvailable,
-          sttAvailable,
-        }));
-      }
-    })();
+    sendServiceAvailability(ws);
 
     // Send current client settings so the browser can sync from the JSON file.
     // Also include effective exec permissions (defaults merged with overrides) so the
@@ -770,6 +798,15 @@ export async function startWebServer(
   // client_settings event so every browser tab refreshes its settings store.
   client.on('permissions_updated', (settings: Record<string, string>) => {
     const payload = JSON.stringify({ type: 'client_settings', settings });
+    for (const ws of wss.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
+  });
+
+  // When the gatekeeper auto-resolves pending permissions (e.g. after an always-allow
+  // update), it emits 'perm_dismissed' with the list of IDs to remove from the UI queue.
+  client.on('perm_dismissed', (ids: string[]) => {
+    const payload = JSON.stringify({ type: 'perm_dismissed', ids });
     for (const ws of wss.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }

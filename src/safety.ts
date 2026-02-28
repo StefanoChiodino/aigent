@@ -381,9 +381,20 @@ export const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {
     'wc *',
     'file *',
     'stat *',
+    // Text processing (read-only, no side effects)
+    'jq', 'jq *',
+    'sed *', 'awk *',
+    'sort *', 'uniq *', 'tr *', 'cut *', 'column *',
+    // HTTP clients: use the `fetch` tool instead (has SSRF protection + permission controls)
+    // Python (npm run * and make * already allow arbitrary code execution)
+    'python *', 'python3 *',
     // Shell builtins / system info
     'pwd', 'echo *', 'which *', 'env', 'whoami', 'id', 'hostname',
     'date', 'uname *', 'uptime',
+    // Common dev tools
+    'diff *', 'tree *', 'du *', 'df *',
+    'realpath *', 'dirname *', 'basename *',
+    'xargs *',
     // Node / build read-only
     'node --version', 'node -v',
     'npm --version', 'npm -v', 'npm list *', 'npm ls *',
@@ -395,11 +406,9 @@ export const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {
     'make', 'make *',
   ],
   alwaysClassify: [
-    // Commands that should always be reviewed by the Tier 3 classifier,
-    // even if they match an alwaysAllow pattern.
-    'curl *',
-    'python *', 'python3 *',
-    'node -e *', 'node --eval *',
+    // Empty by default — if a user adds a pattern to alwaysAllow, we respect it.
+    // Users can add patterns here (e.g. 'curl *') to force Tier 3 classification
+    // even when a command matches alwaysAllow.
   ],
   deny: [
     'sudo *',
@@ -408,6 +417,9 @@ export const DEFAULT_EXEC_PERMISSIONS: ExecPermissions = {
     'dd if=* of=/dev/*', 'dd of=/dev/*',
     ':() { :|: & }; :',
     'rm -rf /*', 'rm -rf /',
+    // HTTP clients — use the `fetch` tool instead (has SSRF protection + hostname allow/deny)
+    'curl', 'curl *',
+    'wget', 'wget *',
   ],
 };
 

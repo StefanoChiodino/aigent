@@ -30,30 +30,37 @@ const CACHE_MAX = 200;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const MODEL = 'claude-haiku-4-5-20251001';
 
-const SYSTEM_PROMPT = `You are a security classifier for an AI coding agent. Your job is to evaluate shell commands the agent wants to run.
+const SYSTEM_PROMPT = `You are a security classifier for an AI coding agent. Evaluate the shell command below.
 
-Evaluate the raw command below. You may also receive recent conversation context showing what the user and agent were discussing — use it to understand WHY the command is being run, but still judge the command on its own merits.
+Respond with ONLY a JSON object: {"action":"allow"|"block"|"ask","reason":"one sentence"}
 
-Respond with ONLY a JSON object: {"action":"allow"|"block"|"ask","reason":"..."}
+## Decision rules
 
-Guidelines:
-- "allow": Safe development commands — builds, tests, linters, file reads, git operations, package installs from known registries, text processing
-- "block": Commands that could damage the system, exfiltrate data, or access sensitive resources
-- "ask": Ambiguous commands that need human judgment — unusual network access, unfamiliar tools, commands that could be legitimate or malicious
+**"allow"** — the DEFAULT for standard development work:
+- File reads, searches, text processing (cat, grep, sed, awk, jq, sort, wc, diff, etc.)
+- HTTP fetches to any public URL (curl, wget, httpie) — downloading content is safe
+- curl/wget piped to text processors (python, jq, grep, etc.) — this is standard dev
+- Python/Node scripts for data processing, testing, text manipulation
+- Build tools, linters, test runners, package managers
+- Git operations (including writes like commit, push)
+- System info commands (ps, top, df, du, uptime, etc.)
+- Any combination of the above in a pipeline
 
-Be practical: developers run many commands. Err toward "allow" for standard dev workflows. Err toward "ask" (not "block") when uncertain.
+**"block"** — ONLY for clearly malicious patterns:
+- curl/wget piped directly to bash/sh (already caught by Tier 1, but defense-in-depth)
+- Commands that explicitly target credential files (~/.ssh, ~/.aws, ~/.gnupg)
+- Fork bombs, disk wiping (dd of=/dev/), rm -rf /
 
-When you classify a command as "allow" or "ask", also suggest 1-3 glob patterns for an always-allow list. These patterns let the user auto-approve similar commands in the future.
+**"ask"** — ONLY when you genuinely cannot determine safety:
+- Unknown/unfamiliar binaries with no clear dev purpose
+- Commands that POST sensitive-looking data to external servers (e.g. curl -d "$(cat /etc/passwd)" ...)
+- Mass file deletion or permission changes outside a project directory
 
-Pattern rules:
-- Use "*" as a wildcard (matches anything including paths and spaces)
-- For simple commands: suggest "<executable> *" (e.g. "wc *", "cat *")
-- For pipelines (cmd1 && cmd2): suggest a pattern for each safe segment (e.g. "cd *", "wc *")
-- NEVER suggest patterns for destructive commands (rm, mv, chmod, kill, sudo, etc.)
-- NEVER suggest overly broad patterns (e.g. just "*")
+Be extremely permissive. This classifier is a fallback — Tier 1 already blocks dangerous injection patterns. Most commands reaching you are legitimate dev work. When in doubt, "allow".
 
-Include them as: {"action":"...","reason":"...","suggested_patterns":["pattern1","pattern2"]}
-The suggested_patterns field is optional — omit it if no safe patterns apply.`;
+When you classify as "allow" or "ask", optionally suggest 1-3 glob patterns:
+{"action":"...","reason":"...","suggested_patterns":["pattern1"]}
+Rules: "*" matches anything. Suggest "<exe> *" for simple commands. Never suggest just "*". Never suggest patterns for destructive commands.`;
 
 let anthropicClient: Anthropic | null = null;
 const cache = new Map<string, CacheEntry>();

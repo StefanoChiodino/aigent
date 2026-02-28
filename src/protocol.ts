@@ -88,7 +88,7 @@ export interface BackgroundTaskInfo {
   inputTokens?: number;
   outputTokens?: number;
   cost?: number;
-  delivery?: 'agent-review' | 'user-pull';
+  delivery?: 'agent-review' | 'user-pull' | 'agent-batch';
   /** Raw result text — only set for user-pull tasks so the UI can display it. */
   result?: string;
 }

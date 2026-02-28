@@ -245,13 +245,26 @@ describe('checkExecPermission (with DEFAULT_EXEC_PERMISSIONS)', () => {
   it('allows echo hello', () => assert.equal(checkExecPermission('echo hello', perms), 'allow'));
   it('allows npx tsc --noEmit', () => assert.equal(checkExecPermission('npx tsc --noEmit', perms), 'allow'));
 
+  // --- curl/wget denied (must use fetch tool instead) ---
+  it('denies curl', () => assert.equal(checkExecPermission('curl https://example.com', perms), 'deny'));
+  it('denies curl -s with URL', () => assert.equal(checkExecPermission('curl -s "https://en.wikipedia.org/wiki/Test"', perms), 'deny'));
+  it('denies wget', () => assert.equal(checkExecPermission('wget https://example.com/file.tar.gz', perms), 'deny'));
+  it('allows python3', () => assert.equal(checkExecPermission('python3 -c "print(1)"', perms), 'allow'));
+  it('allows python', () => assert.equal(checkExecPermission('python script.py', perms), 'allow'));
+  it('allows jq', () => assert.equal(checkExecPermission('jq ".items[]" data.json', perms), 'allow'));
+  it('allows sed', () => assert.equal(checkExecPermission('sed "s/foo/bar/g" file.txt', perms), 'allow'));
+  it('allows awk', () => assert.equal(checkExecPermission('awk "{print $1}" file.txt', perms), 'allow'));
+  it('allows sort', () => assert.equal(checkExecPermission('sort -u file.txt', perms), 'allow'));
+  it('allows diff', () => assert.equal(checkExecPermission('diff a.txt b.txt', perms), 'allow'));
+  it('allows tree', () => assert.equal(checkExecPermission('tree src/', perms), 'allow'));
+  it('allows xargs', () => assert.equal(checkExecPermission('xargs -I {} echo {}', perms), 'allow'));
+
   // --- prompt (fallthrough) ---
   it('prompts for git add', () => assert.equal(checkExecPermission('git add .', perms), 'prompt'));
   it('prompts for git commit', () => assert.equal(checkExecPermission('git commit -m "test"', perms), 'prompt'));
   it('prompts for git push', () => assert.equal(checkExecPermission('git push', perms), 'prompt'));
   it('prompts for rm somefile', () => assert.equal(checkExecPermission('rm somefile.txt', perms), 'prompt'));
   it('prompts for npm install', () => assert.equal(checkExecPermission('npm install lodash', perms), 'prompt'));
-  it('prompts for curl', () => assert.equal(checkExecPermission('curl https://example.com', perms), 'prompt'));
   it('prompts for unknown commands', () => assert.equal(checkExecPermission('some-unknown-binary --flag', perms), 'prompt'));
 
   // --- subshell downgrade: allow → prompt ---
@@ -334,30 +347,13 @@ describe('checkExecPermission — wildcard edge cases', () => {
 describe('shouldForceClassify', () => {
   const defaults = DEFAULT_EXEC_PERMISSIONS.alwaysClassify;
 
-  it('matches curl commands against default patterns', () => {
-    assert.equal(shouldForceClassify('curl https://example.com', defaults), true);
-    assert.equal(shouldForceClassify('curl -s https://api.github.com/repos | jq .', defaults), true);
-  });
-
-  it('matches python commands against default patterns', () => {
-    assert.equal(shouldForceClassify('python script.py', defaults), true);
-    assert.equal(shouldForceClassify('python3 -m pytest', defaults), true);
-  });
-
-  it('matches node -e against default patterns', () => {
-    assert.equal(shouldForceClassify('node -e "console.log(1)"', defaults), true);
-    assert.equal(shouldForceClassify('node --eval "process.exit(1)"', defaults), true);
-  });
-
-  it('does not match safe commands', () => {
+  it('defaults are empty — nothing is force-classified by default', () => {
+    assert.equal(shouldForceClassify('curl https://example.com', defaults), false);
+    assert.equal(shouldForceClassify('python script.py', defaults), false);
+    assert.equal(shouldForceClassify('python3 -m pytest', defaults), false);
+    assert.equal(shouldForceClassify('node -e "console.log(1)"', defaults), false);
     assert.equal(shouldForceClassify('ls -la', defaults), false);
     assert.equal(shouldForceClassify('git status', defaults), false);
-    assert.equal(shouldForceClassify('cat README.md', defaults), false);
-  });
-
-  it('does not match node without -e flag', () => {
-    assert.equal(shouldForceClassify('node --version', defaults), false);
-    assert.equal(shouldForceClassify('node -v', defaults), false);
   });
 
   it('returns false for empty patterns list', () => {

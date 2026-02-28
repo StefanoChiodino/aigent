@@ -391,6 +391,10 @@ export function useWebSocket(): void {
             timestamp: new Date().toISOString(),
           });
           break;
+
+        case 'perm_dismissed':
+          ui().dismissPermRequests(event.ids);
+          break;
       }
     }
 

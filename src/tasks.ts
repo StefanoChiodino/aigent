@@ -23,7 +23,7 @@ export interface TaskResult {
   result: string;
   startedAt: string;
   completedAt: string;
-  delivery: 'agent-review' | 'user-pull';
+  delivery: 'agent-review' | 'user-pull' | 'agent-batch';
 }
 
 export interface TaskQueueOptions {
@@ -51,7 +51,7 @@ interface InternalTask {
   inputTokens?: number;
   outputTokens?: number;
   cost?: number;
-  delivery: 'agent-review' | 'user-pull';
+  delivery: 'agent-review' | 'user-pull' | 'agent-batch';
 }
 
 export class TaskQueue {
@@ -70,7 +70,7 @@ export class TaskQueue {
   }
 
   /** Register a new running task. Returns the task ID. */
-  register(description: string, delivery: 'agent-review' | 'user-pull' = 'agent-review'): string {
+  register(description: string, delivery: 'agent-review' | 'user-pull' | 'agent-batch' = 'agent-batch'): string {
     const id = this.nextId();
     const task: InternalTask = {
       id,
@@ -238,6 +238,35 @@ export class TaskQueue {
     return Array.from(this.tasks.values())
       .filter((t) => t.status === 'running')
       .map(({ id, description, status, startedAt }) => ({ id, description, status, startedAt }));
+  }
+
+  /** Peek at the next result without removing it. */
+  peekNext(): TaskResult | null {
+    return this.completionQueue[0] ?? null;
+  }
+
+  /** Check if there are any agent-batch results pending. */
+  hasBatchPending(): boolean {
+    return this.completionQueue.some(r => r.delivery === 'agent-batch');
+  }
+
+  /** Drain only agent-batch results, leaving others in the queue. */
+  drainBatch(): TaskResult[] {
+    const batch: TaskResult[] = [];
+    this.completionQueue = this.completionQueue.filter(r => {
+      if (r.delivery === 'agent-batch') {
+        batch.push(r);
+        return false;
+      }
+      return true;
+    });
+    return batch;
+  }
+
+  /** Check if batched results are ready for delivery (no more running tasks). */
+  readyForBatchDelivery(): boolean {
+    if (!this.hasBatchPending()) return false;
+    return this.runningCount === 0;
   }
 
   /** Clean up old completed/failed/cancelled tasks (keep last N). */

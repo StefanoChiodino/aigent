@@ -138,4 +138,37 @@ describe('Permission approval flow', () => {
 
     expect(ws.send).not.toHaveBeenCalled();
   });
+
+  it('dismissPermRequests removes matching entries from the queue', () => {
+    enqueue({ type: 'fetch', id: 'fetch-a' });
+    enqueue({ type: 'fetch', id: 'fetch-b' });
+    enqueue({ type: 'exec', id: 'exec-c' });
+
+    expect(useUIStore.getState().permQueue).toHaveLength(3);
+
+    useUIStore.getState().dismissPermRequests(['fetch-a', 'exec-c']);
+
+    const queue = useUIStore.getState().permQueue;
+    expect(queue).toHaveLength(1);
+    expect(queue[0]!.id).toBe('fetch-b');
+  });
+
+  it('dismissPermRequests hides modal when all requests are dismissed', () => {
+    enqueue({ type: 'fetch', id: 'fetch-only' });
+    expect(useUIStore.getState().permShowing).toBe(true);
+
+    useUIStore.getState().dismissPermRequests(['fetch-only']);
+
+    expect(useUIStore.getState().permQueue).toHaveLength(0);
+    expect(useUIStore.getState().permShowing).toBe(false);
+  });
+
+  it('dismissPermRequests is a no-op for unknown IDs', () => {
+    enqueue({ type: 'fetch', id: 'fetch-x' });
+
+    useUIStore.getState().dismissPermRequests(['nonexistent']);
+
+    expect(useUIStore.getState().permQueue).toHaveLength(1);
+    expect(useUIStore.getState().permShowing).toBe(true);
+  });
 });
