@@ -26,9 +26,9 @@
 
 ## Observability
 
-- [ ] **Request correlation ID (`reqId`)** — thread a 6-char hex ID through UI → Gatekeeper → Agent → Sub-agents → MCP.
-- [ ] **Log rotation / max size** — pipe `stderr` to `logrotate` / `pino-roll`, or rolling file sinks in the logger.
-- [ ] **Tool call audit trail in session logs** — persist tool call events to daily log so they survive context compaction.
+- [x] **Request correlation ID (`reqId`)** — 6-char hex ID threaded through UI → Web bridge → Server (AsyncLocalStorage) → Agent → Sub-agents → MCP (`_meta.reqId`). Logger and audit log auto-read from context.
+- [x] **Log rotation / max size** — `rotateIfNeeded()` runs at startup for gatekeeper log and audit log. 5 MB threshold, 2 rotations kept.
+- [x] **Tool call audit trail in session logs** — `onToolComplete` callback in agent.ts appends pipe-delimited entries to `workspace/memory/YYYY-MM-DD.md` via `appendToolLog()`.
 
 ---
 

@@ -1,69 +1,99 @@
 # Design: Observability and Tracing
 
-## 1. Motivation
+## Status: Implemented
 
-Aigent is a multi-process system. A single user interaction might touch:
-1. The Browser UI
-2. The Gatekeeper (Host Node.js process)
-3. The LLM API (Anthropic/OpenAI)
-4. The Sandbox Agent loop (Docker Node.js process)
-5. A Background Sub-agent (Another Sandbox process)
-6. An MCP Server (External plugin process)
+All three observability features are implemented and tested.
 
-Currently, logs are scattered. If a background task fails, or an MCP server crashes, finding the relevant logs and tying them back to the user's original request is difficult.
+## 1. Request Correlation ID (`reqId`)
 
-We need a lightweight, structured way to trace a request end-to-end without introducing heavy dependencies like OpenTelemetry.
-
-## 2. The Correlation ID
-
-The core mechanism will be a **Correlation ID** (`reqId`). This is a short, unique string (e.g., a 6-character hex like `a1b2c3`) generated when the user submits a message.
-
-This ID must be passed down the stack and attached to every log line related to that request.
+A 6-character hex ID is generated per user message and threaded through every layer for end-to-end log correlation.
 
 ### Flow
 
-1. **Browser UI:**
-   * User types "Search my files for passwords".
-   * UI generates `reqId: "f9d8e7"`.
-   * UI sends POST `/chat` with payload: `{ message: "...", reqId: "f9d8e7" }`.
+1. **Browser UI** (`web/src/components/InputArea.tsx`):
+   - Generates `reqId` via `Math.random().toString(16).slice(2, 8)` on each message submit
+   - Included in WebSocket payload: `{ type: 'message', content: '...', reqId: 'f9d8e7' }`
 
-2. **Gatekeeper:**
-   * Receives `reqId`.
-   * Passes `reqId` in the NDJSON IPC payload sent to the Sandbox.
-   * All Gatekeeper logs regarding this request (LLM proxying, permission checks) prepend `[f9d8e7]`.
+2. **Web bridge** (`src/web-bridge.ts`):
+   - Forwards `reqId` to the agent server via Unix socket NDJSON
 
-3. **Sandbox Agent (`agent.ts`):**
-   * Receives `reqId` from the Gatekeeper.
-   * Uses Node.js `AsyncLocalStorage` to store the `reqId` for the current execution context.
-   * The custom `logger.ts` automatically pulls `reqId` from `AsyncLocalStorage` and prepends it to all logs.
+3. **Agent server** (`src/server.ts`):
+   - Stores `reqId` in `QueuedMessage` interface
+   - Wraps `processMessage()` in `reqContext.run({ reqId }, ...)` using `AsyncLocalStorage`
+   - All downstream async code automatically inherits the reqId
 
-4. **Background Tasks (`dispatch_task`):**
-   * When spawning a background agent, the parent agent passes its current `reqId` to the child process via an environment variable (e.g., `AIGENT_REQ_ID=f9d8e7`).
-   * The sub-agent's logger picks this up.
+4. **Logger** (`src/logger.ts`):
+   - Reads `getReqId()` from `AsyncLocalStorage` on every log line
+   - Prepends `[reqId]` when present: `2024-01-15T10:30:45.123Z [INFO] [server] [f9d8e7] Listening`
 
-5. **MCP Servers:**
-   * MCP servers are separate processes. The Sandbox acts as the MCP Client.
-   * When sending JSON-RPC requests to an MCP server, the Sandbox can pass the `reqId` in the `_meta` parameter (a standard extension point in JSON-RPC).
-   * Note: MCP servers must be built to respect and log this `_meta.reqId` for full tracing.
+5. **Audit log** (`src/audit.ts`):
+   - Auto-reads `reqId` from `AsyncLocalStorage` (or accepts explicit override)
+   - Includes `"reqId":"f9d8e7"` in NDJSON entries
 
-## 3. Structured Audit Logging
+6. **Background tasks** (`src/server.ts` `dispatchBackgroundTask()`):
+   - Captures parent reqId before the async IIFE
+   - Creates derived reqId: `${parentReqId}.${taskId.slice(0,4)}`
+   - Wraps task body in `reqContext.run()` with derived ID
 
-Alongside tracing, we need an **Audit Log**. Standard debug logs are noisy. We need a guaranteed stream of security-relevant events that are never filtered out by log levels.
+7. **MCP servers** (`src/mcp.ts`):
+   - Includes `reqId` in JSON-RPC `_meta` parameter for cross-process tracing
 
-### Requirements
-*   **Format:** Key-Value or JSON for easy parsing (e.g., `[AUDIT] action=mount path=/tmp result=denied reqId=f9d8e7`).
-*   **Storage:** Written to a dedicated `audit.log` file on the host, separate from standard `stderr`.
-*   **Events to Audit:**
-    *   `request_mount`: Path, requested mode, result (approved/denied).
-    *   `exec` / `fetch`: Command/URL, permission tier matched, result.
-    *   `request_config_write`: File, diff size, result.
-    *   Startup / Shutdown events.
+### Key module
 
-## 4. Implementation Steps
+`src/req-context.ts` — exports `reqContext` (AsyncLocalStorage instance) and `getReqId()` helper. Zero overhead when no store is active.
 
-1.  **Introduce `AsyncLocalStorage` in `src/logger.ts`:** Create a store to hold the `reqId`. Update the `log` function to check the store and prefix the message.
-2.  **Generate `reqId` in UI:** Update `web/index.html` to generate and send the ID.
-3.  **Thread through Gatekeeper:** Update `gatekeeper.tsx` to accept the ID, log it, and pass it via the IPC socket to `agent.ts`.
-4.  **Initialize Context in Sandbox:** Update `agent.ts` to wrap the conversation loop handler in `asyncLocalStorage.run(reqId, ...)`.
-5.  **Sub-agents:** Update `spawn_agent` and `dispatch_task` in `tools.ts` to pass the ID via `env`.
-6.  **Audit Logger:** Create a secondary logger instance specifically for `[AUDIT]` events that writes to a rolling file on the host.
+## 2. Log Rotation
+
+Simple size-based rotation at process startup. No runtime rotation, no dependencies.
+
+### Module
+
+`src/log-rotate.ts` — `rotateIfNeeded(path, maxBytes = 5MB, keep = 2)`
+
+- Checks file size with `statSync`
+- Cascades rotations: delete `.2`, rename `.1` → `.2`, rename current → `.1`
+- Fire-and-forget: all errors silently swallowed
+
+### Integration
+
+- **Gatekeeper** (`src/gatekeeper.tsx`): calls `rotateIfNeeded(LOG_PATH)` before `createWriteStream`
+- **Audit log** (`src/audit.ts`): calls `rotateIfNeeded(auditLogPath)` at module load
+
+## 3. Tool Call Audit Trail
+
+Tool call events are persisted to the daily session log (`workspace/memory/YYYY-MM-DD.md`) so they survive context compaction.
+
+### Module
+
+`src/tool-log.ts` — `appendToolLog(memoryDir, info, reqId?)` and `formatToolLogLine(info, reqId?)`
+
+### Format
+
+Pipe-delimited markdown table rows:
+
+```markdown
+## Tool Calls
+
+| Time | Tool | Input | Duration | Status | Req |
+|------|------|-------|----------|--------|-----|
+| 14:23:05 | exec | {"command":"git status"} | 120ms | ok | f9d8e7 |
+| 14:23:08 | read_file | {"path":"/src/agent.ts","offset":1,"limit":50} | 3ms | ok | f9d8e7 |
+```
+
+### Integration
+
+- `src/agent.ts`: `ChatCallbacks.onToolComplete` fires after each tool execution (success or failure)
+- `src/server.ts`: wires `onToolComplete` to `appendToolLog()` in `processAgentTurn()` callbacks
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `src/req-context.ts` | AsyncLocalStorage for reqId propagation |
+| `src/log-rotate.ts` | Startup log rotation utility |
+| `src/tool-log.ts` | Tool call daily log writer |
+| `src/logger.ts` | Structured logger (reads reqId from context) |
+| `src/audit.ts` | Security audit log (includes reqId, startup rotation) |
+| `src/req-context.test.ts` | Tests for req context |
+| `src/log-rotate.test.ts` | Tests for log rotation |
+| `src/tool-log.test.ts` | Tests for tool call formatting and writing |
