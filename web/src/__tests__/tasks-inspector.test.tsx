@@ -182,4 +182,47 @@ describe('TasksInspector', () => {
     expect(descs[0]?.textContent).toBe('Second task');
     expect(descs[1]?.textContent).toBe('First task');
   });
+
+  it('shows Clear button when tasks exist', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useChatStore.getState().upsertTaskHistory(makeTask());
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    expect(document.querySelector('.tski-clear')).not.toBeNull();
+  });
+
+  it('does not show Clear button when no tasks', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    expect(document.querySelector('.tski-clear')).toBeNull();
+  });
+
+  it('Clear button clears task history', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useChatStore.getState().upsertTaskHistory(makeTask());
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    expect(useChatStore.getState().taskHistory.length).toBe(1);
+    await act(async () => {
+      (document.querySelector('.tski-clear') as HTMLElement)?.click();
+    });
+    expect(useChatStore.getState().taskHistory.length).toBe(0);
+  });
+
+  it('shows date column in task row', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useChatStore.getState().upsertTaskHistory(makeTask());
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    expect(document.querySelector('.tski-date')).not.toBeNull();
+    // Column header should include Date
+    const headers = document.querySelectorAll('.tski-col-h');
+    const headerTexts = Array.from(headers).map(h => h.textContent);
+    expect(headerTexts).toContain('Date');
+  });
 });
