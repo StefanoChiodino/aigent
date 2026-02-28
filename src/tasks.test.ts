@@ -127,11 +127,11 @@ describe('TaskQueue', () => {
       assert.equal(completeUpdate.result, 'the result');
     });
 
-    it('omits result in update for agent-review tasks', () => {
+    it('includes result in update for agent-review tasks', () => {
       const id = queue.register('task', 'agent-review');
       queue.complete(id, 'the result');
       const completeUpdate = updates.find((u) => u.status === 'completed')!;
-      assert.equal(completeUpdate.result, undefined);
+      assert.equal(completeUpdate.result, 'the result');
     });
 
     it('is a no-op for unknown task ID', () => {

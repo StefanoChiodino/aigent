@@ -175,18 +175,51 @@ export function PermissionModal() {
             >
               {req.type === 'file_access' ? 'Always Allow Dir' : 'Always Allow Domain'}
             </button>
-            <button
-              id="perm-autonomous-btn"
-              className={`perm-btn perm-autonomous${req.autonomousCmd ? '' : ' hidden'}`}
-              onClick={() => {
-                if (req.autonomousCmd) {
-                  send({ type: 'command', cmd: req.autonomousCmd });
-                  resolvePermRequest(send, true, true, false);
-                }
-              }}
-            >
-              Go Autonomous
-            </button>
+            {req.alwaysReadCmd && (
+              <button
+                id="perm-always-read-btn"
+                className="perm-btn perm-always-read"
+                onClick={() => {
+                  send({ type: 'command', cmd: req.alwaysReadCmd! });
+                  useUIStore.setState(s => {
+                    const next = s.permQueue.slice(1);
+                    return { permQueue: next, permShowing: next.length > 0 };
+                  });
+                }}
+              >
+                Always Read
+              </button>
+            )}
+            {req.alwaysWriteCmd && (
+              <button
+                id="perm-always-write-btn"
+                className="perm-btn perm-always-write"
+                onClick={() => {
+                  send({ type: 'command', cmd: req.alwaysWriteCmd! });
+                  useUIStore.setState(s => {
+                    const next = s.permQueue.slice(1);
+                    return { permQueue: next, permShowing: next.length > 0 };
+                  });
+                }}
+              >
+                Always Write
+              </button>
+            )}
+            {req.alwaysScriptCmd && (
+              <button
+                id="perm-always-script-btn"
+                className="perm-btn perm-always-script"
+                onClick={() => {
+                  send({ type: 'command', cmd: req.alwaysScriptCmd! });
+                  useUIStore.setState(s => {
+                    const next = s.permQueue.slice(1);
+                    return { permQueue: next, permShowing: next.length > 0 };
+                  });
+                }}
+              >
+                Always Script
+              </button>
+            )}
           </div>
         </div>
       )}

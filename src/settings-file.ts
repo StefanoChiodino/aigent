@@ -147,13 +147,13 @@ function logPermissionDiff(
   after: Record<string, unknown>,
   caller: string,
 ): void {
-  const permKeys = ['exec_permissions', 'fetch_permissions', 'file_permissions'] as const;
+  const permKeys = ['exec_permissions', 'fetch_permissions', 'file_permissions', 'browser_permissions'] as const;
 
   for (const key of permKeys) {
     const oldPerms = (before[key] ?? {}) as Record<string, unknown>;
     const newPerms = (after[key] ?? {}) as Record<string, unknown>;
 
-    for (const field of ['alwaysAllow', 'alwaysClassify', 'deny', 'readWrite', 'readOnly'] as const) {
+    for (const field of ['alwaysAllow', 'alwaysClassify', 'deny', 'readWrite', 'readOnly', 'read', 'write', 'script'] as const) {
       const oldArr = Array.isArray(oldPerms[field]) ? oldPerms[field] as string[] : [];
       const newArr = Array.isArray(newPerms[field]) ? newPerms[field] as string[] : [];
 

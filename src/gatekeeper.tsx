@@ -20,11 +20,11 @@ import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
-import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, checkMCPPermission, DEFAULT_MCP_PERMISSIONS, type MCPPermissions, parseCommandPipeline, shouldForceClassify } from './safety.js';
+import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, checkMCPPermission, DEFAULT_MCP_PERMISSIONS, type MCPPermissions, parseCommandPipeline, shouldForceClassify, checkBrowserPermission, classifyBrowserAction, browserTierSufficient, DEFAULT_BROWSER_PERMISSIONS, type BrowserPermissions } from './safety.js';
 import { initClassifier, classifyCommand, classifyFileAccess, isClassifierAvailable } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
 import { auditLog } from './audit.js';
-import { detectDestructiveSteps, validateBrowserUrls } from './browser-safety.js';
+import { validateBrowserUrls } from './browser-safety.js';
 import { readSettingsSync, writeSettingsSync, getSettingsPath } from './settings-file.js';
 import {
   handleConfigWriteRequest as _handleConfigWriteRequest,
@@ -372,7 +372,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-file', '/deny-file', '/approve-fetchsize', '/deny-fetchsize', '/approve-mcp', '/deny-mcp', '/approve-browser-write', '/deny-browser-write', '/grant-browser-autonomous', '/revoke-browser-autonomous', '/set-env']);
+const GATEKEEPER_COMMANDS = new Set(['/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-file', '/deny-file', '/approve-fetchsize', '/deny-fetchsize', '/approve-mcp', '/deny-mcp', '/approve-browser-write', '/deny-browser-write', '/set-env']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -438,7 +438,6 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   if (handleFetchSizeApproveReject(input)) return;
   if (handleMcpToolApproveReject(input)) return;
   if (await handleBrowserWriteApproveReject(input)) return;
-  if (handleBrowserAutonomousGrant(input)) return;
 
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
@@ -588,6 +587,7 @@ function handleSettingsChanged(): void {
   flushPendingFetchApprovals();
   flushPendingFileAccessApprovals();
   flushPendingMCPApprovals();
+  flushPendingBrowserApprovals();
 }
 
 function broadcastUpdatedPermissions(): void {
@@ -597,6 +597,7 @@ function broadcastUpdatedPermissions(): void {
   const fetchPerms = readFetchPermissions();
   const filePerms = readFilePermissions();
   const mcpPerms = readMCPPermissions();
+  const browserPerms = readBrowserPermissions();
   client.emit('permissions_updated', {
     exec_perm_alwaysAllow: JSON.stringify(execPerms.alwaysAllow),
     exec_perm_alwaysClassify: JSON.stringify(execPerms.alwaysClassify),
@@ -609,6 +610,10 @@ function broadcastUpdatedPermissions(): void {
     file_perm_readOnly: JSON.stringify(filePerms.readOnly),
     file_perm_deny: JSON.stringify(filePerms.deny),
     file_perm_yolo: settings['file_perm_yolo'] === true,
+    browser_perm_read: JSON.stringify(browserPerms.read),
+    browser_perm_write: JSON.stringify(browserPerms.write),
+    browser_perm_script: JSON.stringify(browserPerms.script),
+    browser_perm_deny: JSON.stringify(browserPerms.deny),
     mcp_perm_servers: JSON.stringify(mcpPerms.servers),
   });
 }
@@ -1525,26 +1530,90 @@ function flushPendingMCPApprovals(): void {
   }
 }
 
-// --- Browser write approval ---
+// --- Browser per-domain permissions ---
 
 interface PendingBrowserWrite {
-  action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab';
+  action: string;
   tabId?: number;
   steps?: unknown[];
   url?: string;
+  domain?: string;
+  requiredTier: 'read' | 'write' | 'script';
 }
 
 const pendingBrowserWriteApprovals = new Map<string, PendingBrowserWrite>();
-// Session-scoped grant: when true, all browser write actions skip the approval queue
-const browserWriteGranted = { value: false };
-// Session-scoped grant: when true, all browser actions (including destructive) skip approval
-const browserAutonomousGranted = { value: false };
 // IDs auto-handled (grant active) before web-bridge listener fires — web-bridge skips these
 const autoHandledBrowserWriteIds = new Set<string>();
-// IDs flagged as destructive — web-bridge reads this to annotate the permission request
-const destructiveBrowserWriteIds = new Map<string, string>();
 
-function summariseBrowserWriteAction(action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab', steps?: unknown[], url?: string, tabId?: number): string {
+function readBrowserPermissions(): BrowserPermissions {
+  try {
+    const settings = readSettingsSync();
+    const perms = settings['browser_permissions'];
+    if (!perms || typeof perms !== 'object') return DEFAULT_BROWSER_PERMISSIONS;
+    const p = perms as Partial<BrowserPermissions>;
+    return {
+      read: Array.isArray(p.read) ? p.read : DEFAULT_BROWSER_PERMISSIONS.read,
+      write: Array.isArray(p.write) ? p.write : DEFAULT_BROWSER_PERMISSIONS.write,
+      script: Array.isArray(p.script) ? p.script : DEFAULT_BROWSER_PERMISSIONS.script,
+      deny: Array.isArray(p.deny)
+        ? [...new Set([...DEFAULT_BROWSER_PERMISSIONS.deny, ...p.deny])]
+        : DEFAULT_BROWSER_PERMISSIONS.deny,
+    };
+  } catch {
+    return DEFAULT_BROWSER_PERMISSIONS;
+  }
+}
+
+function addToBrowserPermissionList(tier: 'read' | 'write' | 'script' | 'deny', pattern: string): void {
+  try {
+    writeSettingsSync('gatekeeper:addToBrowserPermission', (settings) => {
+      const perms = (settings['browser_permissions'] as Partial<BrowserPermissions> | undefined) ?? {};
+      const current = Array.isArray(perms[tier]) ? [...perms[tier]!] : [];
+      if (!current.includes(pattern)) {
+        current.push(pattern);
+      }
+      return { ...settings, browser_permissions: { ...DEFAULT_BROWSER_PERMISSIONS, ...perms, [tier]: current } };
+    });
+    log.info('Added pattern to browser permissions', { tier, pattern });
+    broadcastUpdatedPermissions();
+    flushPendingBrowserApprovals();
+  } catch (err) {
+    log.error('Failed to update browser permissions', { error: String(err) });
+  }
+}
+
+/** Re-check pending browser approvals against updated permissions and auto-resolve matches. */
+function flushPendingBrowserApprovals(): void {
+  if (pendingBrowserWriteApprovals.size === 0) return;
+  const perms = readBrowserPermissions();
+  const toResolve: Array<[string, PendingBrowserWrite]> = [];
+  for (const [id, pending] of pendingBrowserWriteApprovals) {
+    if (!pending.domain) continue;
+    const granted = checkBrowserPermission(pending.domain.includes('://') ? pending.domain : `https://${pending.domain}`, perms);
+    if (browserTierSufficient(granted, pending.requiredTier)) {
+      toResolve.push([id, pending]);
+    }
+  }
+  for (const [id, pending] of toResolve) {
+    pendingBrowserWriteApprovals.delete(id);
+    auditLog({ type: 'browser_ext_domain_grant', detail: `${pending.action} on ${pending.domain}` });
+    autoHandledBrowserWriteIds.add(id);
+    const params: Record<string, unknown> = {};
+    if (pending.tabId !== undefined) params.tabId = pending.tabId;
+    if (pending.steps !== undefined) params.steps = pending.steps;
+    if (pending.url !== undefined) params.url = pending.url;
+    type BrowserAction = 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab';
+    void extensionBridge.request(pending.action as BrowserAction, params).then((result) => {
+      sendBrowserExtResult(id, result);
+    }).catch((err: Error) => {
+      client!.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
+    });
+    // Dismiss from UI
+    client!.emit('perm_dismissed', [id]);
+  }
+}
+
+function summariseBrowserWriteAction(action: string, steps?: unknown[], url?: string, tabId?: number): string {
   if (action === 'navigate') return `Navigate to ${url ?? '(no url)'}`;
   if (action === 'open_tab') return `Open new tab: ${url ?? '(no url)'}`;
   if (action === 'close_tab') return `Close tab ${tabId ?? '(unknown)'}`;
@@ -1575,6 +1644,12 @@ function summariseBrowserWriteAction(action: 'run_script' | 'navigate' | 'open_t
   return summary.length > MAX_LEN ? summary.slice(0, MAX_LEN - 3) + '...' : summary;
 }
 
+/** Extract hostname from a URL, returning undefined on failure. */
+function extractDomain(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try { return new URL(url).hostname.toLowerCase(); } catch { return undefined; }
+}
+
 async function handleBrowserWriteApproveReject(input: string): Promise<boolean> {
   const parts = input.trim().split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
@@ -1602,26 +1677,34 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
 
   if (cmd === '/deny-browser-write') {
     auditLog({ type: 'browser_ext_user_deny', detail: `${pending.action}`, approved: false });
-    injectSystemMessage(`Browser write denied: ${id}`);
-    client!.send({ type: 'browser_ext_result', id, ok: false, error: 'User denied browser write action' });
+    injectSystemMessage(`Browser action denied: ${id}`);
+    client!.send({ type: 'browser_ext_result', id, ok: false, error: 'User denied browser action' });
     return true;
   }
 
-  // Approve — relay to extension
+  // Approve — check for --always-read / --always-write / --always-script flags
   auditLog({ type: 'browser_ext_user_approve', detail: `${pending.action}`, approved: true });
-  const alwaysAllow = parts.includes('--always');
-  if (alwaysAllow) {
-    browserWriteGranted.value = true;
-    injectSystemMessage(`Browser write approved and auto-allowed for this session: ${pending.action}`);
+
+  const alwaysRead = parts.includes('--always-read');
+  const alwaysWrite = parts.includes('--always-write');
+  const alwaysScript = parts.includes('--always-script');
+  const domain = pending.domain;
+
+  if (domain && (alwaysRead || alwaysWrite || alwaysScript)) {
+    const tier = alwaysScript ? 'script' : alwaysWrite ? 'write' : 'read';
+    addToBrowserPermissionList(tier, domain);
+    injectSystemMessage(`Browser ${tier} approved and always-allowed for ${domain}`);
   } else {
-    injectSystemMessage(`Browser write approved: ${pending.action}`);
+    injectSystemMessage(`Browser action approved (once): ${pending.action}`);
   }
+
   const params: { tabId?: number; steps?: unknown[]; url?: string } = {};
   if (pending.tabId !== undefined) params.tabId = pending.tabId;
   if (pending.steps !== undefined) params.steps = pending.steps;
   if (pending.url !== undefined) params.url = pending.url;
 
-  extensionBridge.request(pending.action, params).then((result) => {
+  type BrowserAction = 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab';
+  extensionBridge.request(pending.action as BrowserAction, params).then((result) => {
     sendBrowserExtResult(id, result);
   }).catch((err: Error) => {
     client!.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
@@ -1646,22 +1729,6 @@ function sendBrowserExtResult(id: string, result: { ok: boolean; treeText?: stri
   if (result.screenshots !== undefined) msg.screenshots = result.screenshots;
   if (result.error !== undefined) msg.error = result.error;
   client!.send(msg);
-}
-
-function handleBrowserAutonomousGrant(input: string): boolean {
-  const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
-  if (cmd === '/grant-browser-autonomous') {
-    browserAutonomousGranted.value = true;
-    browserWriteGranted.value = true;
-    injectSystemMessage('Browser autonomous mode enabled — all browser write actions will be auto-approved for this session.');
-    return true;
-  }
-  if (cmd === '/revoke-browser-autonomous') {
-    browserAutonomousGranted.value = false;
-    injectSystemMessage('Browser autonomous mode revoked — browser write actions will require approval again (session write grant still active).');
-    return true;
-  }
-  return false;
 }
 
 // --- Host Daemon ---
@@ -1858,7 +1925,7 @@ client.sendCommand = (cmd: string) => {
 // Start web UI server before the server process so it's available during startup/restarts.
 const extSecret = randomUUID();
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, destructiveBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged: handleSettingsChanged, extSecret }).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions: readBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged: handleSettingsChanged, extSecret }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });
@@ -1930,51 +1997,40 @@ client.on('mcp_tool_request', (id: string, server: string, tool: string, params:
   handleAgentMcpToolRequest(id, server, tool, params);
 });
 
-// Handle browser extension requests from the host daemon — relay to the Chrome extension
+// Handle browser extension requests — per-domain three-tier permission check
 client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab', tabId?: number, rootSelector?: string, steps?: unknown[], url?: string) => {
-  const isWriteAction = action === 'run_script' || action === 'navigate' || action === 'open_tab' || action === 'close_tab';
+  // Classify what tier this action requires
+  const requiredTier = classifyBrowserAction(action, steps);
 
-  if (isWriteAction) {
-    // SSRF check — block navigate/open_tab to private IPs, localhost, metadata endpoints
-    const ssrfErr = validateBrowserUrls(action, steps, url);
-    if (ssrfErr) {
-      auditLog({ type: 'browser_ext_ssrf_block', detail: `${action}${url ? ` ${url}` : ''}`, reason: ssrfErr });
-      client.send({ type: 'browser_ext_result', id, ok: false, error: `Blocked: ${ssrfErr}` });
+  // SSRF check for any action involving URLs
+  const ssrfErr = validateBrowserUrls(action, steps, url);
+  if (ssrfErr) {
+    auditLog({ type: 'browser_ext_ssrf_block', detail: `${action}${url ? ` ${url}` : ''}`, reason: ssrfErr });
+    client.send({ type: 'browser_ext_result', id, ok: false, error: `Blocked: ${ssrfErr}` });
+    return;
+  }
+
+  // Determine the target domain (from explicit url, or fall back to the active tab)
+  const domain = extractDomain(url);
+
+  // Check per-domain permissions
+  if (domain) {
+    const perms = readBrowserPermissions();
+    const granted = checkBrowserPermission(url!, perms);
+
+    if (granted === 'deny') {
+      auditLog({ type: 'browser_ext_domain_deny', detail: `${action} on ${domain}` });
+      client.send({ type: 'browser_ext_result', id, ok: false, error: `Domain ${domain} is in browser deny list` });
       return;
     }
 
-    // Check session-level browser write grant — auto-approve if granted
-    if (browserWriteGranted.value) {
-      // Phase 3c: even with write grant, destructive actions require confirmation
-      // unless autonomous mode is active
-      if (!browserAutonomousGranted.value) {
-        const destructiveMatches = detectDestructiveSteps(action, steps, url);
-        if (destructiveMatches.length > 0) {
-          const detail = destructiveMatches.join(', ');
-          auditLog({ type: 'browser_ext_destructive_prompt', detail: `${action}: ${detail}` });
-          log.info('Destructive browser action flagged for confirmation', { id, action, matches: destructiveMatches });
-          destructiveBrowserWriteIds.set(id, detail);
-          const stepSummary = summariseBrowserWriteAction(action, steps, url, tabId);
-          pendingBrowserWriteApprovals.set(id, {
-            action,
-            ...(tabId !== undefined ? { tabId } : {}),
-            ...(steps !== undefined ? { steps } : {}),
-            ...(url !== undefined ? { url } : {}),
-          });
-          injectSystemMessage(
-            `⚠ Potentially destructive browser action: ${detail}\n` +
-            `Agent wants to: ${stepSummary}\n` +
-            `  Reply: /approve-browser-write ${id} or /deny-browser-write ${id}`
-          );
-          return;
-        }
-      }
-
-      log.info('Browser write auto-approved by session grant', { id, action });
-      auditLog({ type: 'browser_ext_write_grant', detail: `${action}${url ? ` ${url}` : ''}` });
+    if (browserTierSufficient(granted, requiredTier)) {
+      log.info('Browser action auto-approved by domain permission', { id, action, domain, granted, requiredTier });
+      auditLog({ type: 'browser_ext_domain_grant', detail: `${action} on ${domain} (${granted} >= ${requiredTier})` });
       autoHandledBrowserWriteIds.add(id);
       const params: Record<string, unknown> = {};
       if (tabId !== undefined) params.tabId = tabId;
+      if (rootSelector !== undefined) params.rootSelector = rootSelector;
       if (steps !== undefined) params.steps = steps;
       if (url !== undefined) params.url = url;
       void extensionBridge.request(action, params).then((result) => {
@@ -1984,46 +2040,44 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
       });
       return;
     }
+  }
 
-    // Not granted — queue for user approval
-    auditLog({ type: 'browser_ext_write_prompt', detail: `${action}${url ? ` ${url}` : ''}` });
-    // Detect destructive actions so the UI can show a warning
-    const destructiveMatches = detectDestructiveSteps(action, steps, url);
-    if (destructiveMatches.length > 0) {
-      destructiveBrowserWriteIds.set(id, destructiveMatches.join(', '));
-    }
-    const stepSummary = summariseBrowserWriteAction(action, steps, url, tabId);
-    pendingBrowserWriteApprovals.set(id, {
-      action,
-      ...(tabId !== undefined ? { tabId } : {}),
-      ...(steps !== undefined ? { steps } : {}),
-      ...(url !== undefined ? { url } : {}),
+  // Read actions with no domain info: auto-approve (they're passive)
+  if (requiredTier === 'read') {
+    auditLog({ type: 'browser_ext_read', detail: action });
+    const params: Record<string, unknown> = {};
+    if (tabId !== undefined) params.tabId = tabId;
+    if (rootSelector !== undefined) params.rootSelector = rootSelector;
+    void extensionBridge.request(action, params).then((result) => {
+      sendBrowserExtResult(id, result);
+    }).catch((err: Error) => {
+      client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
     });
-    log.info('Browser write approval requested', { id, action });
-    const actionDesc = action === 'navigate' ? `navigate to: ${url ?? '?'}`
-      : action === 'open_tab' ? `open new tab: ${url ?? '?'}`
-      : action === 'close_tab' ? `close tab ${tabId ?? '?'}`
-      : `run browser script: ${stepSummary}`;
-    injectSystemMessage(
-      `Agent wants to ${actionDesc}\n` +
-      `  Reply: /approve-browser-write ${id} or /deny-browser-write ${id}\n` +
-      `  To auto-approve all browser writes: /approve-browser-write ${id} --always`
-    );
-    // The web-bridge event handler sends browser_write_request to web UI clients
-    // (see browser_ext_request handler in web-bridge.ts)
     return;
   }
 
-  // Read-only actions (extract_a11y, screenshot, list_tabs, activate_tab): relay directly
-  auditLog({ type: 'browser_ext_read', detail: action });
-  const params: Record<string, unknown> = {};
-  if (tabId !== undefined) params.tabId = tabId;
-  if (rootSelector !== undefined) params.rootSelector = rootSelector;
-  void extensionBridge.request(action, params).then((result) => {
-    sendBrowserExtResult(id, result);
-  }).catch((err: Error) => {
-    client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
+  // Not granted — queue for user approval
+  auditLog({ type: 'browser_ext_prompt', detail: `${action}${domain ? ` on ${domain}` : ''}` });
+  const stepSummary = summariseBrowserWriteAction(action, steps, url, tabId);
+  pendingBrowserWriteApprovals.set(id, {
+    action,
+    ...(tabId !== undefined ? { tabId } : {}),
+    ...(steps !== undefined ? { steps } : {}),
+    ...(url !== undefined ? { url } : {}),
+    ...(domain !== undefined ? { domain } : {}),
+    requiredTier,
   });
+  log.info('Browser action approval requested', { id, action, domain, requiredTier });
+  const actionDesc = action === 'navigate' ? `navigate to: ${url ?? '?'}`
+    : action === 'open_tab' ? `open new tab: ${url ?? '?'}`
+    : action === 'close_tab' ? `close tab ${tabId ?? '?'}`
+    : `run browser ${requiredTier === 'script' ? 'script' : 'action'}: ${stepSummary}`;
+  const tierHint = domain ? `\n  To always allow ${requiredTier} on ${domain}: /approve-browser-write ${id} --always-${requiredTier}` : '';
+  injectSystemMessage(
+    `Agent wants to ${actionDesc}\n` +
+    `  Reply: /approve-browser-write ${id} or /deny-browser-write ${id}` +
+    tierHint
+  );
 });
 
 // Run UI

@@ -564,84 +564,93 @@ Tab enumeration (`get_tabs`) is also read-only and permitted by default,
 but returns only the currently active tab unless the user has granted
 `browser.tabs.all`.
 
-### Write grant required
+### Per-domain three-tier permissions
 
-Any step that changes state requires an explicit grant. The gatekeeper checks
-before forwarding the `run_script` payload to the extension:
+Browser permissions are scoped **per domain** with three tiers, stored
+persistently in `settings.json` under `browser_permissions`:
 
-| Action type | Requires |
+| Tier | Actions allowed |
 |---|---|
-| `extract_a11y`, `screenshot` | Nothing (always allowed) |
-| `navigate` (external URL) | `browser.navigate` grant |
-| `navigate` (localhost / internal) | Blocked, same as fetch SSRF rules |
-| `fill`, `clear`, `check`, `select` | `browser.write` grant |
-| `click` (non-destructive) | `browser.write` grant |
-| `click` on submit / send / delete | `browser.write` grant + confirmation |
-| `pressKey` | `browser.write` grant |
+| **Read** | `extract_a11y`, `screenshot`, `list_tabs`, `activate_tab` |
+| **Write** | Read + `click`, `fill`, `navigate`, `open_tab`, `close_tab`, structured `run_script` steps |
+| **Script** | Write + `run_script` with arbitrary/unrecognised step keys |
+
+```json
+{
+  "browser_permissions": {
+    "read": ["*.google.com"],
+    "write": ["github.com"],
+    "script": [],
+    "deny": ["bank.example.com"]
+  }
+}
+```
+
+Evaluation order: **deny > script > write > read > prompt** (same deny-wins
+pattern as fetch/exec permissions).
+
+SSRF protection (private IPs, metadata endpoints) is enforced regardless of
+permission level.
+
+### Action classification
+
+The gatekeeper classifies each `browser_ext_request` into a required tier:
+
+| Action | Required tier |
+|---|---|
+| `extract_a11y`, `screenshot`, `list_tabs`, `activate_tab` | `read` |
+| `navigate`, `open_tab`, `close_tab` | `write` |
+| `run_script` with only structured steps (click, fill, scroll, etc.) | `write` |
+| `run_script` with unrecognised step keys | `script` |
+
+Structured step keys: `click`, `fill`, `navigate`, `scroll`, `wait`, `waitFor`,
+`hover`, `pressKey`, `select`, `check`, `clear`, `extractA11y`, `screenshot`.
+Parameter keys (`by`, `value`, `timeout`, `direction`, `amount`, `key`) are
+ignored in the classification.
 
 ### Grant request flow
 
-When the agent calls `run_script` and a `browser.write` grant is not already
-active, the gatekeeper intercepts the call before it reaches the extension and
-emits a `browser_write_request` event to the Web UI:
+When the agent performs an action and the domain's permission tier is
+insufficient, the gatekeeper queues a `browser_write_request` for user approval:
 
 ```json
 {
   "type": "browser_write_request",
   "id": "bwr_01",
-  "steps": [...],
+  "action": "run_script",
   "stepSummary": "Fill email, fill password, click Submit",
-  "reason": "User asked me to log in to the site"
+  "domain": "example.com",
+  "requiredTier": "write",
+  "alwaysReadCmd": "/approve-browser-write bwr_01 --always-read",
+  "alwaysWriteCmd": "/approve-browser-write bwr_01 --always-write",
+  "alwaysScriptCmd": "/approve-browser-write bwr_01 --always-script"
 }
 ```
 
-The Web UI shows this as a permission prompt displaying the full step list. The
-user can:
-- **Allow once** — grant for this specific `run_script` call only.
-- **Allow for session** — grant `browser.write` for the rest of this session.
-- **Deny** — agent receives an error and can report back to the user.
+The Web UI shows a permission modal with:
+- **Approve** — one-time approval for this action
+- **Deny** — agent receives an error
+- **Always Read** (green) — persist read access for this domain
+- **Always Write** (amber) — persist write access for this domain
+- **Always Script** (red) — persist script access for this domain
 
-The grant is stored in the gatekeeper's grant store (same as mount grants),
-with an optional expiry.
+Clicking "Always *" sends the corresponding `--always-*` flag with the approval
+command, which adds the domain to the appropriate tier in `settings.json`.
+Subsequent actions on the same domain at the same or lower tier are
+auto-approved without prompting.
 
-### Confirmation for destructive actions
+### Settings panel
 
-Some actions are irreversible: submitting a form, clicking "Send", clicking
-"Delete", initiating a payment. The gatekeeper heuristically identifies these
-by checking the accessible name and role of click targets:
+The Settings panel includes a "Browser Permissions" group with four editable
+lists (one per line, hostname or URL patterns):
+- **Read** — domains for read access
+- **Write** — domains for write access
+- **Script** — domains for script execution
+- **Deny** — domains blocked from all browser automation
 
-```typescript
-const DESTRUCTIVE_PATTERNS = [
-  /\bsubmit\b/i, /\bsend\b/i, /\bdelete\b/i, /\bremove\b/i,
-  /\bpurchase\b/i, /\bbuy\b/i, /\bconfirm\b/i, /\bpay\b/i,
-  /\bpublish\b/i, /\bpost\b/i, /\bdeploy\b/i,
-];
-```
-
-If a `click` step targets an element whose accessible name matches a destructive
-pattern, the gatekeeper requires explicit confirmation even if `browser.write`
-is already granted — unless the user has said "go autonomously" for the current
-task.
-
-The confirmation prompt names the specific action:
-
-```
-Agent wants to click "Submit Order" on checkout.example.com.
-This action may be irreversible.
-Allow? [y]es / [n]o / [a]lways for this task
-```
-
-### Autonomous mode
-
-The user can grant `browser.autonomous` for a specific task:
-```
-/grant browser.autonomous
-```
-
-In autonomous mode, all write actions and destructive confirmations are skipped.
-The gatekeeper still logs everything. The user can revoke at any time. This is
-appropriate for trusted, fully delegated tasks (e.g., "process my entire email
-inbox").
+Pattern syntax matches fetch permissions: `"example.com"` for exact hostname,
+`"*.example.com"` for subdomains, `"https://api.example.com/v1/*"` for URL
+prefix, `"*"` for catch-all.
 
 ---
 

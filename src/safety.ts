@@ -258,7 +258,7 @@ export const DEFAULT_FETCH_PERMISSIONS: FetchPermissions = {
  *   matched against the URL's hostname only (backward compat).
  * - The catch-all "*" pattern matches any URL.
  */
-function matchFetchPattern(url: string, hostname: string, pattern: string): boolean {
+export function matchFetchPattern(url: string, hostname: string, pattern: string): boolean {
   if (pattern === '*') return true;
   if (pattern.includes('://')) return minimatch(url, pattern);
   return minimatch(hostname, pattern);
@@ -287,6 +287,107 @@ export function checkFetchPermission(
     if (matchFetchPattern(normalizedUrl, hostname, pattern)) return 'allow';
   }
   return 'prompt';
+}
+
+// --- Browser domain permissions ---
+
+export interface BrowserPermissions {
+  read: string[];    // domains where read actions (a11y, screenshot) auto-approve
+  write: string[];   // domains where write actions (click, fill, navigate) auto-approve
+  script: string[];  // domains where run_script with arbitrary JS auto-approves
+  deny: string[];    // domains blocked from all browser automation
+}
+
+export type BrowserPermissionLevel = 'script' | 'write' | 'read' | 'deny' | 'prompt';
+
+export const DEFAULT_BROWSER_PERMISSIONS: BrowserPermissions = {
+  read: [],
+  write: [],
+  script: [],
+  deny: [],
+};
+
+/** Recognized structured BrowserStep action keys (not arbitrary JS). */
+const STRUCTURED_STEP_KEYS = new Set([
+  'click', 'fill', 'navigate', 'scroll', 'wait', 'waitFor',
+  'hover', 'pressKey', 'select', 'check', 'clear',
+  'extractA11y', 'screenshot',
+]);
+
+/**
+ * Classify the required permission tier for a browser action.
+ * - Read actions: extract_a11y, screenshot, list_tabs, activate_tab
+ * - Write actions: navigate, open_tab, close_tab, run_script with only structured steps
+ * - Script actions: run_script with unrecognised step keys (arbitrary JS)
+ */
+export function classifyBrowserAction(
+  action: string,
+  steps?: unknown[],
+): 'read' | 'write' | 'script' {
+  if (action === 'extract_a11y' || action === 'screenshot' || action === 'list_tabs' || action === 'activate_tab') {
+    return 'read';
+  }
+  if (action === 'navigate' || action === 'open_tab' || action === 'close_tab') {
+    return 'write';
+  }
+  // run_script — check if all steps are structured
+  if (action === 'run_script' && Array.isArray(steps) && steps.length > 0) {
+    for (const step of steps) {
+      if (typeof step !== 'object' || step === null) return 'script';
+      const keys = Object.keys(step as Record<string, unknown>);
+      // Each step must have at least one recognized key and no unrecognized ones
+      // (extra keys like 'by', 'value', 'timeout' are parameters to recognized actions)
+      const PARAM_KEYS = new Set(['by', 'value', 'timeout', 'direction', 'amount', 'key']);
+      const actionKeys = keys.filter(k => !PARAM_KEYS.has(k));
+      if (actionKeys.length === 0) return 'script';
+      for (const k of actionKeys) {
+        if (!STRUCTURED_STEP_KEYS.has(k)) return 'script';
+      }
+    }
+    return 'write';
+  }
+  // run_script with no steps or unknown action
+  return 'script';
+}
+
+/**
+ * Check browser domain permission level.
+ * Evaluation order: deny → script → write → read → prompt.
+ * Returns the granted tier for the domain, or 'deny'/'prompt'.
+ */
+export function checkBrowserPermission(
+  url: string,
+  permissions: BrowserPermissions,
+): BrowserPermissionLevel {
+  let hostname: string;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch {
+    return 'prompt';
+  }
+  const normalizedUrl = url.toLowerCase();
+  for (const pattern of permissions.deny) {
+    if (matchFetchPattern(normalizedUrl, hostname, pattern)) return 'deny';
+  }
+  for (const pattern of permissions.script) {
+    if (matchFetchPattern(normalizedUrl, hostname, pattern)) return 'script';
+  }
+  for (const pattern of permissions.write) {
+    if (matchFetchPattern(normalizedUrl, hostname, pattern)) return 'write';
+  }
+  for (const pattern of permissions.read) {
+    if (matchFetchPattern(normalizedUrl, hostname, pattern)) return 'read';
+  }
+  return 'prompt';
+}
+
+/** Check if a granted tier is sufficient for the required tier. */
+export function browserTierSufficient(
+  granted: BrowserPermissionLevel,
+  required: 'read' | 'write' | 'script',
+): boolean {
+  const TIER_RANK: Record<string, number> = { deny: -1, prompt: 0, read: 1, write: 2, script: 3 };
+  return (TIER_RANK[granted] ?? 0) >= (TIER_RANK[required] ?? 0);
 }
 
 // --- File path permissions ---

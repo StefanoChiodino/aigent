@@ -16,7 +16,8 @@ import type { AgentClient } from './client.js';
 import { extensionBridge } from './ext-bridge.js';
 import type { ServerEvent, ServerState } from './protocol.js';
 import type { ThinkingLevel } from './agent.js';
-import type { ExecPermissions, FetchPermissions } from './safety.js';
+import type { ExecPermissions, FetchPermissions, BrowserPermissions } from './safety.js';
+import { classifyBrowserAction } from './safety.js';
 import { parseCommandPipeline } from './safety.js';
 import { createLogger } from './logger.js';
 import { readSettingsSync, writeSettings } from './settings-file.js';
@@ -38,7 +39,7 @@ async function writeClientSettings(updates: ClientSettings): Promise<void> {
     for (const [k, v] of Object.entries(updates)) {
       // Deep-merge nested permission objects so gatekeeper-added entries survive
       // a browser POST that only intends to update one sub-field.
-      if ((k === 'exec_permissions' || k === 'fetch_permissions' || k === 'file_permissions' || k === 'mcp_permissions') &&
+      if ((k === 'exec_permissions' || k === 'fetch_permissions' || k === 'file_permissions' || k === 'browser_permissions' || k === 'mcp_permissions') &&
           v !== null && typeof v === 'object' &&
           merged[k] !== null && typeof merged[k] === 'object') {
         const existing = merged[k] as Record<string, unknown>;
@@ -82,9 +83,9 @@ export interface ClassifierDecision { tier: 1 | 2 | 3; action: 'allow' | 'block'
 export async function startWebServer(
   client: AgentClient,
   port?: number,
-  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; destructiveBrowserWriteIds?: Map<string, string>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; autoHandledMcpIds?: Set<string>; onSettingsChanged?: () => void; extSecret?: string },
+  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; getBrowserPermissions?: () => BrowserPermissions; pendingBrowserWriteApprovals?: Map<string, { action: string; domain?: string; requiredTier: 'read' | 'write' | 'script' }>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; autoHandledMcpIds?: Set<string>; onSettingsChanged?: () => void; extSecret?: string },
 ): Promise<{ port: number }> {
-  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, destructiveBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged, extSecret } = options ?? {};
+  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged, extSecret } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -558,6 +559,16 @@ export async function startWebServer(
             fetch_perm_deny: JSON.stringify(perms.deny),
           };
         }
+        if (getBrowserPermissions) {
+          const perms = getBrowserPermissions();
+          merged = {
+            ...merged,
+            browser_perm_read: JSON.stringify(perms.read),
+            browser_perm_write: JSON.stringify(perms.write),
+            browser_perm_script: JSON.stringify(perms.script),
+            browser_perm_deny: JSON.stringify(perms.deny),
+          };
+        }
         // Flatten nested tools config into tools_* keys for the settings panel
         const toolsCfg = (settings as Record<string, unknown>)['tools'] as Record<string, unknown> | undefined;
         if (toolsCfg) {
@@ -629,54 +640,57 @@ export async function startWebServer(
         send({ type: 'fetch_request', id, url, ...(method ? { method } : {}) });
       },
       browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab', _tabId?: number, _rootSelector?: string, steps?: unknown[], url?: string) => {
-        // Read-only actions are handled entirely by the gatekeeper — no relay needed.
-        // Write actions need user approval: send browser_write_request to the web UI.
-        if (action === 'run_script' || action === 'navigate' || action === 'open_tab' || action === 'close_tab') {
-          // Skip if gatekeeper already handled this (browser write grant active)
-          if (autoHandledBrowserWriteIds?.has(id)) {
-            autoHandledBrowserWriteIds.delete(id);
-            return;
-          }
-          const stepSummary = action === 'navigate'
-            ? `Navigate to ${url ?? '?'}`
-            : action === 'open_tab'
-            ? `Open new tab: ${url ?? '?'}`
-            : action === 'close_tab'
-            ? `Close tab ${_tabId ?? '?'}`
-            : (() => {
-                if (!steps || steps.length === 0) return 'run_script (no steps)';
-                const verbs: string[] = [];
-                for (const step of steps) {
-                  const s = step as Record<string, unknown>;
-                  if ('navigate' in s) verbs.push(`navigate ${s['navigate']}`);
-                  else if ('fill' in s) verbs.push(`fill ${s['fill']}`);
-                  else if ('click' in s) verbs.push(`click ${s['click']}`);
-                  else if ('clear' in s) verbs.push(`clear ${s['clear']}`);
-                  else if ('select' in s) verbs.push(`select ${s['select']}`);
-                  else if ('check' in s) verbs.push(`check ${s['check']}`);
-                  else if ('scroll' in s) verbs.push(`scroll ${s['scroll']}`);
-                  else if ('wait' in s) verbs.push(`wait ${s['wait']}ms`);
-                  else if ('waitFor' in s) verbs.push(`waitFor ${s['waitFor']}`);
-                  else if ('pressKey' in s) verbs.push(`pressKey ${s['pressKey']}`);
-                  else if ('hover' in s) verbs.push(`hover ${s['hover']}`);
-                  else if ('extractA11y' in s) verbs.push('extractA11y');
-                  else if ('screenshot' in s) verbs.push('screenshot');
-                }
-                let summary = verbs.slice(0, 5).join(', ');
-                const extra = verbs.length - 5;
-                if (extra > 0) summary += ` + ${extra} more`;
-                return summary.length > 80 ? summary.slice(0, 77) + '...' : summary;
-              })();
-          const tabUrl = extensionBridge.getActiveTabUrl();
-          const destructiveDetail = destructiveBrowserWriteIds?.get(id);
-          if (destructiveDetail) destructiveBrowserWriteIds?.delete(id);
-          send({
-            type: 'browser_write_request', id, action, stepSummary,
-            ...(tabUrl ? { tabUrl } : {}),
-            autonomousCmd: `/grant-browser-autonomous`,
-            ...(destructiveDetail ? { destructive: true, destructiveDetail } : {}),
-          });
+        // Skip if gatekeeper already handled this (domain permission grant active)
+        if (autoHandledBrowserWriteIds?.has(id)) {
+          autoHandledBrowserWriteIds.delete(id);
+          return;
         }
+        // Only relay actions that need user approval (write/script tier, not auto-approved)
+        const requiredTier = classifyBrowserAction(action, steps);
+        if (requiredTier === 'read') return; // read actions are auto-approved by gatekeeper
+
+        const stepSummary = action === 'navigate'
+          ? `Navigate to ${url ?? '?'}`
+          : action === 'open_tab'
+          ? `Open new tab: ${url ?? '?'}`
+          : action === 'close_tab'
+          ? `Close tab ${_tabId ?? '?'}`
+          : (() => {
+              if (!steps || steps.length === 0) return 'run_script (no steps)';
+              const verbs: string[] = [];
+              for (const step of steps) {
+                const s = step as Record<string, unknown>;
+                if ('navigate' in s) verbs.push(`navigate ${s['navigate']}`);
+                else if ('fill' in s) verbs.push(`fill ${s['fill']}`);
+                else if ('click' in s) verbs.push(`click ${s['click']}`);
+                else if ('clear' in s) verbs.push(`clear ${s['clear']}`);
+                else if ('select' in s) verbs.push(`select ${s['select']}`);
+                else if ('check' in s) verbs.push(`check ${s['check']}`);
+                else if ('scroll' in s) verbs.push(`scroll ${s['scroll']}`);
+                else if ('wait' in s) verbs.push(`wait ${s['wait']}ms`);
+                else if ('waitFor' in s) verbs.push(`waitFor ${s['waitFor']}`);
+                else if ('pressKey' in s) verbs.push(`pressKey ${s['pressKey']}`);
+                else if ('hover' in s) verbs.push(`hover ${s['hover']}`);
+                else if ('extractA11y' in s) verbs.push('extractA11y');
+                else if ('screenshot' in s) verbs.push('screenshot');
+              }
+              let summary = verbs.slice(0, 5).join(', ');
+              const extra = verbs.length - 5;
+              if (extra > 0) summary += ` + ${extra} more`;
+              return summary.length > 80 ? summary.slice(0, 77) + '...' : summary;
+            })();
+        const tabUrl = extensionBridge.getActiveTabUrl();
+        // Extract domain from the pending request stored by gatekeeper
+        const pending = pendingBrowserWriteApprovals?.get(id);
+        const domain = pending?.domain;
+        send({
+          type: 'browser_write_request', id, action: action as 'run_script' | 'navigate' | 'open_tab' | 'close_tab', stepSummary, requiredTier,
+          ...(tabUrl ? { tabUrl } : {}),
+          ...(domain ? { domain } : {}),
+          ...(domain ? { alwaysReadCmd: `/approve-browser-write ${id} --always-read` } : {}),
+          ...(domain ? { alwaysWriteCmd: `/approve-browser-write ${id} --always-write` } : {}),
+          ...(domain ? { alwaysScriptCmd: `/approve-browser-write ${id} --always-script` } : {}),
+        });
       },
       file_access_request: (id: string, path: string, operation: 'read' | 'write', reason: string) => {
         // If gatekeeper auto-handled (e.g. auto-allowed reads), broadcast decision

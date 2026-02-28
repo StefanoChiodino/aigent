@@ -218,7 +218,7 @@ export class AgentClient extends EventEmitter {
         this.emit('client_settings', event.settings);
         break;
       case 'browser_write_request':
-        this.emit('browser_write_request', event.id, event.action, event.stepSummary, event.tabUrl, event.autonomousCmd);
+        this.emit('browser_write_request', event.id, event.action, event.stepSummary, event.tabUrl, event.domain, event.requiredTier, event.alwaysReadCmd, event.alwaysWriteCmd, event.alwaysScriptCmd);
         break;
       case 'user_question_request':
         this.emit('user_question_request', event.id, event.question, event.options, event.multiSelect, event.allowFreeText);

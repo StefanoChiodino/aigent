@@ -1,79 +1,83 @@
 /**
- * Browser extension safety utilities — destructive action heuristics and SSRF validation.
+ * Browser extension safety utilities — SSRF validation for browser navigations.
  *
- * Used by the gatekeeper to flag potentially irreversible browser actions
- * (submit, delete, purchase, etc.) and to block navigations to private IPs.
+ * Used by the gatekeeper to block navigations to private IPs / metadata endpoints.
  */
 
 import { validateFetchUrl } from './safety.js';
 
-export const DESTRUCTIVE_PATTERNS = [
-  /\bsubmit\b/i, /\bsend\b/i, /\bdelete\b/i, /\bremove\b/i,
-  /\bpurchase\b/i, /\bbuy\b/i, /\bconfirm\b/i, /\bpay\b/i,
-  /\bpublish\b/i, /\bpost\b/i, /\bdeploy\b/i,
+/* ── Destructive-action detection ────────────────────────────────────────── */
+
+/** Keywords that indicate a destructive / irreversible browser action. */
+const DESTRUCTIVE_KEYWORDS = [
+  'delete', 'remove', 'destroy', 'drop', 'purge', 'erase', 'wipe',
+  'submit', 'purchase', 'buy', 'pay', 'checkout', 'order', 'confirm',
+  'deploy', 'publish', 'release', 'post', 'send', 'transfer',
+  'unsubscribe', 'deactivate', 'disable', 'revoke', 'terminate',
 ];
 
-/** Check if a string matches any destructive pattern. Returns the first match or null. */
+const DESTRUCTIVE_RE = new RegExp(
+  `\\b(${DESTRUCTIVE_KEYWORDS.join('|')})\\b`,
+  'i',
+);
+
+/** Check a single string for a destructive keyword. Returns the keyword or null. */
 export function matchDestructive(text: string): string | null {
-  for (const pat of DESTRUCTIVE_PATTERNS) {
-    const m = pat.exec(text);
-    if (m) return m[0].toLowerCase();
-  }
-  return null;
+  const m = DESTRUCTIVE_RE.exec(text);
+  return m ? m[1]!.toLowerCase() : null;
 }
 
 /**
- * Scan browser action steps for destructive click targets.
- * Returns a list of matched destructive keywords found in the steps.
+ * Scan a browser action (steps + url) for destructive signals.
+ * Returns an array of human-readable match descriptions (empty = safe).
  */
-export function detectDestructiveSteps(action: string, steps?: unknown[], url?: string): string[] {
+export function detectDestructiveSteps(
+  action: string,
+  steps?: unknown[],
+  url?: string,
+): string[] {
   const matches: string[] = [];
 
-  // Check navigate / open_tab URLs for destructive path segments
-  if (url && (action === 'navigate' || action === 'open_tab')) {
-    try {
-      const parsed = new URL(url);
-      const m = matchDestructive(parsed.pathname);
-      if (m) matches.push(`navigate → "${m}" in URL path`);
-    } catch { /* invalid URL — will be caught by SSRF check */ }
+  // Non-write actions are inherently safe
+  const writeActions = new Set(['run_script', 'navigate', 'open_tab', 'close_tab']);
+  if (!writeActions.has(action)) return matches;
+
+  // Check top-level URL
+  if (url) {
+    const kw = matchDestructive(url);
+    if (kw) matches.push(`url contains "${kw}"`);
   }
 
-  if (!steps || !Array.isArray(steps)) return matches;
+  // Check individual steps
+  if (steps && Array.isArray(steps)) {
+    for (const step of steps) {
+      const s = step as Record<string, unknown>;
 
-  for (const step of steps) {
-    const s = step as Record<string, unknown>;
-
-    // Check click steps
-    if ('click' in s && typeof s['click'] === 'string') {
-      const selector = s['click'];
-      const by = (s['by'] as string) ?? 'css';
-
-      if (by === 'text' || by === 'aria') {
-        // The selector IS the visible label / aria-label
-        const m = matchDestructive(selector);
-        if (m) matches.push(`click "${selector}" (${m})`);
-      } else {
-        // CSS selector — check for embedded labels and submit types
-        const m = matchDestructive(selector);
-        if (m) matches.push(`click ${selector} (${m})`);
-        if (/\[type=["']?submit["']?\]/i.test(selector)) {
-          matches.push(`click ${selector} (submit)`);
+      // Click steps — check the selector / label text
+      if ('click' in s && typeof s['click'] === 'string') {
+        const target = s['click'] as string;
+        const kw = matchDestructive(target);
+        if (kw) {
+          matches.push(`click target contains "${kw}"`);
+        }
+        // Also catch [type=submit] in CSS selectors
+        if (/\[type\s*=\s*['"]?submit['"]?\]/i.test(target)) {
+          matches.push(`click target contains "submit" (type=submit)`);
         }
       }
-    }
 
-    // Check navigate steps within run_script
-    if ('navigate' in s && typeof s['navigate'] === 'string') {
-      try {
-        const parsed = new URL(s['navigate'] as string);
-        const m = matchDestructive(parsed.pathname);
-        if (m) matches.push(`navigate → "${m}" in URL path`);
-      } catch { /* ignore invalid */ }
+      // Navigate steps within run_script
+      if ('navigate' in s && typeof s['navigate'] === 'string') {
+        const kw = matchDestructive(s['navigate'] as string);
+        if (kw) matches.push(`navigate url contains "${kw}"`);
+      }
     }
   }
 
   return matches;
 }
+
+/* ── SSRF / URL validation ───────────────────────────────────────────────── */
 
 /**
  * Validate all URLs in a browser action against SSRF rules.
