@@ -1236,7 +1236,7 @@ html, body {
 }
 
 .tim-key {
-  color: var(--text-dim, #585b70);
+  color: var(--text-secondary, #8888a0);
   width: 56px;
   flex-shrink: 0;
   text-align: right;
@@ -2912,7 +2912,7 @@ html, body {
 
 #perm-card-detail {
   font-size: 11.5px;
-  color: var(--text-secondary);
+  color: #a0a0bc;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
   white-space: pre-wrap;
   word-break: break-all;
@@ -3173,7 +3173,7 @@ html, body {
 
 .perm-deny {
   background: transparent;
-  color: var(--text-secondary);
+  color: #a0a0bc;
   border: 1px solid var(--border);
 }
 
@@ -3185,7 +3185,7 @@ html, body {
 
 .perm-approve {
   background: rgba(64, 176, 128, 0.12);
-  color: var(--success);
+  color: #52c896;
   border: 1px solid rgba(64, 176, 128, 0.35);
 }
 
@@ -3195,7 +3195,7 @@ html, body {
 
 .perm-always-allow {
   background: transparent;
-  color: var(--text-secondary);
+  color: #a0a0bc;
   border: 1px solid var(--border);
 }
 
@@ -4213,7 +4213,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   border-radius: 4px;
 }
 .settings-row--danger .label-text {
-  color: #e53935;
+  color: #ff5252;
   font-weight: 700;
 }
 .settings-row--danger .label-desc {

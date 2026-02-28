@@ -76,12 +76,13 @@ describe('TaskResultPanel', () => {
     expect(screen.getByText('Security scan')).toBeTruthy();
   });
 
-  it('has a close (×) button', async () => {
+  it('has a Defer button (no × close button)', async () => {
     render(<TaskResultPanel />);
     await act(async () => {
       useUIStore.getState().setTaskResultTask(makeTask());
     });
-    expect(document.querySelector('.task-result-close')).not.toBeNull();
+    expect(document.querySelector('.task-result-close')).toBeNull();
+    expect(document.querySelector('.task-result-defer')).not.toBeNull();
   });
 
   it('shows metadata row', async () => {

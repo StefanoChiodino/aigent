@@ -40,7 +40,6 @@ import '../style.css';
   ui.setTtsAvailable(false);
   ui.setSttAvailable(false);
   ui.setCaps({});
-  ui.setMounts([]);
   // Clear permission queue
   useUIStore.setState({ permQueue: [], permShowing: false });
 

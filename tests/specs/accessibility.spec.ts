@@ -202,7 +202,7 @@ test.describe('Accessibility: color contrast audit', () => {
     await expect(page.locator('#task-result-panel')).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
 
     const violations = await checkContrast(page, '#task-result-panel');
-    await page.locator('.task-result-close').click();
+    await page.locator('.task-result-defer').click();
 
     assertNoViolations(violations, 'Task result panel');
   });

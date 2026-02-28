@@ -52,7 +52,6 @@ export function TaskResultPanel() {
         <>
           <div className="task-result-header">
             <span className="task-result-title">{task.description}</span>
-            <button className="task-result-close" onClick={close} title="Close">×</button>
           </div>
 
           <div className="task-inspect-meta">

@@ -172,7 +172,7 @@ test.describe('@fast Task Updates', () => {
     await expect(panel.locator('.task-result-body')).toContainText('Result content here.');
   });
 
-  test('task result panel close button hides the panel', async () => {
+  test('task result panel Defer button hides the panel', async () => {
     const page = getPage();
     await injectEvent({
       type: 'task_update',
@@ -191,7 +191,7 @@ test.describe('@fast Task Updates', () => {
     const panel = page.locator('#task-result-panel');
     await expect(panel).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
 
-    await panel.locator('.task-result-close').click();
+    await panel.locator('.task-result-defer').click();
     await expect(panel).toHaveClass(/\bhidden\b/, { timeout: 3_000 });
   });
 });
