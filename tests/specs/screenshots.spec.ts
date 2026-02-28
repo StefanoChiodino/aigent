@@ -57,6 +57,25 @@ for (const scene of SCENES) {
       await page.waitForTimeout(scene.delay);
     }
 
+    // Kill all animations so screenshots are deterministic across runs.
+    // The animated backgrounds (CSS bokeh blobs, canvas themes) produce different
+    // pixels every frame, making PNGs differ even when the UI is identical.
+    // Setting animation:none removes the animation entirely so elements snap back
+    // to their static CSS positions — deterministic every time.
+    await page.evaluate(() => {
+      const style = document.createElement('style');
+      style.textContent = `
+        *, *::before, *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+        canvas { visibility: hidden !important; }
+      `;
+      document.head.appendChild(style);
+    });
+    // Let the static state paint
+    await page.waitForTimeout(100);
+
     // Take screenshot
     const target = scene.selector ? page.locator(scene.selector) : page;
     await target.screenshot({ path: `${SCREENSHOTS_DIR}/${scene.name}.png` });

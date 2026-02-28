@@ -814,26 +814,9 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'type_input', text: '@', charDelayMs: 0 },
     wait(2500),
 
-    // Simulate STT: mic starts recording
+    // Simulate STT: TTS speaks with an alternate voice, mic animates, text "transcribed"
     { action: 'label', text: 'Voice input (STT)', id: 'voice-input' },
-    { action: 'set_mic', state: 'recording', vadActive: false },
-    wait(800),
-
-    // VAD detects speech
-    { action: 'set_mic', state: 'recording', vadActive: true },
-    wait(2000),
-
-    // Speech ends
-    { action: 'set_mic', state: 'recording', vadActive: false },
-    wait(400),
-
-    // Transcription in progress
-    { action: 'set_mic', state: 'transcribing' },
-    wait(1000),
-
-    // Transcription complete — text appears in input
-    { action: 'set_mic', state: 'idle' },
-    { action: 'type_input', text: 'Does the endpoint look right?', charDelayMs: 30 },
+    { action: 'tts_to_stt', text: 'Does the endpoint look right?' },
     wait(400),
 
     // Attach a fake screenshot

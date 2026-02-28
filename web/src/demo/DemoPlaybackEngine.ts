@@ -27,6 +27,42 @@ const CURSOR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="2
   <path d="M5 3l14 10-6.5 1.5L16 21l-3 1.5-3.5-6.5L4 18z"/>
 </svg>`;
 
+/**
+ * Pick a SpeechSynthesis voice that differs from the browser default.
+ * Prefers a male English voice or different locale; falls back to any non-default.
+ */
+function pickAlternateVoice(preferredName?: string): SpeechSynthesisVoice | null {
+  const voices = speechSynthesis.getVoices();
+  if (voices.length === 0) return null;
+
+  // If a specific voice name was requested, find it
+  if (preferredName) {
+    const match = voices.find(v => v.name === preferredName);
+    if (match) return match;
+  }
+
+  const defaultVoice = voices.find(v => v.default) ?? voices[0]!;
+
+  // Prefer English voices that aren't the default
+  const enVoices = voices.filter(v => v.lang.startsWith('en') && v !== defaultVoice);
+
+  // Try to find one with a different gender hint (name containing "Male"/"Guy"/"David"/"James")
+  const maleHints = /\b(male|guy|david|james|mark|daniel|ryan|thomas)\b/i;
+  const male = enVoices.find(v => maleHints.test(v.name));
+  if (male) return male;
+
+  // Try a different English locale (en-GB if default is en-US, etc.)
+  const diffLocale = enVoices.find(v => v.lang !== defaultVoice.lang);
+  if (diffLocale) return diffLocale;
+
+  // Any non-default English voice
+  if (enVoices.length > 0) return enVoices[0]!;
+
+  // Any non-default voice at all
+  const any = voices.find(v => v !== defaultVoice);
+  return any ?? null;
+}
+
 export class DemoPlaybackEngine {
   private scenario: DemoScenario;
   private mockWs: MockWebSocket;
@@ -338,6 +374,11 @@ export class DemoPlaybackEngine {
         this.closePiP();
         break;
 
+      case 'tts_to_stt':
+        // Fast-forward: just set the input text, skip audio & mic animation
+        this.currentInputText = step.text;
+        break;
+
       case 'loop': break;
     }
   }
@@ -429,6 +470,10 @@ export class DemoPlaybackEngine {
         this.closePiP();
         break;
 
+      case 'tts_to_stt':
+        await this.executeTtsToStt(step.text, step.voice);
+        break;
+
       case 'loop':
         await this.loopReset();
         break;
@@ -494,6 +539,50 @@ export class DemoPlaybackEngine {
       audio.onerror = done;
       void audio.play().catch(done);
     });
+  }
+
+  /**
+   * Simulate voice input: speak text with an alternate voice via SpeechSynthesis,
+   * animate mic recording/VAD/transcribing states, then type the "transcribed" text.
+   */
+  private async executeTtsToStt(text: string, voiceName?: string): Promise<void> {
+    if (this.shouldStop()) return;
+
+    const voice = pickAlternateVoice(voiceName);
+
+    // Start "recording"
+    useVoiceStore.getState().setMicState('recording');
+    useVoiceStore.getState().setVadActive(false);
+    await this.delay(400);
+    if (this.shouldStop()) return;
+
+    // Speak the text with the alternate voice and show VAD active
+    useVoiceStore.getState().setVadActive(true);
+
+    await new Promise<void>((resolve) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      if (voice) utterance.voice = voice;
+      utterance.rate = 1.0;
+      const done = () => resolve();
+      utterance.onend = done;
+      utterance.onerror = done;
+      speechSynthesis.speak(utterance);
+    });
+    if (this.shouldStop()) return;
+
+    // Speech ended — VAD goes silent
+    useVoiceStore.getState().setVadActive(false);
+    await this.delay(300);
+    if (this.shouldStop()) return;
+
+    // "Transcribing"
+    useVoiceStore.getState().setMicState('transcribing');
+    await this.delay(800);
+    if (this.shouldStop()) return;
+
+    // Transcription complete — type the text into input
+    useVoiceStore.getState().setMicState('idle');
+    await this.animateTyping(text, 30);
   }
 
   // ── Fake cursor ──────────────────────────────────────────────────────────

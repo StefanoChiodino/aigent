@@ -193,6 +193,7 @@ export function handleEditFileRequest(
   containerPath: string,
   edits: Array<{ old_str: string; new_str: string; index?: number }>,
   reason: string,
+  autoApply = false,
 ): void {
   const hostPath = ctx.resolveHostPath(containerPath);
 
@@ -252,6 +253,21 @@ export function handleEditFileRequest(
       workingContent.slice(charPos + edit.old_str.length);
 
     lineOffset += edit.new_str.split('\n').length - edit.old_str.split('\n').length;
+  }
+
+  // Auto-apply: write directly without queuing for user review
+  if (autoApply) {
+    try {
+      writeFileSync(hostPath, workingContent, 'utf-8');
+      ctx.log.info('Edit auto-applied (file permission)', { id, path: hostPath, edits: resolvedEdits.length });
+      ctx.client!.send({ type: 'edit_file_response', id, ok: true, message: `Auto-applied ${resolvedEdits.length} edit(s) to ${hostPath} (allowed by file permission policy)` });
+      ctx.injectSystemMessage(`Auto-approved: edit applied to ${hostPath} (allowed by file permission policy)`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.log.error('Edit write failed', { id, error: msg });
+      ctx.client!.send({ type: 'edit_file_response', id, ok: false, message: `Write failed: ${msg}` });
+    }
+    return;
   }
 
   pendingEditFileRequests.set(id, { hostPath, originalContent, resolvedEdits, reason });

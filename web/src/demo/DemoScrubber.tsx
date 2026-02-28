@@ -33,6 +33,19 @@ export const DemoScrubber = React.memo(function DemoScrubber() {
   const [hoverX, setHoverX] = useState(0);
   const [showTooltip, setShowTooltip] = useState(false);
   const sliderRef = useRef<HTMLInputElement>(null);
+  const sectionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = sectionsRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY === 0) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [sections.length]);
 
   const onSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const engine = getDemoEngine();
@@ -74,7 +87,7 @@ export const DemoScrubber = React.memo(function DemoScrubber() {
   return (
     <div id="demo-scrubber">
       {sections.length > 0 && (
-        <div className="demo-sections">
+        <div className="demo-sections" ref={sectionsRef}>
           {sections.map(s => (
             <button
               key={s.id}

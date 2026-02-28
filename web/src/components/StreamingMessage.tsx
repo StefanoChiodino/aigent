@@ -61,9 +61,7 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
         {displayText ? (
           <div dangerouslySetInnerHTML={{ __html: rendered }} />
         ) : (
-          activity
-            ? <span className="streaming-activity">{activity}</span>
-            : null
+          <span className="streaming-activity">{activity}</span>
         )}
       </div>
     </div>

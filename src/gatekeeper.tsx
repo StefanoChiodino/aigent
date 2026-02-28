@@ -496,7 +496,25 @@ function handleEditFileRequest(
   edits: Array<{ old_str: string; new_str: string; index?: number }>,
   reason: string,
 ): void {
-  _handleEditFileRequest(getConfigWriteContext(), id, containerPath, edits, reason);
+  // Check file permissions — auto-apply if allowed, block if denied
+  const filePerms = readFilePermissions();
+  const hostPath = resolveHostPath(containerPath);
+  const level = checkFilePermission(hostPath, filePerms);
+
+  if (level === 'deny') {
+    log.info('Edit auto-denied by file permission policy', { id, path: hostPath });
+    auditLog({ type: 'file_write_block', detail: hostPath, reason: 'denied by file_permissions (host_edit_file)' });
+    client!.send({ type: 'edit_file_response', id, ok: false, message: 'Denied by file permission policy' });
+    injectSystemMessage(`[file] Blocked by deny policy: ${hostPath}`);
+    return;
+  }
+
+  if (level === 'allow') {
+    log.info('Edit auto-allowed by file permission policy', { id, path: hostPath });
+    auditLog({ type: 'file_write', detail: hostPath, reason: 'allowed by file_permissions (host_edit_file)' });
+  }
+
+  _handleEditFileRequest(getConfigWriteContext(), id, containerPath, edits, reason, level === 'allow');
 }
 
 function handleEditFileApproveReject(input: string): Promise<boolean> {
@@ -537,12 +555,16 @@ function readExecPermissions(): ExecPermissions {
     if (!perms || typeof perms !== 'object') return DEFAULT_EXEC_PERMISSIONS;
     const p = perms as Partial<ExecPermissions>;
     return {
+      // alwaysAllow/alwaysClassify: user's list is authoritative — no default merging.
+      // Defaults are only used as a fallback when the key doesn't exist at all.
       alwaysAllow: Array.isArray(p.alwaysAllow)
-        ? [...new Set([...DEFAULT_EXEC_PERMISSIONS.alwaysAllow, ...p.alwaysAllow])]
+        ? p.alwaysAllow
         : DEFAULT_EXEC_PERMISSIONS.alwaysAllow,
       alwaysClassify: Array.isArray(p.alwaysClassify)
-        ? [...new Set([...DEFAULT_EXEC_PERMISSIONS.alwaysClassify, ...p.alwaysClassify])]
+        ? p.alwaysClassify
         : DEFAULT_EXEC_PERMISSIONS.alwaysClassify,
+      // deny: always merge with defaults for safety — prevents accidentally un-blocking
+      // dangerous patterns like sudo, rm -rf /, etc.
       deny: Array.isArray(p.deny)
         ? [...new Set([...DEFAULT_EXEC_PERMISSIONS.deny, ...p.deny])]
         : DEFAULT_EXEC_PERMISSIONS.deny,
@@ -845,7 +867,7 @@ function readFetchPermissions(): FetchPermissions {
     const p = perms as Partial<FetchPermissions>;
     return {
       alwaysAllow: Array.isArray(p.alwaysAllow)
-        ? [...new Set([...DEFAULT_FETCH_PERMISSIONS.alwaysAllow, ...p.alwaysAllow])]
+        ? p.alwaysAllow
         : DEFAULT_FETCH_PERMISSIONS.alwaysAllow,
       deny: Array.isArray(p.deny)
         ? [...new Set([...DEFAULT_FETCH_PERMISSIONS.deny, ...p.deny])]
@@ -883,7 +905,7 @@ function readFilePermissions(): FilePermissions {
     const p = perms as Partial<FilePermissions>;
     return {
       alwaysAllow: Array.isArray(p.alwaysAllow)
-        ? [...new Set([...DEFAULT_FILE_PERMISSIONS.alwaysAllow, ...p.alwaysAllow])]
+        ? p.alwaysAllow
         : DEFAULT_FILE_PERMISSIONS.alwaysAllow,
       deny: Array.isArray(p.deny)
         ? [...new Set([...DEFAULT_FILE_PERMISSIONS.deny, ...p.deny])]

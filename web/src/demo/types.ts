@@ -19,6 +19,7 @@ export type DemoStep =
   | { action: 'click'; selector: string }
   | { action: 'set_theme'; theme: string }
   | { action: 'close_pip' }
+  | { action: 'tts_to_stt'; text: string; voice?: string }
   | { action: 'label'; text: string; id?: string }
   | { action: 'loop' };
 
