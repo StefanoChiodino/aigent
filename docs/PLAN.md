@@ -137,6 +137,7 @@ Server process (spawned directly, no Docker)
 ### Web UI & Extension
 - [x] Replace sidepanel iframe with `chrome.windows.create({ type: 'popup' })`
 - [x] Delete mic relay chain, isSidepanel branches, sidepanel files
+- [x] Tasks Inspector modal — persistent task history, full prompt/result/metadata, clickable sidebar label
 
 ### Memory System
 - [x] MEMORY.md as curated short-term memory in system prompt

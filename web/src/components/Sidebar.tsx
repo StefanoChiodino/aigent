@@ -126,6 +126,7 @@ export function Sidebar() {
   const shortMode = useUIStore(s => s.shortMode);
   const setCtxInspectorOpen = useUIStore(s => s.setCtxInspectorOpen);
   const setTaskResultTask = useUIStore(s => s.setTaskResultTask);
+  const setTasksInspectorOpen = useUIStore(s => s.setTasksInspectorOpen);
   const modelPickerOpen = useUIStore(s => s.modelPickerOpen);
   const setModelPickerOpen = useUIStore(s => s.setModelPickerOpen);
 
@@ -176,7 +177,7 @@ export function Sidebar() {
 
         {/* Tasks */}
         <div className="sidebar-section" id="sb-tasks-section">
-          <div className="sidebar-label">Tasks</div>
+          <div className="sidebar-label" style={{ cursor: 'pointer' }} onClick={() => setTasksInspectorOpen(true)}>Tasks <span className="ctx-open-hint">&rsaquo;</span></div>
           <div id="sb-tasks-list">
             {tasks.length === 0
               ? <span className="sidebar-value" style={{ fontSize: 11 }}>none</span>
@@ -283,19 +284,34 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* TTS */}
+        {/* Speak */}
         <div className="sidebar-section">
-          <div className="sidebar-label">Voice</div>
-          <div className="sb-reasoning-controls">
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Auto-speak</span>
-            <button
-              id="sb-tts-toggle"
-              className={`sb-toggle${ttsAutoSpeak ? ' on' : ''}`}
-              onClick={() => setTtsAutoSpeak(!ttsAutoSpeak)}
-            >
-              {ttsAutoSpeak ? 'ON' : 'OFF'}
-            </button>
-          </div>
+          <div className="sidebar-label">Speak</div>
+          {(() => {
+            const speakMode = shortMode ? 'short' : ttsAutoSpeak ? 'on' : 'off';
+            const setSpeakMode = (mode: 'off' | 'on' | 'short') => {
+              setTtsAutoSpeak(mode !== 'off');
+              const wantShort = mode === 'short';
+              if (wantShort !== shortMode) {
+                send({ type: 'message', content: wantShort ? '/short on' : '/short off' });
+                setClientSetting('AIGENT_SHORT', wantShort);
+              }
+            };
+            return (
+              <div id="sb-speak-pills" className="sb-pills" style={{ marginTop: 4 }}>
+                {(['off', 'on', 'short'] as const).map(level => (
+                  <button
+                    key={level}
+                    className={`sb-pill${speakMode === level ? ' active' : ''}`}
+                    data-speak={level}
+                    onClick={() => setSpeakMode(level)}
+                  >
+                    {level}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
           <div className="sb-tts-speed" style={{ marginTop: 6 }}>
             <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Rate</span>
             <input
@@ -321,25 +337,6 @@ export function Sidebar() {
               <DevicePicker kind="audioinput" value={micDeviceId} onChange={setMicDeviceId} />
             </div>
           )}
-        </div>
-
-
-        {/* Short */}
-        <div className="sidebar-section">
-          <div className="sb-reasoning-controls">
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Short mode</span>
-            <button
-              id="sb-short-toggle"
-              className={`sb-toggle${shortMode ? ' on' : ''}`}
-              onClick={() => {
-                const next = !shortMode;
-                send({ type: 'message', content: next ? '/short on' : '/short off' });
-                setClientSetting('AIGENT_SHORT', next);
-              }}
-            >
-              {shortMode ? 'ON' : 'OFF'}
-            </button>
-          </div>
         </div>
 
 

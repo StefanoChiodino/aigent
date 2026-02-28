@@ -26,6 +26,7 @@ import { ContextInspector } from './modals/ContextInspector';
 import { TaskResultPanel } from './modals/TaskResultPanel';
 import { ShortcutsModal } from './modals/ShortcutsModal';
 import { TraceInspector } from './modals/TraceInspector';
+import { TasksInspector } from './modals/TasksInspector';
 
 export function App() {
   useWebSocket();
@@ -97,6 +98,7 @@ export function App() {
       {createPortal(<TaskResultPanel />, document.body)}
       {createPortal(<ShortcutsModal />, document.body)}
       {createPortal(<TraceInspector />, document.body)}
+      {createPortal(<TasksInspector />, document.body)}
       {isDemo() && createPortal(
         <>
           <div id="demo-banner">

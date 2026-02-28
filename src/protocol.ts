@@ -82,6 +82,7 @@ export interface ContextBreakdown {
 export interface BackgroundTaskInfo {
   id: string;
   description: string;
+  context?: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   startedAt: string;
   completedAt?: string;
@@ -90,7 +91,6 @@ export interface BackgroundTaskInfo {
   outputTokens?: number;
   cost?: number;
   delivery?: 'agent-review' | 'user-pull' | 'agent-batch';
-  /** Raw result text — only set for user-pull tasks so the UI can display it. */
   result?: string;
 }
 
@@ -144,7 +144,7 @@ export type ServerEvent =
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string }
-  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; steps?: unknown[]; url?: string; autonomousCmd?: string; destructive?: boolean; destructiveDetail?: string }
+  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; domain?: string; requiredTier: 'read' | 'write' | 'script'; alwaysReadCmd?: string; alwaysWriteCmd?: string; alwaysScriptCmd?: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'classifier_decision'; tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
   | { type: 'user_question_request'; id: string; question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean; allowFreeText?: boolean }

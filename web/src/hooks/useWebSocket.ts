@@ -55,6 +55,9 @@ export function useWebSocket(): void {
           ui().setLoading(event.state.isLoading);
           ui().setQueuedMessages(event.state.queue ?? []);
           chat().setTasks(event.state.tasks ?? []);
+          for (const t of event.state.tasks ?? []) {
+            chat().upsertTaskHistory(t);
+          }
           ui().setError(null);
           // If the server is mid-turn, start (or keep) the stream so
           // StreamingMessage renders; otherwise make sure it's ended.
@@ -143,6 +146,7 @@ export function useWebSocket(): void {
 
         case 'task_update': {
           chat().upsertTask(event.task);
+          chat().upsertTaskHistory(event.task);
           if (
             event.task.status === 'completed' ||
             event.task.status === 'failed' ||
@@ -344,26 +348,26 @@ export function useWebSocket(): void {
         }
 
         case 'browser_write_request': {
+          const tierLabel = event.requiredTier === 'script' ? 'Script' : 'Write';
           const baseTitle = event.action === 'navigate' ? 'Browser: Navigate'
             : event.action === 'open_tab' ? 'Browser: Open Tab'
             : event.action === 'close_tab' ? 'Browser: Close Tab'
-            : 'Browser: Run Script';
+            : `Browser: ${tierLabel === 'Script' ? 'Run Script' : 'Run Action'}`;
           const bodyParts: string[] = [];
-          if (event.destructive && event.destructiveDetail) {
-            bodyParts.push(`\u26a0 Destructive: ${event.destructiveDetail}`);
-          }
+          if (event.domain) bodyParts.push(`Domain: ${event.domain}`);
           if (event.tabUrl) bodyParts.push(`On: ${event.tabUrl}`);
+          bodyParts.push(`Required: ${event.requiredTier}`);
           ui().enqueuePermRequest({
             type: 'browser_write',
             id: event.id,
-            title: event.destructive ? `\u26a0 ${baseTitle}` : baseTitle,
+            title: baseTitle,
             detail: event.stepSummary,
             ...(bodyParts.length > 0 ? { body: bodyParts.join('\n') } : {}),
             approveCmd: `/approve-browser-write ${event.id}`,
             denyCmd: `/deny-browser-write ${event.id}`,
-            // Hide always-allow for destructive actions — require per-action confirmation
-            ...(!event.destructive ? { alwaysAllowCmd: `/approve-browser-write ${event.id} --always` } : {}),
-            ...(event.autonomousCmd ? { autonomousCmd: event.autonomousCmd } : {}),
+            ...(event.alwaysReadCmd ? { alwaysReadCmd: event.alwaysReadCmd } : {}),
+            ...(event.alwaysWriteCmd ? { alwaysWriteCmd: event.alwaysWriteCmd } : {}),
+            ...(event.alwaysScriptCmd ? { alwaysScriptCmd: event.alwaysScriptCmd } : {}),
           });
           playPermissionSound();
           break;
@@ -412,6 +416,7 @@ export function useWebSocket(): void {
 
         case 'reset':
           chat().clearMessages();
+          chat().clearTaskHistory();
           break;
 
         case 'pong':

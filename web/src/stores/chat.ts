@@ -17,6 +17,7 @@ interface ChatState {
   messages: DisplayMessage[];
   usage: TokenUsage;
   tasks: BackgroundTaskInfo[];
+  taskHistory: BackgroundTaskInfo[];
   streaming: StreamingState;
 
   setMessages: (msgs: DisplayMessage[]) => void;
@@ -24,7 +25,9 @@ interface ChatState {
   setUsage: (usage: TokenUsage) => void;
   setTasks: (tasks: BackgroundTaskInfo[]) => void;
   upsertTask: (task: BackgroundTaskInfo) => void;
+  upsertTaskHistory: (task: BackgroundTaskInfo) => void;
   clearMessages: () => void;
+  clearTaskHistory: () => void;
 
   // Streaming actions
   startStream: (turnStartCtx: number) => void;
@@ -56,6 +59,7 @@ export const useChatStore = create<ChatState>()(
       messages: [],
       usage: INITIAL_USAGE,
       tasks: [],
+      taskHistory: [],
       streaming: INITIAL_STREAMING,
 
       setMessages: (msgs) => set({ messages: msgs }),
@@ -73,7 +77,17 @@ export const useChatStore = create<ChatState>()(
         }
         return { tasks: [...s.tasks, task] };
       }),
+      upsertTaskHistory: (task) => set(s => {
+        const idx = s.taskHistory.findIndex(t => t.id === task.id);
+        if (idx >= 0) {
+          const next = [...s.taskHistory];
+          next[idx] = { ...next[idx], ...task };
+          return { taskHistory: next };
+        }
+        return { taskHistory: [...s.taskHistory, task] };
+      }),
       clearMessages: () => set({ messages: [] }),
+      clearTaskHistory: () => set({ taskHistory: [] }),
 
       startStream: (turnStartCtx) => set({
         streaming: { ...INITIAL_STREAMING, active: true, turnStartCtx },
@@ -154,7 +168,7 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'aigent-chat',
-      partialize: (s) => ({ messages: s.messages, usage: s.usage }),
+      partialize: (s) => ({ messages: s.messages, usage: s.usage, taskHistory: s.taskHistory }),
     }
   )
 );

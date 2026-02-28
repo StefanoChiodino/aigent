@@ -67,17 +67,24 @@ make serve   # server only (no frontend dev server)
 
 ## Web UI features
 
-### Voice
+### Speak
+
+Three-state control in the sidebar: **off** | **on** | **short**
+
+| Mode | What it does |
+|------|-------------|
+| **off** | No auto-speak; responses are text-only |
+| **on** | Auto-speak enabled; full responses are read aloud via TTS |
+| **short** | Auto-speak + short mode; the agent produces concise responses with a `<speak>` tag that is read aloud |
 
 - **Push-to-talk** — `Ctrl+\`` or the mic button; transcription streams into the input box in real time
 - **Always-on mode** — `Ctrl+Shift+\`` keeps the microphone open continuously; silence detection auto-submits
   - **Interrupt** — talk over the agent's response and VAD will stop it, letting you speak
   - **Edit during recording** — typing or pasting while the mic is recording preserves your edits; STT appends after your text instead of overwriting it
-- **Text-to-speech** — speaker button on each assistant message reads it aloud; auto-speak toggle in the sidebar plays responses automatically
+- **Text-to-speech** — speaker button on each assistant message reads it aloud
 - **Speak preview** — assistant messages with a `<speak>` tag show a chat-bubble icon; hover to see the spoken summary without playing audio
 - **TTS rate control** — adjustable playback speed slider in the sidebar (-50% to +100%)
 - **Audio device pickers** — choose speaker and microphone devices from the sidebar when TTS/STT is available
-- **Short mode** — when enabled, a cheap model generates a short spoken summary of each response; only the summary is read aloud, keeping TTS output brief and conversation-paced
 
 ### Input
 
@@ -112,7 +119,7 @@ Type `/` to open the command palette. Available commands:
 | `/restart` | Restart the agent server |
 | `/reasoning on\|off` | Toggle extended thinking |
 | `/effort low\|medium\|high\|max` | Set thinking budget |
-| `/short on\|off` | Toggle short/voice mode |
+| `/short on\|off` | Toggle short mode (also accessible via Speak pills in sidebar) |
 | `/model <name>` | Show or switch the active model |
 | `/image <path> [msg]` | Send an image from a host path |
 | `/usage` | Show cumulative token and cost stats |
@@ -164,6 +171,12 @@ Tasks with `delivery: user-pull` pop up a result panel when completed. The panel
 
 ![Background tasks in sidebar](docs/screenshots/tasks.png)
 
+**Tasks Inspector** — click the "Tasks ›" label in the sidebar to open the Tasks Inspector modal. It shows a persistent history of all dispatched tasks (survives page refresh), with:
+
+- Summary bar: total tasks, tokens, and cost
+- Sortable grid: status, description, model, tokens, cost
+- Expandable detail: full metadata (ID, delivery mode, timing), the exact prompt sent to the background agent, and the complete result (markdown-rendered)
+
 ### Tool visibility
 
 Tool calls are shown inline in the chat — name, input summary, and output excerpt. Collapsed by default; click to expand and see the full input and output. Tools that return images (screenshots, clipboard, browser captures) display them inline in the trace block — click to open full-size in a new tab.
@@ -211,7 +224,7 @@ Key settings groups:
 | Group | Settings |
 |-------|----------|
 | **Provider** | Provider (auto-detect / Anthropic / OpenAI), API keys (stored in `.env`), OpenAI base URL |
-| **Model** | Default model, default reasoning level, short mode |
+| **Model** | Default model, default reasoning level, speak: short |
 | **Tools** | Disable all tools, tool allowlist |
 | **Prompt** | Slim prompt (omit MEMORY.md), full session logs |
 | **Services** | Web UI port, STT URL, TTS URL |

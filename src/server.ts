@@ -620,7 +620,7 @@ function dispatchBackgroundTask(input: {
   capabilities?: string[];
   delivery?: 'agent-batch' | 'agent-review' | 'user-pull';
 }): string {
-  const taskId = taskQueue.register(input.task, input.delivery ?? 'agent-batch');
+  const taskId = taskQueue.register(input.task, input.delivery ?? 'agent-batch', input.context);
 
   // Fire and forget — run the sub-agent in the background
   void (async () => {

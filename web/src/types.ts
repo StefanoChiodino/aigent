@@ -56,6 +56,7 @@ export interface DisplayMessage {
 export interface BackgroundTaskInfo {
   id: string;
   description: string;
+  context?: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   startedAt: string;
   completedAt?: string;
@@ -146,7 +147,7 @@ export type ServerEvent =
   | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean; extensionConnected?: boolean }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
-  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; autonomousCmd?: string; destructive?: boolean; destructiveDetail?: string }
+  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; domain?: string; requiredTier: 'read' | 'write' | 'script'; alwaysReadCmd?: string; alwaysWriteCmd?: string; alwaysScriptCmd?: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'classifier_decision'; tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
   | { type: 'user_question_request'; id: string; question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean; allowFreeText?: boolean }
@@ -178,7 +179,9 @@ export interface PermRequest {
   denyCmd: string;
   alwaysAllowCmd?: string;
   alwaysAllowDomainCmd?: string;
-  autonomousCmd?: string;
+  alwaysReadCmd?: string;
+  alwaysWriteCmd?: string;
+  alwaysScriptCmd?: string;
   durationMinutes?: number;
   fallbackHint?: string;
   diff?: string;

@@ -10,6 +10,7 @@ interface UIState {
   settingsOpen: boolean;
   shortcutsOpen: boolean;
   ctxInspectorOpen: boolean;
+  tasksInspectorOpen: boolean;
   capsList: Record<string, { grant: string; available: boolean }>;
   ttsAvailable: boolean;
   sttAvailable: boolean;
@@ -36,6 +37,7 @@ interface UIState {
   setSettingsOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setCtxInspectorOpen: (open: boolean) => void;
+  setTasksInspectorOpen: (open: boolean) => void;
   setCaps: (caps: Record<string, { grant: string; available: boolean }>) => void;
   setTtsAvailable: (v: boolean) => void;
   setSttAvailable: (v: boolean) => void;
@@ -63,6 +65,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   settingsOpen: false,
   shortcutsOpen: false,
   ctxInspectorOpen: false,
+  tasksInspectorOpen: false,
   capsList: {},
   ttsAvailable: false,
   sttAvailable: false,
@@ -139,6 +142,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setCtxInspectorOpen: (open) => set({ ctxInspectorOpen: open }),
+  setTasksInspectorOpen: (open) => set({ tasksInspectorOpen: open }),
   setCaps: (caps) => set({ capsList: caps }),
   setTtsAvailable: (v) => set({ ttsAvailable: v }),
   setSttAvailable: (v) => set({ sttAvailable: v }),

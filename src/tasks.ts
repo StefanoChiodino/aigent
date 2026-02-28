@@ -43,6 +43,7 @@ interface TaskUsageMeta {
 interface InternalTask {
   id: string;
   description: string;
+  context?: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   startedAt: string;
   completedAt?: string;
@@ -70,18 +71,19 @@ export class TaskQueue {
   }
 
   /** Register a new running task. Returns the task ID. */
-  register(description: string, delivery: 'agent-review' | 'user-pull' | 'agent-batch' = 'agent-batch'): string {
+  register(description: string, delivery: 'agent-review' | 'user-pull' | 'agent-batch' = 'agent-batch', context?: string): string {
     const id = this.nextId();
     const task: InternalTask = {
       id,
       description,
+      ...(context !== undefined ? { context } : {}),
       status: 'running',
       startedAt: new Date().toISOString(),
       delivery,
     };
     this.tasks.set(id, task);
     log.info('Task registered', { id, description: task.description, delivery });
-    this.opts.onTaskUpdate?.({ id, description: task.description, status: 'running', startedAt: task.startedAt, delivery });
+    this.opts.onTaskUpdate?.({ id, description: task.description, status: 'running', startedAt: task.startedAt, delivery, ...(context ? { context } : {}) });
     return id;
   }
 
@@ -128,8 +130,8 @@ export class TaskQueue {
       startedAt: task.startedAt,
       completedAt: task.completedAt,
       delivery: task.delivery,
-      // For user-pull tasks, send the raw result to the UI so it can display it
-      ...(task.delivery === 'user-pull' ? { result } : {}),
+      ...(task.context ? { context: task.context } : {}),
+      ...(result ? { result } : {}),
       ...(task.model !== undefined ? { model: task.model } : {}),
       ...(task.inputTokens !== undefined ? { inputTokens: task.inputTokens } : {}),
       ...(task.outputTokens !== undefined ? { outputTokens: task.outputTokens } : {}),
@@ -169,7 +171,8 @@ export class TaskQueue {
       startedAt: task.startedAt,
       completedAt: task.completedAt,
       delivery: task.delivery,
-      ...(task.delivery === 'user-pull' ? { result: error } : {}),
+      ...(task.context ? { context: task.context } : {}),
+      ...(error ? { result: error } : {}),
       ...(task.model !== undefined ? { model: task.model } : {}),
     });
 
@@ -221,15 +224,15 @@ export class TaskQueue {
 
   /** Get info for all tasks (for UI / /tasks command). */
   getInfos(): BackgroundTaskInfo[] {
-    return Array.from(this.tasks.values()).map(({ id, description, status, startedAt, completedAt, model, inputTokens, outputTokens, cost, delivery, result }) => ({
+    return Array.from(this.tasks.values()).map(({ id, description, context, status, startedAt, completedAt, model, inputTokens, outputTokens, cost, delivery, result }) => ({
       id, description, status, startedAt, delivery,
+      ...(context ? { context } : {}),
       ...(completedAt ? { completedAt } : {}),
       ...(model ? { model } : {}),
       ...(inputTokens !== undefined ? { inputTokens } : {}),
       ...(outputTokens !== undefined ? { outputTokens } : {}),
       ...(cost !== undefined ? { cost } : {}),
-      // Include result for user-pull tasks so the UI can display it on reconnect
-      ...(delivery === 'user-pull' && result ? { result } : {}),
+      ...(result ? { result } : {}),
     }));
   }
 
