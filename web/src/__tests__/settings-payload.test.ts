@@ -151,6 +151,26 @@ describe('buildSettingsPayload', () => {
     }
   });
 
+  // ── YOLO mode toggles pass through as plain booleans ─────────────────────
+
+  it('exec_perm_yolo passes through as a plain boolean', () => {
+    const result = buildSettingsPayload('exec_perm_yolo', true, { exec_perm_yolo: true });
+    expect(result).toEqual({ exec_perm_yolo: true });
+    expect(result).not.toHaveProperty('exec_permissions');
+  });
+
+  it('fetch_perm_yolo passes through as a plain boolean', () => {
+    const result = buildSettingsPayload('fetch_perm_yolo', true, { fetch_perm_yolo: true });
+    expect(result).toEqual({ fetch_perm_yolo: true });
+    expect(result).not.toHaveProperty('fetch_permissions');
+  });
+
+  it('file_perm_yolo passes through as a plain boolean', () => {
+    const result = buildSettingsPayload('file_perm_yolo', true, { file_perm_yolo: true });
+    expect(result).toEqual({ file_perm_yolo: true });
+    expect(result).not.toHaveProperty('file_permissions');
+  });
+
   // ── Non-permission keys pass through unchanged ────────────────────────────
 
   it('passes through non-permission keys as-is', () => {
