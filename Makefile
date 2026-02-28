@@ -1,4 +1,4 @@
-.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots screenshots-diff clean stt stt-setup tts tts-setup kill-ports plugin plugin-dev plugin-typecheck
+.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots screenshots-diff clean stt stt-setup tts tts-setup demo-audio kill-ports plugin plugin-dev plugin-typecheck
 
 # --- Development ---
 
@@ -145,6 +145,10 @@ tts-setup:
 # Start the TTS server (run make tts-setup first)
 tts: $(TTS_PYTHON)
 	$(TTS_PYTHON) tts/main.py $(ARGS)
+
+# Pre-generate demo audio files (requires tts-setup)
+demo-audio: $(TTS_PYTHON)
+	$(TTS_PYTHON) scripts/gen-demo-audio.py
 
 $(TTS_PYTHON):
 	@echo "TTS environment not set up. Run: make tts-setup"

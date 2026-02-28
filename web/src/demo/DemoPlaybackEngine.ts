@@ -427,7 +427,7 @@ export class DemoPlaybackEngine {
         break;
 
       case 'speak_tts':
-        await this.speakViaTts(step.text, step.voice);
+        await this.speakViaTts(step.text, step.voice, step.src);
         break;
 
       case 'click':
@@ -443,7 +443,7 @@ export class DemoPlaybackEngine {
         break;
 
       case 'tts_to_stt':
-        await this.executeTtsToStt(step.text, step.voice);
+        await this.executeTtsToStt(step.text, step.voice, step.src);
         break;
 
       case 'loop':
@@ -514,20 +514,24 @@ export class DemoPlaybackEngine {
   }
 
   /**
-   * Speak text via edge-tts (default voice) and play the audio.
-   * Used for the agent's TTS response in the demo — no static file needed.
-   * Falls back to browser SpeechSynthesis if TTS server is unavailable.
+   * Play audio from a source with a three-tier fallback:
+   *   1. Pre-generated static file (if src provided)
+   *   2. Live /tts endpoint (if server running)
+   *   3. Browser SpeechSynthesis (last resort)
    */
-  private async speakViaTts(text: string, voiceName?: string): Promise<void> {
-    if (this.shouldStop()) return;
+  private async playTtsAudio(text: string, src?: string, voiceName?: string): Promise<void> {
+    // 1. Try pre-generated static file
+    if (src) {
+      const played = await this.tryPlayFile(src);
+      if (played) return;
+    }
 
-    useVoiceStore.getState().setTtsPlaying(true);
-    let played = false;
+    // 2. Try live /tts endpoint
     try {
       const params = new URLSearchParams();
       if (voiceName) params.set('voice', voiceName);
-      const qs = params.toString();
-      const res = await fetch(`/tts${qs ? `?${qs}` : ''}`, {
+      params.set('rate', '+0%');
+      const res = await fetch(`/tts?${params}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: text,
@@ -535,20 +539,13 @@ export class DemoPlaybackEngine {
       if (res.ok) {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
-        await new Promise<void>((resolve) => {
-          const audio = new Audio(url);
-          this.currentAudio = audio;
-          const done = () => { this.currentAudio = null; URL.revokeObjectURL(url); resolve(); };
-          audio.onended = done;
-          audio.onerror = done;
-          void audio.play().catch(done);
-        });
-        played = true;
+        await this.playAndWait(url, true);
+        return;
       }
     } catch { /* TTS server unavailable */ }
 
-    // Fallback: browser SpeechSynthesis
-    if (!played && !this.shouldStop()) {
+    // 3. Fallback: browser SpeechSynthesis
+    if (!this.shouldStop()) {
       await new Promise<void>((resolve) => {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.onend = () => resolve();
@@ -556,19 +553,51 @@ export class DemoPlaybackEngine {
         speechSynthesis.speak(utterance);
       });
     }
+  }
 
+  /** Try to play a static file. Returns true if it played successfully. */
+  private async tryPlayFile(src: string): Promise<boolean> {
+    try {
+      const res = await fetch(src, { method: 'HEAD' });
+      if (!res.ok) return false;
+    } catch { return false; }
+    await this.playAndWait(src, false);
+    return true;
+  }
+
+  /** Play an audio URL and wait for it to finish. */
+  private playAndWait(src: string, revokeOnDone: boolean): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const audio = new Audio(src);
+      this.currentAudio = audio;
+      const done = () => {
+        this.currentAudio = null;
+        if (revokeOnDone) URL.revokeObjectURL(src);
+        resolve();
+      };
+      audio.onended = done;
+      audio.onerror = done;
+      void audio.play().catch(done);
+    });
+  }
+
+  /**
+   * Speak text via TTS and play the audio.
+   * Used for the agent's TTS response in the demo.
+   */
+  private async speakViaTts(text: string, voice?: string, src?: string): Promise<void> {
+    if (this.shouldStop()) return;
+    useVoiceStore.getState().setTtsPlaying(true);
+    await this.playTtsAudio(text, src, voice);
     useVoiceStore.getState().setTtsPlaying(false);
   }
 
   /**
-   * Simulate voice input: generate speech with edge-tts (alternate voice),
-   * play the audio while animating mic/VAD states, then "transcribe" the text into input.
-   * Falls back to browser SpeechSynthesis if TTS server is unavailable.
+   * Simulate voice input: play speech with an alternate voice while animating
+   * mic/VAD states, then "transcribe" the text into input.
    */
-  private async executeTtsToStt(text: string, voiceName?: string): Promise<void> {
+  private async executeTtsToStt(text: string, voice?: string, src?: string): Promise<void> {
     if (this.shouldStop()) return;
-
-    const voice = voiceName ?? STT_SIM_VOICE;
 
     // Start "recording"
     useVoiceStore.getState().setMicState('recording');
@@ -576,41 +605,9 @@ export class DemoPlaybackEngine {
     await this.delay(400);
     if (this.shouldStop()) return;
 
-    // Generate audio with edge-tts using a different voice
+    // Play audio with VAD active
     useVoiceStore.getState().setVadActive(true);
-    let played = false;
-    try {
-      const qs = `?voice=${encodeURIComponent(voice)}&rate=${encodeURIComponent('+0%')}`;
-      const res = await fetch(`/tts${qs}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: text,
-      });
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        await new Promise<void>((resolve) => {
-          const audio = new Audio(url);
-          this.currentAudio = audio;
-          const done = () => { this.currentAudio = null; URL.revokeObjectURL(url); resolve(); };
-          audio.onended = done;
-          audio.onerror = done;
-          void audio.play().catch(done);
-        });
-        played = true;
-      }
-    } catch { /* TTS server unavailable — fall through to SpeechSynthesis fallback */ }
-
-    // Fallback: browser SpeechSynthesis if /tts failed
-    if (!played && !this.shouldStop()) {
-      await new Promise<void>((resolve) => {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.rate = 1.0;
-        utterance.onend = () => resolve();
-        utterance.onerror = () => resolve();
-        speechSynthesis.speak(utterance);
-      });
-    }
+    await this.playTtsAudio(text, src, voice ?? STT_SIM_VOICE);
     if (this.shouldStop()) return;
 
     // Speech ended — VAD goes silent
