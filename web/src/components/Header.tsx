@@ -5,7 +5,7 @@ import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
 import { useSettingsStore } from '../stores/settings';
 import { usePiP } from '../hooks/usePiP';
-import type { MountInfo, BackgroundTaskInfo } from '../types';
+import type { BackgroundTaskInfo } from '../types';
 import { CAP_INFO, GRANT_DESCRIPTIONS } from '../lib/capabilities';
 
 
@@ -18,38 +18,6 @@ function modelDisplayName(id: string): string {
   return id.replace(/^claude-/, '').replace(/-\d{8,}$/, '');
 }
 
-function fmtRemaining(ms: number): string {
-  if (ms <= 0) return 'expired';
-  const secs = Math.round(ms / 1000);
-  if (secs <= 60) return `${secs} sec`;
-  return `${Math.round((ms / 60_000) * 2) / 2} min`;
-}
-
-function NarrowMountItem({ mount }: { mount: MountInfo }) {
-  const [remaining, setRemaining] = useState<number | null>(
-    mount.expiresAt ? mount.expiresAt - Date.now() : null
-  );
-  useEffect(() => {
-    if (!mount.expiresAt) return;
-    const id = setInterval(() => setRemaining(mount.expiresAt! - Date.now()), 5_000);
-    return () => clearInterval(id);
-  }, [mount.expiresAt]);
-
-  const parts = mount.hostPath.replace(/\/$/, '').split('/').filter(Boolean);
-  const label = parts.length >= 2
-    ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
-    : mount.hostPath;
-
-  return (
-    <div className="hdr-overflow-item" style={{ fontSize: 11 }}>
-      <span className={`mount-mode ${mount.mode}`}>{mount.mode}</span>
-      <span style={{ flex: 1 }} title={mount.hostPath}>{label}</span>
-      {remaining !== null && (
-        <span className="mount-expiry-badge">{fmtRemaining(remaining)}</span>
-      )}
-    </div>
-  );
-}
 
 function NarrowTaskItem({ task }: { task: BackgroundTaskInfo }) {
   const statusChar =
@@ -84,7 +52,6 @@ export function Header() {
   const thinkingLevel = useUIStore(s => s.thinkingLevel);
   const lastEffortLevel = useUIStore(s => s.lastEffortLevel);
   const shortMode = useUIStore(s => s.shortMode);
-  const mountsList = useUIStore(s => s.mountsList);
   const capsList = useUIStore(s => s.capsList);
   const ttsAvailable = useUIStore(s => s.ttsAvailable);
   const sttAvailable = useUIStore(s => s.sttAvailable);
@@ -308,15 +275,6 @@ export function Header() {
                   </div>
                 )}
 
-                {/* Mounts */}
-                {mountsList.length > 0 && (
-                  <div className="hdr-overflow-section">
-                    <div className="hdr-overflow-label">Mounts</div>
-                    {mountsList.map(m => (
-                      <NarrowMountItem key={m.hostPath} mount={m} />
-                    ))}
-                  </div>
-                )}
 
                 {/* Capabilities */}
                 {(Object.keys(capsList).length > 0 || ttsAvailable || sttAvailable) && (

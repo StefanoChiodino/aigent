@@ -29,7 +29,7 @@ export type ClientCommand =
   | { type: 'mcp_tool_response'; id: string; ok: boolean; message: string }
   | { type: 'screenshot_response'; id: string; ok: boolean; data?: string; mediaType?: string; message: string }
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
-  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw' }[] }
+  | { type: 'host_state' }
   | { type: 'context_breakdown_request' }
   | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; error?: string }
   | { type: 'browser_write_response'; id: string; ok: boolean; message: string }
@@ -133,7 +133,7 @@ export type ServerEvent =
   | { type: 'mcp_tool_request'; id: string; server: string; tool: string; params: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
-  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[]; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean }
+  | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string }
@@ -144,7 +144,7 @@ export type ServerEvent =
   | { type: 'reset' }
   | { type: 'pong' };
 
-// --- Worker → Gatekeeper (capability/mount requests) ---
+// --- Worker → Gatekeeper (capability requests) ---
 
 export type WorkerRequest =
   | { type: 'capability_request'; id: string; capability: string; params: Record<string, unknown>; reason?: string };

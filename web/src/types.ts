@@ -128,7 +128,6 @@ export type ServerEvent =
   | { type: 'error'; message: string }
   | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string; short?: boolean; availableModels?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
-  | { type: 'mount_request'; id: string; path: string; mode: string; reason?: string; durationMinutes?: number; fallbackHint?: string }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }
   | { type: 'exec_request'; id: string; command: string; segments?: CommandSegment[] }
@@ -138,7 +137,7 @@ export type ServerEvent =
   | { type: 'mcp_tool_request'; id: string; server: string; tool: string; params: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
-  | { type: 'host_state'; mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw' }[]; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean }
+  | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; autonomousCmd?: string }
@@ -162,7 +161,7 @@ export interface DiffFile {
 }
 
 export interface PermRequest {
-  type: 'mount' | 'config_write' | 'patch' | 'exec' | 'fetch' | 'file_access' | 'fetch_size' | 'mcp_tool' | 'browser_write' | 'user_question';
+  type: 'config_write' | 'patch' | 'exec' | 'fetch' | 'file_access' | 'fetch_size' | 'mcp_tool' | 'browser_write' | 'user_question';
   id: string;
   title: string;
   detail: string;
@@ -201,10 +200,3 @@ export interface AtItem {
   isDir?: boolean;
 }
 
-export interface MountInfo {
-  hostPath: string;
-  mountPath: string;
-  mode: 'ro' | 'rw';
-  expiresAt?: number;
-  durationMinutes?: number;
-}

@@ -42,7 +42,7 @@ export interface AgentClientEvents {
   browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate', tabId?: number, rootSelector?: string, steps?: unknown[], url?: string) => void;
   browser_write_request: (id: string, action: string, stepSummary: string, tabUrl?: string, autonomousCmd?: string) => void;
   browser_error: (level: 'warn' | 'error', message: string, source?: string) => void;
-  host_state: (mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw' }[], capabilities?: Record<string, string>) => void;
+  host_state: (capabilities?: Record<string, string>) => void;
   client_settings: (settings: Record<string, boolean | number | string>) => void;
   context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) => void;
   reset: () => void;
@@ -211,7 +211,7 @@ export class AgentClient extends EventEmitter {
         this.emit('screen_share_request', event.id);
         break;
       case 'host_state':
-        this.emit('host_state', event.mounts, event.capabilities);
+        this.emit('host_state', event.capabilities);
         break;
       case 'client_settings':
         this.emit('client_settings', event.settings);

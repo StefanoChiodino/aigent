@@ -136,7 +136,7 @@ export async function startWebServer(
 
   // Cache latest host state from gatekeeper (capabilities).
   let cachedCapabilities: Record<string, { grant: string; available: boolean }> | undefined;
-  client.on('host_state', (_mounts: unknown, capabilities: Record<string, { grant: string; available: boolean }> | undefined) => {
+  client.on('host_state', (capabilities: Record<string, { grant: string; available: boolean }> | undefined) => {
     cachedCapabilities = capabilities;
   });
 
@@ -466,7 +466,6 @@ export async function startWebServer(
     cachedSttAvailable = stt;
     const msg = JSON.stringify({
       type: 'host_state',
-      mounts: [],
       ...(cachedCapabilities ? { capabilities: cachedCapabilities } : {}),
       ttsAvailable: tts,
       sttAvailable: stt,
@@ -661,8 +660,8 @@ export async function startWebServer(
         send({ type: 'screenshot_request', id }),
       screen_share_request: (id: string) =>
         send({ type: 'screen_share_request', id }),
-      host_state: (mounts: { hostPath: string; mountPath: string; mode: 'ro' | 'rw'; expiresAt?: number; durationMinutes?: number }[], capabilities?: Record<string, { grant: string; available: boolean }>) =>
-        send({ type: 'host_state', mounts, ...(capabilities ? { capabilities } : {}) }),
+      host_state: (capabilities?: Record<string, { grant: string; available: boolean }>) =>
+        send({ type: 'host_state', ...(capabilities ? { capabilities } : {}) }),
       context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) =>
         send({ type: 'context_breakdown', breakdown }),
       user_question_request: (id: string, question: string, options?: { label: string; description?: string }[], multiSelect?: boolean, allowFreeText?: boolean) =>

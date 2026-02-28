@@ -45,23 +45,10 @@ test.describe('@fast Sidebar controls', () => {
     await expect(page.locator('#sb-cost-value')).not.toHaveText(before, { timeout: 3_000 });
   });
 
-  test('mounts list updates on host_state event', async () => {
-    const page = getPage();
-    await injectEvent({
-      type: 'host_state',
-      mounts: [{ hostPath: '/tmp/test-mount', containerPath: '/tmp/test-mount', mode: 'ro' }],
-      capabilities: {},
-    });
-    // The mount renders as separate DOM spans: mode ("ro") + path segments ("tmp/" + "test-mount")
-    // toContainText reads concatenated text content, so check for the last path segment
-    await expect(page.locator('#sb-mounts-list')).toContainText('test-mount', { timeout: 3_000 });
-  });
-
   test('capabilities list updates on host_state event', async () => {
     const page = getPage();
     await injectEvent({
       type: 'host_state',
-      mounts: [],
       capabilities: { 'clipboard.read': { grant: 'allow', available: true } },
     });
     await expect(page.locator('#sb-caps-list')).toContainText(/Clipboard Read/i, { timeout: 3_000 });

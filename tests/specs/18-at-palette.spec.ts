@@ -133,28 +133,6 @@ test.describe('@fast At Mention Palette', () => {
     await expect(input).toHaveValue('@screen ');
   });
 
-  test('Enter completes file item and inserts container path', async () => {
-    const page = getPage();
-    await page.route('**/files**', route => route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ files: [{ path: 'src/agent.ts', mountPath: '/workspace' }] }),
-    }));
-
-    await injectEvent({
-      type: 'host_state',
-      mounts: [{ hostPath: '/home/draga/repos/aigent', containerPath: '/workspace', mode: 'ro' }],
-    });
-
-    const input = page.locator('#input');
-    await input.type('@agent');
-    const palette = page.locator('#at-palette');
-    await expect(palette).toContainText('agent.ts', { timeout: 3_000 });
-
-    await input.press('Enter');
-    await expectHidden(palette);
-    await expect(input).toHaveValue('/workspace/src/agent.ts ');
-  });
 
   // ── Token persistence after completion ───────────────────────────────────────
 

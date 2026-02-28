@@ -4,7 +4,7 @@ import { useChatStore } from '../stores/chat';
 import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
 import { useSettingsStore } from '../stores/settings';
-import type { MountInfo, BackgroundTaskInfo } from '../types';
+import type { BackgroundTaskInfo } from '../types';
 import { CAP_INFO, GRANT_DESCRIPTIONS } from '../lib/capabilities';
 import { listAudioDevices, type AudioDevice } from '../lib/audio-devices';
 
@@ -17,55 +17,6 @@ function modelDisplayName(id: string): string {
   return id.replace(/^claude-/, '').replace(/-\d{8,}$/, '');
 }
 
-function fmtRemaining(ms: number): string {
-  if (ms <= 0) return 'expired';
-  const secs = Math.round(ms / 1000);
-  if (secs <= 60) return `${secs} sec`;
-  return `${Math.round((ms / 60_000) * 2) / 2} min`;
-}
-
-function MountItem({ mount }: { mount: MountInfo }) {
-  const [remaining, setRemaining] = useState<number | null>(
-    mount.expiresAt ? mount.expiresAt - Date.now() : null
-  );
-
-  useEffect(() => {
-    if (!mount.expiresAt) return;
-    const id = setInterval(() => setRemaining(mount.expiresAt! - Date.now()), 5_000);
-    return () => clearInterval(id);
-  }, [mount.expiresAt]);
-
-  const parts = mount.hostPath.replace(/\/$/, '').split('/').filter(Boolean);
-  const pct = mount.expiresAt && mount.durationMinutes
-    ? Math.max(0, Math.min(100, ((mount.expiresAt - Date.now()) / (mount.durationMinutes * 60_000)) * 100))
-    : null;
-
-  return (
-    <div className="mount-item">
-      <div className="mount-item-row">
-        <span className={`mount-mode ${mount.mode}`}>{mount.mode}</span>
-        <span className="mount-path" title={mount.hostPath}>
-          {parts.length >= 2 ? (
-            <>
-              <span className="mount-path-parent">{parts[parts.length - 2]}/</span>
-              <span>{parts[parts.length - 1]}</span>
-            </>
-          ) : mount.hostPath}
-        </span>
-        {remaining !== null && (
-          <span className="mount-expiry-badge" title={`Expires at ${new Date(mount.expiresAt!).toLocaleTimeString()}`}>
-            {fmtRemaining(remaining)}
-          </span>
-        )}
-      </div>
-      {pct !== null && (
-        <div className="mount-timer-bar">
-          <div className="mount-timer-fill" style={{ width: `${pct}%` }} />
-        </div>
-      )}
-    </div>
-  );
-}
 
 function TaskItem({ task, onOpen }: { task: BackgroundTaskInfo; onOpen: () => void }) {
   const isUserPullDone = task.delivery === 'user-pull' &&
@@ -164,7 +115,6 @@ export function Sidebar() {
   const usage = useChatStore(s => s.usage);
   const tasks = useChatStore(s => s.tasks);
 
-  const mountsList = useUIStore(s => s.mountsList);
   const capsList = useUIStore(s => s.capsList);
   const ttsAvailable = useUIStore(s => s.ttsAvailable);
   const sttAvailable = useUIStore(s => s.sttAvailable);
@@ -378,16 +328,6 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* Mounts */}
-        <div className="sidebar-section">
-          <div className="sidebar-label">Mounts</div>
-          <div id="sb-mounts-list">
-            {mountsList.length === 0
-              ? <span className="sidebar-value" style={{ fontSize: 11 }}>none</span>
-              : mountsList.map(m => <MountItem key={m.hostPath} mount={m} />)
-            }
-          </div>
-        </div>
 
         {/* Capabilities */}
         <div className="sidebar-section">

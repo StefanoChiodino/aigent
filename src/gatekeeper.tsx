@@ -174,11 +174,7 @@ function readCapabilities(): Record<string, { grant: string; available: boolean 
 /** Push current host state (capabilities) to all UI listeners. */
 function emitHostState(): void {
   if (!client) return;
-  client.emit(
-    'host_state',
-    [], // No mounts — agent runs on host with direct filesystem access
-    readCapabilities(),
-  );
+  client.emit('host_state', readCapabilities());
 }
 
 // --- Server lifecycle (direct spawn, no Docker) ---

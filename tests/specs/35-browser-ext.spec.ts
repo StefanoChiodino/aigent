@@ -28,7 +28,6 @@ test.describe('@fast Browser Extension — sidebar capabilities', () => {
     const page = getPage();
     await injectEvent({
       type: 'host_state',
-      mounts: [],
       capabilities: { 'clipboard.read': { grant: 'allow', available: true } },
     });
     await expect(page.locator('#sb-caps-list')).toContainText(/Clipboard Read/i, {
@@ -40,7 +39,6 @@ test.describe('@fast Browser Extension — sidebar capabilities', () => {
     const page = getPage();
     await injectEvent({
       type: 'host_state',
-      mounts: [],
       capabilities: {
         'clipboard.read': { grant: 'allow', available: true },
         'screen.capture': { grant: 'prompt', available: false },
@@ -56,13 +54,12 @@ test.describe('@fast Browser Extension — sidebar capabilities', () => {
     // First set some caps
     await injectEvent({
       type: 'host_state',
-      mounts: [],
       capabilities: { 'clipboard.read': { grant: 'allow', available: true } },
     });
     await expect(page.locator('#sb-caps-list')).toContainText(/Clipboard Read/i, { timeout: 3_000 });
 
     // Now clear (also reset ttsAvailable/sttAvailable which the server may have probed)
-    await injectEvent({ type: 'host_state', mounts: [], capabilities: {}, ttsAvailable: false, sttAvailable: false });
+    await injectEvent({ type: 'host_state', capabilities: {}, ttsAvailable: false, sttAvailable: false });
     // When capsList is empty the sidebar shows "--"
     await expect(page.locator('#sb-caps-list')).toContainText('--', { timeout: 3_000 });
   });
@@ -175,23 +172,6 @@ test.describe('@fast Browser Extension — browser_ext tool trace (screenshot)',
     });
     await expect(page.locator('#messages')).toContainText('screenshot of the current tab', {
       timeout: 5_000,
-    });
-  });
-});
-
-test.describe('@fast Browser Extension — host_state with mounts', () => {
-  const getPage = useSharedPage();
-
-  test('host_state with both mounts and capability renders both', async () => {
-    const page = getPage();
-    await injectEvent({
-      type: 'host_state',
-      mounts: [{ hostPath: '/home/user/projects', containerPath: '/workspace', mode: 'rw' }],
-      capabilities: { 'clipboard.read': { grant: 'allow', available: true } },
-    });
-    await expect(page.locator('#sb-mounts-list')).toContainText('projects', { timeout: 3_000 });
-    await expect(page.locator('#sb-caps-list')).toContainText(/Clipboard Read/i, {
-      timeout: 3_000,
     });
   });
 });

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PermRequest, MountInfo, ContextBreakdown, PendingAttachment } from '../types';
+import type { PermRequest, ContextBreakdown, PendingAttachment } from '../types';
 
 interface UIState {
   errorMsg: string | null;
@@ -10,7 +10,6 @@ interface UIState {
   settingsOpen: boolean;
   shortcutsOpen: boolean;
   ctxInspectorOpen: boolean;
-  mountsList: MountInfo[];
   capsList: Record<string, { grant: string; available: boolean }>;
   ttsAvailable: boolean;
   sttAvailable: boolean;
@@ -34,7 +33,6 @@ interface UIState {
   setSettingsOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setCtxInspectorOpen: (open: boolean) => void;
-  setMounts: (mounts: MountInfo[]) => void;
   setCaps: (caps: Record<string, { grant: string; available: boolean }>) => void;
   setTtsAvailable: (v: boolean) => void;
   setSttAvailable: (v: boolean) => void;
@@ -59,7 +57,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   settingsOpen: false,
   shortcutsOpen: false,
   ctxInspectorOpen: false,
-  mountsList: [],
   capsList: {},
   ttsAvailable: false,
   sttAvailable: false,
@@ -133,7 +130,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setCtxInspectorOpen: (open) => set({ ctxInspectorOpen: open }),
-  setMounts: (mounts) => set({ mountsList: mounts }),
   setCaps: (caps) => set({ capsList: caps }),
   setTtsAvailable: (v) => set({ ttsAvailable: v }),
   setSttAvailable: (v) => set({ sttAvailable: v }),

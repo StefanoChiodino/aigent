@@ -82,8 +82,9 @@ make serve   # server only (no frontend dev server)
 
 - `Enter` to send, `Shift+Enter` for newline
 - `Ctrl+Enter` — one-shot thinking toggle (if thinking is off, sends with `high` reasoning; if thinking is on, sends without reasoning — then reverts)
+- **Message queueing** — submitting while the agent is busy queues the message instead of blocking. Queued messages appear as dismissable chips above the input and are sent automatically in order as the agent becomes idle.
 - `/` to open the slash-command palette with autocomplete
-- `@` to open the mention palette — `@screen` starts screen sharing, `@clipboard` pastes clipboard content, `@image` attaches an image. When mounts are active, type a filename to search mounted directories.
+- `@` to open the mention palette — `@screen` starts screen sharing, `@clipboard` pastes clipboard content, `@image` attaches an image. Type a path prefix (`~/`, `/`, `./`) to browse the filesystem.
 - Paste or drag files into the input box; attach via the paperclip button. Supported: images (PNG, JPEG, GIF, WebP), PDFs, plain text, and Markdown (up to 5 attachments)
 - Screen-capture button grabs any window or tab via `getDisplayMedia` and attaches it as an image; while sharing, a snap button captures the current frame
 - **Picture-in-Picture** — "Float (PiP)" button in the header pops the chat into a floating window (browsers with Document PiP API support)
@@ -176,12 +177,6 @@ Each row is expandable — click to reveal the actual content sent to the model:
 - **Workspace** — the workspace files section (AGENTS.md, MEMORY.md, etc.)
 - **Tool definitions** — name and one-line description of every active tool
 - **Messages** — the raw JSON payload for each message (first ~800 characters)
-
-### Mounts
-
-The agent can request time-limited access to folders on your machine. You see a permission modal (with an audio cue and browser notification if the tab is backgrounded), approve or deny, and the agent gets read or read-write access that auto-expires.
-
-Active mounts are shown in the sidebar with a countdown timer. Click ✕ to revoke early.
 
 ### Config writes
 

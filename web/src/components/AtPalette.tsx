@@ -77,7 +77,6 @@ function makeDirItems(entries: { name: string; isDir: boolean }[], dir: string):
 interface AtPaletteProps {
   triggerPos: number;
   query: string;
-  mountsAvailable: boolean;
   selected: number;
   onSelect: (idx: number) => void;
   onComplete: (item: AtItem) => void;
@@ -85,7 +84,7 @@ interface AtPaletteProps {
 }
 
 export const AtPalette = React.memo(function AtPalette({
-  triggerPos, query, mountsAvailable, selected, onSelect, onComplete, onItemsChange,
+  triggerPos, query, selected, onSelect, onComplete, onItemsChange,
 }: AtPaletteProps) {
   const [fileItems, setFileItems] = useState<AtItem[]>([]);
   const lastDirRef = useRef('');
@@ -119,29 +118,9 @@ export const AtPalette = React.memo(function AtPalette({
       return () => { if (timerRef.current) clearTimeout(timerRef.current); };
     }
 
-    // Mount search mode (existing)
-    if (!mountsAvailable) { setFileItems([]); return; }
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(async () => {
-      timerRef.current = null;
-      if (query === lastDirRef.current) return;
-      lastDirRef.current = query;
-      try {
-        const resp = await fetch(`/files?q=${encodeURIComponent(query)}`);
-        if (!resp.ok) return;
-        const data = await resp.json() as { files: { path: string; mountPath: string }[] };
-        setFileItems(data.files.map(f => ({
-          icon: '📄',
-          label: f.path,
-          desc: f.mountPath,
-          insert: f.mountPath.replace(/\/$/, '') + '/' + f.path,
-          isFile: true,
-        })));
-      } catch { /* unavailable */ }
-    }, 120);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+    setFileItems([]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, mountsAvailable, triggerPos, pathMode, pathDir]);
+  }, [query, triggerPos, pathMode, pathDir]);
 
   // Static items: hidden when in path mode
   const staticItems = triggerPos !== -1 && !pathMode

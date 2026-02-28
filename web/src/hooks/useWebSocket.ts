@@ -9,7 +9,7 @@ import { captureScreenshot, startScreenShare } from '../lib/screen';
 import { playPermissionSound } from '../lib/audio';
 import { isDemo, getDemoWebSocket } from '../demo/useDemoMode';
 import { setupErrorRelay, teardownErrorRelay } from '../lib/errorRelay';
-import type { ServerEvent, MountInfo } from '../types';
+import type { ServerEvent } from '../types';
 
 export function useWebSocket(): void {
   const chat = useChatStore.getState;
@@ -201,7 +201,6 @@ export function useWebSocket(): void {
           break;
 
         case 'host_state':
-          ui().setMounts(event.mounts as MountInfo[]);
           if (event.capabilities) ui().setCaps(event.capabilities);
           if (event.ttsAvailable !== undefined) ui().setTtsAvailable(event.ttsAvailable);
           if (event.sttAvailable !== undefined) ui().setSttAvailable(event.sttAvailable);

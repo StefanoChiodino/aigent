@@ -86,7 +86,6 @@ describe('InputArea submission', () => {
       thinkingLevel: 'off',
       permQueue: [],
       pendingAttachments: [],
-      mountsList: [],
     });
     // Reset voice store
     useVoiceStore.setState({

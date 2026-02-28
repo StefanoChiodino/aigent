@@ -143,7 +143,6 @@ export function InputArea() {
   const isLoading = useUIStore(s => s.isLoading);
   const errorMsg = useUIStore(s => s.errorMsg);
   const setError = useUIStore(s => s.setError);
-  const mountsList = useUIStore(s => s.mountsList);
   const thinkingLevel = useUIStore(s => s.thinkingLevel);
   const setCtxInspectorOpen = useUIStore(s => s.setCtxInspectorOpen);
   const pendingAttachments = useUIStore(s => s.pendingAttachments);
@@ -650,7 +649,6 @@ export function InputArea() {
       <AtPalette
         triggerPos={atTriggerPos}
         query={atQuery}
-        mountsAvailable={mountsList.length > 0}
         selected={atSelected}
         onSelect={setAtSelected}
         onComplete={handleAtComplete}

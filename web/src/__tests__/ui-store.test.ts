@@ -21,7 +21,7 @@ describe('UI store', () => {
     useUIStore.setState({
       errorMsg: null, isLoading: false, permQueue: [], permShowing: false,
       modelPickerOpen: false, settingsOpen: false, shortcutsOpen: false,
-      ctxInspectorOpen: false, mountsList: [], capsList: {},
+      ctxInspectorOpen: false, capsList: {},
       ttsAvailable: false, sttAvailable: false, modelName: '',
       availableModels: [], availableTools: [], shortMode: false,
       thinkingLevel: 'high', lastEffortLevel: 'high',

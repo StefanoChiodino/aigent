@@ -118,6 +118,14 @@ const RESPONSE_3 =
   'Health endpoint looks good — status ok, uptime reporting correctly, rate limit headers active at 30/min. Ready for production.' +
   '\n\n<speak>Health endpoint checks out — status ok, rate limiting active.</speak>';
 
+const RESPONSE_QUEUE_1 =
+  "Sure — I'll add error handling next. I'll wrap the uptime call in a try/catch and " +
+  'return `{ status: "error", reason: <message> }` with a 500 if anything throws.';
+
+const RESPONSE_QUEUE_2 =
+  "Agreed — I'll add a `cache-control: no-store` header to the /health response so " +
+  'proxies and load balancers always get a fresh result.';
+
 const RESPONSE_4 =
   "Done! I navigated to your app's checkout page and clicked the submit button. " +
   'The form submitted successfully — the page redirected to `/order/confirmed` with ' +
@@ -213,7 +221,7 @@ export const DEMO_SCENARIO: DemoScenario = {
           'claude-opus-4-6',
           'claude-haiku-4-5-20251001',
         ],
-        availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch', 'tree', 'patch', 'search_memory', 'switch_model', 'dispatch_task', 'request_mount', 'request_config_write', 'browser_ext', 'ask_user'],
+        availableTools: ['read_file', 'write_file', 'edit_file', 'exec', 'grep', 'glob', 'fetch', 'tree', 'patch', 'search_memory', 'switch_model', 'dispatch_task', 'request_config_write', 'browser_ext', 'ask_user'],
         isLoading: false,
         tasks: [],
         pendingResults: 0,
@@ -221,9 +229,6 @@ export const DEMO_SCENARIO: DemoScenario = {
     }),
     emit({
       type: 'host_state',
-      mounts: [
-        { hostPath: '~/projects/myapp', mountPath: '/mnt/myapp', mode: 'rw' },
-      ],
       capabilities: {
         'clipboard.read': { grant: 'allow', available: true },
         'clipboard.write': { grant: 'allow', available: true },
@@ -640,7 +645,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     }),
 
     // ════════════════════════════════════════════════════════════════════════
-    //  PHASE 5: Flash settings modal & mount request
+    //  PHASE 5: Flash settings modal
     // ════════════════════════════════════════════════════════════════════════
 
     { action: 'label', text: 'Settings panel', id: 'settings' },
@@ -652,37 +657,6 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'close_modal', modal: 'settings' },
     wait(1500),
 
-    // Mount request with expiry (shows timer bar in sidebar)
-    { action: 'label', text: 'Permission: mount directory' },
-    emit({
-      type: 'mount_request',
-      id: 'mount-001',
-      path: '~/projects/shared-lib',
-      mode: 'ro',
-      reason: 'Need to check shared utility types',
-      durationMinutes: 5,
-    }),
-    { action: 'auto_approve', delayMs: 4000 },
-    wait(500),
-
-    // Update host_state with the new mount (including expiry)
-    emit({
-      type: 'host_state',
-      mounts: [
-        { hostPath: '~/projects/myapp', mountPath: '/mnt/myapp', mode: 'rw' },
-        { hostPath: '~/projects/shared-lib', mountPath: '/mnt/shared-lib', mode: 'ro' },
-      ],
-      capabilities: {
-        'clipboard.read': { grant: 'allow', available: true },
-        'clipboard.write': { grant: 'allow', available: true },
-        'screen.capture': { grant: 'prompt', available: false },
-        'audio.play': { grant: 'prompt', available: false },
-        'notify': { grant: 'prompt', available: false },
-      },
-      ttsAvailable: true,
-      sttAvailable: true,
-    }),
-    wait(1500),
 
     // Config write request — agent wants to update TOOLS.md
     { action: 'label', text: 'Permission: config write', id: 'config-write' },
@@ -862,6 +836,87 @@ export const DEMO_SCENARIO: DemoScenario = {
     }),
 
     // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 5.8: Message queueing — type while agent is busy
+    // ════════════════════════════════════════════════════════════════════════
+
+    { action: 'label', text: 'Message queueing', id: 'message-queue' },
+    wait(1500),
+
+    // Start a new agent turn so isLoading goes true
+    { action: 'type_input', text: 'Add error handling to the health endpoint', charDelayMs: 40 },
+    wait(600),
+    { action: 'submit_input' },
+
+    emit({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: 'Add error handling to the health endpoint',
+        timestamp: new Date().toISOString(),
+      },
+    }),
+    emit({ type: 'loading', isLoading: true }),
+    wait(800),
+
+    // While agent is busy, user types a second message — it queues
+    { action: 'type_input', text: 'Also add a cache-control header', charDelayMs: 50 },
+    wait(600),
+    { action: 'submit_input' },
+    // (message is now in the queue — shown as a chip above input)
+    wait(2500),
+
+    // Agent finishes first exchange — queued message auto-sends
+    { action: 'stream_text', text: RESPONSE_QUEUE_1, chunkSize: 5, intervalMs: 22 },
+    wait(200),
+    emit({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: RESPONSE_QUEUE_1,
+        timestamp: new Date().toISOString(),
+        elapsed: 2.8,
+      },
+    }),
+    emit({ type: 'loading', isLoading: false }),
+
+    // Agent picks up the queued message
+    emit({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: 'Also add a cache-control header',
+        timestamp: new Date().toISOString(),
+      },
+    }),
+    emit({ type: 'loading', isLoading: true }),
+    wait(800),
+
+    { action: 'stream_text', text: RESPONSE_QUEUE_2, chunkSize: 5, intervalMs: 22 },
+    wait(200),
+    emit({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: RESPONSE_QUEUE_2,
+        timestamp: new Date().toISOString(),
+        elapsed: 1.9,
+      },
+    }),
+    emit({ type: 'loading', isLoading: false }),
+
+    emit({
+      type: 'usage',
+      usage: {
+        input: 38400,
+        output: 5200,
+        cacheRead: 22400,
+        cacheWrite: 12000,
+        cost: 0.115,
+        contextTokens: 43600,
+      },
+    }),
+
+    // ════════════════════════════════════════════════════════════════════════
     //  PHASE 6: Concise/voice mode — STT, screenshot, TTS audio playback
     // ════════════════════════════════════════════════════════════════════════
 
@@ -951,12 +1006,12 @@ export const DEMO_SCENARIO: DemoScenario = {
     emit({
       type: 'usage',
       usage: {
-        input: 38400,
-        output: 5620,
-        cacheRead: 24800,
-        cacheWrite: 13600,
-        cost: 0.128,
-        contextTokens: 44020,
+        input: 44600,
+        output: 6480,
+        cacheRead: 29200,
+        cacheWrite: 15400,
+        cost: 0.148,
+        contextTokens: 51080,
       },
     }),
 
