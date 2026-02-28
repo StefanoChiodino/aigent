@@ -764,6 +764,10 @@ function getState(): ServerState {
     isLoading,
     tasks: taskQueue.getInfos(),
     pendingResults: taskQueue.pendingCount,
+    queue: messageQueue.map(m => ({
+      id: m.id,
+      displayText: m.displayText ?? (typeof m.content === 'string' ? m.content : '[attachment]'),
+    })),
   };
 }
 
@@ -815,9 +819,18 @@ function handleCommand(cmd: string): boolean {
 
 // --- Message processing ---
 
-interface QueuedMessage { content: string | UserContent; displayText?: string; displayAttachments?: DisplayAttachment[]; thinkingOverride?: ThinkingLevel | undefined }
+interface QueuedMessage { id: number; content: string | UserContent; displayText?: string; displayAttachments?: DisplayAttachment[]; thinkingOverride?: ThinkingLevel | undefined }
 const messageQueue: QueuedMessage[] = [];
 let processingQueue = false;
+let queueIdCounter = 0;
+
+function broadcastQueueUpdate(): void {
+  const queue = messageQueue.map(m => ({
+    id: m.id,
+    displayText: m.displayText ?? (typeof m.content === 'string' ? m.content : '[attachment]'),
+  }));
+  broadcast({ type: 'queue_update', queue });
+}
 
 async function processMessage(msg: QueuedMessage): Promise<void> {
   // Apply one-shot thinking override if requested (Ctrl+Enter toggle)
@@ -844,6 +857,7 @@ async function processQueue(): Promise<void> {
 
   while (messageQueue.length > 0) {
     const next = messageQueue.shift();
+    broadcastQueueUpdate();
     if (next) await processMessage(next);
   }
 
@@ -864,6 +878,7 @@ function handleCancel(): void {
     abortController.abort();
     abortController = null;
     messageQueue.length = 0;
+    broadcastQueueUpdate();
     isLoading = false;
 
     // Remove the trailing user message — but only for normal user turns.
@@ -990,6 +1005,7 @@ function handleClient(socket: Socket): void {
                 : undefined;
 
             const queued: QueuedMessage = {
+              id: ++queueIdCounter,
               content,
               ...(displayText ? { displayText } : {}),
               ...(displayAttachments ? { displayAttachments } : {}),
@@ -997,14 +1013,7 @@ function handleClient(socket: Socket): void {
             };
             if (isLoading) {
               messageQueue.push(queued);
-              const queuedMsg: DisplayMessage = {
-                role: 'user',
-                content: `[queued] ${displayText ?? trimmed}`,
-                timestamp: new Date().toISOString(),
-                ...(displayAttachments ? { attachments: displayAttachments } : {}),
-              };
-              messages.push(queuedMsg);
-              broadcast({ type: 'message', message: queuedMsg });
+              broadcastQueueUpdate();
             } else {
               messageQueue.push(queued);
               void processQueue();
@@ -1014,6 +1023,14 @@ function handleClient(socket: Socket): void {
           case 'cancel':
             handleCancel();
             break;
+          case 'cancel_queued': {
+            const idx = messageQueue.findIndex(m => m.id === cmd.id);
+            if (idx !== -1) {
+              messageQueue.splice(idx, 1);
+              broadcastQueueUpdate();
+            }
+            break;
+          }
           case 'command':
             handleCommand(cmd.cmd);
             break;
@@ -1329,7 +1346,7 @@ function writeEndOfSessionSummary(): void {
   try {
     if (messages.length < 4) return;
 
-    const userMessages = messages.filter((m) => m.role === 'user' && !m.content.startsWith('[queued]'));
+    const userMessages = messages.filter((m) => m.role === 'user');
     const assistantMessages = messages.filter((m) => m.role === 'assistant');
     const systemMessages = messages.filter((m) => m.role === 'system');
 

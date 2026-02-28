@@ -72,6 +72,7 @@ make serve   # server only (no frontend dev server)
 - **Push-to-talk** — `Ctrl+\`` or the mic button; transcription streams into the input box in real time
 - **Always-on mode** — `Ctrl+Shift+\`` keeps the microphone open continuously; silence detection auto-submits
   - **Interrupt** — talk over the agent's response and VAD will stop it, letting you speak
+  - **Edit during recording** — typing or pasting while the mic is recording preserves your edits; STT appends after your text instead of overwriting it
 - **Text-to-speech** — speaker button on each assistant message reads it aloud; auto-speak toggle in the sidebar plays responses automatically
 - **Speak preview** — assistant messages with a `<speak>` tag show a chat-bubble icon; hover to see the spoken summary without playing audio
 - **TTS rate control** — adjustable playback speed slider in the sidebar (-50% to +100%)
@@ -372,7 +373,9 @@ The `aigent-extension/` directory contains a Chrome extension that enables the `
 
 Build with `make plugin`, or `make plugin-dev` for watch mode. The extension is also built automatically as part of `make dev` and `make dev-ts`.
 
-Read actions (a11y extraction, screenshots, listing tabs) are auto-allowed. Write actions (script execution, navigation, opening/closing tabs) show an approval prompt.
+Read actions (a11y extraction, screenshots, listing tabs) are auto-allowed. Write actions (script execution, navigation, opening/closing tabs) show an approval prompt. Destructive actions (submit, delete, purchase) are flagged with a warning and cannot be bulk-approved via "Always Allow".
+
+The extension authenticates to the gatekeeper via a per-session secret — fetched over HTTP on connect, validated on WebSocket upgrade — preventing other local processes from injecting browser commands.
 
 ---
 

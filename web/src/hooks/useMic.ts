@@ -11,6 +11,7 @@ export interface MicControls {
   stopMic: (silent?: boolean) => Promise<void>;
   abortMic: () => void;
   clearTranscript: () => void;
+  commitBase: (text: string) => void;
   micRecording: boolean;
 }
 
@@ -293,6 +294,18 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     micLiveAbortCtrls.current = [];
   }, []);
 
+  /** Adopt new base text during recording (e.g. user typed or pasted).
+   *  Clears accumulated audio so the next STT chunk only contains speech
+   *  recorded after the edit, preventing duplication with the new base. */
+  const commitBase = useCallback((text: string): void => {
+    micBaseText.current = text;
+    micLastText.current = '';
+    micSamples.current = [];
+    micDisplayedSeq.current = ++micReqSeq.current;
+    for (const c of micLiveAbortCtrls.current) c.abort();
+    micLiveAbortCtrls.current = [];
+  }, []);
+
   const abortMic = useCallback((): void => {
     for (const ctrl of micLiveAbortCtrls.current) ctrl.abort();
     micLiveAbortCtrls.current = [];
@@ -317,6 +330,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     stopMic,
     abortMic,
     clearTranscript,
+    commitBase,
     micRecording: useVoiceStore.getState().micState !== 'idle',
   };
 }

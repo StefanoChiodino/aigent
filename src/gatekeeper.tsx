@@ -12,6 +12,7 @@
  */
 
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -1539,6 +1540,8 @@ const browserWriteGranted = { value: false };
 const browserAutonomousGranted = { value: false };
 // IDs auto-handled (grant active) before web-bridge listener fires — web-bridge skips these
 const autoHandledBrowserWriteIds = new Set<string>();
+// IDs flagged as destructive — web-bridge reads this to annotate the permission request
+const destructiveBrowserWriteIds = new Map<string, string>();
 
 // --- Destructive action heuristics (Phase 3c) ---
 
@@ -1957,8 +1960,9 @@ client.sendCommand = (cmd: string) => {
 }
 
 // Start web UI server before the server process so it's available during startup/restarts.
+const extSecret = randomUUID();
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged: handleSettingsChanged }).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, destructiveBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged: handleSettingsChanged, extSecret }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });
@@ -2053,6 +2057,7 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
           const detail = destructiveMatches.join(', ');
           auditLog({ type: 'browser_ext_destructive_prompt', detail: `${action}: ${detail}` });
           log.info('Destructive browser action flagged for confirmation', { id, action, matches: destructiveMatches });
+          destructiveBrowserWriteIds.set(id, detail);
           const stepSummary = summariseBrowserWriteAction(action, steps, url, tabId);
           pendingBrowserWriteApprovals.set(id, {
             action,
@@ -2086,6 +2091,11 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
 
     // Not granted — queue for user approval
     auditLog({ type: 'browser_ext_write_prompt', detail: `${action}${url ? ` ${url}` : ''}` });
+    // Detect destructive actions so the UI can show a warning
+    const destructiveMatches = detectDestructiveSteps(action, steps, url);
+    if (destructiveMatches.length > 0) {
+      destructiveBrowserWriteIds.set(id, destructiveMatches.join(', '));
+    }
     const stepSummary = summariseBrowserWriteAction(action, steps, url, tabId);
     pendingBrowserWriteApprovals.set(id, {
       action,

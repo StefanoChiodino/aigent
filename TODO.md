@@ -53,7 +53,7 @@
 > Strategy decided — see `docs/os-automation-strategy.md`. Browser-first, a11y-tree-driven, screenshot on demand.
 > Native OS APIs (AT-SPI, UIA, NSAccessibility) deferred — too platform-fragmented, broken in WSL2.
 
-- [ ] **Phase 3c — Destructive action heuristics** — detect and confirm destructive click targets (submit, delete, purchase, etc.) even when `browser.write` is granted; only skipped by `browser.autonomous`
+- [x] **Phase 3c — Destructive action heuristics** — destructive browser actions flagged with warning icon, "Always Allow" hidden, per-action confirmation required; skipped by `browser.autonomous`
 - [ ] **Headless browser (deferred)** — Playwright fallback for unattended/CI runs. See `docs/design-headless-browser.md`.
 - [ ] **Computer-use loop (deferred)** — screenshot + Anthropic computer-use API for non-browser desktop apps; expensive fallback only
 

@@ -22,14 +22,22 @@ const mockStartMic = vi.fn();
 const mockStopMic = vi.fn().mockResolvedValue(undefined);
 const mockAbortMic = vi.fn();
 const mockClearTranscript = vi.fn();
+const mockCommitBase = vi.fn();
+
+// Capture the onTranscript callback so tests can simulate STT output
+let capturedOnTranscript: ((text: string, windowCapped: boolean) => void) | null = null;
 
 vi.mock('../hooks/useMic', () => ({
-  useMic: () => ({
-    startMic: mockStartMic,
-    stopMic: mockStopMic,
-    abortMic: mockAbortMic,
-    clearTranscript: mockClearTranscript,
-  }),
+  useMic: (cb: (text: string, windowCapped: boolean) => void) => {
+    capturedOnTranscript = cb;
+    return {
+      startMic: mockStartMic,
+      stopMic: mockStopMic,
+      abortMic: mockAbortMic,
+      clearTranscript: mockClearTranscript,
+      commitBase: mockCommitBase,
+    };
+  },
 }));
 
 vi.mock('../hooks/useTTS', () => ({
@@ -99,6 +107,7 @@ describe('InputArea submission', () => {
     mockStopMic.mockReset().mockResolvedValue(undefined);
     mockAbortMic.mockReset();
     mockClearTranscript.mockReset();
+    mockCommitBase.mockReset();
   });
 
   afterEach(() => {
@@ -334,5 +343,146 @@ describe('InputArea submission', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // ── STT suffix preservation ─────────────────────────────────────────────
+
+  it('onTranscript sets the input value', async () => {
+    renderInputArea();
+    expect(capturedOnTranscript).not.toBeNull();
+
+    await act(async () => {
+      capturedOnTranscript!('hello from stt', false);
+    });
+
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+    expect(input.value).toBe('hello from stt');
+  });
+
+  it('onTranscript preserves user-typed suffix', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    // First STT chunk sets the input
+    await act(async () => {
+      capturedOnTranscript!('hello', false);
+    });
+    expect(input.value).toBe('hello');
+
+    // User types additional text at the end
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'hello world' } });
+    });
+    expect(input.value).toBe('hello world');
+
+    // Next STT chunk arrives — should preserve " world" suffix
+    await act(async () => {
+      capturedOnTranscript!('hello there', false);
+    });
+    expect(input.value).toBe('hello there world');
+  });
+
+  it('clear button resets STT tracking so no ghost suffix appears', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    // STT sets some text
+    await act(async () => {
+      capturedOnTranscript!('old text', false);
+    });
+    expect(input.value).toBe('old text');
+
+    // User clears the input via the ✕ button
+    const clearBtn = document.getElementById('input-clear')!;
+    await act(async () => {
+      fireEvent.click(clearBtn);
+    });
+    expect(input.value).toBe('');
+
+    // New STT arrives — should not carry over "old text" as a ghost suffix
+    await act(async () => {
+      capturedOnTranscript!('fresh start', false);
+    });
+    expect(input.value).toBe('fresh start');
+  });
+
+  it('submit resets STT tracking', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    // STT sets text, user appends, then submits
+    await act(async () => {
+      capturedOnTranscript!('dictated', false);
+    });
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'dictated extra' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    });
+    expect(input.value).toBe('');
+
+    // New STT after submit — no ghost suffix
+    await act(async () => {
+      capturedOnTranscript!('new dictation', false);
+    });
+    expect(input.value).toBe('new dictation');
+  });
+
+  it('onTranscript replaces fully when user edited within STT text', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    // STT sets text
+    await act(async () => {
+      capturedOnTranscript!('the quick brown fox', false);
+    });
+
+    // User edits in the middle (no longer starts with old STT)
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'a quick brown fox' } });
+    });
+
+    // Next STT chunk — can't detect suffix, should just replace
+    await act(async () => {
+      capturedOnTranscript!('the quick red fox', false);
+    });
+    expect(input.value).toBe('the quick red fox');
+  });
+
+  it('editing during recording calls commitBase so paste is preserved', async () => {
+    // Mic is recording (always-on mode)
+    useVoiceStore.setState({ micState: 'recording' });
+
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    // User pastes text while mic is recording
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'pasted code snippet' } });
+    });
+
+    // commitBase should have been called with the pasted text
+    expect(mockCommitBase).toHaveBeenCalledWith('pasted code snippet');
+
+    // lastSttValueRef should now match the pasted text, so the next
+    // STT chunk that includes the paste as base won't overwrite it
+    await act(async () => {
+      capturedOnTranscript!('pasted code snippet new speech', false);
+    });
+    expect(input.value).toBe('pasted code snippet new speech');
+  });
+
+  it('editing while NOT recording does not call commitBase', async () => {
+    useVoiceStore.setState({ micState: 'idle' });
+
+    renderInputArea();
+    const input = screen.getByRole('textbox');
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'normal typing' } });
+    });
+
+    expect(mockCommitBase).not.toHaveBeenCalled();
   });
 });

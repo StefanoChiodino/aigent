@@ -720,6 +720,7 @@ export class DemoPlaybackEngine {
       permQueue: [], permShowing: false,
       settingsOpen: false, shortcutsOpen: false, ctxInspectorOpen: false,
       pendingAttachments: [],
+      queuedMessages: [],
     });
     useVoiceStore.getState().setMicState('idle');
     useVoiceStore.getState().setVadActive(false);

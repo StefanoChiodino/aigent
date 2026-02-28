@@ -67,6 +67,11 @@ export interface BackgroundTaskInfo {
   result?: string;
 }
 
+export interface QueuedMessageInfo {
+  id: number;
+  displayText: string;
+}
+
 export interface ServerState {
   messages: DisplayMessage[];
   usage: TokenUsage;
@@ -80,6 +85,7 @@ export interface ServerState {
   isLoading: boolean;
   tasks: BackgroundTaskInfo[];
   pendingResults: number;
+  queue: QueuedMessageInfo[];
 }
 
 export interface ToolSummaryRecord {
@@ -137,14 +143,15 @@ export type ServerEvent =
   | { type: 'mcp_tool_request'; id: string; server: string; tool: string; params: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
-  | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean }
+  | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean; extensionConnected?: boolean }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
-  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; autonomousCmd?: string }
+  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; autonomousCmd?: string; destructive?: boolean; destructiveDetail?: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'classifier_decision'; tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
   | { type: 'user_question_request'; id: string; question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean; allowFreeText?: boolean }
   | { type: 'perm_dismissed'; ids: string[] }
+  | { type: 'queue_update'; queue: QueuedMessageInfo[] }
   | { type: 'reset' }
   | { type: 'pong' };
 

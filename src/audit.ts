@@ -57,7 +57,15 @@ export type AuditEventType =
   | 'mcp_tool_allow'
   | 'mcp_tool_deny'
   | 'mcp_user_approve'
-  | 'mcp_user_deny';
+  | 'mcp_user_deny'
+  // Browser extension
+  | 'browser_ext_read'
+  | 'browser_ext_write_grant'
+  | 'browser_ext_write_prompt'
+  | 'browser_ext_user_approve'
+  | 'browser_ext_user_deny'
+  | 'browser_ext_destructive_prompt'
+  | 'browser_ext_ssrf_block';
 
 export interface AuditEvent {
   type: AuditEventType;

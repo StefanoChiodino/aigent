@@ -40,8 +40,8 @@ import '../style.css';
   ui.setTtsAvailable(false);
   ui.setSttAvailable(false);
   ui.setCaps({});
-  // Clear permission queue
-  useUIStore.setState({ permQueue: [], permShowing: false });
+  // Clear permission queue and message queue
+  useUIStore.setState({ permQueue: [], permShowing: false, queuedMessages: [] });
 
   const voice = useVoiceStore.getState();
   voice.setMicState('idle');

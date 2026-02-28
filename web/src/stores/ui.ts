@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PermRequest, ContextBreakdown, PendingAttachment, TraceEntry } from '../types';
+import type { PermRequest, ContextBreakdown, PendingAttachment, TraceEntry, QueuedMessageInfo } from '../types';
 
 interface UIState {
   errorMsg: string | null;
@@ -13,6 +13,7 @@ interface UIState {
   capsList: Record<string, { grant: string; available: boolean }>;
   ttsAvailable: boolean;
   sttAvailable: boolean;
+  extensionConnected: boolean;
   modelName: string;
   availableModels: string[];
   availableTools: string[];
@@ -23,6 +24,7 @@ interface UIState {
   pendingAttachments: PendingAttachment[];
   taskResultTask: import('../types').BackgroundTaskInfo | null;
   traceInspectorTrace: TraceEntry | null;
+  queuedMessages: QueuedMessageInfo[];
 
   setError: (msg: string | null) => void;
   setLoading: (loading: boolean) => void;
@@ -37,6 +39,7 @@ interface UIState {
   setCaps: (caps: Record<string, { grant: string; available: boolean }>) => void;
   setTtsAvailable: (v: boolean) => void;
   setSttAvailable: (v: boolean) => void;
+  setExtensionConnected: (v: boolean) => void;
   setModelName: (name: string) => void;
   setAvailableModels: (models: string[]) => void;
   setAvailableTools: (tools: string[]) => void;
@@ -48,6 +51,7 @@ interface UIState {
   clearAttachments: () => void;
   setTaskResultTask: (task: import('../types').BackgroundTaskInfo | null) => void;
   setTraceInspectorTrace: (trace: TraceEntry | null) => void;
+  setQueuedMessages: (queue: QueuedMessageInfo[]) => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -62,6 +66,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   capsList: {},
   ttsAvailable: false,
   sttAvailable: false,
+  extensionConnected: false,
   modelName: '',
   availableModels: [],
   availableTools: [],
@@ -72,6 +77,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   pendingAttachments: [],
   taskResultTask: null,
   traceInspectorTrace: null,
+  queuedMessages: [],
 
   setError: (msg) => set({ errorMsg: msg }),
   setLoading: (loading) => set({ isLoading: loading }),
@@ -136,6 +142,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setCaps: (caps) => set({ capsList: caps }),
   setTtsAvailable: (v) => set({ ttsAvailable: v }),
   setSttAvailable: (v) => set({ sttAvailable: v }),
+  setExtensionConnected: (v) => set({ extensionConnected: v }),
   setModelName: (name) => set({ modelName: name }),
   setAvailableModels: (models) => set({ availableModels: models }),
   setAvailableTools: (tools) => set({ availableTools: tools }),
@@ -150,4 +157,5 @@ export const useUIStore = create<UIState>((set, get) => ({
   clearAttachments: () => set({ pendingAttachments: [] }),
   setTaskResultTask: (task) => set({ taskResultTask: task }),
   setTraceInspectorTrace: (trace) => set({ traceInspectorTrace: trace }),
+  setQueuedMessages: (queue) => set({ queuedMessages: queue }),
 }));

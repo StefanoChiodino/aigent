@@ -228,6 +228,7 @@ export function useWebSocket(): void {
           if (event.capabilities) ui().setCaps(event.capabilities);
           if (event.ttsAvailable !== undefined) ui().setTtsAvailable(event.ttsAvailable);
           if (event.sttAvailable !== undefined) ui().setSttAvailable(event.sttAvailable);
+          if (event.extensionConnected !== undefined) ui().setExtensionConnected(event.extensionConnected);
           break;
 
         case 'client_settings':
@@ -342,23 +343,31 @@ export function useWebSocket(): void {
           break;
         }
 
-        case 'browser_write_request':
+        case 'browser_write_request': {
+          const baseTitle = event.action === 'navigate' ? 'Browser: Navigate'
+            : event.action === 'open_tab' ? 'Browser: Open Tab'
+            : event.action === 'close_tab' ? 'Browser: Close Tab'
+            : 'Browser: Run Script';
+          const bodyParts: string[] = [];
+          if (event.destructive && event.destructiveDetail) {
+            bodyParts.push(`\u26a0 Destructive: ${event.destructiveDetail}`);
+          }
+          if (event.tabUrl) bodyParts.push(`On: ${event.tabUrl}`);
           ui().enqueuePermRequest({
             type: 'browser_write',
             id: event.id,
-            title: event.action === 'navigate' ? 'Browser: Navigate'
-              : event.action === 'open_tab' ? 'Browser: Open Tab'
-              : event.action === 'close_tab' ? 'Browser: Close Tab'
-              : 'Browser: Run Script',
+            title: event.destructive ? `\u26a0 ${baseTitle}` : baseTitle,
             detail: event.stepSummary,
-            ...(event.tabUrl ? { body: `On: ${event.tabUrl}` } : {}),
+            ...(bodyParts.length > 0 ? { body: bodyParts.join('\n') } : {}),
             approveCmd: `/approve-browser-write ${event.id}`,
             denyCmd: `/deny-browser-write ${event.id}`,
-            alwaysAllowCmd: `/approve-browser-write ${event.id} --always`,
+            // Hide always-allow for destructive actions — require per-action confirmation
+            ...(!event.destructive ? { alwaysAllowCmd: `/approve-browser-write ${event.id} --always` } : {}),
             ...(event.autonomousCmd ? { autonomousCmd: event.autonomousCmd } : {}),
           });
           playPermissionSound();
           break;
+        }
 
         case 'user_question_request':
           ui().enqueuePermRequest({

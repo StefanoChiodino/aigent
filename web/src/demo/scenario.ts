@@ -863,6 +863,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(600),
     { action: 'submit_input' },
     // (message is now in the queue — shown as a chip above input)
+    emit({ type: 'queue_update', queue: [{ id: 1, displayText: 'Also add a cache-control header' }] }),
     wait(2500),
 
     // Agent finishes first exchange — queued message auto-sends
@@ -878,6 +879,9 @@ export const DEMO_SCENARIO: DemoScenario = {
       },
     }),
     emit({ type: 'loading', isLoading: false }),
+
+    // Queue drained — chip disappears
+    emit({ type: 'queue_update', queue: [] }),
 
     // Agent picks up the queued message
     emit({

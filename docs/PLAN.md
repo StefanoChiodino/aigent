@@ -131,6 +131,8 @@ Server process (spawned directly, no Docker)
 - [x] Phase 3a — Multi-tab + grants: `activate_tab`, `open_tab`, session-level `browser.write` grant
 - [x] Prompt injection defense: page content wrapped in untrusted markers
 - [x] Phase 3b — Autonomous mode: `browser.autonomous` grant, `close_tab` action, "Go Autonomous" button (2026-02-26)
+- [x] Phase 3c — Destructive action heuristics: UI warning + forced per-action confirmation for destructive browser writes
+- [x] Extension WebSocket auth: per-session secret via /ext/secret + query-param validation on upgrade
 
 ### Web UI & Extension
 - [x] Replace sidepanel iframe with `chrome.windows.create({ type: 'popup' })`

@@ -45,6 +45,7 @@ export interface AgentClientEvents {
   host_state: (capabilities?: Record<string, string>) => void;
   client_settings: (settings: Record<string, boolean | number | string>) => void;
   context_breakdown: (breakdown: import('./protocol.js').ContextBreakdown) => void;
+  queue_update: (queue: import('./protocol.js').QueuedMessageInfo[]) => void;
   reset: () => void;
   disconnected: () => void;
   reconnecting: (attempt: number) => void;
@@ -227,6 +228,9 @@ export class AgentClient extends EventEmitter {
         break;
       case 'context_breakdown':
         this.emit('context_breakdown', event.breakdown);
+        break;
+      case 'queue_update':
+        this.emit('queue_update', event.queue);
         break;
       case 'reset':
         this.emit('reset');

@@ -5,7 +5,7 @@
 
 import { useCallback } from 'react';
 
-const PIP_WIDTH = 420;
+const PIP_WIDTH = 460;
 const PIP_HEIGHT = 720;
 
 export interface PiPControls {

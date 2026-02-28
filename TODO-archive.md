@@ -4,6 +4,10 @@ Completed items moved here to keep `TODO.md` focused on active work.
 
 ---
 
+## UI / UX
+
+- [x] **Message queue chip UI** — queued messages now appear as dismissable chips above the input bar (not `[queued]` chat bubbles). Per-message cancel via ✕ button removes from server queue. New `queue_update` protocol event syncs queue state to all connected clients.
+
 ## Security & Safety
 
 - [x] **`fetch` response size cap** — `FETCH_MAX_BYTES_HARD = 10 * 1024 * 1024` (10 MB hard ceiling) in `src/server.ts`; enforced in `src/tools/execute.ts`. Agent must request user approval to exceed the default soft limit; hard ceiling is unconditional.

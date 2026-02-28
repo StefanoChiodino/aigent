@@ -82,9 +82,9 @@ export interface ClassifierDecision { tier: 1 | 2 | 3; action: 'allow' | 'block'
 export async function startWebServer(
   client: AgentClient,
   port?: number,
-  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; autoHandledMcpIds?: Set<string>; onSettingsChanged?: () => void },
+  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; destructiveBrowserWriteIds?: Map<string, string>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; autoHandledMcpIds?: Set<string>; onSettingsChanged?: () => void; extSecret?: string },
 ): Promise<{ port: number }> {
-  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged } = options ?? {};
+  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, destructiveBrowserWriteIds, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged, extSecret } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -153,6 +153,14 @@ export async function startWebServer(
     if (req.method === 'GET' && url === '/healthz') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end('{"status":"ok"}');
+      return;
+    }
+
+    // Extension auth secret — extension fetches this to authenticate WebSocket connections.
+    // Only served to localhost connections.
+    if (req.method === 'GET' && url === '/ext/secret' && extSecret) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ secret: extSecret }));
       return;
     }
 
@@ -357,6 +365,17 @@ export async function startWebServer(
     const url = req.url ?? '/';
     const pathname = url.includes('?') ? url.slice(0, url.indexOf('?')) : url;
     if (pathname === '/ext') {
+      // Validate extension auth secret via query param
+      if (extSecret) {
+        const qs = url.includes('?') ? url.slice(url.indexOf('?')) : '';
+        const params = new URLSearchParams(qs);
+        if (params.get('secret') !== extSecret) {
+          log.warn('Extension WebSocket rejected — invalid or missing secret');
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+      }
       extWss.handleUpgrade(req, socket, head, (ws) => extWss.emit('connection', ws, req));
     } else {
       // Default to /ws (also handles any other paths)
@@ -470,6 +489,7 @@ export async function startWebServer(
       ...(cachedCapabilities ? { capabilities: cachedCapabilities } : {}),
       ttsAvailable: tts,
       sttAvailable: stt,
+      extensionConnected: extensionBridge.isConnected(),
     });
     if (ws) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -491,6 +511,16 @@ export async function startWebServer(
   }, 15_000);
   // Don't hold the process open for the re-probe timer.
   reprobe.unref();
+
+  // Broadcast extension connection changes to all web clients.
+  const broadcastExtensionState = (connected: boolean): void => {
+    broadcastToClients({
+      type: 'host_state',
+      extensionConnected: connected,
+    });
+  };
+  extensionBridge.on('connected', () => broadcastExtensionState(true));
+  extensionBridge.on('disconnected', () => broadcastExtensionState(false));
 
   wss.on('connection', (ws: WebSocket) => {
     log.info('Web client connected');
@@ -637,7 +667,14 @@ export async function startWebServer(
                 return summary.length > 80 ? summary.slice(0, 77) + '...' : summary;
               })();
           const tabUrl = extensionBridge.getActiveTabUrl();
-          send({ type: 'browser_write_request', id, action, stepSummary, ...(tabUrl ? { tabUrl } : {}), autonomousCmd: `/grant-browser-autonomous` });
+          const destructiveDetail = destructiveBrowserWriteIds?.get(id);
+          if (destructiveDetail) destructiveBrowserWriteIds?.delete(id);
+          send({
+            type: 'browser_write_request', id, action, stepSummary,
+            ...(tabUrl ? { tabUrl } : {}),
+            autonomousCmd: `/grant-browser-autonomous`,
+            ...(destructiveDetail ? { destructive: true, destructiveDetail } : {}),
+          });
         }
       },
       file_access_request: (id: string, path: string, operation: 'read' | 'write', reason: string) => {

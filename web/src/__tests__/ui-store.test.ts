@@ -26,7 +26,7 @@ describe('UI store', () => {
       availableModels: [], availableTools: [], shortMode: false,
       thinkingLevel: 'high', lastEffortLevel: 'high',
       contextBreakdown: null, pendingAttachments: [], taskResultTask: null,
-      traceInspectorTrace: null,
+      traceInspectorTrace: null, queuedMessages: [],
     });
   });
 

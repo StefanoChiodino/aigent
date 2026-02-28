@@ -11,6 +11,7 @@ import { COMMANDS } from '../lib/settings-schema';
 import { CommandPalette } from './CommandPalette';
 import { AtPalette, getAtStaticMatches } from './AtPalette';
 import { AttachmentPreview } from './AttachmentPreview';
+import { QueueChips } from './QueueChips';
 import type { CommandDef, AtItem, PendingAttachment } from '../types';
 
 /** Escape HTML special chars */
@@ -185,16 +186,23 @@ export function InputArea() {
   });
   const micBaseTextRef = useRef('');
   const lastMicTextRef = useRef('');
+  const lastSttValueRef = useRef('');
   const [hasMicText, setHasMicText] = useState(false);
   const [micCapped, setMicCapped] = useState(false);
 
   const { stopAll: ttsStopAll } = useTTS();
 
-  const { startMic, stopMic, abortMic, clearTranscript } = useMic(useCallback((text: string, windowCapped: boolean) => {
+  const { startMic, stopMic, abortMic, clearTranscript, commitBase } = useMic(useCallback((text: string, windowCapped: boolean) => {
     lastMicTextRef.current = text;
     setHasMicText(!!text);
     setMicCapped(windowCapped);
-    setInputValue(text);
+    setInputValue(prev => {
+      const oldStt = lastSttValueRef.current;
+      // If user appended text after the last STT value, preserve that suffix
+      const suffix = oldStt && prev.startsWith(oldStt) ? prev.slice(oldStt.length) : '';
+      lastSttValueRef.current = text;
+      return text + suffix;
+    });
   }, []));
 
   useEffect(() => {
@@ -208,6 +216,7 @@ export function InputArea() {
       // (the zustand store reset sets micState to 'idle' but doesn't stop the
       // actual mic infrastructure managed by useMic's refs)
       abortMic();
+      lastSttValueRef.current = '';
       setMicCapped(false);
       setHasMicText(false);
       setScreenCapActive(false);
@@ -298,6 +307,7 @@ export function InputArea() {
 
     send(msg);
     setInputValue('');
+    lastSttValueRef.current = '';
     setMicCapped(false);
     setPaletteSelected(0);
     setAtTriggerPos(-1);
@@ -591,6 +601,12 @@ export function InputArea() {
     computeAtTrigger(val, caret);
     setPaletteSelected(0);
     setPaletteHidden(false);
+    // When user edits during recording, adopt their text as the new base.
+    // This clears stale audio samples so STT appends after the user's text.
+    if (micState === 'recording') {
+      commitBase(val);
+      lastSttValueRef.current = val;
+    }
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -637,6 +653,7 @@ export function InputArea() {
       <div id="error-bar" className={errorMsg ? '' : 'hidden'}>{errorMsg}</div>
 
       <AttachmentPreview />
+      <QueueChips />
 
       <CommandPalette
         text={inputValue}
@@ -704,9 +721,11 @@ export function InputArea() {
                 if (micState === 'recording') {
                   clearTranscript();
                   lastMicTextRef.current = '';
+                  lastSttValueRef.current = '';
                   setHasMicText(false);
                   setMicCapped(false);
                 }
+                lastSttValueRef.current = '';
                 setInputValue('');
                 inputRef.current?.focus();
               }}
@@ -799,7 +818,7 @@ export function InputArea() {
           )}
         </div>
 
-        {/* Send / Cancel — both always in DOM, toggled via hidden class */}
+        {/* Cancel (visible when busy) + Send (always visible) — side by side */}
         <button
           id="cancel"
           className={showCancel ? '' : 'hidden'}
@@ -815,8 +834,8 @@ export function InputArea() {
         </button>
         <button
           id="send"
-          className={[showCancel ? 'hidden' : '', ctrlHeld ? 'thinking-override' : ''].filter(Boolean).join(' ')}
-          title={ctrlHeld ? (currentlyOn ? 'Send without thinking' : 'Send with thinking') : 'Send'}
+          className={ctrlHeld ? 'thinking-override' : ''}
+          title={ctrlHeld ? (currentlyOn ? 'Send without thinking' : 'Send with thinking') : (showCancel ? 'Queue message' : 'Send')}
           onClick={() => submitMessage(ctrlHeld)}
         >
           <svg className={`icon-brain${willThink ? '' : ' hidden'}`} viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">

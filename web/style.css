@@ -2167,6 +2167,49 @@ html, body {
   opacity: 1;
 }
 
+/* ── Queue chips (pending messages above input) ──────────── */
+
+#queue-chips {
+  display: flex;
+  gap: 6px;
+  padding: 0 0 8px;
+  flex-wrap: wrap;
+}
+
+.queue-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  max-width: 300px;
+}
+
+.queue-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-chip-remove {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.queue-chip-remove:hover {
+  color: var(--text);
+}
+
 /* Drag-over highlight */
 #input-area.drag-over {
   background: var(--accent-soft);

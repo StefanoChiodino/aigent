@@ -14,6 +14,8 @@ const GATEKEEPER_URL = 'http://localhost:3141';
 const RECONNECT_DELAY_MS = 3000;
 const KEEPALIVE_ALARM = 'aigent-keepalive';
 
+let cachedSecret: string | null = null;
+
 // --- BrowserStep types (discriminated union used in run_script) ---
 
 type BrowserStep =
@@ -28,7 +30,8 @@ type BrowserStep =
   | { waitFor: string; timeout?: number; state?: 'visible' | 'hidden' | 'attached' }
   | { pressKey: string; target?: string }
   | { hover: string }
-  | { extractA11y: true };
+  | { extractA11y: true }
+  | { screenshot: true };
 
 interface ScriptRunResult {
   ok: boolean;
@@ -37,6 +40,7 @@ interface ScriptRunResult {
   finalUrl?: string;
   finalTitle?: string;
   pendingNavigation?: string;
+  pendingScreenshot?: boolean;
   a11ySnapshots?: Array<{ stepIndex: number; treeText: string }>;
   error?: { step: number; type: string; message: string };
 }
@@ -71,6 +75,7 @@ interface ExtResponse {
   finalUrl?: string;
   finalTitle?: string;
   newTabId?: number;
+  screenshots?: Array<{ stepIndex: number; dataUrl: string }>;
   error?: string;
 }
 
@@ -90,13 +95,33 @@ function send(msg: object): void {
   }
 }
 
+async function fetchSecret(): Promise<string | null> {
+  try {
+    const res = await fetch(`${GATEKEEPER_URL}/ext/secret`);
+    if (!res.ok) return null;
+    const body = await res.json() as { secret?: string };
+    return body.secret ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function connect(): void {
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
 
-  ws = new WebSocket(GATEKEEPER_WS);
+  // Fetch auth secret before connecting (re-fetch on each connect in case gatekeeper restarted)
+  void fetchSecret().then((secret) => {
+    cachedSecret = secret;
+    const wsUrl = secret ? `${GATEKEEPER_WS}?secret=${encodeURIComponent(secret)}` : GATEKEEPER_WS;
+    connectWithUrl(wsUrl);
+  });
+}
+
+function connectWithUrl(wsUrl: string): void {
+  ws = new WebSocket(wsUrl);
 
   ws.onopen = () => {
     console.log('[aigent] Connected to gatekeeper');
@@ -357,12 +382,14 @@ async function runScript(id: string, tabId?: number, steps: BrowserStep[] = []):
   }
 }
 
-/** Execute steps starting at `fromIndex`, handling cross-page navigation. */
+/** Execute steps starting at `fromIndex`, handling cross-page navigation and mid-script screenshots. */
 async function executeSteps(
   id: string,
   tabId: number,
   steps: BrowserStep[],
   fromIndex: number,
+  accScreenshots: Array<{ stepIndex: number; dataUrl: string }> = [],
+  accA11y: Array<{ stepIndex: number; treeText: string }> = [],
 ): Promise<ExtResponse> {
   const stepsToRun = steps.slice(fromIndex);
 
@@ -377,42 +404,56 @@ async function executeSteps(
     return { type: 'ext_response', id, ok: false, error: 'No result from script runner' };
   }
 
+  // Accumulate a11y snapshots from this batch
+  if (result.a11ySnapshots) accA11y.push(...result.a11ySnapshots);
+
   // If a navigate step caused a page unload, wait for the new page then continue
   if (result.pendingNavigation !== undefined) {
     const remainingFrom = fromIndex + result.stepsCompleted;
     if (remainingFrom >= steps.length) {
-      // Navigation was the last step — wait for page to load and return
       const finalTab = await waitForTabLoad(tabId, 15_000);
       return {
-        type: 'ext_response',
-        id,
-        ok: true,
-        stepsCompleted: steps.length,
-        totalSteps: steps.length,
-        finalUrl: finalTab?.url,
-        finalTitle: finalTab?.title,
+        type: 'ext_response', id, ok: true,
+        stepsCompleted: steps.length, totalSteps: steps.length,
+        finalUrl: finalTab?.url, finalTitle: finalTab?.title,
+        ...(accScreenshots.length > 0 ? { screenshots: accScreenshots } : {}),
+        ...(accA11y.length > 0 ? { a11ySnapshots: accA11y } : {}),
       };
     }
-    // Wait for navigation then execute remaining steps
     await waitForTabLoad(tabId, 15_000);
-    return executeSteps(id, tabId, steps, remainingFrom);
+    return executeSteps(id, tabId, steps, remainingFrom, accScreenshots, accA11y);
   }
 
-  // Build a11y snapshot texts (the injected function returns treeText strings)
-  const a11ySnapshots = result.a11ySnapshots?.map(s => ({
-    stepIndex: s.stepIndex,
-    treeText: s.treeText,
-  }));
+  // If a screenshot step paused execution, capture via background API then continue
+  if (result.pendingScreenshot) {
+    const screenshotStepIdx = fromIndex + result.stepsCompleted - 1;
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.windowId) {
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+      accScreenshots.push({ stepIndex: screenshotStepIdx, dataUrl });
+    }
+    const remainingFrom = fromIndex + result.stepsCompleted;
+    if (remainingFrom >= steps.length) {
+      return {
+        type: 'ext_response', id, ok: true,
+        stepsCompleted: steps.length, totalSteps: steps.length,
+        finalUrl: result.finalUrl, finalTitle: result.finalTitle,
+        ...(accScreenshots.length > 0 ? { screenshots: accScreenshots } : {}),
+        ...(accA11y.length > 0 ? { a11ySnapshots: accA11y } : {}),
+      };
+    }
+    return executeSteps(id, tabId, steps, remainingFrom, accScreenshots, accA11y);
+  }
 
   return {
-    type: 'ext_response',
-    id,
+    type: 'ext_response', id,
     ok: result.ok,
     stepsCompleted: result.stepsCompleted,
     totalSteps: result.totalSteps,
     finalUrl: result.finalUrl,
     finalTitle: result.finalTitle,
-    ...(a11ySnapshots && a11ySnapshots.length > 0 ? {} : {}), // included below via spread on result
+    ...(accScreenshots.length > 0 ? { screenshots: accScreenshots } : {}),
+    ...(accA11y.length > 0 ? { a11ySnapshots: accA11y } : {}),
     error: result.error ? `Step ${result.error.step}: ${result.error.message}` : undefined,
   };
 }
@@ -573,6 +614,17 @@ function scriptRunnerFn(steps: BrowserStep[], startIndex: number): ScriptRunResu
 
         if ('extractA11y' in step) {
           a11ySnapshots.push({ stepIndex: globalStepIdx, treeText: extractA11yInline() });
+        }
+
+        // screenshot steps are handled by the background worker (captureVisibleTab)
+        // — signal back so the background can capture and then resume remaining steps
+        if ('screenshot' in step) {
+          return {
+            ok: true, stepsCompleted: globalStepIdx + 1, totalSteps,
+            finalUrl: location.href, finalTitle: document.title,
+            pendingScreenshot: true,
+            ...(a11ySnapshots.length > 0 ? { a11ySnapshots } : {}),
+          };
         }
 
       } catch (err) {
