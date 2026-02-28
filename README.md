@@ -366,16 +366,18 @@ Permission levels: `"allow"` (auto-approve), `"deny"` (auto-block), `"prompt"` (
 The `aigent-extension/` directory contains a Chrome extension that enables the `browser_ext` tool. When installed, the agent can:
 
 - Extract the accessibility tree from any tab
-- Take screenshots of browser tabs
+- Take screenshots of browser tabs (also mid-script via `{ screenshot: true }` steps)
 - List, open, close, and switch tabs
 - Execute JavaScript in tabs (requires user approval)
 - Navigate tabs to URLs
 
 Build with `make plugin`, or `make plugin-dev` for watch mode. The extension is also built automatically as part of `make dev` and `make dev-ts`.
 
-Read actions (a11y extraction, screenshots, listing tabs) are auto-allowed. Write actions (script execution, navigation, opening/closing tabs) show an approval prompt. Destructive actions (submit, delete, purchase) are flagged with a warning and cannot be bulk-approved via "Always Allow".
+**Permission model:** Read actions (a11y extraction, screenshots, listing tabs) are auto-allowed. Write actions (script execution, navigation, opening/closing tabs) show an approval prompt. Destructive actions (submit, delete, purchase, etc.) are flagged with a warning icon and cannot be bulk-approved via "Always Allow" — each destructive action requires individual confirmation.
 
-The extension authenticates to the gatekeeper via a per-session secret — fetched over HTTP on connect, validated on WebSocket upgrade — preventing other local processes from injecting browser commands.
+**Security:** The extension authenticates to the gatekeeper via a per-session shared secret — fetched over HTTP on connect, validated on WebSocket upgrade — preventing other local processes from injecting browser commands. Navigate URLs are validated against the same SSRF rules as `fetch` (private IPs, metadata endpoints, etc.). All browser extension events are recorded in the audit log.
+
+**Connection indicator:** When the extension connects, a "Browser" capability appears in the sidebar with an "on" badge. It disappears when the extension disconnects.
 
 ---
 

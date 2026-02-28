@@ -744,6 +744,10 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'label', text: 'Browser automation', id: 'browser-automation' },
     wait(1500),
 
+    // Extension connection indicator appears in sidebar
+    emit({ type: 'host_state', extensionConnected: true }),
+    wait(800),
+
     { action: 'type_input', text: 'Test the checkout flow — click submit and verify the confirmation page', charDelayMs: 40 },
     wait(600),
     { action: 'submit_input' },
@@ -775,6 +779,20 @@ export const DEMO_SCENARIO: DemoScenario = {
       autonomousCmd: '/grant browser.autonomous',
     }),
     { action: 'auto_approve', delayMs: 4500 },
+    wait(300),
+
+    // Destructive browser action — ⚠ warning, "Always Allow" hidden
+    { action: 'label', text: 'Browser: destructive action' },
+    emit({
+      type: 'browser_write_request',
+      id: 'browser-001b',
+      action: 'run_script',
+      stepSummary: 'Click "Delete Test Order" in admin panel',
+      tabUrl: 'http://localhost:3000/admin/orders',
+      destructive: true,
+      destructiveDetail: 'click "Delete Test Order" (delete)',
+    }),
+    { action: 'auto_approve', delayMs: 4000 },
     wait(300),
 
     // Browser action: navigate to verify

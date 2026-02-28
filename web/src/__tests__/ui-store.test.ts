@@ -22,7 +22,8 @@ describe('UI store', () => {
       errorMsg: null, isLoading: false, permQueue: [], permShowing: false,
       modelPickerOpen: false, settingsOpen: false, shortcutsOpen: false,
       ctxInspectorOpen: false, capsList: {},
-      ttsAvailable: false, sttAvailable: false, modelName: '',
+      ttsAvailable: false, sttAvailable: false, extensionConnected: false,
+      modelName: '',
       availableModels: [], availableTools: [], shortMode: false,
       thinkingLevel: 'high', lastEffortLevel: 'high',
       contextBreakdown: null, pendingAttachments: [], taskResultTask: null,
@@ -163,5 +164,16 @@ describe('UI store', () => {
     const stored = useUIStore.getState().traceInspectorTrace;
     expect(stored?.type).toBe('tool');
     if (stored?.type === 'tool') expect(stored.toolName).toBe('exec');
+  });
+
+  it('extensionConnected defaults to false', () => {
+    expect(useUIStore.getState().extensionConnected).toBe(false);
+  });
+
+  it('setExtensionConnected toggles extension state', () => {
+    useUIStore.getState().setExtensionConnected(true);
+    expect(useUIStore.getState().extensionConnected).toBe(true);
+    useUIStore.getState().setExtensionConnected(false);
+    expect(useUIStore.getState().extensionConnected).toBe(false);
   });
 });
