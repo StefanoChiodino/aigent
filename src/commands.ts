@@ -61,6 +61,61 @@ export interface CommandContext {
 const VALID_EFFORT_LEVELS: ThinkingLevel[] = ['low', 'medium', 'high', 'max'];
 
 // ---------------------------------------------------------------------------
+// State-mutation functions — used by both structured messages and slash commands
+// ---------------------------------------------------------------------------
+
+/** Toggle reasoning on or off. */
+export function setThinking(enabled: boolean, ctx: CommandContext): void {
+  if (enabled) {
+    if (ctx.currentThinking === 'off') {
+      ctx.agent.thinkingLevel = ctx.savedEffortLevel;
+      ctx.currentThinking = ctx.savedEffortLevel;
+    }
+  } else {
+    if (ctx.currentThinking !== 'off') {
+      ctx.savedEffortLevel = ctx.currentThinking;
+    }
+    ctx.agent.thinkingLevel = 'off';
+    ctx.currentThinking = 'off';
+  }
+  ctx.broadcast({ type: 'state', thinking: ctx.currentThinking });
+  ctx.doAutoSave();
+}
+
+/** Set effort level (low/medium/high/max). Returns false if invalid. */
+export function setEffort(level: ThinkingLevel, ctx: CommandContext): boolean {
+  if (!VALID_EFFORT_LEVELS.includes(level)) return false;
+  ctx.agent.thinkingLevel = level;
+  ctx.currentThinking = level;
+  ctx.broadcast({ type: 'state', thinking: ctx.currentThinking });
+  ctx.doAutoSave();
+  return true;
+}
+
+/** Toggle short/voice mode. */
+export function setShort(enabled: boolean, ctx: CommandContext): void {
+  ctx.currentShort = enabled;
+  ctx.agent.setExtraSystemPrompt(ctx.buildExtraSystemPrompt());
+  ctx.broadcast({ type: 'state', short: enabled });
+  ctx.doAutoSave();
+}
+
+/** Switch the active model. Returns result with ok status. */
+export function setModel(model: string, ctx: CommandContext): { ok: boolean; message?: string } {
+  if (!ctx.availableModels.includes(model)) {
+    return { ok: false, message: `Unknown model: ${model}\nAvailable: ${ctx.availableModels.join(', ')}` };
+  }
+  if (model === ctx.model) {
+    return { ok: true, message: `Already using: ${ctx.model}` };
+  }
+  ctx.model = model;
+  ctx.agent.currentModel = model;
+  ctx.broadcast({ type: 'state', model: ctx.model });
+  ctx.doAutoSave();
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // Command definitions
 // ---------------------------------------------------------------------------
 
@@ -116,7 +171,7 @@ const commands: CommandDef[] = [
 
   // --- /reasoning ---
   {
-    match: '/reasoning',
+    match: (input) => input === '/reasoning' || input === '/reasoning on' || input === '/reasoning off',
     execute: (input, ctx) => {
       if (input === '/reasoning') {
         const isOn = ctx.currentThinking !== 'off';
@@ -124,24 +179,13 @@ const commands: CommandDef[] = [
         return true;
       }
       if (input === '/reasoning on') {
-        if (ctx.currentThinking === 'off') {
-          ctx.agent.thinkingLevel = ctx.savedEffortLevel;
-          ctx.currentThinking = ctx.savedEffortLevel;
-        }
+        setThinking(true, ctx);
         ctx.addSystemMessage(`Reasoning: on (${ctx.currentThinking})`);
-        ctx.broadcast({ type: 'state', thinking: ctx.currentThinking });
-        ctx.doAutoSave();
         return true;
       }
       if (input === '/reasoning off') {
-        if (ctx.currentThinking !== 'off') {
-          ctx.savedEffortLevel = ctx.currentThinking;
-        }
-        ctx.agent.thinkingLevel = 'off';
-        ctx.currentThinking = 'off';
+        setThinking(false, ctx);
         ctx.addSystemMessage('Reasoning: off');
-        ctx.broadcast({ type: 'state', thinking: ctx.currentThinking });
-        ctx.doAutoSave();
         return true;
       }
       return false;
@@ -160,12 +204,8 @@ const commands: CommandDef[] = [
         return true;
       }
       const level = input.split(' ')[1] as ThinkingLevel;
-      if (VALID_EFFORT_LEVELS.includes(level)) {
-        ctx.agent.thinkingLevel = level;
-        ctx.currentThinking = level;
+      if (setEffort(level, ctx)) {
         ctx.addSystemMessage(`Effort: ${level}`);
-        ctx.broadcast({ type: 'state', thinking: ctx.currentThinking });
-        ctx.doAutoSave();
       } else {
         ctx.addSystemMessage(`Invalid effort. Options: ${VALID_EFFORT_LEVELS.join(', ')}`);
       }
@@ -181,20 +221,9 @@ const commands: CommandDef[] = [
         ctx.addSystemMessage(`Short mode: ${ctx.currentShort ? 'on' : 'off'}\nUsage: /short on | /short off`);
         return true;
       }
-      if (input === '/short on') {
-        ctx.currentShort = true;
-        ctx.agent.setExtraSystemPrompt(ctx.buildExtraSystemPrompt());
-        ctx.addSystemMessage('Short mode: on');
-        ctx.broadcast({ type: 'state', short: true });
-        ctx.doAutoSave();
-        return true;
-      }
-      // /short off
-      ctx.currentShort = false;
-      ctx.agent.setExtraSystemPrompt(ctx.buildExtraSystemPrompt());
-      ctx.addSystemMessage('Short mode: off');
-      ctx.broadcast({ type: 'state', short: false });
-      ctx.doAutoSave();
+      const enabled = input === '/short on';
+      setShort(enabled, ctx);
+      ctx.addSystemMessage(`Short mode: ${enabled ? 'on' : 'off'}`);
       return true;
     },
   },
@@ -414,17 +443,8 @@ const commands: CommandDef[] = [
         return true;
       }
       const requested = input.slice('/model '.length).trim();
-      if (!ctx.availableModels.includes(requested)) {
-        ctx.addSystemMessage(`Unknown model: ${requested}\nAvailable: ${ctx.availableModels.join(', ')}`);
-      } else if (requested === ctx.model) {
-        ctx.addSystemMessage(`Already using: ${ctx.model}`);
-      } else {
-        ctx.model = requested;
-        ctx.agent.currentModel = requested;
-        ctx.addSystemMessage(`Model switched to: ${ctx.model}`);
-        ctx.broadcast({ type: 'state', model: ctx.model });
-        ctx.doAutoSave();
-      }
+      const result = setModel(requested, ctx);
+      ctx.addSystemMessage(result.message ?? `Model switched to: ${ctx.model}`);
       return true;
     },
   },

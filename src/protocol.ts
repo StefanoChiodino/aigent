@@ -36,6 +36,10 @@ export type ClientCommand =
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'user_question_response'; id: string; answer: string; selectedOptions?: string[]; dismissed: boolean }
   | { type: 'cancel_queued'; id: number }
+  | { type: 'set_thinking'; enabled: boolean }
+  | { type: 'set_effort'; level: ThinkingLevel }
+  | { type: 'set_short'; enabled: boolean }
+  | { type: 'set_model'; model: string }
   | { type: 'ping' };
 
 // --- Server → Client ---

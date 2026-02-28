@@ -90,9 +90,17 @@ test.describe('@fast Slash command palette & commands', () => {
   test('/reasoning off disables the toggle', async () => {
     const page = getPage();
     const input = page.locator('#input');
+    // Ensure reasoning is on first (precondition)
+    await input.fill('/reasoning on');
+    await input.press('Enter');
+    await expect(page.locator('#sb-reasoning-toggle')).toHaveText('ON', { timeout: 5_000 });
+    // Now disable and verify it changed
     await input.fill('/reasoning off');
     await input.press('Enter');
     await expect(page.locator('#sb-reasoning-toggle')).toHaveText('OFF', { timeout: 5_000 });
+    // Also verify no "Unknown command" appeared
+    const messages = await page.locator('#messages').innerText();
+    expect(messages).not.toContain('Unknown command');
     // Restore
     await input.fill('/reasoning on');
     await input.press('Enter');

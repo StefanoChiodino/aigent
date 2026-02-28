@@ -84,18 +84,18 @@ export function useWebSocket(): void {
             const cs = settings().clientSettings;
             if ('AIGENT_MODEL' in cs && typeof cs['AIGENT_MODEL'] === 'string' && cs['AIGENT_MODEL'] !== event.state.model) {
               ui().setModelName(cs['AIGENT_MODEL']);
-              send({ type: 'message', content: `/model ${cs['AIGENT_MODEL']}` });
+              send({ type: 'set_model', model: cs['AIGENT_MODEL'] });
             }
             if ('AIGENT_SHORT' in cs && typeof cs['AIGENT_SHORT'] === 'boolean' && cs['AIGENT_SHORT'] !== (event.state.short ?? false)) {
               ui().setShortMode(cs['AIGENT_SHORT']);
-              send({ type: 'message', content: cs['AIGENT_SHORT'] ? '/short on' : '/short off' });
+              send({ type: 'set_short', enabled: cs['AIGENT_SHORT'] });
             }
             if ('AIGENT_THINKING' in cs && typeof cs['AIGENT_THINKING'] === 'string' && cs['AIGENT_THINKING'] !== event.state.thinking) {
               ui().setThinkingLevel(cs['AIGENT_THINKING']);
               if (cs['AIGENT_THINKING'] === 'off') {
-                send({ type: 'message', content: '/reasoning off' });
+                send({ type: 'set_thinking', enabled: false });
               } else {
-                send({ type: 'message', content: `/effort ${cs['AIGENT_THINKING']}` });
+                send({ type: 'set_effort', level: cs['AIGENT_THINKING'] });
               }
             }
           }

@@ -139,7 +139,7 @@ export function Sidebar() {
   const setModelPickerOpen = useUIStore(s => s.setModelPickerOpen);
 
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
-
+  const multilineEnter = useSettingsStore(s => s.getClientSetting('AIGENT_MULTILINE_ENTER')) === true;
 
   const ttsAutoSpeak = useVoiceStore(s => s.ttsAutoSpeak);
   const ttsRatePct = useVoiceStore(s => s.ttsRatePct);
@@ -215,7 +215,7 @@ export function Sidebar() {
                 title={mid}
                 onClick={() => {
                   if (mid !== modelName) {
-                    send({ type: 'message', content: `/model ${mid}` });
+                    send({ type: 'set_model', model: mid });
                     setClientSetting('AIGENT_MODEL', mid);
                   }
                   setModelPickerOpen(false);
@@ -243,7 +243,7 @@ export function Sidebar() {
               title={!supportsThinking ? 'Reasoning requires an Opus model' : undefined}
               onClick={() => {
                 const nextOff = reasoningOn;
-                send({ type: 'message', content: nextOff ? '/reasoning off' : '/reasoning on' });
+                send({ type: 'set_thinking', enabled: !nextOff });
                 setClientSetting('AIGENT_THINKING', nextOff ? 'off' : (lastEffortLevel || 'high'));
               }}
             >
@@ -262,7 +262,7 @@ export function Sidebar() {
                 className={`sb-pill${activeLevel === level ? ' active' : ''}`}
                 data-level={level}
                 onClick={() => {
-                  send({ type: 'message', content: `/effort ${level}` });
+                  send({ type: 'set_effort', level });
                   setClientSetting('AIGENT_THINKING', level);
                 }}
               >
@@ -272,6 +272,38 @@ export function Sidebar() {
           </div>
             </>;
           })()}
+        </div>
+
+        {/* Input mode */}
+        <div className="sidebar-section">
+          <div className="sidebar-label">Input</div>
+          <div className="sb-reasoning-controls">
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>
+              Multiline Enter
+              <span className="sb-keyhint-wrap">
+                <kbd className="sb-keyhint-trigger">?</kbd>
+                <div className="sb-keyhint-tooltip">
+                  {(multilineEnter
+                    ? [['Enter', 'newline'], ['Ctrl+Enter', 'send'], ['Shift+Enter', 'thinking']]
+                    : [['Enter', 'send'], ['Shift+Enter', 'newline'], ['Ctrl+Enter', 'thinking']]
+                  ).map(([keys, desc]) => (
+                    <div key={keys} className="sb-keyhint-row">
+                      <span className="sb-keyhint-keys">{keys!.split('+').map((k, i) => (
+                        <React.Fragment key={k}>{i > 0 && <span className="shortcut-plus">+</span>}<kbd>{k}</kbd></React.Fragment>
+                      ))}</span>
+                      <span className="sb-keyhint-desc">{desc}</span>
+                    </div>
+                  ))}
+                </div>
+              </span>
+            </span>
+            <button
+              className={`sb-toggle${multilineEnter ? ' on' : ''}`}
+              onClick={() => setClientSetting('AIGENT_MULTILINE_ENTER', !multilineEnter)}
+            >
+              {multilineEnter ? 'ON' : 'OFF'}
+            </button>
+          </div>
         </div>
 
         {/* Context meter */}
@@ -301,7 +333,7 @@ export function Sidebar() {
               setTtsAutoSpeak(mode !== 'off');
               const wantShort = mode === 'short';
               if (wantShort !== shortMode) {
-                send({ type: 'message', content: wantShort ? '/short on' : '/short off' });
+                send({ type: 'set_short', enabled: wantShort });
                 setClientSetting('AIGENT_SHORT', wantShort);
               }
             };

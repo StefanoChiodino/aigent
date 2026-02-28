@@ -798,6 +798,42 @@ export async function startWebServer(
           case 'command':
             client.sendCommand(cmd.cmd);
             break;
+          case 'set_thinking':
+            if (TEST_MODE) {
+              const level = cmd.enabled ? 'high' : 'off';
+              if (cachedState) cachedState = { ...cachedState, thinking: level as ThinkingLevel };
+              broadcastToClients({ type: 'state', thinking: level as ThinkingLevel });
+            } else {
+              client.send(cmd);
+            }
+            break;
+          case 'set_effort':
+            if (TEST_MODE) {
+              if (cachedState) cachedState = { ...cachedState, thinking: cmd.level as ThinkingLevel };
+              broadcastToClients({ type: 'state', thinking: cmd.level as ThinkingLevel });
+            } else {
+              client.send(cmd);
+            }
+            break;
+          case 'set_short':
+            if (TEST_MODE) {
+              if (cachedState) cachedState = { ...cachedState, short: cmd.enabled as boolean };
+              broadcastToClients({ type: 'state', short: cmd.enabled as boolean });
+              if (cmd.enabled) broadcastToClients({ type: 'system', content: 'Short mode: on' });
+            } else {
+              client.send(cmd);
+            }
+            break;
+          case 'set_model':
+            if (TEST_MODE) {
+              if (cachedState && cachedState.availableModels.includes(cmd.model as string)) {
+                cachedState = { ...cachedState, model: cmd.model as string };
+                broadcastToClients({ type: 'state', model: cmd.model as string });
+              }
+            } else {
+              client.send(cmd);
+            }
+            break;
           case 'config_write_response':
             client.send(cmd);
             break;

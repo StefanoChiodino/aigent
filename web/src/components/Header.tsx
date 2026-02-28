@@ -145,7 +145,7 @@ export function Header() {
                     className={`hdr-dropdown-option${mid === modelName ? ' active' : ''}`}
                     onClick={() => {
                       if (mid !== modelName) {
-                        send({ type: 'message', content: `/model ${mid}` });
+                        send({ type: 'set_model', model: mid });
                         setClientSetting('AIGENT_MODEL', mid);
                       }
                       setModelPickerOpen(false);
@@ -165,7 +165,7 @@ export function Header() {
             title={`Reasoning: ${reasoningOn ? activeLevel : 'off'}`}
             onClick={() => {
               const nextOff = reasoningOn;
-              send({ type: 'message', content: nextOff ? '/reasoning off' : '/reasoning on' });
+              send({ type: 'set_thinking', enabled: !nextOff });
               setClientSetting('AIGENT_THINKING', nextOff ? 'off' : (lastEffortLevel || 'high'));
             }}
           >
@@ -213,7 +213,7 @@ export function Header() {
                         key={level}
                         className={`sb-pill${activeLevel === level ? ' active' : ''}${!reasoningOn ? ' disabled' : ''}`}
                         onClick={() => {
-                          send({ type: 'message', content: `/effort ${level}` });
+                          send({ type: 'set_effort', level });
                           setClientSetting('AIGENT_THINKING', level);
                         }}
                       >
@@ -232,7 +232,7 @@ export function Header() {
                       setTtsAutoSpeak(mode !== 'off');
                       const wantShort = mode === 'short';
                       if (wantShort !== shortMode) {
-                        send({ type: 'message', content: wantShort ? '/short on' : '/short off' });
+                        send({ type: 'set_short', enabled: wantShort });
                         setClientSetting('AIGENT_SHORT', wantShort);
                       }
                     };

@@ -33,7 +33,7 @@ import {
   SHORT_MODE_PROMPT,
   ensureSpeakTag as _ensureSpeakTag,
 } from './system-prompts.js';
-import { handleCommand as _handleCommand, type CommandContext } from './commands.js';
+import { handleCommand as _handleCommand, setThinking, setEffort, setShort, setModel, type CommandContext } from './commands.js';
 
 const log = createLogger('server');
 
@@ -815,8 +815,8 @@ function doAutoSave(): void {
 
 // --- Command handling ---
 
-function handleCommand(cmd: string): boolean {
-  const ctx: CommandContext = {
+function getCommandContext(): CommandContext {
+  return {
     agent,
     taskQueue,
     get messages() { return messages; },
@@ -845,7 +845,10 @@ function handleCommand(cmd: string): boolean {
     requestRestart,
     processAgentTurn,
   };
-  return _handleCommand(cmd, ctx);
+}
+
+function handleCommand(cmd: string): boolean {
+  return _handleCommand(cmd, getCommandContext());
 }
 
 // --- Message processing ---
@@ -1074,6 +1077,18 @@ function handleClient(socket: Socket): void {
           }
           case 'command':
             handleCommand(cmd.cmd);
+            break;
+          case 'set_thinking':
+            setThinking(cmd.enabled, getCommandContext());
+            break;
+          case 'set_effort':
+            setEffort(cmd.level, getCommandContext());
+            break;
+          case 'set_short':
+            setShort(cmd.enabled, getCommandContext());
+            break;
+          case 'set_model':
+            setModel(cmd.model, getCommandContext());
             break;
           case 'host_state':
             // Refresh system prompt so the agent sees current state
