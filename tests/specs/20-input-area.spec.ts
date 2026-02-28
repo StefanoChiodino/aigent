@@ -134,6 +134,60 @@ test.describe('@fast Input area', () => {
     expect(short!.height).toBeLessThan(tall!.height);
   });
 
+  test('textarea scrolls to bottom when text exceeds max height', async () => {
+    const page = getPage();
+    const input = page.locator('#input');
+
+    // Fill with enough lines to exceed the 200px max-height cap
+    const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join('\n');
+    await input.fill(lines);
+
+    // The textarea should be scrolled to the bottom
+    const { scrollTop, scrollHeight, clientHeight } = await input.evaluate(el => ({
+      scrollTop: (el as HTMLTextAreaElement).scrollTop,
+      scrollHeight: (el as HTMLTextAreaElement).scrollHeight,
+      clientHeight: (el as HTMLTextAreaElement).clientHeight,
+    }));
+
+    // Content overflows — scrollHeight exceeds visible area
+    expect(scrollHeight).toBeGreaterThan(clientHeight);
+    // Scrolled to the bottom (within 2px tolerance for rounding)
+    expect(scrollTop + clientHeight).toBeGreaterThanOrEqual(scrollHeight - 2);
+  });
+
+  test('textarea stays scrolled to bottom as text is incrementally added', async () => {
+    const page = getPage();
+    const input = page.locator('#input');
+
+    // Start with enough text to fill the textarea
+    const initial = Array.from({ length: 15 }, (_, i) => `line ${i + 1}`).join('\n');
+    await input.fill(initial);
+
+    // Simulate STT adding more text (like microphone dictation)
+    for (let i = 16; i <= 20; i++) {
+      await input.evaluate((el, line) => {
+        const ta = el as HTMLTextAreaElement;
+        // Simulate React-style value update (like STT callback does)
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype, 'value'
+        )!.set!;
+        nativeInputValueSetter.call(ta, ta.value + '\n' + line);
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+      }, `dictated line ${i}`);
+
+      // After each addition, verify scroll is at bottom
+      const { scrollTop, scrollHeight, clientHeight } = await input.evaluate(el => ({
+        scrollTop: (el as HTMLTextAreaElement).scrollTop,
+        scrollHeight: (el as HTMLTextAreaElement).scrollHeight,
+        clientHeight: (el as HTMLTextAreaElement).clientHeight,
+      }));
+      expect(scrollTop + clientHeight).toBeGreaterThanOrEqual(scrollHeight - 2);
+    }
+
+    // Clean up
+    await input.fill('');
+  });
+
   // ── Drag-and-drop visual indicator ───────────────────────────────────────────
 
   test('dragging over input area adds drag-over class', async () => {

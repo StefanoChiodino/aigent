@@ -236,12 +236,13 @@ export function InputArea() {
     else sessionStorage.removeItem('aigent-draft');
   }, [inputValue]);
 
-  // Auto-grow textarea
+  // Auto-grow textarea and keep bottom visible
   const autoGrow = useCallback(() => {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+    el.scrollTop = el.scrollHeight;
   }, []);
 
   useEffect(() => {
