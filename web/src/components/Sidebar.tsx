@@ -81,6 +81,14 @@ function DevicePicker({ kind, value, onChange }: {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  // If the stored device ID is no longer in the enumerated list, reset to default.
+  // This handles browsers regenerating device IDs across sessions.
+  useEffect(() => {
+    if (devices.length > 0 && value && !devices.some(d => d.deviceId === value)) {
+      onChange('');
+    }
+  }, [devices, value, onChange]);
+
   const selected = devices.find(d => d.deviceId === value) ?? devices[0];
 
   return (

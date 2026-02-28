@@ -162,7 +162,8 @@ test.describe('@fast TTS stop button scope', () => {
     await setTtsPlaying(page, true);
 
     await expectVisible(page.locator('#cancel'));
-    await expectHidden(page.locator('#send'));
+    // Send button is always visible now — it queues messages
+    await expectVisible(page.locator('#send'));
 
     // Cleanup
     await setTtsPlaying(page, false);

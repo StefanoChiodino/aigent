@@ -175,6 +175,20 @@ export function PermissionModal() {
             >
               {req.type === 'file_access' ? 'Always Allow Dir' : 'Always Allow Domain'}
             </button>
+            <button
+              id="perm-autonomous-btn"
+              className={`perm-btn perm-autonomous${req.autonomousCmd ? '' : ' hidden'}`}
+              onClick={() => {
+                if (!req.autonomousCmd) return;
+                send({ type: 'command', cmd: req.autonomousCmd });
+                useUIStore.setState(s => {
+                  const next = s.permQueue.slice(1);
+                  return { permQueue: next, permShowing: next.length > 0 };
+                });
+              }}
+            >
+              Go Autonomous
+            </button>
             {req.alwaysReadCmd && (
               <button
                 id="perm-always-read-btn"

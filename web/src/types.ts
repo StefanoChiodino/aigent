@@ -179,6 +179,7 @@ export interface PermRequest {
   denyCmd: string;
   alwaysAllowCmd?: string;
   alwaysAllowDomainCmd?: string;
+  autonomousCmd?: string;
   alwaysReadCmd?: string;
   alwaysWriteCmd?: string;
   alwaysScriptCmd?: string;

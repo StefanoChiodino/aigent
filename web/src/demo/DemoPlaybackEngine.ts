@@ -326,6 +326,7 @@ export class DemoPlaybackEngine {
 
       case 'set_short':
         useUIStore.getState().setShortMode(step.on);
+        useVoiceStore.getState().setTtsAutoSpeak(step.on);
         break;
 
       case 'click': {
@@ -420,6 +421,7 @@ export class DemoPlaybackEngine {
 
       case 'set_short':
         useUIStore.getState().setShortMode(step.on);
+        useVoiceStore.getState().setTtsAutoSpeak(step.on);
         break;
 
       case 'play_audio':

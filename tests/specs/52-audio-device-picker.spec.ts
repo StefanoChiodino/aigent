@@ -250,6 +250,83 @@ test.describe('@fast Audio device picker', () => {
     expect(constraints.audio.channelCount).toBe(1);
   });
 
+  // ── Stale device ID handling ───────────────────────────────────────────────
+
+  test('stale device ID is reset to default when device not found', async () => {
+    const page = getPage();
+
+    // Set a device ID that won't match any enumerated device
+    await page.evaluate(() => {
+      (window as any).__zustand_voice.getState().setMicDeviceId('stale-device-id');
+    });
+
+    await enableVoiceServices(page);
+
+    // The DevicePicker should detect the mismatch and reset to ''
+    const stored = await page.evaluate(() =>
+      (window as any).__zustand_voice.getState().micDeviceId,
+    );
+    expect(stored).toBe('');
+  });
+
+  test('startMic falls back to default when stored device is stale', async () => {
+    const page = getPage();
+    await enableVoiceServices(page);
+
+    // Set a stale device ID directly in the store
+    await page.evaluate(() => {
+      (window as any).__zustand_voice.getState().setMicDeviceId('nonexistent-device');
+    });
+
+    // Install mic mock that captures constraints
+    await page.evaluate(() => {
+      let capturedConstraints: any = null;
+      const mockTrack = { stop: () => {}, kind: 'audio', enabled: true };
+      const mockStream = { getTracks: () => [mockTrack], getAudioTracks: () => [mockTrack] };
+
+      (navigator.mediaDevices as any).getUserMedia = async (constraints: any) => {
+        capturedConstraints = constraints;
+        return mockStream;
+      };
+      (window as any).__capturedConstraints = () => capturedConstraints;
+
+      (window as any).AudioWorkletNode = class {
+        port = { onmessage: null, postMessage: () => {} };
+        connect() {}
+        disconnect() {}
+        addEventListener() {}
+        removeEventListener() {}
+      };
+      (window as any).AudioContext = class {
+        sampleRate = 16000;
+        destination = {};
+        currentTime = 0;
+        state = 'running';
+        audioWorklet = { addModule: () => Promise.resolve() };
+        createMediaStreamSource() { return { connect: () => {}, disconnect: () => {} }; }
+        createOscillator() { return { connect: () => {}, frequency: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} }, start: () => {}, stop: () => {} }; }
+        createGain() { return { connect: () => {}, gain: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} } }; }
+        close() { return Promise.resolve(); }
+      };
+    });
+    await mockSTT(page, '');
+
+    const mic = page.locator('#mic');
+    await mic.click();
+    await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3_000 });
+
+    // Should have fallen back to no deviceId constraint
+    const constraints = await page.evaluate(() => (window as any).__capturedConstraints());
+    expect(constraints).toBeTruthy();
+    expect(constraints.audio.deviceId).toBeUndefined();
+
+    // Store should have been reset to ''
+    const stored = await page.evaluate(() =>
+      (window as any).__zustand_voice.getState().micDeviceId,
+    );
+    expect(stored).toBe('');
+  });
+
   test('getUserMedia uses default when no device selected', async () => {
     const page = getPage();
     await enableVoiceServices(page);

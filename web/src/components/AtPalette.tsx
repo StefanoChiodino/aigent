@@ -95,7 +95,7 @@ export const AtPalette = React.memo(function AtPalette({
 
   // Fetch directory listing (path mode) or mount search (mount mode)
   useEffect(() => {
-    if (triggerPos === -1) { setFileItems([]); return; }
+    if (triggerPos === -1) { setFileItems([]); lastDirRef.current = ''; return; }
 
     if (pathMode) {
       // Path mode — fetch directory listing from /files?dir=

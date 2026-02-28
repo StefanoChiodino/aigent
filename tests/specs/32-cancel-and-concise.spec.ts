@@ -31,10 +31,12 @@ test.describe('@fast Cancel button', () => {
     await expectHidden(page.locator('#cancel'));
   });
 
-  test('send button is hidden when loading', async () => {
+  test('send button stays visible when loading (for message queueing)', async () => {
     const page = getPage();
     await injectEvent({ type: 'loading', isLoading: true });
-    await expectHidden(page.locator('#send'));
+    // Send button is always visible now — it queues messages when loading
+    await expectVisible(page.locator('#send'));
+    await expect(page.locator('#send')).toHaveAttribute('title', /Queue/);
     // Cleanup
     await injectEvent({ type: 'loading', isLoading: false });
   });
@@ -123,62 +125,56 @@ test.describe('@fast Cancel button', () => {
   });
 });
 
-test.describe('@fast Short mode', () => {
+test.describe('@fast Short mode (speak pills)', () => {
   const getPage = useSharedPage();
 
-  test('short toggle sends /short command and updates state', async () => {
+  test('clicking "short" speak pill sends /short on and activates pill', async () => {
     const page = getPage();
-    const toggle = page.locator('#sb-short-toggle');
-    const before = (await toggle.innerText()).trim();
-    const expected = before === 'ON' ? 'OFF' : 'ON';
+    const offPill = page.locator('#sb-speak-pills .sb-pill[data-speak="off"]');
+    const shortPill = page.locator('#sb-speak-pills .sb-pill[data-speak="short"]');
 
-    await toggle.click();
-    // Wait for server round-trip
-    await expect(toggle).toHaveText(expected, { timeout: 5_000 });
-
-    // Restore
-    await toggle.click();
-    await expect(toggle).toHaveText(before, { timeout: 5_000 });
-  });
-
-  test('short toggle ON produces system message', async () => {
-    const page = getPage();
-    const toggle = page.locator('#sb-short-toggle');
-    const before = (await toggle.innerText()).trim();
-
-    if (before === 'ON') {
-      // Turn off first
-      await toggle.click();
-      await expect(toggle).toHaveText('OFF', { timeout: 5_000 });
+    // Ensure we start from "off"
+    if (!(await offPill.evaluate(el => el.classList.contains('active')))) {
+      await offPill.click();
+      await expect(offPill).toHaveClass(/active/, { timeout: 5_000 });
     }
 
-    await toggle.click();
-    await expect(toggle).toHaveText('ON', { timeout: 5_000 });
-    // Check system message appeared
+    await shortPill.click();
+    await expect(shortPill).toHaveClass(/active/, { timeout: 5_000 });
+
+    // Restore
+    await offPill.click();
+    await expect(offPill).toHaveClass(/active/, { timeout: 5_000 });
+  });
+
+  test('clicking "short" speak pill produces system message', async () => {
+    const page = getPage();
+    const offPill = page.locator('#sb-speak-pills .sb-pill[data-speak="off"]');
+    const shortPill = page.locator('#sb-speak-pills .sb-pill[data-speak="short"]');
+
+    // Ensure we start from "off"
+    if (!(await offPill.evaluate(el => el.classList.contains('active')))) {
+      await offPill.click();
+      await expect(offPill).toHaveClass(/active/, { timeout: 5_000 });
+    }
+
+    await shortPill.click();
+    await expect(shortPill).toHaveClass(/active/, { timeout: 5_000 });
     await expect(page.locator('#messages')).toContainText(/short mode: on/i, { timeout: 5_000 });
 
     // Restore
-    await toggle.click();
-    await expect(toggle).toHaveText('OFF', { timeout: 5_000 });
+    await offPill.click();
+    await expect(offPill).toHaveClass(/active/, { timeout: 5_000 });
   });
 
-  test('short state survives injected state event', async () => {
+  test('short state reflects injected state event in speak pills', async () => {
     const page = getPage();
     // Inject short: true
     await injectEvent({ type: 'state', short: true });
-    await expect(page.locator('#sb-short-toggle')).toHaveText('ON', { timeout: 3_000 });
+    await expect(page.locator('#sb-speak-pills .sb-pill[data-speak="short"]')).toHaveClass(/active/, { timeout: 3_000 });
 
     // Inject short: false
     await injectEvent({ type: 'state', short: false });
-    await expect(page.locator('#sb-short-toggle')).toHaveText('OFF', { timeout: 3_000 });
-  });
-
-  test('short toggle has correct CSS class when on', async () => {
-    const page = getPage();
-    await injectEvent({ type: 'state', short: true });
-    await expect(page.locator('#sb-short-toggle')).toHaveClass(/\bon\b/, { timeout: 3_000 });
-
-    await injectEvent({ type: 'state', short: false });
-    await expect(page.locator('#sb-short-toggle')).not.toHaveClass(/\bon\b/, { timeout: 3_000 });
+    await expect(page.locator('#sb-speak-pills .sb-pill[data-speak="short"]')).not.toHaveClass(/active/, { timeout: 3_000 });
   });
 });

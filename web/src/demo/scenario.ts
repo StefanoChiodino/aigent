@@ -942,7 +942,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 6: Concise/voice mode — STT, screenshot, TTS audio playback
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'label', text: 'Short mode', id: 'short-mode' },
+    { action: 'label', text: 'Speak: short', id: 'short-mode' },
     wait(2000),
 
     // Toggle short mode ON in the sidebar

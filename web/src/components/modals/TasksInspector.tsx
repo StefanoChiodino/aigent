@@ -8,6 +8,19 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function fmtDateTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+    d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function fmtDateShort(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return fmtTime(iso);
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
 function fmtElapsed(startedAt: string, completedAt?: string): string {
   const end = completedAt ? new Date(completedAt).getTime() : Date.now();
   const ms = end - new Date(startedAt).getTime();
@@ -65,6 +78,7 @@ function TaskRow({ task }: { task: BackgroundTaskInfo }) {
       <div className="tski-row" onClick={() => setExpanded(e => !e)}>
         <span className={`tski-status tski-status-${task.status}`}>{statusChar}</span>
         <span className="tski-desc" title={task.description}>{task.description}</span>
+        <span className="tski-date">{fmtDateShort(task.startedAt)}</span>
         <span className="tski-model">{task.model ? modelDisplayName(task.model) : '--'}</span>
         <span className="tski-tokens">{tokTotal > 0 ? tokTotal.toLocaleString() : '--'}</span>
         <span className="tski-cost">{costStr ?? '--'}</span>
@@ -109,7 +123,7 @@ function TaskRow({ task }: { task: BackgroundTaskInfo }) {
             </div>
             <div className="tski-meta-row">
               <span className="tim-key">Started</span>
-              <span className="tim-val">{fmtTime(task.startedAt)}</span>
+              <span className="tim-val">{fmtDateTime(task.startedAt)}</span>
             </div>
             <div className="tski-meta-row">
               <span className="tim-key">Elapsed</span>
@@ -193,6 +207,7 @@ export function TasksInspector() {
               <div className="tski-col-headers">
                 <span />
                 <span className="tski-col-h">Task</span>
+                <span className="tski-col-h">Date</span>
                 <span className="tski-col-h">Model</span>
                 <span className="tski-col-h tski-col-r">Tokens</span>
                 <span className="tski-col-h tski-col-r">Cost</span>

@@ -109,28 +109,35 @@ test.describe('@fast Sidebar controls', () => {
     await toggle.click();
   });
 
-  // ── TTS ───────────────────────────────────────────────────────────────────────
+  // ── Speak pills ──────────────────────────────────────────────────────────────
 
-  test('TTS toggle is visible', async () => {
+  test('speak pills are visible with off/on/short options', async () => {
     const page = getPage();
-    await expect(page.locator('#sb-tts-toggle')).toBeVisible();
+    const pills = page.locator('#sb-speak-pills .sb-pill');
+    await expect(pills).toHaveCount(3);
+    await expect(page.locator('#sb-speak-pills .sb-pill[data-speak="off"]')).toBeVisible();
+    await expect(page.locator('#sb-speak-pills .sb-pill[data-speak="on"]')).toBeVisible();
+    await expect(page.locator('#sb-speak-pills .sb-pill[data-speak="short"]')).toBeVisible();
   });
 
-  test('TTS toggle shows ON or OFF', async () => {
+  test('clicking "on" speak pill activates it', async () => {
     const page = getPage();
-    const text = await page.locator('#sb-tts-toggle').innerText();
-    expect(['ON', 'OFF']).toContain(text.trim());
-  });
-
-  test('clicking TTS toggle flips its state', async () => {
-    const page = getPage();
-    const toggle = page.locator('#sb-tts-toggle');
-    const before = await toggle.innerText();
-    await toggle.click();
-    const after = await toggle.innerText();
-    expect(after.trim()).not.toEqual(before.trim());
+    const onPill = page.locator('#sb-speak-pills .sb-pill[data-speak="on"]');
+    await onPill.click();
+    await expect(onPill).toHaveClass(/active/);
     // Restore
-    await toggle.click();
+    await page.locator('#sb-speak-pills .sb-pill[data-speak="off"]').click();
+  });
+
+  test('clicking "short" speak pill activates it and sends /short on', async () => {
+    const page = getPage();
+    const shortPill = page.locator('#sb-speak-pills .sb-pill[data-speak="short"]');
+    await shortPill.click();
+    await expect(shortPill).toHaveClass(/active/, { timeout: 5_000 });
+    // Restore
+    const offPill = page.locator('#sb-speak-pills .sb-pill[data-speak="off"]');
+    await offPill.click();
+    await expect(offPill).toHaveClass(/active/, { timeout: 5_000 });
   });
 
   test('TTS rate slider is present', async () => {
@@ -144,26 +151,6 @@ test.describe('@fast Sidebar controls', () => {
     await slider.fill('50');
     await slider.dispatchEvent('input');
     await expect(page.locator('#sb-tts-rate-label')).toContainText('50%');
-  });
-
-  // ── Short ────────────────────────────────────────────────────────────────────
-
-  test('short toggle is visible', async () => {
-    const page = getPage();
-    await expect(page.locator('#sb-short-toggle')).toBeVisible();
-  });
-
-  test('clicking short toggle flips its state', async () => {
-    const page = getPage();
-    const toggle = page.locator('#sb-short-toggle');
-    const before = (await toggle.innerText()).trim();
-    const expected = before === 'ON' ? 'OFF' : 'ON';
-    await toggle.click();
-    // Toggle sends a slash command to the server; wait for state event to come back
-    await expect(toggle).toHaveText(expected, { timeout: 5_000 });
-    // Restore
-    await toggle.click();
-    await expect(toggle).toHaveText(before, { timeout: 5_000 });
   });
 
   // ── Model picker ──────────────────────────────────────────────────────────────

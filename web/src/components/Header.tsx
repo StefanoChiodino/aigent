@@ -223,18 +223,34 @@ export function Header() {
                   </div>
                 </div>
 
-                {/* Voice */}
+                {/* Speak */}
                 <div className="hdr-overflow-section">
-                  <div className="hdr-overflow-label">Voice</div>
-                  <div className="hdr-overflow-row">
-                    <span>Auto-speak</span>
-                    <button
-                      className={`sb-toggle${ttsAutoSpeak ? ' on' : ''}`}
-                      onClick={() => setTtsAutoSpeak(!ttsAutoSpeak)}
-                    >
-                      {ttsAutoSpeak ? 'ON' : 'OFF'}
-                    </button>
-                  </div>
+                  <div className="hdr-overflow-label">Speak</div>
+                  {(() => {
+                    const speakMode = shortMode ? 'short' : ttsAutoSpeak ? 'on' : 'off';
+                    const setSpeakMode = (mode: 'off' | 'on' | 'short') => {
+                      setTtsAutoSpeak(mode !== 'off');
+                      const wantShort = mode === 'short';
+                      if (wantShort !== shortMode) {
+                        send({ type: 'message', content: wantShort ? '/short on' : '/short off' });
+                        setClientSetting('AIGENT_SHORT', wantShort);
+                      }
+                    };
+                    return (
+                      <div className="hdr-effort-pills">
+                        {(['off', 'on', 'short'] as const).map(level => (
+                          <button
+                            key={level}
+                            className={`sb-pill${speakMode === level ? ' active' : ''}`}
+                            data-speak={level}
+                            onClick={() => setSpeakMode(level)}
+                          >
+                            {level}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
                   <div className="hdr-overflow-row" style={{ marginTop: 4 }}>
                     <span>Rate</span>
                     <input
@@ -245,23 +261,6 @@ export function Header() {
                       style={{ flex: 1, margin: '0 6px' }}
                     />
                     <span style={{ fontSize: 10, minWidth: 32 }}>{ttsRatePct >= 0 ? `+${ttsRatePct}%` : `${ttsRatePct}%`}</span>
-                  </div>
-                </div>
-
-                {/* Short mode */}
-                <div className="hdr-overflow-section">
-                  <div className="hdr-overflow-row">
-                    <span>Short</span>
-                    <button
-                      className={`sb-toggle${shortMode ? ' on' : ''}`}
-                      onClick={() => {
-                        const next = !shortMode;
-                        send({ type: 'message', content: next ? '/short on' : '/short off' });
-                        setClientSetting('AIGENT_SHORT', next);
-                      }}
-                    >
-                      {shortMode ? 'ON' : 'OFF'}
-                    </button>
                   </div>
                 </div>
 

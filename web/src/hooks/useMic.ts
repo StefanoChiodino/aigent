@@ -129,7 +129,17 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
       }
       const micDevId = useVoiceStore.getState().micDeviceId;
       const audioConstraints: MediaTrackConstraints = { channelCount: 1 };
-      if (micDevId) audioConstraints.deviceId = { exact: micDevId };
+      if (micDevId) {
+        // Validate device still exists before using { exact } — browsers can
+        // regenerate device IDs across sessions, causing OverconstrainedError.
+        const available = await navigator.mediaDevices.enumerateDevices();
+        const exists = available.some(d => d.kind === 'audioinput' && d.deviceId === micDevId);
+        if (exists) {
+          audioConstraints.deviceId = { exact: micDevId };
+        } else {
+          useVoiceStore.getState().setMicDeviceId('');
+        }
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       micStream.current = stream;
       const ctx = new AudioContext({ sampleRate: 16000 });
@@ -215,7 +225,9 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
       if (!silent) playMicSound('start');
       setMicState('recording');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error
+        ? (err.message || err.name || 'Unknown error')
+        : String(err);
       useUIStore.getState().setError(`Microphone error: ${msg}`);
     }
   }, [sendLiveChunk, send, setMicState, setVadActive]);

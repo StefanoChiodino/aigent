@@ -348,23 +348,30 @@ export function useWebSocket(): void {
         }
 
         case 'browser_write_request': {
-          const tierLabel = event.requiredTier === 'script' ? 'Script' : 'Write';
+          const isDestructive = !!(event as Record<string, unknown>).destructive;
+          const destructiveDetail = (event as Record<string, unknown>).destructiveDetail as string | undefined;
+          const autonomousCmd = (event as Record<string, unknown>).autonomousCmd as string | undefined;
           const baseTitle = event.action === 'navigate' ? 'Browser: Navigate'
             : event.action === 'open_tab' ? 'Browser: Open Tab'
             : event.action === 'close_tab' ? 'Browser: Close Tab'
-            : `Browser: ${tierLabel === 'Script' ? 'Run Script' : 'Run Action'}`;
+            : event.action === 'run_script' ? 'Browser: Run Script'
+            : 'Browser: Run Action';
+          const title = isDestructive ? `⚠ ${baseTitle}` : baseTitle;
           const bodyParts: string[] = [];
           if (event.domain) bodyParts.push(`Domain: ${event.domain}`);
           if (event.tabUrl) bodyParts.push(`On: ${event.tabUrl}`);
-          bodyParts.push(`Required: ${event.requiredTier}`);
+          if (isDestructive && destructiveDetail) bodyParts.push(`Destructive: ${destructiveDetail}`);
+          else if (event.requiredTier) bodyParts.push(`Required: ${event.requiredTier}`);
           ui().enqueuePermRequest({
             type: 'browser_write',
             id: event.id,
-            title: baseTitle,
+            title,
             detail: event.stepSummary,
             ...(bodyParts.length > 0 ? { body: bodyParts.join('\n') } : {}),
             approveCmd: `/approve-browser-write ${event.id}`,
             denyCmd: `/deny-browser-write ${event.id}`,
+            ...(!isDestructive ? { alwaysAllowCmd: `/approve-browser-write ${event.id} --always` } : {}),
+            ...(autonomousCmd ? { autonomousCmd } : {}),
             ...(event.alwaysReadCmd ? { alwaysReadCmd: event.alwaysReadCmd } : {}),
             ...(event.alwaysWriteCmd ? { alwaysWriteCmd: event.alwaysWriteCmd } : {}),
             ...(event.alwaysScriptCmd ? { alwaysScriptCmd: event.alwaysScriptCmd } : {}),
@@ -416,7 +423,6 @@ export function useWebSocket(): void {
 
         case 'reset':
           chat().clearMessages();
-          chat().clearTaskHistory();
           break;
 
         case 'pong':

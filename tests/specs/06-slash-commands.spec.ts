@@ -75,14 +75,13 @@ test.describe('@fast Slash command palette & commands', () => {
     await expect(page.locator('#messages')).toContainText(/reset|cleared|start/i, { timeout: 5_000 });
   });
 
-  test('/short on runs and shows system message', async () => {
+  test('/short on runs and activates the "short" speak pill', async () => {
     const page = getPage();
     const input = page.locator('#input');
     await input.fill('/short on');
     await input.press('Enter');
-    // System message or sidebar toggle should reflect short mode
-    // The short toggle in the sidebar should switch to ON
-    await expect(page.locator('#sb-short-toggle')).toHaveText('ON', { timeout: 5_000 });
+    // The "short" pill in the sidebar should become active
+    await expect(page.locator('#sb-speak-pills .sb-pill[data-speak="short"]')).toHaveClass(/active/, { timeout: 5_000 });
     // Restore
     await input.fill('/short off');
     await input.press('Enter');
