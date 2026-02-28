@@ -2828,7 +2828,7 @@ html, body {
   border-left: 3px solid var(--warning);
   border-radius: var(--radius);
   padding: 10px 12px;
-  width: 290px;
+  width: 340px;
   max-width: calc(100vw - 32px);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   animation: slideInRight 0.2s ease;
@@ -2891,9 +2891,12 @@ html, body {
   font-size: 11.5px;
   color: var(--text-secondary);
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  overflow-y: auto;
+  max-height: 200px;
+  text-overflow: clip;
 }
 
 #perm-overlay.patch-mode #perm-card-detail {
@@ -2902,32 +2905,18 @@ html, body {
   margin-bottom: 8px;
 }
 
-/* Exec mode: card stays top-right but detail wraps to show full command */
-#perm-overlay.exec-mode #perm-card {
-  width: 320px;
-}
-
+/* Exec mode: detail has a lower max-height since commands can be very long */
 #perm-overlay.exec-mode #perm-card-detail {
-  white-space: pre-wrap;
-  word-break: break-all;
-  overflow-x: hidden;
-  overflow-y: auto;
   max-height: 180px;
-  text-overflow: clip;
 }
 
 #perm-card-detail > div {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#perm-overlay.exec-mode #perm-card-detail > div {
   white-space: pre-wrap;
   word-break: break-all;
-  overflow: visible;
+  overflow-wrap: break-word;
   text-overflow: clip;
 }
+
 
 /* Pipeline display for exec requests with multiple segments */
 .exec-pipeline {
@@ -2978,14 +2967,6 @@ html, body {
   margin-top: 2px;
 }
 
-#perm-overlay.fetch-mode #perm-card-detail,
-#perm-overlay.fetch-mode #perm-card-detail > div {
-  white-space: normal;
-  word-break: break-all;
-  overflow-wrap: break-word;
-  text-overflow: clip;
-  overflow: visible;
-}
 
 #perm-card-detail > div:not(:first-child) {
   color: var(--text-dim);
@@ -3045,7 +3026,7 @@ html, body {
 
 .patch-file-dir {
   font-size: 10px;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   font-family: var(--font-mono);
   white-space: nowrap;
   overflow: hidden;
@@ -3101,6 +3082,9 @@ html, body {
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow-wrap: break-word;
+}
+.diff2html-wrapper {
+  --d2h-dark-dim-color: var(--text-secondary);
 }
 
 /* Word-wrap toggle button inside diff panel */
@@ -3752,12 +3736,12 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 }
 
 .ctx-msg-role.user {
-  color: #6080d0;
+  color: #7898e0;
   background: rgba(96, 128, 208, 0.12);
 }
 
 .ctx-msg-role.assistant {
-  color: var(--accent);
+  color: #9888ff;
   background: var(--accent-soft);
 }
 
