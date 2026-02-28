@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PermRequest, ContextBreakdown, PendingAttachment } from '../types';
+import type { PermRequest, ContextBreakdown, PendingAttachment, TraceEntry } from '../types';
 
 interface UIState {
   errorMsg: string | null;
@@ -22,6 +22,7 @@ interface UIState {
   contextBreakdown: ContextBreakdown | null;
   pendingAttachments: PendingAttachment[];
   taskResultTask: import('../types').BackgroundTaskInfo | null;
+  traceInspectorTrace: TraceEntry | null;
 
   setError: (msg: string | null) => void;
   setLoading: (loading: boolean) => void;
@@ -46,6 +47,7 @@ interface UIState {
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
   setTaskResultTask: (task: import('../types').BackgroundTaskInfo | null) => void;
+  setTraceInspectorTrace: (trace: TraceEntry | null) => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -69,6 +71,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   contextBreakdown: null,
   pendingAttachments: [],
   taskResultTask: null,
+  traceInspectorTrace: null,
 
   setError: (msg) => set({ errorMsg: msg }),
   setLoading: (loading) => set({ isLoading: loading }),
@@ -146,4 +149,5 @@ export const useUIStore = create<UIState>((set, get) => ({
   removeAttachment: (id) => set(s => ({ pendingAttachments: s.pendingAttachments.filter(a => a.id !== id) })),
   clearAttachments: () => set({ pendingAttachments: [] }),
   setTaskResultTask: (task) => set({ taskResultTask: task }),
+  setTraceInspectorTrace: (trace) => set({ traceInspectorTrace: trace }),
 }));

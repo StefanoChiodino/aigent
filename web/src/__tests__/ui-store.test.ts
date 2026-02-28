@@ -26,6 +26,7 @@ describe('UI store', () => {
       availableModels: [], availableTools: [], shortMode: false,
       thinkingLevel: 'high', lastEffortLevel: 'high',
       contextBreakdown: null, pendingAttachments: [], taskResultTask: null,
+      traceInspectorTrace: null,
     });
   });
 
@@ -139,5 +140,28 @@ describe('UI store', () => {
     useUIStore.getState().setAvailableTools(['exec', 'read_file']);
     expect(useUIStore.getState().availableModels).toEqual(['claude-3', 'gpt-4']);
     expect(useUIStore.getState().availableTools).toEqual(['exec', 'read_file']);
+  });
+
+  it('traceInspectorTrace starts null', () => {
+    expect(useUIStore.getState().traceInspectorTrace).toBeNull();
+  });
+
+  it('setTraceInspectorTrace sets and clears trace', () => {
+    const trace = { id: 't1', type: 'thinking' as const, text: 'thinking...', running: false };
+    useUIStore.getState().setTraceInspectorTrace(trace);
+    expect(useUIStore.getState().traceInspectorTrace).toEqual(trace);
+    useUIStore.getState().setTraceInspectorTrace(null);
+    expect(useUIStore.getState().traceInspectorTrace).toBeNull();
+  });
+
+  it('setTraceInspectorTrace works with tool traces', () => {
+    const trace = {
+      id: 't2', type: 'tool' as const, toolName: 'exec', toolSummary: '$ ls',
+      toolInput: '{"command":"ls"}', toolOutput: 'file.txt', running: false,
+    };
+    useUIStore.getState().setTraceInspectorTrace(trace);
+    const stored = useUIStore.getState().traceInspectorTrace;
+    expect(stored?.type).toBe('tool');
+    if (stored?.type === 'tool') expect(stored.toolName).toBe('exec');
   });
 });

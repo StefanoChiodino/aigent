@@ -34,7 +34,7 @@ Host process: Gatekeeper (gatekeeper.tsx)
 Child process: Agent server (server.ts)
 ├── agent.ts       — conversation loop, streaming, retry
 ├── provider.ts    — Anthropic + OpenAI abstraction
-├── tools.ts       — 20 tools (all gated by gatekeeper)
+├── tools.ts       — 23 tools (all gated by gatekeeper)
 ├── workspace.ts   — memory system
 └── compact.ts     — context compaction
 ```
@@ -85,9 +85,15 @@ make serve   # server only (no frontend dev server)
 - **Message queueing** — submitting while the agent is busy queues the message instead of blocking. Queued messages appear as dismissable chips above the input and are sent automatically in order as the agent becomes idle.
 - `/` to open the slash-command palette with autocomplete
 - `@` to open the mention palette — `@screen` starts screen sharing, `@clipboard` pastes clipboard content, `@image` attaches an image. Type a path prefix (`~/`, `/`, `./`) to browse the filesystem.
+
+![@ mention palette with filesystem browser](docs/screenshots/at-palette.png)
+
 - Paste or drag files into the input box; attach via the paperclip button. Supported: images (PNG, JPEG, GIF, WebP), PDFs, plain text, and Markdown (up to 5 attachments)
 - Screen-capture button grabs any window or tab via `getDisplayMedia` and attaches it as an image; while sharing, a snap button captures the current frame
 - **Picture-in-Picture** — "Float (PiP)" button in the header pops the chat into a floating window (browsers with Document PiP API support)
+
+![Picture-in-Picture floating chat window](docs/screenshots/pip.png)
+
 - `Ctrl+Shift+?` — open the keyboard shortcuts reference
 
 ### Slash commands
@@ -132,6 +138,8 @@ Toggles in the left sidebar:
 
 Settings persist across reloads. The agent applies thinking heuristics automatically — short messages get lower effort to save tokens. `Ctrl+Enter` temporarily toggles thinking for one message.
 
+![Extended thinking with reasoning traces](docs/screenshots/thinking.png)
+
 ### Model picker
 
 Choose any available model from the sidebar dropdown. The list is fetched live from the Anthropic API and falls back to a hardcoded default. Selection persists across restarts.
@@ -160,6 +168,8 @@ Tasks with `delivery: user-pull` pop up a result panel when completed. The panel
 Tool calls are shown inline in the chat — name, input summary, and output excerpt. Collapsed by default; click to expand and see the full input and output. Tools that return images (screenshots, clipboard, browser captures) display them inline in the trace block — click to open full-size in a new tab.
 
 ![Expanded tool call blocks with input and output](docs/screenshots/tool-calls.png)
+
+Click any expanded tool call to open the **Tool Inspector** modal — a dedicated overlay showing the formatted JSON input, full output, and any returned images with a lightbox. Reasoning (thinking) traces also open in the inspector. Press `Esc` or click the backdrop to close.
 
 ### Context inspector
 
@@ -204,10 +214,12 @@ Key settings groups:
 | **Tools** | Disable all tools, tool allowlist |
 | **Prompt** | Slim prompt (omit MEMORY.md), full session logs |
 | **Services** | Web UI port, STT URL, TTS URL |
+| **Appearance** | Background theme (aurora, spectrum, oscilloscope, circular, milkdrop, circuit, matrix, constellation, topology, ember) |
 | **Microphone** | Silence threshold, speech onset frames, silence tail, auto-send on silence, auto-send duration |
 | **Context** | Summarize large tool results, summarize threshold, summarize model, tool filter mode |
 | **Permissions** | Exec always-allow / always-deny patterns (editable per-pattern lists) |
 | **Fetch Permissions** | Fetch always-allow / always-deny patterns (hostname or URL globs) |
+| **File Permissions** | File YOLO mode, read-write paths, read-only paths, deny patterns |
 | **Debug** | Relay browser errors to server log |
 
 ---
@@ -240,11 +252,12 @@ Key settings groups:
 
 ---
 
-## Tools (21)
+## Tools (23)
 
 | Tool | Description |
 |------|-------------|
 | `exec` | Shell command with timeout and optional cwd |
+| `exec_readonly` | Read-only shell commands only (git log/diff/status, ls, grep, cat, etc.) — used by background agents |
 | `read_file` | File read with line-range support (offset + limit) |
 | `write_file` | Write a file, creating parent directories as needed |
 | `edit_file` | Surgical exact-string replacement in a file |
@@ -254,6 +267,7 @@ Key settings groups:
 | `glob` | Recursive file-pattern matching (skips node_modules etc.) |
 | `tree` | Directory tree, gitignore-aware |
 | `fetch` | HTTP requests (all methods, optional HTML→text stripping) |
+| `fetch_readonly` | GET/HEAD-only fetch — used by background agents with restricted permissions |
 | `screenshot` | Capture the virtual display (Xvfb) as PNG |
 | `request_screenshot` | Capture the user's live browser screen (requires screen-share active) |
 | `dispatch_task` | Spawn a background agent — returns immediately, result injected later |
@@ -358,6 +372,8 @@ Every `exec` call from the agent goes through three gates before it runs:
 Commands that pass Tiers 1 & 2 but aren't in the allow list go to Tier 3. If Tier 3 returns `ask`, you see a prompt: `/approve-exec <id>` or `/deny-exec <id>`. Adding `--always` promotes to the static allow list.
 
 ![Permission modal for command approval](docs/screenshots/permission-exec.png)
+
+![Permission modal for patch approval](docs/screenshots/permission-patch.png)
 
 ### API key isolation
 

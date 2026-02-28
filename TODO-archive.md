@@ -6,6 +6,12 @@ Completed items moved here to keep `TODO.md` focused on active work.
 
 ## Security & Safety
 
+- [x] **`fetch` response size cap** — `FETCH_MAX_BYTES_HARD = 10 * 1024 * 1024` (10 MB hard ceiling) in `src/server.ts`; enforced in `src/tools/execute.ts`. Agent must request user approval to exceed the default soft limit; hard ceiling is unconditional.
+
+- [x] **Audit log stream** — structured JSON-lines appended to `/tmp/aigent-audit.log` by `src/audit.ts`. Covers exec (tier1/2/3/user), file (read/write/block), fetch (ssrf/dns/size/allow), and MCP tool calls. Fire-and-forget; never blocks the main flow.
+
+- [x] **SSRF DNS rebinding — DNS resolution** — `validateFetchUrlDns()` in `src/safety.ts` resolves hostnames via `dns.promises.resolve4/6` and re-checks resolved IPs against private-range regexes. Remaining gap (curl `--resolve` flag) tracked separately above.
+
 - [x] **Safety unit tests** — 92 tests covering all functions in `src/safety.ts`; `make test` target added; pre-commit hook via `.pre-commit-config.yaml` runs typecheck + tests on every commit.
   - **Known gaps documented in tests:**
     - `mkfs *` deny glob doesn't match `mkfs.ext4 /dev/sdb` (minimatch treats `*` as not matching spaces/dots)
@@ -45,6 +51,10 @@ Completed items moved here to keep `TODO.md` focused on active work.
 - [x] **Attached images persist in chat** — thumbnails generated client-side, stored in `DisplayMessage.attachments`, rendered in `Message.tsx`, persisted via Zustand localStorage. See `docs/image-handling.md`.
 - [x] **Agent spawn details** — model name and reasoning level shown in the expandable details panel of `spawn_agent` and `dispatch_task` tool traces.
 - [x] **Phase 3b — Autonomous mode + close_tab** — `browser.autonomous` grant (distinct from `browser.write`), `close_tab` action, "Go Autonomous" button in permission modal. Destructive action heuristics deferred. (2026-02-26)
+
+## Extensibility & Docs
+
+- [x] **README: "Extending with MCP"** — README has a full MCP section with `mcp.json` format, example GitHub server config, and tool prefixing explanation.
 
 ## UI Fixes (archived)
 

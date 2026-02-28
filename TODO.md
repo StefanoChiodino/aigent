@@ -4,26 +4,22 @@
 
 ## Active Bugs
 
-- [ ] **Queued message lost on cancel** — if a message is queued and the agent's run is cancelled, the queued message is silently dropped. The whole queue → cancel → resume chain feels brittle and needs a reliability pass.
+- [ ] **Message queueing — not implemented** — README describes this as if it exists ("Queued messages appear as dismissable chips above the input"), but the feature is not implemented — only a demo scenario stub exists. Needs: queue data structure in connection/UI store, chip UI above input bar, auto-send on agent idle, cancel support.
+  - Sub-bug once implemented: **queued message lost on cancel** — if a message is queued and the run is cancelled, it must not be silently dropped.
 
-- [ ] **Queued message UX** — queued messages should look better than `[Q'd]` and stick to the bottom above the input bar (not inside the chat), similar to Cursor.
-
-- [ ] **Settings don't persist reliably** — model, short mode, and other settings seem to reset. They should persist hard across sessions.
+- [ ] **Settings don't persist reliably** — model, short mode, and other settings seem to reset. Client settings persist via zustand `persist` to localStorage, but confirm server-side settings (model, reasoning level) round-trip correctly after restart.
 
 ## Bugs / Quick Fixes
 
-- [ ] **Reasoning toggle on incompatible models** — UI allows enabling reasoning on models that don't support it (e.g. Haiku); disable the toggle or warn.
+- [ ] **Reasoning toggle on incompatible models** — UI allows enabling reasoning on models that don't support it (e.g. Haiku); disable the toggle or warn when selected model doesn't support thinking.
+
+- [ ] **TraceInspector not wired up** — `web/src/components/modals/TraceInspector.tsx` exists but `traceInspectorTrace` / `setTraceInspectorTrace` are missing from the UI store and the component isn't mounted in App.tsx.
 
 ---
 
 ## Security & Safety
 
-- [ ] **Harden SSRF protection against DNS rebinding**
-  - Use `dns.promises.lookup` in `validateFetchUrl` to resolve the hostname.
-  - Run private-IP regex checks against the *resolved IP*, not the hostname.
-  - Pass `--resolve` flag to `curl` to pin the IP.
-
-- [ ] **`fetch` response size cap** — hard limit (e.g. 10 MB) to prevent large-payload exfiltration or OOM.
+- [ ] **SSRF: pin curl to resolved IP** — `validateFetchUrlDns()` already resolves the hostname and checks the IP; remaining gap is passing `--resolve host:port:IP` to curl to prevent TOCTOU rebinding between the DNS check and the actual request.
 
 - [ ] **MCP server permission model** — optional `permissions` block per server in `mcp.json`; default: `prompt` for all calls.
 
@@ -36,7 +32,6 @@
 ## Observability
 
 - [ ] **Request correlation ID (`reqId`)** — thread a 6-char hex ID through UI → Gatekeeper → Agent → Sub-agents → MCP.
-- [ ] **Audit log stream** — structured `[AUDIT]` entries to a dedicated rotating file for exec/fetch permissions, config writes, startup.
 - [ ] **Log rotation / max size** — pipe `stderr` to `logrotate` / `pino-roll`, or rolling file sinks in the logger.
 - [ ] **Tool call audit trail in session logs** — persist tool call events to daily log so they survive context compaction.
 
@@ -47,13 +42,12 @@
 - [ ] **Tool description audit** — trim descriptions in `tools.ts` longer than ~100 tokens.
 - [ ] **Prompt cache warm-up on startup** — send a minimal no-op message to pre-warm the Anthropic cache.
 - [ ] **Compaction prompt refinement** — ensure summaries preserve file paths, bug IDs, code references.
-- [ ] **Anthropic subscription usage tracking** — display monthly usage stats (tokens, cost) from Anthropic API.
+- [ ] **Anthropic subscription usage tracking** — display monthly usage stats (tokens, cost) from Anthropic API. (Local cumulative tracking exists in `src/usage-tracking.ts`; this is about fetching from Anthropic's billing API.)
 
 ---
 
 ## UI / UX
 
-- [ ] **Reasoning / tool usage display** — show thinking blocks and tool calls more transparently without cluttering chat.
 - [ ] **Browser extension** — see `docs/design-browser-extension.md` for full design. Live session automation (already logged in), a11y-tree-driven, batched action scripts, gatekeeper-bridged.
 - [ ] **Browser a11y tree** — covered in extension design; `extract_a11y` returns structured element tree, ~800–2000 tokens vs ~20k for raw HTML.
 
@@ -72,7 +66,6 @@
 
 ## Extensibility & Docs
 
-- [ ] **README: "Extending with MCP"** — document `mcp.json` format with a working example.
 - [ ] **README: MCP permissions** — document permission model once implemented.
 - [ ] **CONTRIBUTING.md** — explain workflow, code style, PR expectations, how to add tools.
 
@@ -81,7 +74,7 @@
 ## Testing
 
 - [ ] **Integration smoke test** — headless `repl.ts`-based test: start agent, send message, assert tool call.
-- [ ] **Compaction round-trip test** — verify compacted conversation can continue without errors.
+- [ ] **Compaction round-trip test** — verify compacted conversation can continue without errors. (Unit tests exist in `compact.test.ts`; this is an end-to-end continuation test.)
 
 ---
 
