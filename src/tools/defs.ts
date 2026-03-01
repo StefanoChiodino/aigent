@@ -580,8 +580,7 @@ const searchEpisodesTool: ToolDef = {
     '(which filters by exact metadata), this finds episodes whose task, lessons, and tags ' +
     'are semantically similar to your query — even when the exact words differ.\n\n' +
     'Examples: "CSS layout debugging" matches "fixing flexbox alignment issues". ' +
-    '"performance optimization" matches "reducing bundle size".\n\n' +
-    'Requires semantic indexing to be enabled (AIGENT_SEMANTIC_EPISODES=1).',
+    '"performance optimization" matches "reducing bundle size".',
   input_schema: {
     type: 'object' as const,
     properties: {

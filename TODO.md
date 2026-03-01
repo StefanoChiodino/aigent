@@ -79,7 +79,7 @@
 - [ ] **Reflection agent** — background agent at session end: extracts structured episodes, mines patterns across recent history, proposes improvements (MEMORY.md updates, TODO items, auto-fixes).
 - [ ] **Self-play harness** — launch isolated test instance (different port, clean workspace), drive via browser extension, evaluate results. Task library format: prompt + setup script + eval criteria.
 - [x] **Feedback collection** — three-channel system: (1) UI rating widget (1-5 dots on each assistant message), (2) compaction-triggered episode boundaries (`auto-compact` source), (3) automated friction signals (tool failures, API errors tracked per session). Ratings averaged into `userRating` on episodes. System prompt instructs agent to call `log_episode` at natural breaks. 13 web tests, 9 new episode tests.
-- [x] **Semantic episode retrieval** — local neural embeddings (`@xenova/transformers`, all-MiniLM-L6-v2 384-dim). `search_episodes` tool for meaning-based search. Proactive retrieval injects relevant past experience before each agent turn. Auto-indexing on episode append. Gated behind `AIGENT_SEMANTIC_EPISODES=1`. 23 new tests.
+- [x] **Semantic episode retrieval** — local neural embeddings (`@xenova/transformers`, all-MiniLM-L6-v2 384-dim). `search_episodes` tool for meaning-based search. Proactive retrieval injects relevant past experience before each agent turn. Auto-indexing on episode append. Always on. 23 new tests.
 
 ---
 

@@ -504,26 +504,23 @@ async function processAgentTurn(
     : content;
 
   // Proactive episode retrieval — surface relevant past experience before the agent responds.
-  // Best-effort, non-blocking. Gated behind AIGENT_SEMANTIC_EPISODES setting.
+  // Best-effort, non-blocking. Only fires for real user messages > 20 chars.
   if (!isTaskResult && typeof userContent === 'string' && userContent.length > 20) {
     try {
-      const semanticEnabled = process.env['AIGENT_SEMANTIC_EPISODES'] === '1';
-      if (semanticEnabled) {
-        const { searchEpisodesSemantic, hasIndex } = await import('./episode-index.js');
-        if (hasIndex(workspacePath)) {
-          const relevant = await searchEpisodesSemantic(workspacePath, userContent, {
-            limit: 3,
-            minSimilarity: 0.4,
+      const { searchEpisodesSemantic, hasIndex } = await import('./episode-index.js');
+      if (hasIndex(workspacePath)) {
+        const relevant = await searchEpisodesSemantic(workspacePath, userContent, {
+          limit: 3,
+          minSimilarity: 0.4,
+        });
+        if (relevant.length > 0) {
+          const hints = relevant.map(r => {
+            const ep = r.episode;
+            const lessons = ep.lessons.length > 0 ? ` Lessons: ${ep.lessons.join('; ')}` : '';
+            return `- [${ep.outcome}] ${ep.task}${lessons}`;
           });
-          if (relevant.length > 0) {
-            const hints = relevant.map(r => {
-              const ep = r.episode;
-              const lessons = ep.lessons.length > 0 ? ` Lessons: ${ep.lessons.join('; ')}` : '';
-              return `- [${ep.outcome}] ${ep.task}${lessons}`;
-            });
-            const episodeHint = '\n\n[Relevant past experience:\n' + hints.join('\n') + ']';
-            userContent = userContent + episodeHint;
-          }
+          const episodeHint = '\n\n[Relevant past experience:\n' + hints.join('\n') + ']';
+          userContent = userContent + episodeHint;
         }
       }
     } catch { /* non-critical — fail silently */ }

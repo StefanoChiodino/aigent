@@ -104,8 +104,6 @@ export function appendEpisode(workspacePath: string, episode: Episode): void {
 /** Auto-index a new episode for semantic search (fire-and-forget). */
 async function indexEpisodeIfEnabled(workspacePath: string, episode: Episode): Promise<void> {
   try {
-    const semanticEnabled = process.env['AIGENT_SEMANTIC_EPISODES'] === '1';
-    if (!semanticEnabled) return;
     const { indexEpisode } = await import('./episode-index.js');
     await indexEpisode(workspacePath, episode);
   } catch {

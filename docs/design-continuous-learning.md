@@ -399,7 +399,7 @@ Benchmarks are the measurement layer that emerges from both.
 - Proactive retrieval — before each agent turn, automatically surface top 3
   relevant past episodes (similarity > 0.4) as context hints
 - Auto-indexing — new episodes embedded fire-and-forget in `appendEpisode()`
-- Gated behind `AIGENT_SEMANTIC_EPISODES=1` (avoids surprise model downloads)
+- Always on — model downloads lazily on first use (~22MB, cached in `~/.cache/`)
 - 23 unit tests (cosine similarity, episodeToText, hasIndex, search logic)
 
 ---

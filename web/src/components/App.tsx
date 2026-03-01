@@ -24,6 +24,8 @@ import { FirefliesBackground } from './backgrounds/FirefliesBackground';
 import { RainBackground } from './backgrounds/RainBackground';
 import { NeonGridBackground } from './backgrounds/NeonGridBackground';
 import { LavaLampBackground } from './backgrounds/LavaLampBackground';
+import { PCBBackground } from './backgrounds/PCBBackground';
+import { NeuronBackground } from './backgrounds/NeuronBackground';
 import { PermissionModal } from './modals/PermissionModal';
 import { SettingsModal } from './modals/SettingsModal';
 import { ContextInspector } from './modals/ContextInspector';
@@ -92,6 +94,8 @@ export function App() {
       {theme === 'rain' && <RainBackground />}
       {theme === 'neongrid' && <NeonGridBackground />}
       {theme === 'lavalamp' && <LavaLampBackground />}
+      {theme === 'pcb' && <PCBBackground />}
+      {theme === 'neuron' && <NeuronBackground />}
       <Header />
       <div id="body">
         <Sidebar />

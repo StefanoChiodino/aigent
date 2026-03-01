@@ -290,6 +290,14 @@ export async function startWebServer(
               try { onSettingsChanged?.(); } catch (err) {
                 log.error('onSettingsChanged callback failed', { error: String(err) });
               }
+              if ('stt_energy_threshold' in updates) {
+                const threshold = Number(updates['stt_energy_threshold' as keyof ClientSettings]);
+                fetch(`${STT_URL}/config`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ energy_threshold: threshold }),
+                }).catch(() => { /* STT service not running — ignore */ });
+              }
             }
             res.writeHead(204); res.end();
           } catch {

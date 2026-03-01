@@ -1123,7 +1123,7 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingFetchApprovals.get(id);
     if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending fetch request: ${id}`);
+      // Already resolved (e.g. auto-approved by settings flush before user clicked) — silently ignore.
       return true;
     }
 
@@ -1161,7 +1161,7 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
 
     const pending = pendingFetchApprovals.get(id);
     if (!pending) {
-      if (!IS_TEST_MODE) injectSystemMessage(`No pending fetch request: ${id}`);
+      // Already resolved — silently ignore.
       return true;
     }
 
@@ -1380,7 +1380,7 @@ function handleFetchSizeApproveReject(input: string): boolean {
 
   const pending = pendingFetchSizeApprovals.get(id);
   if (!pending) {
-    if (!IS_TEST_MODE) injectSystemMessage(`No pending fetch size request: ${id}`);
+    // Already resolved — silently ignore.
     return true;
   }
 
@@ -1492,7 +1492,7 @@ function handleMcpToolApproveReject(input: string): boolean {
 
   const pending = pendingMcpToolApprovals.get(id);
   if (!pending) {
-    if (!IS_TEST_MODE) injectSystemMessage(`No pending MCP tool request: ${id}`);
+    // Already resolved — silently ignore.
     return true;
   }
 
@@ -1674,7 +1674,7 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
 
   const pending = pendingBrowserWriteApprovals.get(id);
   if (!pending) {
-    if (!IS_TEST_MODE) injectSystemMessage(`No pending browser write request: ${id}`);
+    // Already resolved — silently ignore.
     return true;
   }
 

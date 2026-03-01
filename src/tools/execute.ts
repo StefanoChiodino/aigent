@@ -758,7 +758,7 @@ export async function executeTool(
       const { query, limit, min_similarity } = input as { query: string; limit?: number; min_similarity?: number };
       const { searchEpisodesSemantic, hasIndex } = await import('../episode-index.js');
       const wsp = process.env['AIGENT_WORKSPACE'] ?? join(process.cwd(), 'workspace');
-      if (!hasIndex(wsp)) return 'No semantic index found. Enable semantic indexing with AIGENT_SEMANTIC_EPISODES=1 and log some episodes.';
+      if (!hasIndex(wsp)) return 'No semantic index found. Episodes are auto-indexed when logged — log some episodes first.';
       const results = await searchEpisodesSemantic(wsp, query, {
         limit: Math.min(limit ?? 5, 20),
         minSimilarity: min_similarity ?? 0.3,

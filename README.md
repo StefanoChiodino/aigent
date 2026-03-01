@@ -230,7 +230,7 @@ Key settings groups:
 | **Prompt** | Slim prompt (omit MEMORY.md), full session logs |
 | **Services** | Web UI port, STT URL, TTS URL |
 | **Appearance** | Background theme (aurora, spectrum, oscilloscope, circular, milkdrop, circuit, matrix, constellation, topology, ember) |
-| **Microphone** | Silence threshold, speech onset frames, silence tail, auto-send on silence, auto-send duration |
+| **Microphone** | STT energy threshold (hot-reload), silence threshold, speech onset frames, silence tail, auto-send on silence, auto-send duration |
 | **Context** | Summarize large tool results, summarize threshold, summarize model, tool filter mode |
 | **Permissions** | Exec always-allow / always-deny patterns (editable per-pattern lists) |
 | **Fetch Permissions** | Fetch always-allow / always-deny patterns (hostname or URL globs) |
@@ -259,8 +259,8 @@ Key settings groups:
 - **Memory distillation** — on `/reset` or session end, the agent rewrites `MEMORY.md` from the day's logs
 - **Daily logs** — by default only an index of log files is included in the prompt; the agent reads specific logs on demand via `read_file`. Set `AIGENT_FULL_LOGS=1` to include recent logs in full.
 - **`search_memory`** — keyword search across all past daily logs at zero LLM cost
-- **`search_episodes`** — semantic similarity search over episode records using local neural embeddings (all-MiniLM-L6-v2). Finds relevant past experience even when wording differs. Enable with `AIGENT_SEMANTIC_EPISODES=1`.
-- **Proactive retrieval** — when semantic search is enabled, relevant past episodes are automatically surfaced before each agent turn (similarity > 0.4, max 3 results)
+- **`search_episodes`** — semantic similarity search over episode records using local neural embeddings (all-MiniLM-L6-v2). Finds relevant past experience even when wording differs.
+- **Proactive retrieval** — relevant past episodes are automatically surfaced before each agent turn (similarity > 0.4, max 3 results)
 
 ### Profiles and sessions
 
@@ -322,9 +322,10 @@ AIGENT_CLASSIFIER=0               # disable Tier 3 LLM classifier (falls back to
 AIGENT_WORKSPACE=/path/to/ws      # custom workspace directory (default: workspace/ in repo root)
 AIGENT_NO_TOOLS=1                 # send no tool definitions to the model
 AIGENT_TOOLS_ALLOWLIST=exec,read_file  # comma-separated list of tools to enable
-AIGENT_SEMANTIC_EPISODES=1               # enable semantic episode search + proactive retrieval
 AIGENT_STT_URL=http://127.0.0.1:8765   # STT service endpoint
 AIGENT_TTS_URL=http://127.0.0.1:8766   # TTS service endpoint
+AIGENT_STT_ENERGY_THRESHOLD=0.01       # RMS gate: audio quieter than this is discarded before transcription (0 = off)
+AIGENT_STT_IDLE_TIMEOUT=0              # unload Parakeet model after N seconds idle (0 = never)
 ```
 
 ### TTS / STT setup
@@ -334,11 +335,13 @@ make tts-setup   # install edge-tts (Microsoft TTS, no API key needed)
 make tts         # start the TTS server on port 8766
 
 # STT uses NVIDIA Parakeet via local Python service
-cd stt && pip install -r requirements.txt && python main.py
-# Runs on port 8765 by default
+make stt-setup   # create venv and install dependencies (run once)
+make stt         # start the STT server on port 8765
 ```
 
 TTS and STT URLs are configurable in the settings panel or via `AIGENT_TTS_URL` / `AIGENT_STT_URL`.
+
+**STT energy gate** — Parakeet can hallucinate words ("yeah", "okay") from silence or background noise. The energy gate measures the RMS volume of each audio clip before sending it to the model; clips below the threshold are discarded immediately. The default (0.01) works well in a quiet room. If you still get spurious transcriptions, raise it in **Settings → Microphone → STT energy threshold** — changes take effect immediately without restarting the STT service. The STT log shows the RMS alongside each transcript to help you calibrate: `[0.43s]  rms=0.0312  'yeah'`.
 
 ### MCP (Model Context Protocol)
 

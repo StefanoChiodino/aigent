@@ -23,12 +23,15 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+import math
 import os
 import re
+import struct
 import tempfile
 import threading
 import time
 import traceback
+import wave
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Protocol, cast
 
@@ -56,6 +59,41 @@ _model_name: str = "nvidia/parakeet-tdt-0.6b-v2"
 _device: str = "cpu"
 _idle_timeout: int = 300
 _unload_timer: threading.Timer | None = None
+_energy_threshold: float = 0.01  # RMS below this → return empty without calling model
+
+
+# ── Audio energy gate ─────────────────────────────────────────
+
+def _wav_rms(wav_bytes: bytes) -> float:
+    """Return the RMS amplitude of a WAV file's PCM samples (0.0–1.0).
+
+    Reads only the data chunk — works for standard 16-bit mono WAV as produced
+    by the browser mic. Returns 0.0 on any parse error so the gate fails open
+    (audio is passed through to the model) rather than silently dropping audio.
+    """
+    try:
+        import io
+        with wave.open(io.BytesIO(wav_bytes)) as wf:
+            sampwidth: int = wf.getsampwidth()
+            nframes: int = wf.getnframes()
+            if nframes == 0 or sampwidth not in (1, 2, 4):
+                return 0.0
+            raw: bytes = wf.readframes(nframes)
+
+        if sampwidth == 2:
+            samples = struct.unpack_from(f'<{len(raw)//2}h', raw)
+            scale = 32768.0
+        elif sampwidth == 4:
+            samples = struct.unpack_from(f'<{len(raw)//4}i', raw)
+            scale = 2147483648.0
+        else:  # 8-bit unsigned
+            samples = struct.unpack_from(f'{len(raw)}B', raw)
+            scale = 128.0
+
+        rms: float = math.sqrt(sum(s * s for s in samples) / len(samples)) / scale
+        return rms
+    except Exception:
+        return 0.0  # fail open
 
 
 # ── Device detection ──────────────────────────────────────────
@@ -173,14 +211,14 @@ def get_model() -> _ASRModel:
 
 # ── Transcript post-processing ────────────────────────────────
 
-# Standalone filler words to strip (whole-word, case-insensitive).
+# Inline filler sounds to strip from within a transcript.
 _FILLER_RE = re.compile(
     r'\b(um+|uh+|hmm+|hm+|mm-hmm|mhm+|mm+|ah+|er|erm|oh+)\b[,.]?',
     re.IGNORECASE,
 )
 
 def _clean(text: str) -> str:
-    """Strip filler words and tidy up whitespace/punctuation."""
+    """Strip inline filler words and tidy up whitespace/punctuation."""
     text = _FILLER_RE.sub(' ', text)
     # Collapse runs of spaces and strip leading/trailing whitespace.
     text = re.sub(r'  +', ' ', text).strip()
@@ -198,11 +236,26 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self.path == "/health":
             self._json(200, {"status": "ok", "model_loaded": _model is not None, "device": _device})
+        elif self.path == "/config":
+            self._json(200, {"energy_threshold": _energy_threshold})
         else:
             self.send_response(404)
             self.end_headers()
 
     def do_POST(self) -> None:
+        if self.path == "/config":
+            global _energy_threshold
+            length: int = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length))
+                if "energy_threshold" in body:
+                    _energy_threshold = float(body["energy_threshold"])
+                    print(f"[config] energy_threshold={_energy_threshold}", flush=True)
+                self._json(200, {"energy_threshold": _energy_threshold})
+            except Exception as e:
+                self._json(400, {"error": str(e)})
+            return
+
         if self.path != "/transcribe":
             self.send_response(404)
             self.end_headers()
@@ -213,6 +266,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if not body:
             self._json(400, {"error": "empty body"})
+            return
+
+        # Energy gate: skip the model entirely if the audio is too quiet.
+        rms: float = _wav_rms(body) if _energy_threshold > 0 else -1.0
+        if _energy_threshold > 0 and rms < _energy_threshold:
+            self._json(200, {"text": ""})
             return
 
         tmpfile: str | None = None
@@ -236,7 +295,8 @@ class Handler(BaseHTTPRequestHandler):
                 text = str(r)
 
             text = _clean(text)
-            print(f"[{elapsed:.2f}s] {text!r}", flush=True)
+            rms_str = f"  rms={rms:.4f}" if rms >= 0 else ""
+            print(f"[{elapsed:.2f}s]{rms_str} {text!r}", flush=True)
             self._json(200, {"text": text})
         except Exception as e:
             traceback.print_exc()
@@ -257,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
 # ── Entry point ───────────────────────────────────────────────
 
 def main() -> None:
-    global _model_name, _device, _idle_timeout
+    global _model_name, _device, _idle_timeout, _energy_threshold
 
     parser = argparse.ArgumentParser(description="Parakeet STT server")
     parser.add_argument("--host", default="127.0.0.1")
@@ -269,6 +329,10 @@ def main() -> None:
     parser.add_argument("--idle-timeout", type=int,
                         default=int(os.environ.get("AIGENT_STT_IDLE_TIMEOUT", "0")),
                         help="Unload model after N seconds idle (0 = never, default 0 / env: AIGENT_STT_IDLE_TIMEOUT)")
+    parser.add_argument("--energy-threshold", type=float,
+                        default=float(os.environ.get("AIGENT_STT_ENERGY_THRESHOLD", "0.01")),
+                        help="RMS energy threshold below which audio is skipped without transcription "
+                             "(0 = disabled, default 0.01 / env: AIGENT_STT_ENERGY_THRESHOLD)")
     parser.add_argument("--eager", action="store_true",
                         help="Load model at startup rather than on first request")
     args = parser.parse_args()
@@ -276,8 +340,9 @@ def main() -> None:
     _model_name = args.model
     _device = _pick_device() if args.device == "auto" else args.device
     _idle_timeout = args.idle_timeout
+    _energy_threshold = args.energy_threshold
 
-    print(f"STT server  model={_model_name}  device={_device}  idle_timeout={_idle_timeout}s", flush=True)
+    print(f"STT server  model={_model_name}  device={_device}  idle_timeout={_idle_timeout}s  energy_threshold={_energy_threshold}", flush=True)
 
     if args.eager:
         get_model()
