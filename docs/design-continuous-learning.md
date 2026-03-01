@@ -95,25 +95,33 @@ When does one episode end and another begin?
 The default is conservative: one episode per session, with the agent able to
 split into multiple episodes if the session covers distinct tasks.
 
-### Reflection Agent
+### Reflection Agent (implemented)
 
-A background agent that runs at natural boundaries (session end, reset,
-compaction) and does three things:
+Runs at session boundaries (shutdown, `/reset`) after `distillToMemory()`.
+Implementation: `src/reflection.ts` (~180 lines), 17 unit tests.
 
-1. **Episode extraction** — reviews the conversation and produces the
-   structured episode record. The agent doesn't do this inline; it happens
-   asynchronously so it doesn't slow down the user.
+**How it works:**
 
-2. **Pattern mining** — scans recent episodes for recurring friction, failure
-   modes, or user corrections. "3 of the last 5 web UI edits failed because
-   the build wasn't run" → codifies as a lesson.
+1. Loads the last 50 episodes via `queryEpisodes()`
+2. Skips if fewer than 5 episodes (not enough data for patterns)
+3. Formats episodes into compact text blocks for the LLM
+4. Single Haiku call (`claude-haiku-4-5-20251001`, ~$0.005/call) with:
+   - Existing MEMORY.md and TODO.md as context (to avoid duplicate suggestions)
+   - Structured JSON output: `{ patterns, memoryLessons, todoItems }`
+5. Appends new lessons to MEMORY.md under `## Reflection Insights (auto-generated)`
+6. Appends new items to TODO.md under `## Reflection-Suggested`
+7. Logs reflection record to `workspace/reflections.ndjson`
 
-3. **Action proposals** — when patterns are strong enough, the reflection
-   agent can:
-   - Update MEMORY.md with new lessons
-   - Add items to TODO.md
-   - File structured improvement proposals (see below)
-   - For small, safe fixes: implement, test, and commit autonomously
+**MEMORY.md conflict avoidance:** `distillToMemory()` rewrites the whole file
+first, then reflection appends to a clearly marked section. Order matters —
+distill runs first, reflection runs second.
+
+**Pattern types mined:** recurring friction (2+ episodes), success patterns,
+low-rated episodes, cost anomalies. The LLM is instructed to only report
+patterns with evidence from multiple episodes.
+
+**Future:** Autonomous code fixes (small, safe self-modifications) are not
+yet implemented. Currently reflection only writes to MEMORY.md and TODO.md.
 
 ### Feedback Collection (implemented)
 
@@ -362,15 +370,18 @@ Benchmarks are the measurement layer that emerges from both.
 
 **Depends on:** nothing new — builds on existing workspace system.
 
-### Phase 2: Reflection Agent
+### Phase 2: Reflection Agent (done)
 
-- Background agent that runs on session end / reset
-- Reviews conversation, produces structured episode record
-- Pattern extraction: scans last N episodes for recurring themes
-- Writes findings to MEMORY.md and/or TODO.md
-- Uses `dispatch_task` infrastructure (already exists)
+- `src/reflection.ts`: direct Haiku LLM call (not `dispatch_task` — server is closing at shutdown)
+- Loads last 50 episodes, formats as compact text, asks for recurring patterns
+- Structured JSON output: patterns, memoryLessons, todoItems
+- Appends to MEMORY.md (`## Reflection Insights`) and TODO.md (`## Reflection-Suggested`)
+- Audit log: `workspace/reflections.ndjson`
+- Runs after `distillToMemory()` at shutdown and `/reset` — order avoids MEMORY.md conflicts
+- Minimum 5 episodes required before reflection fires
+- 17 unit tests with mock provider
 
-**Depends on:** Phase 1 (episode storage to write to and read from).
+**Depends on:** Phase 1 (episode storage to read from).
 
 ### Phase 3: Self-Play Harness
 

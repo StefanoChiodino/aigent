@@ -162,7 +162,13 @@ const commands: CommandDef[] = [
       if (messagesToDistill.length >= 4) {
         ctx.addSystemMessage('Distilling session to memory...');
         void distillToMemory(ctx.agent.underlyingProvider, ctx.agent.currentModel, messagesToDistill, ctx.workspacePath)
-          .then(() => ctx.addSystemMessage('Memory updated.'))
+          .then(async () => {
+            ctx.addSystemMessage('Memory updated.');
+            try {
+              const { runReflection } = await import('./reflection.js');
+              await runReflection(ctx.agent.underlyingProvider, ctx.workspacePath);
+            } catch { /* non-critical */ }
+          })
           .catch(() => {});
       }
       ctx.agent.reset();

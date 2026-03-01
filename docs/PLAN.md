@@ -156,7 +156,7 @@ Server process (spawned directly, no Docker)
 
 ### Continuous Learning (primary track — see `docs/design-continuous-learning.md`)
 - [x] Episode logging — `src/episodes.ts`, NDJSON storage, `log_episode` + `query_episodes` tools, auto-log on reset/shutdown
-- [ ] Reflection agent — background agent at session boundaries, pattern extraction, auto-improvements
+- [x] Reflection agent — `src/reflection.ts`: Haiku-powered pattern mining at shutdown/reset, appends to MEMORY.md + TODO.md, NDJSON audit log
 - [ ] Self-play harness — isolated test instance + browser-driven evaluation + task library
 - [x] Feedback collection — UI rating widget (1-5 dots), compaction-triggered episode boundaries, automated friction signals, LLM-driven episode logging via system prompt
 - [x] Semantic episode retrieval — local neural embeddings (all-MiniLM-L6-v2), `search_episodes` tool, proactive retrieval, auto-indexing

@@ -4,7 +4,7 @@
 
 ## Active Bugs
 
-(none currently)
+sometimes I'm reading an interesting piece of info that's coming streaming in, then it disappears and the agents goes back thinking. Maybe this is reasoning, but it sure feels poor.
 
 ## Bugs / Quick Fixes
 
@@ -76,7 +76,7 @@
 ## Continuous Learning (new track — see `docs/design-continuous-learning.md`)
 
 - [x] **Episode logging** — `src/episodes.ts`: Episode interface, NDJSON storage (`workspace/episodes.ndjson`), `log_episode` + `query_episodes` tools, auto-log on `/reset` and shutdown, domain inference, session tracking, 10MB rotation. 37 unit tests.
-- [ ] **Reflection agent** — background agent at session end: extracts structured episodes, mines patterns across recent history, proposes improvements (MEMORY.md updates, TODO items, auto-fixes).
+- [x] **Reflection agent** — `src/reflection.ts`: runs at shutdown and `/reset` after `distillToMemory()`. Loads last 50 episodes, asks Haiku to identify recurring friction/success patterns, appends insights to MEMORY.md (`## Reflection Insights`) and TODO.md (`## Reflection-Suggested`). Audit log at `workspace/reflections.ndjson`. 17 unit tests.
 - [ ] **Self-play harness** — launch isolated test instance (different port, clean workspace), drive via browser extension, evaluate results. Task library format: prompt + setup script + eval criteria.
 - [x] **Feedback collection** — three-channel system: (1) UI rating widget (1-5 dots on each assistant message), (2) compaction-triggered episode boundaries (`auto-compact` source), (3) automated friction signals (tool failures, API errors tracked per session). Ratings averaged into `userRating` on episodes. System prompt instructs agent to call `log_episode` at natural breaks. 13 web tests, 9 new episode tests.
 - [x] **Semantic episode retrieval** — local neural embeddings (`@xenova/transformers`, all-MiniLM-L6-v2 384-dim). `search_episodes` tool for meaning-based search. Proactive retrieval injects relevant past experience before each agent turn. Auto-indexing on episode append. Always on. 23 new tests.
@@ -85,7 +85,7 @@
 
 ## Future / Low Priority
 
-- [ ] **Packaging / installer** — single-binary or packaged installer; consider Tauri or Electron.
+- [x] **Packaging / installer** — `npm install -g aigent` + `aigent init` wizard. XDG config/data dirs, isDev detection, STT/TTS venv setup, Chrome extension build + load instructions. `src/xdg.ts`, `src/init.ts`, `src/cli.ts`.
 - [ ] **Multi-instance agents** — per-project agent processes once STT is decoupled from GPU.
-- [ ] **TTS/STT one-click setup** — bundle into `make start` with graceful fallback.
+- [x] **TTS/STT one-click setup** — handled by `aigent init` (venv creation + pip install).
 - [ ] **OAT token docs** — document what an OAT token is and how to obtain one.

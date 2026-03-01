@@ -1630,6 +1630,17 @@ async function shutdown(): Promise<void> {
     writeEndOfSessionSummary();
   }
 
+  // Run reflection — mine patterns from recent episodes (non-critical, 30s timeout)
+  if (agent) {
+    try {
+      const { runReflection } = await import('./reflection.js');
+      await Promise.race([
+        runReflection(agent.underlyingProvider, workspacePath),
+        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('reflection timeout')), 30_000)),
+      ]);
+    } catch { /* non-critical */ }
+  }
+
   if (mcpManager) mcpManager.shutdown();
   server.close();
   if (existsSync(SOCKET_PATH)) {

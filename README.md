@@ -43,7 +43,34 @@ Child process: Agent server (server.ts)
 
 ---
 
-## Quick start
+## Install (global)
+
+**Requirements:** Node.js 22+, Anthropic API key
+
+```bash
+npm install -g aigent
+aigent init          # scaffold workspace, enter API key, set up TTS and Chrome extension
+aigent               # launch — open http://localhost:3141
+```
+
+`aigent init` walks you through:
+- Creating `~/.config/aigent/` (config + API key) and `~/.local/share/aigent/workspace/` (memory)
+- Entering your `ANTHROPIC_API_KEY` (stored in `~/.config/aigent/.env`, permissions `600`)
+- Setting up TTS (edge-tts, Microsoft neural TTS) — requires Python 3
+- Optionally installing STT (NVIDIA Parakeet, requires CUDA GPU and ~2 GB download)
+- Building the Chrome extension and printing load instructions
+
+After init, just run `aigent` — no extra flags needed.
+
+```bash
+aigent --workspace ~/myproject    # custom workspace
+aigent --headless                 # web UI only (no TUI)
+aigent --model claude-opus-4-6   # override model
+```
+
+---
+
+## Quick start (development)
 
 **Requirements:** Node.js 22+, Anthropic API key (or OAT subscription token)
 
@@ -261,6 +288,7 @@ Key settings groups:
 - **`search_memory`** — keyword search across all past daily logs at zero LLM cost
 - **`search_episodes`** — semantic similarity search over episode records using local neural embeddings (all-MiniLM-L6-v2). Finds relevant past experience even when wording differs.
 - **Proactive retrieval** — relevant past episodes are automatically surfaced before each agent turn (similarity > 0.4, max 3 results)
+- **Reflection agent** — at shutdown and `/reset`, Haiku analyzes the last 50 episodes to find recurring friction and success patterns, then appends actionable insights to `MEMORY.md` and improvement suggestions to `TODO.md`
 
 ### Profiles and sessions
 
