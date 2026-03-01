@@ -15,7 +15,7 @@ export interface MicControls {
   micRecording: boolean;
 }
 
-// Max samples to send per live chunk (12 s at 16 kHz — more context improves Whisper accuracy)
+// Max samples to send per live chunk (12 s at 16 kHz — more context improves Parakeet accuracy)
 const MIC_WINDOW_SAMPLES = 16000 * 12;
 
 export function useMic(onTranscript: (text: string, windowCapped: boolean) => void): MicControls {
@@ -54,7 +54,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
 
     // Check if audio exceeds the window. If so, commit the last good
     // transcription into micBaseText, clear samples, and start a fresh
-    // window. This prevents old text from being lost when Whisper only
+    // window. This prevents old text from being lost when Parakeet only
     // sees the trailing 12 s.
     let totalLen = 0;
     for (const s of micSamples.current) totalLen += s.length;
@@ -130,17 +130,27 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
         useUIStore.getState().setError('Microphone not available (secure context required)');
         return;
       }
-      const micDevId = useVoiceStore.getState().micDeviceId;
+      const { micDeviceId: micDevId, micDeviceLabel } = useVoiceStore.getState();
       const audioConstraints: MediaTrackConstraints = { channelCount: 1 };
       if (micDevId) {
         // Validate device still exists before using { exact } — browsers can
         // regenerate device IDs across sessions, causing OverconstrainedError.
         const available = await navigator.mediaDevices.enumerateDevices();
-        const exists = available.some(d => d.kind === 'audioinput' && d.deviceId === micDevId);
-        if (exists) {
+        const micInputs = available.filter(d => d.kind === 'audioinput');
+        const byId = micInputs.find(d => d.deviceId === micDevId);
+        if (byId) {
           audioConstraints.deviceId = { exact: micDevId };
         } else {
-          useVoiceStore.getState().setMicDeviceId('');
+          // ID is stale — try to re-match by label (Chrome regenerates IDs each session)
+          const byLabel = micDeviceLabel
+            ? micInputs.find(d => d.label === micDeviceLabel)
+            : null;
+          if (byLabel) {
+            useVoiceStore.getState().setMicDevice(byLabel.deviceId, byLabel.label);
+            audioConstraints.deviceId = { exact: byLabel.deviceId };
+          } else {
+            useVoiceStore.getState().setMicDevice('', '');
+          }
         }
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
@@ -311,7 +321,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     let finalText = micLastText.current;
     try {
       // No client-side timeout for the final call — the full recording may be long
-      // and Whisper may need several seconds to process it.
+      // and Parakeet may need several seconds to process it.
       const resp = await fetch('/stt', {
         method: 'POST',
         headers: { 'Content-Type': 'audio/wav' },

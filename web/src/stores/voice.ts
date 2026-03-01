@@ -15,8 +15,12 @@ interface VoiceState {
   speakBlockSpoken: boolean;
   /** Selected mic deviceId ('' = system default) */
   micDeviceId: string;
+  /** Human-readable label for the selected mic (used to re-match after Chrome regenerates IDs) */
+  micDeviceLabel: string;
   /** Selected speaker deviceId ('' = system default) */
   speakerDeviceId: string;
+  /** Human-readable label for the selected speaker (used to re-match after Chrome regenerates IDs) */
+  speakerDeviceLabel: string;
 
   setTtsAutoSpeak: (on: boolean) => void;
   setTtsRatePct: (pct: number) => void;
@@ -26,8 +30,12 @@ interface VoiceState {
   setTtsPlaying: (playing: boolean) => void;
   setTtsSpeakingId: (id: string | null) => void;
   setSpeakBlockSpoken: (spoken: boolean) => void;
+  /** @deprecated Use setMicDevice(id, label) */
   setMicDeviceId: (id: string) => void;
+  /** @deprecated Use setSpeakerDevice(id, label) */
   setSpeakerDeviceId: (id: string) => void;
+  setMicDevice: (id: string, label: string) => void;
+  setSpeakerDevice: (id: string, label: string) => void;
 }
 
 export const useVoiceStore = create<VoiceState>()(
@@ -42,7 +50,9 @@ export const useVoiceStore = create<VoiceState>()(
       ttsSpeakingId: null,
       speakBlockSpoken: false,
       micDeviceId: '',
+      micDeviceLabel: '',
       speakerDeviceId: '',
+      speakerDeviceLabel: '',
 
       setTtsAutoSpeak: (on) => set({ ttsAutoSpeak: on }),
       setTtsRatePct: (pct) => set({ ttsRatePct: pct }),
@@ -54,6 +64,8 @@ export const useVoiceStore = create<VoiceState>()(
       setSpeakBlockSpoken: (spoken) => set({ speakBlockSpoken: spoken }),
       setMicDeviceId: (id) => set({ micDeviceId: id }),
       setSpeakerDeviceId: (id) => set({ speakerDeviceId: id }),
+      setMicDevice: (id, label) => set({ micDeviceId: id, micDeviceLabel: label }),
+      setSpeakerDevice: (id, label) => set({ speakerDeviceId: id, speakerDeviceLabel: label }),
     }),
     {
       name: 'aigent-voice',
@@ -62,7 +74,9 @@ export const useVoiceStore = create<VoiceState>()(
         ttsRatePct: s.ttsRatePct,
         micSticky: s.micSticky,
         micDeviceId: s.micDeviceId,
+        micDeviceLabel: s.micDeviceLabel,
         speakerDeviceId: s.speakerDeviceId,
+        speakerDeviceLabel: s.speakerDeviceLabel,
       }),
     }
   )

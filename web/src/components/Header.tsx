@@ -335,7 +335,7 @@ export function Header() {
                       </div>
                     )}
                     {sttAvailable && (
-                      <div className="hdr-overflow-item" style={{ fontSize: 11 }} title="Speech-to-text via Whisper server">
+                      <div className="hdr-overflow-item" style={{ fontSize: 11 }} title="Speech-to-text via Parakeet server">
                         <span className="cap-grant allow">on</span>
                         <span>STT</span>
                       </div>

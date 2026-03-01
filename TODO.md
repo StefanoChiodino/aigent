@@ -6,7 +6,13 @@
 
 ---
 
-keybindings should be configurable in the settings
+When the text comes streaming down the first part of the text that is actually the short answer displays and then as soon as it finishes it is wiped and then replaced by the full answer. That is quite jarring and should stop.
+
+I often notice that when an agent is spawn instead of being completely asynchronous, it the agent seems to be waiting for those results and I don't quite understand why.
+
+The microphone often resets to the default which is incorrect and needs to be sticky to the one that I pick. Why is it so difficult?
+
+keybindings should be configurable in the settings, and not just typing text, but capturing the keybindings
 
 ## Active Bugs
 

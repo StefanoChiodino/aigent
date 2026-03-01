@@ -49,10 +49,11 @@ function TaskItem({ task, onOpen }: { task: BackgroundTaskInfo; onOpen: () => vo
   );
 }
 
-function DevicePicker({ kind, value, onChange }: {
+function DevicePicker({ kind, value, storedLabel, onChange }: {
   kind: 'audioinput' | 'audiooutput';
   value: string;
-  onChange: (id: string) => void;
+  storedLabel: string;
+  onChange: (id: string, label: string) => void;
 }) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [open, setOpen] = useState(false);
@@ -81,13 +82,20 @@ function DevicePicker({ kind, value, onChange }: {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  // If the stored device ID is no longer in the enumerated list, reset to default.
-  // This handles browsers regenerating device IDs across sessions.
+  // If the stored device ID is no longer in the enumerated list, try to re-match
+  // by label (Chrome regenerates deviceIds across sessions). Fall back to default
+  // only if the label also doesn't match anything.
   useEffect(() => {
-    if (devices.length > 0 && value && !devices.some(d => d.deviceId === value)) {
-      onChange('');
+    if (devices.length === 0 || !value) return;
+    if (devices.some(d => d.deviceId === value)) return; // ID still valid
+    // ID is stale — try label match
+    const byLabel = storedLabel ? devices.find(d => d.label === storedLabel) : null;
+    if (byLabel) {
+      onChange(byLabel.deviceId, byLabel.label);
+    } else {
+      onChange('', '');
     }
-  }, [devices, value, onChange]);
+  }, [devices, value, storedLabel, onChange]);
 
   const selected = devices.find(d => d.deviceId === value) ?? devices[0];
 
@@ -107,7 +115,7 @@ function DevicePicker({ kind, value, onChange }: {
             key={d.deviceId}
             className={`sb-model-option${d.deviceId === value ? ' active' : ''}`}
             title={d.label}
-            onClick={() => { onChange(d.deviceId); setOpen(false); }}
+            onClick={() => { onChange(d.deviceId, d.label); setOpen(false); }}
           >
             {d.label}
           </button>
@@ -147,9 +155,11 @@ export function Sidebar() {
   const setTtsAutoSpeak = useVoiceStore(s => s.setTtsAutoSpeak);
   const setTtsRatePct = useVoiceStore(s => s.setTtsRatePct);
   const micDeviceId = useVoiceStore(s => s.micDeviceId);
+  const micDeviceLabel = useVoiceStore(s => s.micDeviceLabel);
   const speakerDeviceId = useVoiceStore(s => s.speakerDeviceId);
-  const setMicDeviceId = useVoiceStore(s => s.setMicDeviceId);
-  const setSpeakerDeviceId = useVoiceStore(s => s.setSpeakerDeviceId);
+  const speakerDeviceLabel = useVoiceStore(s => s.speakerDeviceLabel);
+  const setMicDevice = useVoiceStore(s => s.setMicDevice);
+  const setSpeakerDevice = useVoiceStore(s => s.setSpeakerDevice);
 
   const ctxUsed = usage.contextTokens ?? 0;
   const cost = usage.cost ?? 0;
@@ -371,13 +381,13 @@ export function Sidebar() {
           {ttsAvailable && (
             <div className="sb-device-row" style={{ marginTop: 6 }}>
               <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Speaker</span>
-              <DevicePicker kind="audiooutput" value={speakerDeviceId} onChange={setSpeakerDeviceId} />
+              <DevicePicker kind="audiooutput" value={speakerDeviceId} storedLabel={speakerDeviceLabel} onChange={setSpeakerDevice} />
             </div>
           )}
           {sttAvailable && (
             <div className="sb-device-row" style={{ marginTop: 6 }}>
               <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>Mic</span>
-              <DevicePicker kind="audioinput" value={micDeviceId} onChange={setMicDeviceId} />
+              <DevicePicker kind="audioinput" value={micDeviceId} storedLabel={micDeviceLabel} onChange={setMicDevice} />
             </div>
           )}
         </div>
@@ -412,7 +422,7 @@ export function Sidebar() {
               </div>
             )}
             {sttAvailable && (
-              <div className="cap-item" title="Speech-to-text via Whisper server">
+              <div className="cap-item" title="Speech-to-text via Parakeet server">
                 <span className="cap-grant allow" title="Available">on</span>
                 <span className="cap-name">STT</span>
               </div>
