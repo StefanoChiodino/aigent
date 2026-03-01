@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useUIStore } from '../../stores/ui';
 import { useSettingsStore } from '../../stores/settings';
+import { getActiveBindings, serializeBinding, type KeyBinding } from '../../lib/keybindings.js';
 
 interface Shortcut {
   keys: string[];
@@ -12,16 +13,60 @@ interface ShortcutGroup {
   shortcuts: Shortcut[];
 }
 
+/** Convert a KeyBinding into an array of display tokens like ['Ctrl', 'Shift', '`'] */
+function bindingToKeys(b: KeyBinding): string[] {
+  const parts: string[] = [];
+  if (b.ctrl) parts.push('Ctrl');
+  if (b.shift) parts.push('Shift');
+  if (b.alt) parts.push('Alt');
+  if (b.meta) parts.push('Meta');
+  if (b.code) {
+    parts.push(b.code === 'Backquote' ? '`' : b.code);
+  } else if (b.key) {
+    parts.push(b.key.length === 1 ? b.key.toUpperCase() : b.key);
+  }
+  return parts;
+}
+
+/**
+ * Build the shortcut groups, using configured bindings for the 3 configurable
+ * actions and keeping everything else hardcoded.
+ */
 function getShortcutGroups(multilineEnter: boolean): ShortcutGroup[] {
+  const bindings = getActiveBindings();
+
+  // Helper: turn a list of KeyBindings into Shortcut rows, one per binding
+  // (skip requireNoFocus ones for the display — we annotate them in the description)
+  function bindingsToShortcuts(
+    bindingList: KeyBinding[],
+    descFull: string,
+    descNoFocus: string,
+  ): Shortcut[] {
+    return bindingList.map(b => ({
+      keys: bindingToKeys(b),
+      description: b.requireNoFocus ? descNoFocus : descFull,
+    }));
+  }
+
   return [
     {
       label: 'Global',
       shortcuts: [
-        { keys: ['Ctrl', 'Shift', '?'], description: 'Show keyboard shortcuts' },
-        { keys: ['Ctrl', '`'], description: 'Toggle microphone' },
-        { keys: ['Ctrl', 'Shift', '`'], description: 'Toggle sticky mic (always-on)' },
-        { keys: ['`'], description: 'Toggle mic (when not typing)' },
-        { keys: ['M'], description: 'Toggle mic (when not typing)' },
+        ...bindingsToShortcuts(
+          bindings.showShortcuts,
+          'Show keyboard shortcuts',
+          'Show keyboard shortcuts (when not typing)',
+        ),
+        ...bindingsToShortcuts(
+          bindings.toggleMic,
+          'Toggle microphone',
+          'Toggle mic (when not typing)',
+        ),
+        ...bindingsToShortcuts(
+          bindings.toggleMicSticky,
+          'Toggle sticky mic (always-on)',
+          'Toggle sticky mic (when not typing)',
+        ),
       ],
     },
     {
@@ -59,6 +104,12 @@ export function ShortcutsModal() {
   const open = useUIStore(s => s.shortcutsOpen);
   const close = () => useUIStore.getState().setShortcutsOpen(false);
   const multilineEnter = useSettingsStore(s => s.getClientSetting('AIGENT_MULTILINE_ENTER')) === true;
+  // Subscribe to keybinding settings changes so the display stays in sync
+  useSettingsStore(s => [
+    s.clientSettings['keybind_toggleMic'],
+    s.clientSettings['keybind_toggleMicSticky'],
+    s.clientSettings['keybind_showShortcuts'],
+  ]);
 
   const groups = getShortcutGroups(multilineEnter);
 

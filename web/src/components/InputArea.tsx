@@ -9,6 +9,7 @@ import { useTTS } from '../hooks/useTTS';
 import { captureScreenshot, registerScreenCapCallback, startScreenShare, stopScreenShare } from '../lib/screen';
 import { COMMANDS } from '../lib/settings-schema';
 import { useSettingsStore } from '../stores/settings';
+import { getActiveBindings, matchesAction } from '../lib/keybindings.js';
 import { CommandPalette } from './CommandPalette';
 import { AtPalette, getAtStaticMatches } from './AtPalette';
 import { AttachmentPreview } from './AttachmentPreview';
@@ -242,6 +243,15 @@ export function InputArea() {
     registerScreenCapCallback(setScreenCapActive);
   }, []);
 
+  // Auto-start mic on mount if micSticky was persisted as true (e.g. in the PiP iframe).
+  useEffect(() => {
+    if (micSticky) {
+      void startMic(true);
+    }
+    // Only run on initial mount — intentionally omit micSticky/startMic from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Test helper: reset local component state between shared-page tests
   useEffect(() => {
     const handler = () => {
@@ -453,32 +463,32 @@ export function InputArea() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Control') setCtrlHeld(true);
       if (e.key === 'Shift') setShiftHeld(true);
-      if ((e.key === '?' || (e.key === '/' && e.shiftKey)) && e.ctrlKey) {
-        e.preventDefault();
-        const { shortcutsOpen, setShortcutsOpen } = useUIStore.getState();
-        setShortcutsOpen(!shortcutsOpen);
-        return;
-      }
-      if (e.code === 'Backquote' && e.ctrlKey && e.shiftKey) {
-        e.preventDefault();
-        toggleMicSticky();
-        return;
-      }
-      if (e.code === 'Backquote' && e.ctrlKey && !e.shiftKey) {
-        e.preventDefault();
-        if (micState === 'recording') { setMicSticky(false); void stopMic(); }
-        else void startMic(false, inputRef.current?.value ?? '');
-        return;
-      }
+
       const active = document.activeElement;
       const anyInputFocused = active instanceof HTMLInputElement
         || active instanceof HTMLTextAreaElement
         || active instanceof HTMLSelectElement
         || (active as HTMLElement)?.isContentEditable;
-      if (!anyInputFocused && (e.code === 'Backquote' || e.key === 'm' || e.key === 'M')) {
+      const noInputFocused = !anyInputFocused;
+
+      const bindings = getActiveBindings();
+
+      if (matchesAction(e, 'showShortcuts', bindings, { noInputFocused })) {
+        e.preventDefault();
+        const { shortcutsOpen, setShortcutsOpen } = useUIStore.getState();
+        setShortcutsOpen(!shortcutsOpen);
+        return;
+      }
+      if (matchesAction(e, 'toggleMicSticky', bindings, { noInputFocused })) {
+        e.preventDefault();
+        toggleMicSticky();
+        return;
+      }
+      if (matchesAction(e, 'toggleMic', bindings, { noInputFocused })) {
         e.preventDefault();
         if (micState === 'recording') { setMicSticky(false); void stopMic(); }
         else void startMic(false, inputRef.current?.value ?? '');
+        return;
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
