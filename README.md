@@ -259,6 +259,8 @@ Key settings groups:
 - **Memory distillation** — on `/reset` or session end, the agent rewrites `MEMORY.md` from the day's logs
 - **Daily logs** — by default only an index of log files is included in the prompt; the agent reads specific logs on demand via `read_file`. Set `AIGENT_FULL_LOGS=1` to include recent logs in full.
 - **`search_memory`** — keyword search across all past daily logs at zero LLM cost
+- **`search_episodes`** — semantic similarity search over episode records using local neural embeddings (all-MiniLM-L6-v2). Finds relevant past experience even when wording differs. Enable with `AIGENT_SEMANTIC_EPISODES=1`.
+- **Proactive retrieval** — when semantic search is enabled, relevant past episodes are automatically surfaced before each agent turn (similarity > 0.4, max 3 results)
 
 ### Profiles and sessions
 
@@ -267,7 +269,7 @@ Key settings groups:
 
 ---
 
-## Tools (25)
+## Tools (26)
 
 | Tool | Description |
 |------|-------------|
@@ -296,6 +298,7 @@ Key settings groups:
 | `ask_user` | Present a question to the user with optional multiple-choice options (free-text input always available) |
 | `log_episode` | Record a structured episode — what was attempted, outcome, friction, lessons learned |
 | `query_episodes` | Search and filter past episode records by domain, outcome, tags, date range |
+| `search_episodes` | Semantic similarity search over episodes — finds relevant past experience even when wording differs |
 
 ---
 
@@ -319,6 +322,7 @@ AIGENT_CLASSIFIER=0               # disable Tier 3 LLM classifier (falls back to
 AIGENT_WORKSPACE=/path/to/ws      # custom workspace directory (default: workspace/ in repo root)
 AIGENT_NO_TOOLS=1                 # send no tool definitions to the model
 AIGENT_TOOLS_ALLOWLIST=exec,read_file  # comma-separated list of tools to enable
+AIGENT_SEMANTIC_EPISODES=1               # enable semantic episode search + proactive retrieval
 AIGENT_STT_URL=http://127.0.0.1:8765   # STT service endpoint
 AIGENT_TTS_URL=http://127.0.0.1:8766   # TTS service endpoint
 ```

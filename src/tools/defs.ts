@@ -573,6 +573,26 @@ const queryEpisodesTool: ToolDef = {
   },
 };
 
+const searchEpisodesTool: ToolDef = {
+  name: 'search_episodes',
+  description:
+    'Search past episodes by meaning using semantic similarity. Unlike query_episodes ' +
+    '(which filters by exact metadata), this finds episodes whose task, lessons, and tags ' +
+    'are semantically similar to your query — even when the exact words differ.\n\n' +
+    'Examples: "CSS layout debugging" matches "fixing flexbox alignment issues". ' +
+    '"performance optimization" matches "reducing bundle size".\n\n' +
+    'Requires semantic indexing to be enabled (AIGENT_SEMANTIC_EPISODES=1).',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      query: { type: 'string', description: 'Natural language description of what you are looking for' },
+      limit: { type: 'number', description: 'Max results (default: 5, max: 20)' },
+      min_similarity: { type: 'number', description: 'Minimum cosine similarity 0-1 (default: 0.3)' },
+    },
+    required: ['query'],
+  },
+};
+
 // --- Tool registry ---
 
 export const internalTools: ToolDef[] = [
@@ -580,7 +600,7 @@ export const internalTools: ToolDef[] = [
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
   hostTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
   searchMemoryTool, browserExtTool, askUserTool,
-  logEpisodeTool, queryEpisodesTool,
+  logEpisodeTool, queryEpisodesTool, searchEpisodesTool,
 ];
 
 export function getToolDefinitions(useClaudeCodeNames: boolean): ToolDef[] {

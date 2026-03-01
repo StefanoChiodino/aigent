@@ -391,16 +391,16 @@ Benchmarks are the measurement layer that emerges from both.
 - System prompt instructs agent to call `log_episode` at natural breaks
 - Trend queries available via `query_episodes` tool
 
-### Phase 5: Semantic Retrieval
+### Phase 5: Semantic Retrieval (done)
 
-- Embed episode summaries (local model via Ollama, or Anthropic voyage)
-- SQLite-vec for vector storage alongside structured episode data
-- Semantic search: "find episodes similar to this task"
-- Proactive memory surfacing: before starting a task, retrieve relevant
-  past experience automatically
-
-**Depends on:** Episode volume being high enough to justify (likely 3-6 months
-of active use).
+- Local neural embeddings via `@xenova/transformers` (`all-MiniLM-L6-v2`, 384-dim)
+- Sidecar NDJSON index (`workspace/episodes.index.ndjson`) stores embeddings
+- `search_episodes` tool — cosine similarity search by meaning, not keywords
+- Proactive retrieval — before each agent turn, automatically surface top 3
+  relevant past episodes (similarity > 0.4) as context hints
+- Auto-indexing — new episodes embedded fire-and-forget in `appendEpisode()`
+- Gated behind `AIGENT_SEMANTIC_EPISODES=1` (avoids surprise model downloads)
+- 23 unit tests (cosine similarity, episodeToText, hasIndex, search logic)
 
 ---
 

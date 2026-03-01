@@ -94,8 +94,22 @@ export function appendEpisode(workspacePath: string, episode: Episode): void {
     const dir = workspacePath;
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     appendFileSync(getEpisodesPath(workspacePath), JSON.stringify(episode) + '\n', 'utf-8');
+    // Fire-and-forget: index for semantic search if enabled
+    void indexEpisodeIfEnabled(workspacePath, episode);
   } catch {
     // Fire-and-forget — never block the main flow
+  }
+}
+
+/** Auto-index a new episode for semantic search (fire-and-forget). */
+async function indexEpisodeIfEnabled(workspacePath: string, episode: Episode): Promise<void> {
+  try {
+    const semanticEnabled = process.env['AIGENT_SEMANTIC_EPISODES'] === '1';
+    if (!semanticEnabled) return;
+    const { indexEpisode } = await import('./episode-index.js');
+    await indexEpisode(workspacePath, episode);
+  } catch {
+    // Non-critical — fail silently
   }
 }
 

@@ -181,6 +181,11 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       if (since) parts.push(`since ${since}`);
       return `query episodes${parts.length ? ': ' + parts.join(', ') : ''}`;
     }
+    case 'search_episodes': {
+      const { query } = input as { query: string };
+      const short = query.length > 60 ? query.slice(0, 60) + '...' : query;
+      return `search episodes: "${short}"`;
+    }
     default:
       return name;
   }
@@ -747,6 +752,31 @@ export async function executeTool(
       });
 
       return `${episodes.length} episode(s) found:\n\n${lines.join('\n\n')}`;
+    }
+
+    case 'search_episodes': {
+      const { query, limit, min_similarity } = input as { query: string; limit?: number; min_similarity?: number };
+      const { searchEpisodesSemantic, hasIndex } = await import('../episode-index.js');
+      const wsp = process.env['AIGENT_WORKSPACE'] ?? join(process.cwd(), 'workspace');
+      if (!hasIndex(wsp)) return 'No semantic index found. Enable semantic indexing with AIGENT_SEMANTIC_EPISODES=1 and log some episodes.';
+      const results = await searchEpisodesSemantic(wsp, query, {
+        limit: Math.min(limit ?? 5, 20),
+        minSimilarity: min_similarity ?? 0.3,
+      });
+      if (results.length === 0) return 'No semantically similar episodes found.';
+      const lines = results.map(r => {
+        const ep = r.episode;
+        const date = ep.endedAt.slice(0, 10);
+        const sim = (r.similarity * 100).toFixed(0);
+        const lessonsStr = ep.lessons.length > 0
+          ? `\n  Lessons: ${ep.lessons.join('; ')}`
+          : '';
+        const frictionStr = ep.friction
+          ? `\n  Friction: ${ep.friction}`
+          : '';
+        return `[${date}] ${ep.domain} [${ep.outcome}] (${sim}% match) ${ep.task}${frictionStr}${lessonsStr}`;
+      });
+      return `${results.length} semantically similar episode(s):\n\n${lines.join('\n\n')}`;
     }
 
     default:

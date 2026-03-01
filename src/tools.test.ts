@@ -128,14 +128,14 @@ describe('fromClaudeCodeName', () => {
 // ---------------------------------------------------------------------------
 
 describe('getToolDefinitions', () => {
-  it('returns 23 tools with internal names', () => {
+  it('returns 24 tools with internal names', () => {
     const tools = getToolDefinitions(false);
-    assert.equal(tools.length, 23);
+    assert.equal(tools.length, 24);
   });
 
-  it('returns 23 tools with CC names', () => {
+  it('returns 24 tools with CC names', () => {
     const tools = getToolDefinitions(true);
-    assert.equal(tools.length, 23);
+    assert.equal(tools.length, 24);
   });
 
   it('internal names include exec, read_file, write_file', () => {
