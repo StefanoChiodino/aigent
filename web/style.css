@@ -4517,6 +4517,60 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   padding: 8px 0;
 }
 
+#settings-search-wrap {
+  padding: 6px 10px 6px;
+}
+
+#settings-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-input, var(--bg-hover));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+  outline: none;
+  transition: border-color var(--transition);
+  /* suppress the native search cancel button in webkit */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+#settings-search::placeholder {
+  color: var(--text-dim);
+}
+
+#settings-search:focus {
+  border-color: var(--accent, #9888ff);
+}
+
+/* hide webkit's native ✕ inside search inputs */
+#settings-search::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.settings-search-empty {
+  padding: 32px 20px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+}
+
+.settings-search-empty em {
+  font-style: normal;
+  color: var(--text-secondary);
+}
+
+.settings-group-label--search {
+  margin-top: 8px;
+}
+
+.settings-group-label--search:first-child {
+  margin-top: 0;
+}
+
 .settings-nav-item {
   display: block;
   width: 100%;

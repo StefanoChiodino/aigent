@@ -27,6 +27,7 @@ export function SettingsModal() {
 
   const groupNames = useMemo(() => Array.from(groups.keys()), [groups]);
   const [activeGroup, setActiveGroup] = useState<string>(groupNames[0] ?? '');
+  const [search, setSearch] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -90,7 +91,18 @@ export function SettingsModal() {
         </div>
         <div id="settings-layout">
           <nav id="settings-nav">
-            {groupNames.map(name => (
+            <div id="settings-search-wrap">
+              <input
+                id="settings-search"
+                type="search"
+                placeholder="Search settings…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </div>
+            {search === '' && groupNames.map(name => (
               <button
                 key={name}
                 className={`settings-nav-item${name === activeGroup ? ' active' : ''}`}
@@ -102,7 +114,51 @@ export function SettingsModal() {
             ))}
           </nav>
           <div id="settings-body">
-            {groupNames.map(name => {
+            {search !== '' ? (() => {
+              const term = search.toLowerCase();
+              const matched = SETTINGS_SCHEMA.filter(def =>
+                def.label.toLowerCase().includes(term) ||
+                (def.desc ?? '').toLowerCase().includes(term) ||
+                def.key.toLowerCase().includes(term)
+              );
+              if (matched.length === 0) {
+                return <div className="settings-search-empty">No settings match <em>"{search}"</em></div>;
+              }
+              // Group matched results under their group headings
+              const seenGroups = new Set<string>();
+              return (
+                <div className="settings-group">
+                  {matched.map(def => {
+                    const showGroupLabel = !seenGroups.has(def.group);
+                    if (showGroupLabel) seenGroups.add(def.group);
+                    const value = def.scope === 'client'
+                      ? getClientValue(def.key)
+                      : (serverSettings[def.key] ?? def.default ?? '');
+                    const isStacked = def.type === 'string-list';
+                    return (
+                      <React.Fragment key={def.key}>
+                        {showGroupLabel && (
+                          <div className="settings-group-label settings-group-label--search">{def.group}</div>
+                        )}
+                        <div className={`settings-row${isStacked ? ' settings-row--stacked' : ''}${def.danger ? ' settings-row--danger' : ''}`}>
+                          <div className="settings-row-label">
+                            <div className="label-text">{def.label}</div>
+                            {def.desc && <div className="label-desc">{def.desc}</div>}
+                          </div>
+                          <div className="settings-row-control">
+                            <SettingControl
+                              def={def}
+                              value={value}
+                              onChange={v => handleChange(def, v)}
+                            />
+                          </div>
+                        </div>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+              );
+            })() : groupNames.map(name => {
               const defs = groups.get(name)!;
               const isActive = name === activeGroup;
               return (
