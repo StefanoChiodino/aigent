@@ -125,7 +125,6 @@ export const useChatStore = create<ChatState>()(
         return {
           streaming: {
             ...s.streaming,
-            text: '',
             currentToolOutput: '',
             currentToolImages: [],
             traces: [...s.streaming.traces, {

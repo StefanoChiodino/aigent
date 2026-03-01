@@ -156,6 +156,15 @@ describe('Chat store', () => {
     if (traces[0]!.type === 'tool') expect(traces[0]!.classifierMeta).toBeUndefined();
   });
 
+  it('startToolBlock preserves accumulated streaming text', () => {
+    // Regression: text was cleared to '' when a tool started, causing it to
+    // visually disappear from the StreamingMessage component mid-stream.
+    useChatStore.getState().startStream(0);
+    useChatStore.getState().setStreamText('Here is what I found:');
+    useChatStore.getState().startToolBlock('exec', 'Running ls', '{}');
+    expect(useChatStore.getState().streaming.text).toBe('Here is what I found:');
+  });
+
   it('trace IDs are unique', () => {
     useChatStore.getState().startStream(0);
     useChatStore.getState().startThinkingBlock();

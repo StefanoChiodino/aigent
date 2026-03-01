@@ -2,13 +2,13 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
-HELP ME PUBLISH THIS TO NPM!
+~~HELP ME PUBLISH THIS TO NPM!~~ ✓ Published as `@stefanochiodino/aigent`
 
 ---
 
 ## Active Bugs
 
-**Streaming text disappears mid-read** — sometimes while reading streaming output, the text disappears and the agent goes back to thinking. This may be reasoning traces being shown then hidden, but it feels disruptive. Needs investigation in the streaming/rendering layer (`web/src/app.ts` or `web/src/components/ChatView.tsx`).
+(none currently)
 
 ---
 
@@ -121,7 +121,7 @@ This is the most complex continuous learning piece. The agent spins up a second 
 
 ## Future / Low Priority
 
-- [x] **Packaging / installer** — `npm install -g aigent` + `aigent init` wizard. `src/xdg.ts`, `src/init.ts`, `src/cli.ts`.
+- [x] **Packaging / installer** — `npm install -g @stefanochiodino/aigent` + `aigent init` wizard. `src/xdg.ts`, `src/init.ts`, `src/cli.ts`.
 - [ ] **Multi-instance agents** — per-project agent processes once STT is decoupled from GPU.
 - [x] **TTS/STT one-click setup** — handled by `aigent init`.
 - [ ] **OAT token docs** — document what an OAT token is and how to obtain one.
