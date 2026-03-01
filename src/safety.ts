@@ -327,7 +327,7 @@ export function classifyBrowserAction(
   if (action === 'extract_a11y' || action === 'screenshot' || action === 'list_tabs' || action === 'activate_tab') {
     return 'read';
   }
-  if (action === 'navigate' || action === 'open_tab' || action === 'close_tab') {
+  if (action === 'navigate' || action === 'open_tab' || action === 'close_tab' || action === 'create_window' || action === 'close_agent_tabs') {
     return 'write';
   }
   // run_script — check if all steps are structured

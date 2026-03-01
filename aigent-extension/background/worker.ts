@@ -16,6 +16,12 @@ const KEEPALIVE_ALARM = 'aigent-keepalive';
 
 let cachedSecret: string | null = null;
 
+// --- Agent window management ---
+// When the agent opens a dedicated browsing window, we track it and all tabs
+// created within it so they can be cleaned up later.
+let agentWindowId: number | null = null;
+const agentTabIds = new Set<number>();
+
 // --- BrowserStep types (discriminated union used in run_script) ---
 
 type BrowserStep =
@@ -48,7 +54,7 @@ interface ScriptRunResult {
 interface ExtRequest {
   type: 'ext_request';
   id: string;
-  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab';
+  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab' | 'create_window' | 'close_agent_tabs';
   tabId?: number;
   rootSelector?: string;
   steps?: BrowserStep[];
@@ -61,6 +67,7 @@ interface TabInfo {
   url: string;
   active: boolean;
   windowId: number;
+  isAgent?: boolean;
 }
 
 interface ExtResponse {
@@ -76,6 +83,8 @@ interface ExtResponse {
   finalTitle?: string;
   newTabId?: number;
   screenshots?: Array<{ stepIndex: number; dataUrl: string }>;
+  agentWindowId?: number;
+  closedTabIds?: number[];
   error?: string;
 }
 
@@ -175,6 +184,10 @@ async function handleRequest(req: ExtRequest): Promise<ExtResponse> {
         return await openTab(req.id, req.url ?? '');
       case 'close_tab':
         return await closeTab(req.id, req.tabId);
+      case 'create_window':
+        return await createAgentWindow(req.id, req.url);
+      case 'close_agent_tabs':
+        return await closeAgentTabs(req.id);
       default:
         return { type: 'ext_response', id: req.id, ok: false, error: `Unknown action: ${String((req as { action: string }).action)}` };
     }
@@ -190,6 +203,20 @@ function isInfrastructureTab(_t: chrome.tabs.Tab): boolean {
 }
 
 async function getActiveTabId(): Promise<number> {
+  // If an agent window exists, prefer its active tab
+  if (agentWindowId !== null) {
+    try {
+      const agentTabs = await chrome.tabs.query({ active: true, windowId: agentWindowId });
+      if (agentTabs.length > 0 && agentTabs[0]?.id) {
+        return agentTabs[0].id;
+      }
+    } catch {
+      // Agent window was closed — fall through to normal behavior
+      agentWindowId = null;
+      agentTabIds.clear();
+    }
+  }
+
   function isUserTab(t: chrome.tabs.Tab): boolean {
     if (!t.id || t.windowId === undefined) return false;
     return !isInfrastructureTab(t);
@@ -226,6 +253,7 @@ async function listTabs(id: string): Promise<ExtResponse> {
         url: t.url ?? '',
         active: t.active ?? false,
         windowId: t.windowId ?? 0,
+        ...(agentTabIds.has(t.id!) ? { isAgent: true } : {}),
       }));
     return { type: 'ext_response', id, ok: true, tabs: userTabs };
   } catch (err) {
@@ -278,6 +306,19 @@ chrome.tabs.onActivated.addListener(async (info) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.active && tab.url && ws?.readyState === WebSocket.OPEN) {
     send({ type: 'ext_tab_changed', tabId, url: tab.url, title: tab.title ?? '' });
+  }
+});
+
+// Clean up agent tab tracking when tabs are closed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  agentTabIds.delete(tabId);
+});
+
+// Clean up agent window tracking when window is closed
+chrome.windows.onRemoved.addListener((windowId) => {
+  if (windowId === agentWindowId) {
+    agentWindowId = null;
+    agentTabIds.clear();
   }
 });
 
@@ -343,7 +384,20 @@ async function openTab(id: string, url: string): Promise<ExtResponse> {
     return { type: 'ext_response', id, ok: false, error: 'url is required for open_tab' };
   }
   try {
-    const tab = await chrome.tabs.create({ url, active: true });
+    // If an agent window exists, open tabs there instead of in the user's window
+    const createOpts: chrome.tabs.CreateProperties = { url, active: true };
+    if (agentWindowId !== null) {
+      try {
+        await chrome.windows.get(agentWindowId);
+        createOpts.windowId = agentWindowId;
+      } catch {
+        // Agent window was closed externally
+        agentWindowId = null;
+        agentTabIds.clear();
+      }
+    }
+    const tab = await chrome.tabs.create(createOpts);
+    if (tab.id) agentTabIds.add(tab.id);
     const finalTab = await waitForTabLoad(tab.id!, 15_000);
     return {
       type: 'ext_response', id, ok: true,
@@ -363,6 +417,109 @@ async function closeTab(id: string, tabId?: number): Promise<ExtResponse> {
   try {
     await chrome.tabs.remove(tabId);
     return { type: 'ext_response', id, ok: true };
+  } catch (err) {
+    return { type: 'ext_response', id, ok: false, error: String(err) };
+  }
+}
+
+async function createAgentWindow(id: string, url?: string): Promise<ExtResponse> {
+  try {
+    // If agent window already exists and is still open, reuse it
+    if (agentWindowId !== null) {
+      try {
+        const existingWin = await chrome.windows.get(agentWindowId);
+        if (existingWin) {
+          // Open a new tab in the existing agent window
+          if (url) {
+            const tab = await chrome.tabs.create({ windowId: agentWindowId, url, active: true });
+            if (tab.id) agentTabIds.add(tab.id);
+            const finalTab = await waitForTabLoad(tab.id!, 15_000);
+            return {
+              type: 'ext_response', id, ok: true,
+              agentWindowId,
+              newTabId: tab.id,
+              finalUrl: finalTab?.url ?? url,
+              finalTitle: finalTab?.title ?? '',
+            };
+          }
+          return { type: 'ext_response', id, ok: true, agentWindowId };
+        }
+      } catch {
+        // Window was closed externally — reset tracking
+        agentWindowId = null;
+        agentTabIds.clear();
+      }
+    }
+
+    // Create a new agent window (not focused, so it doesn't steal from user)
+    const win = await chrome.windows.create({
+      url: url ?? 'about:blank',
+      focused: false,
+      width: 1280,
+      height: 900,
+      type: 'normal',
+    });
+
+    if (!win.id) {
+      return { type: 'ext_response', id, ok: false, error: 'Failed to create window' };
+    }
+
+    agentWindowId = win.id;
+
+    // Track the initial tab
+    const initialTab = win.tabs?.[0];
+    if (initialTab?.id) agentTabIds.add(initialTab.id);
+
+    if (url && initialTab?.id) {
+      const finalTab = await waitForTabLoad(initialTab.id, 15_000);
+      return {
+        type: 'ext_response', id, ok: true,
+        agentWindowId: win.id,
+        newTabId: initialTab.id,
+        finalUrl: finalTab?.url ?? url,
+        finalTitle: finalTab?.title ?? '',
+      };
+    }
+
+    return {
+      type: 'ext_response', id, ok: true,
+      agentWindowId: win.id,
+      newTabId: initialTab?.id,
+    };
+  } catch (err) {
+    return { type: 'ext_response', id, ok: false, error: String(err) };
+  }
+}
+
+async function closeAgentTabs(id: string): Promise<ExtResponse> {
+  try {
+    const closedTabIds: number[] = [];
+
+    // Close all tracked agent tabs
+    for (const tabId of agentTabIds) {
+      try {
+        await chrome.tabs.remove(tabId);
+        closedTabIds.push(tabId);
+      } catch {
+        // Tab may have been closed already — ignore
+      }
+    }
+    agentTabIds.clear();
+
+    // Close the agent window if it's still open and empty
+    if (agentWindowId !== null) {
+      try {
+        const remainingTabs = await chrome.tabs.query({ windowId: agentWindowId });
+        if (remainingTabs.length === 0) {
+          await chrome.windows.remove(agentWindowId);
+        }
+      } catch {
+        // Window already closed
+      }
+      agentWindowId = null;
+    }
+
+    return { type: 'ext_response', id, ok: true, closedTabIds };
   } catch (err) {
     return { type: 'ext_response', id, ok: false, error: String(err) };
   }

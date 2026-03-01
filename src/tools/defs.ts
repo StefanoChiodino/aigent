@@ -471,10 +471,11 @@ const browserExtTool: ToolDef = {
     properties: {
       action: {
         type: 'string',
-        enum: ['extract_a11y', 'screenshot', 'list_tabs', 'run_script', 'navigate', 'activate_tab', 'open_tab', 'close_tab'],
-        description: '`list_tabs`: all open tabs with IDs, titles, URLs. `extract_a11y`: structured a11y tree (use by default for page content). `screenshot`: base64 PNG (visual questions only). `navigate`: navigate the active tab to a URL (requires approval). `run_script`: execute an array of browser steps — fill, click, scroll, wait, etc. (requires approval). `activate_tab`: bring a tab to the foreground by tabId (auto-allowed). `open_tab`: open a URL in a new tab (requires approval). `close_tab`: close a tab by tabId (requires approval).',
+        enum: ['extract_a11y', 'screenshot', 'list_tabs', 'run_script', 'navigate', 'activate_tab', 'open_tab', 'close_tab', 'create_window', 'close_agent_tabs'],
+        description: '`list_tabs`: all open tabs with IDs, titles, URLs. `extract_a11y`: structured a11y tree (use by default for page content). `screenshot`: base64 PNG (visual questions only). `navigate`: navigate the active tab to a URL (requires approval). `run_script`: execute an array of browser steps — fill, click, scroll, wait, etc. (requires approval). `activate_tab`: bring a tab to the foreground by tabId (auto-allowed). `open_tab`: open a URL in a new tab (requires approval). `close_tab`: close a tab by tabId (requires approval). `create_window`: open a dedicated agent browsing window (doesn\'t steal focus). `close_agent_tabs`: close all tabs the agent opened and the agent window.',
       },
       tabId: { type: 'number', description: 'Chrome tab ID to target. Omit to use the currently active tab. Use `list_tabs` to discover tab IDs.' },
+      windowId: { type: 'number', description: 'Window ID for the agent window. Returned by create_window.' },
       rootSelector: { type: 'string', description: 'CSS selector to scope a11y extraction to a subtree (e.g. "#main-content"). Only applies to extract_a11y.' },
       url: { type: 'string', description: 'URL to navigate to. Only used with the `navigate` action.' },
       steps: {
