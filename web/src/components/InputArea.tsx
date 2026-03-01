@@ -517,7 +517,7 @@ export function InputArea() {
     if (paletteItems.length > 0 && !paletteHidden) {
       if (e.key === 'ArrowUp') { e.preventDefault(); setPaletteSelected(s => Math.max(0, s - 1)); return; }
       if (e.key === 'ArrowDown') { e.preventDefault(); setPaletteSelected(s => Math.min(paletteItems.length - 1, s + 1)); return; }
-      if (e.key === 'Tab') {
+      if (e.key === 'Tab' || e.key === 'Enter') {
         e.preventDefault();
         const item = paletteItems[paletteSelected];
         if (item) handlePaletteComplete(item);
