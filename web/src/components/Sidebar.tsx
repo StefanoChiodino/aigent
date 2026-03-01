@@ -127,6 +127,7 @@ export function Sidebar() {
   const ttsAvailable = useUIStore(s => s.ttsAvailable);
   const sttAvailable = useUIStore(s => s.sttAvailable);
   const extensionConnected = useUIStore(s => s.extensionConnected);
+  const extensionPath = useUIStore(s => s.extensionPath);
   const modelName = useUIStore(s => s.modelName);
   const availableModels = useUIStore(s => s.availableModels);
   const thinkingLevel = useUIStore(s => s.thinkingLevel);
@@ -165,6 +166,23 @@ export function Sidebar() {
   const effortLevels = ['low', 'medium', 'high', 'max'];
 
   const modelPickerRef = useRef<HTMLDivElement>(null);
+  const [extGuideOpen, setExtGuideOpen] = useState(false);
+  const extGuideRef = useRef<HTMLDivElement>(null);
+
+  // Close extension setup guide on click-outside
+  useEffect(() => {
+    if (!extGuideOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (!extGuideRef.current?.contains(e.target as Node)) setExtGuideOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [extGuideOpen]);
+
+  // Auto-close guide when extension connects
+  useEffect(() => {
+    if (extensionConnected) setExtGuideOpen(false);
+  }, [extensionConnected]);
 
   useEffect(() => {
     if (!modelPickerOpen) return;
@@ -369,47 +387,72 @@ export function Sidebar() {
         <div className="sidebar-section">
           <div className="sidebar-label">Capabilities</div>
           <div id="sb-caps-list">
-            {Object.keys(capsList).length === 0 && !ttsAvailable && !sttAvailable && !extensionConnected
-              ? <span className="sidebar-value" style={{ fontSize: 11 }}>--</span>
-              : <>
-                  {Object.entries(capsList).map(([cap, info]) => {
-                    const ci = CAP_INFO[cap];
-                    const label = ci?.label ?? cap;
-                    const desc = ci?.description ?? cap;
-                    const grantDesc = GRANT_DESCRIPTIONS[info.grant] ?? info.grant;
-                    const tooltip = info.available
-                      ? `${desc} — ${grantDesc}`
-                      : `${desc} — ${grantDesc} (not yet wired up)`;
-                    const grantLabel = info.grant === 'prompt' ? '?' : info.grant.slice(0, 3);
-                    return (
-                      <div key={cap} className={`cap-item${info.available ? '' : ' cap-unavailable'}`} title={tooltip}>
-                        <span className={`cap-grant ${info.grant}`} title={grantDesc}>
-                          {grantLabel}
-                        </span>
-                        <span className="cap-name">{label}</span>
-                      </div>
-                    );
-                  })}
-                  {ttsAvailable && (
-                    <div className="cap-item" title="Text-to-speech via edge-tts server">
-                      <span className="cap-grant allow" title="Available">on</span>
-                      <span className="cap-name">TTS</span>
-                    </div>
-                  )}
-                  {sttAvailable && (
-                    <div className="cap-item" title="Speech-to-text via Whisper server">
-                      <span className="cap-grant allow" title="Available">on</span>
-                      <span className="cap-name">STT</span>
-                    </div>
-                  )}
-                  {extensionConnected && (
-                    <div className="cap-item" title="Chrome extension connected — browser tools available">
-                      <span className="cap-grant allow" title="Connected">on</span>
-                      <span className="cap-name">Browser</span>
-                    </div>
-                  )}
-                </>
-            }
+            {Object.entries(capsList).map(([cap, info]) => {
+              const ci = CAP_INFO[cap];
+              const label = ci?.label ?? cap;
+              const desc = ci?.description ?? cap;
+              const grantDesc = GRANT_DESCRIPTIONS[info.grant] ?? info.grant;
+              const tooltip = info.available
+                ? `${desc} — ${grantDesc}`
+                : `${desc} — ${grantDesc} (not yet wired up)`;
+              const grantLabel = info.grant === 'prompt' ? '?' : info.grant.slice(0, 3);
+              return (
+                <div key={cap} className={`cap-item${info.available ? '' : ' cap-unavailable'}`} title={tooltip}>
+                  <span className={`cap-grant ${info.grant}`} title={grantDesc}>
+                    {grantLabel}
+                  </span>
+                  <span className="cap-name">{label}</span>
+                </div>
+              );
+            })}
+            {ttsAvailable && (
+              <div className="cap-item" title="Text-to-speech via edge-tts server">
+                <span className="cap-grant allow" title="Available">on</span>
+                <span className="cap-name">TTS</span>
+              </div>
+            )}
+            {sttAvailable && (
+              <div className="cap-item" title="Speech-to-text via Whisper server">
+                <span className="cap-grant allow" title="Available">on</span>
+                <span className="cap-name">STT</span>
+              </div>
+            )}
+            {/* Browser extension — always visible, clickable for setup guide */}
+            <div
+              ref={extGuideRef}
+              className={`cap-item cap-item-clickable${extensionConnected ? '' : ' cap-ext-off'}`}
+              title={extensionConnected
+                ? 'Chrome extension connected — browser tools available'
+                : 'Chrome extension not connected — click for setup'}
+              onClick={() => !extensionConnected && setExtGuideOpen(!extGuideOpen)}
+              onKeyDown={e => { if (e.key === 'Escape') setExtGuideOpen(false); }}
+            >
+              <span
+                className={`cap-grant ${extensionConnected ? 'allow' : 'deny'}`}
+                title={extensionConnected ? 'Connected' : 'Not connected'}
+              >
+                {extensionConnected ? 'on' : 'off'}
+              </span>
+              <span className="cap-name">Browser</span>
+            </div>
+            {extGuideOpen && !extensionConnected && (
+              <div className="ext-setup-guide" role="dialog" aria-label="Browser extension setup">
+                <div className="ext-setup-header">Chrome Extension Setup</div>
+                <ol className="ext-setup-steps">
+                  <li>Open <code>chrome://extensions</code> in Chrome</li>
+                  <li>Enable <strong>Developer mode</strong> (top-right toggle)</li>
+                  <li>Click <strong>Load unpacked</strong></li>
+                  <li>
+                    Select this folder:
+                    <code className="ext-path">{extensionPath || 'aigent-extension/dist/'}</code>
+                  </li>
+                </ol>
+                <div className="ext-setup-note">
+                  The extension auto-builds with <code>make dev</code>. After loading, this badge turns green automatically.
+                </div>
+                <button className="ext-setup-close" onClick={() => setExtGuideOpen(false)}>Got it</button>
+              </div>
+            )}
           </div>
         </div>
 

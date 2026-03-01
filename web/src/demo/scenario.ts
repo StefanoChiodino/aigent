@@ -796,7 +796,7 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(1500),
 
     // Extension connection indicator appears in sidebar
-    emit({ type: 'host_state', extensionConnected: true }),
+    emit({ type: 'host_state', extensionConnected: true, extensionPath: '/home/user/aigent/aigent-extension/dist' }),
     wait(800),
 
     { action: 'type_input', text: 'Test the checkout flow — click submit and verify the confirmation page', charDelayMs: 40 },

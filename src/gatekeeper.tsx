@@ -1679,6 +1679,18 @@ const pendingBrowserWriteApprovals = new Map<string, PendingBrowserWrite>();
 // IDs auto-handled (grant active) before web-bridge listener fires — web-bridge skips these
 const autoHandledBrowserWriteIds = new Set<string>();
 
+// --- PiP state tracking ---
+let pipOpen = false;
+const pendingPiPSuggestions = new Map<string, () => void>();
+
+function setPiPOpen(open: boolean): void { pipOpen = open; }
+
+function resolvePiPSuggestion(id: string, action: 'float' | 'skip'): void {
+  if (action === 'float') pipOpen = true;
+  const resolve = pendingPiPSuggestions.get(id);
+  if (resolve) { pendingPiPSuggestions.delete(id); resolve(); }
+}
+
 function readBrowserPermissions(): BrowserPermissions {
   try {
     const settings = readSettingsSync();
@@ -2088,7 +2100,7 @@ client.sendCommand = (cmd: string) => {
 // Start web UI server before the server process so it's available during startup/restarts.
 const extSecret = randomUUID();
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions: readBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged: handleSettingsChanged, extSecret }).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions: readBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged: handleSettingsChanged, extSecret, setPiPOpen, resolvePiPSuggestion }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });
@@ -2221,6 +2233,30 @@ client.on('browser_ext_request', (id: string, action: string, tabId?: number, ro
     if (rootSelector !== undefined) params.rootSelector = rootSelector;
     if (clear !== undefined) params.clear = clear;
     if (options !== undefined) params.options = options;
+
+    // For activate_tab: prompt user to float chat via PiP before the tab switch
+    if (action === 'activate_tab' && !pipOpen && readSettingsSync()['auto_pip'] !== false) {
+      const pipId = `pip_${id}`;
+      const pipPromise = new Promise<void>((resolve) => {
+        pendingPiPSuggestions.set(pipId, resolve);
+        setTimeout(() => {
+          if (pendingPiPSuggestions.has(pipId)) {
+            pendingPiPSuggestions.delete(pipId);
+            resolve();
+          }
+        }, 30_000);
+      });
+      client.emit('pip_suggestion', pipId);
+      pipPromise.then(() => {
+        void extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params).then((result) => {
+          sendBrowserExtResult(id, result);
+        }).catch((err: Error) => {
+          client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
+        });
+      });
+      return;
+    }
+
     void extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params).then((result) => {
       sendBrowserExtResult(id, result);
     }).catch((err: Error) => {

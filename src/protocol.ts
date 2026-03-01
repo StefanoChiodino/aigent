@@ -36,6 +36,7 @@ export type ClientCommand =
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'user_question_response'; id: string; answer: string; selectedOptions?: string[]; dismissed: boolean }
   | { type: 'cancel_queued'; id: number }
+  | { type: 'reorder_queue'; ids: number[] }
   | { type: 'message_rating'; messageId: string; rating: number; notes?: string }
   | { type: 'set_thinking'; enabled: boolean }
   | { type: 'set_effort'; level: ThinkingLevel }
@@ -52,6 +53,7 @@ export interface DisplayAttachment {
 }
 
 export interface DisplayMessage {
+  id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   timestamp: string;
@@ -145,7 +147,7 @@ export type ServerEvent =
   | { type: 'mcp_tool_request'; id: string; server: string; tool: string; params: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
-  | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean; extensionConnected?: boolean }
+  | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean; extensionConnected?: boolean; extensionPath?: string }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_ext_request'; id: string; action: string; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } }

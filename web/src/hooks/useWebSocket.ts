@@ -9,6 +9,7 @@ import { STREAMING_MESSAGE_ID } from '../components/StreamingMessage';
 import { parseDiffIntoFiles } from '../lib/diff';
 import { captureScreenshot, startScreenShare } from '../lib/screen';
 import { playPermissionSound } from '../lib/audio';
+import { isPiPOpen, pipSupported } from './usePiP';
 import { isDemo, getDemoWebSocket } from '../demo/useDemoMode';
 import { setupErrorRelay, teardownErrorRelay } from '../lib/errorRelay';
 import type { ServerEvent } from '../types';
@@ -179,10 +180,10 @@ export function useWebSocket(): void {
             // Transfer any rating set during streaming to the final message ID
             const streamingRating = useRatingStore.getState().ratings[STREAMING_MESSAGE_ID];
             if (streamingRating) {
-              useRatingStore.getState().remapRating(STREAMING_MESSAGE_ID, event.message.timestamp);
+              useRatingStore.getState().remapRating(STREAMING_MESSAGE_ID, event.message.id);
               conn().send({
                 type: 'message_rating',
-                messageId: event.message.timestamp,
+                messageId: event.message.id,
                 rating: streamingRating.score,
                 notes: streamingRating.notes,
               });
@@ -195,6 +196,7 @@ export function useWebSocket(): void {
 
         case 'system':
           chat().appendMessage({
+            id: 'msg_sys_' + Date.now(),
             role: 'system',
             content: event.content,
             timestamp: new Date().toISOString(),
@@ -213,7 +215,19 @@ export function useWebSocket(): void {
             chat().startStream(turnStartCtx);
           }
           if (!event.isLoading) {
-            chat().endStream();
+            // Preserve partial assistant text on cancel so the user can still see it
+            const { streaming } = chat();
+            if (streaming.active && (streaming.text || streaming.traces.length > 0)) {
+              const traces = streaming.traces;
+              chat().endStream();
+              chat().appendMessage({
+                role: 'assistant',
+                content: streaming.text || '*(cancelled)*',
+                timestamp: new Date().toISOString(),
+              }, traces);
+            } else {
+              chat().endStream();
+            }
           }
           break;
 
@@ -246,6 +260,7 @@ export function useWebSocket(): void {
           if (event.ttsAvailable !== undefined) ui().setTtsAvailable(event.ttsAvailable);
           if (event.sttAvailable !== undefined) ui().setSttAvailable(event.sttAvailable);
           if (event.extensionConnected !== undefined) ui().setExtensionConnected(event.extensionConnected);
+          if (event.extensionPath) ui().setExtensionPath(event.extensionPath);
           break;
 
         case 'client_settings':
@@ -407,6 +422,24 @@ export function useWebSocket(): void {
           });
           playPermissionSound();
           break;
+
+        case 'pip_suggestion': {
+          const autoPip = settings().getClientSetting('auto_pip');
+          if (isPiPOpen() || autoPip === false || !pipSupported) {
+            send({ type: 'pip_suggestion_response', id: event.id, action: 'skip' });
+            break;
+          }
+          ui().enqueuePermRequest({
+            type: 'pip_suggestion',
+            id: event.id,
+            title: 'Float chat?',
+            detail: 'Agent is about to switch tabs',
+            approveCmd: '',
+            denyCmd: '',
+          });
+          playPermissionSound();
+          break;
+        }
 
         case 'screenshot_request': {
           const base64 = captureScreenshot();

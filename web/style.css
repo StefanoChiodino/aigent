@@ -302,7 +302,17 @@ html, body {
 /* Overflow menu sections */
 #hdr-overflow-menu {
   min-width: 220px;
+  max-width: 300px;
   padding: 6px;
+}
+
+/* Task description inside narrow overflow menu */
+.hdr-task-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hdr-overflow-section {
@@ -1167,6 +1177,90 @@ html, body {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+/* ── Browser extension setup guide ──────────────────────── */
+
+.cap-item-clickable {
+  cursor: pointer;
+}
+.cap-item-clickable:hover .cap-name {
+  color: var(--text-primary);
+}
+
+.cap-ext-off {
+  opacity: 0.7;
+}
+.cap-ext-off:hover {
+  opacity: 1;
+}
+
+.ext-setup-guide {
+  margin-top: 6px;
+  background: var(--bg-float);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.ext-setup-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.ext-setup-steps {
+  margin: 0;
+  padding-left: 20px;
+}
+.ext-setup-steps li {
+  margin-bottom: 6px;
+}
+.ext-setup-steps code {
+  background: var(--bg-raised);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+}
+
+.ext-path {
+  display: block;
+  margin-top: 4px;
+  padding: 4px 6px;
+  background: var(--bg-raised);
+  border-radius: 4px;
+  word-break: break-all;
+  user-select: all;
+  cursor: text;
+}
+
+.ext-setup-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.ext-setup-close {
+  margin-top: 10px;
+  width: 100%;
+  padding: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.ext-setup-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .task-item {
@@ -2355,6 +2449,28 @@ html, body {
 
 .queue-chip-remove:hover {
   color: var(--text);
+}
+
+.queue-chip-handle {
+  cursor: grab;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.queue-chip-handle:active {
+  cursor: grabbing;
+}
+
+.queue-chip-dragging {
+  opacity: 0.4;
+}
+
+.queue-chip-drop-target {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* Drag-over highlight */

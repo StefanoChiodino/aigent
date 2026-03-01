@@ -6,6 +6,8 @@
 
 ---
 
+keybindings should be configurable in the settings
+
 ## Active Bugs
 
 (none currently)

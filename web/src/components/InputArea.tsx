@@ -13,6 +13,7 @@ import { CommandPalette } from './CommandPalette';
 import { AtPalette, getAtStaticMatches } from './AtPalette';
 import { AttachmentPreview } from './AttachmentPreview';
 import { QueueChips } from './QueueChips';
+import { broadcastSync, onSyncMessage } from '../lib/broadcastSync';
 import type { CommandDef, AtItem, PendingAttachment } from '../types';
 
 /** Escape HTML special chars */
@@ -175,6 +176,9 @@ export function InputArea() {
   const highlightRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingCaretRef = useRef<number | null>(null);
+  // Prevents echo when receiving our own broadcast (we set this true when
+  // applying a remote update so the resulting setInputValue doesn't re-broadcast).
+  const suppressBroadcastRef = useRef(false);
 
   // Apply pending caret position synchronously after React renders the new value.
   // This avoids the race condition where setTimeout-based caret positioning
@@ -187,6 +191,32 @@ export function InputArea() {
       inputRef.current?.setSelectionRange(pos, pos);
     }
   });
+
+  // BroadcastChannel sync: receive input-text / input-clear / mic-state from the other window.
+  useEffect(() => {
+    return onSyncMessage((msg) => {
+      if (msg.type === 'input-text') {
+        suppressBroadcastRef.current = true;
+        setInputValue(msg.text);
+        suppressBroadcastRef.current = false;
+      } else if (msg.type === 'input-clear') {
+        suppressBroadcastRef.current = true;
+        setInputValue('');
+        suppressBroadcastRef.current = false;
+      } else if (msg.type === 'mic-state') {
+        // Reflect the other window's mic activity in this window's voice store
+        // (visual indicator only — don't actually start/stop the mic here).
+        const store = useVoiceStore.getState();
+        store.setMicState(msg.active ? 'recording' : 'idle');
+      }
+    });
+  }, []);
+
+  // Broadcast our mic state changes so the other window can reflect them.
+  useEffect(() => {
+    broadcastSync({ type: 'mic-state', active: micState === 'recording' });
+  }, [micState]);
+
   const micBaseTextRef = useRef('');
   const lastMicTextRef = useRef('');
   const lastSttValueRef = useRef('');
@@ -311,6 +341,7 @@ export function InputArea() {
     }
 
     send(msg);
+    broadcastSync({ type: 'input-clear' });
     setInputValue('');
     lastSttValueRef.current = '';
     setMicCapped(false);
@@ -616,6 +647,9 @@ export function InputArea() {
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInputValue(val);
+    if (!suppressBroadcastRef.current) {
+      broadcastSync({ type: 'input-text', text: val });
+    }
     const caret = e.target.selectionStart ?? val.length;
     computeAtTrigger(val, caret);
     setPaletteSelected(0);

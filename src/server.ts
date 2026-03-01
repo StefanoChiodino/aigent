@@ -10,6 +10,7 @@
 
 import { createServer, type Server, type Socket } from 'node:net';
 import { existsSync, unlinkSync, appendFileSync, mkdirSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { generateSessionId, autoSaveSession, autoLoadSession } from './profiles.js';
@@ -39,6 +40,10 @@ import { handleCommand as _handleCommand, setThinking, setEffort, setShort, setM
 const log = createLogger('server');
 
 const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'low', 'medium', 'high', 'max'];
+
+function generateMsgId(): string {
+  return 'msg_' + randomBytes(8).toString('hex');
+}
 
 // Default model list — used until the provider reports its own list.
 // Ordered most capable → fastest/cheapest.
@@ -555,6 +560,7 @@ async function processAgentTurn(
   if (!isTaskResult) {
     const text = displayText ?? (typeof content === 'string' ? content : '[message with attachments]');
     const userMsg: DisplayMessage = {
+      id: generateMsgId(),
       role: 'user',
       content: text,
       timestamp: new Date().toISOString(),
@@ -697,6 +703,7 @@ async function processAgentTurn(
       const finalContent = _ensureSpeakTag(response, currentShort);
       broadcast({ type: 'text', content: '' });
       const assistantMsg: DisplayMessage = {
+        id: generateMsgId(),
         role: 'assistant',
         content: finalContent,
         timestamp: new Date().toISOString(),
@@ -950,7 +957,7 @@ function broadcast(event: ServerEvent): void {
 }
 
 function addSystemMessage(content: string): void {
-  const msg: DisplayMessage = { role: 'system', content, timestamp: new Date().toISOString() };
+  const msg: DisplayMessage = { id: generateMsgId(), role: 'system', content, timestamp: new Date().toISOString() };
   messages.push(msg);
   broadcast({ type: 'system', content });
 }
@@ -1265,6 +1272,23 @@ function handleClient(socket: Socket): void {
             }
             break;
           }
+          case 'reorder_queue': {
+            const idOrder = cmd.ids;
+            const byId = new Map(messageQueue.map(m => [m.id, m]));
+            const reordered: QueuedMessage[] = [];
+            for (const id of idOrder) {
+              const m = byId.get(id);
+              if (m) reordered.push(m);
+            }
+            // Keep any messages not in the list (shouldn't happen, but safe)
+            for (const m of messageQueue) {
+              if (!idOrder.includes(m.id)) reordered.push(m);
+            }
+            messageQueue.length = 0;
+            messageQueue.push(...reordered);
+            broadcastQueueUpdate();
+            break;
+          }
           case 'command':
             handleCommand(cmd.cmd);
             break;
@@ -1415,6 +1439,10 @@ function restoreSession(): boolean {
   // Check if the session was interrupted mid-turn: last non-system UI message
   // is from the user, meaning the agent never completed its response.
   const uiMessages = saved.uiMessages as DisplayMessage[];
+  // Migrate old autosaves that lack the `id` field
+  for (const m of uiMessages) {
+    if (!m.id) m.id = generateMsgId();
+  }
   const lastNonSystem = [...uiMessages].reverse().find(m => m.role !== 'system');
   const wasInterrupted = lastNonSystem?.role === 'user';
 

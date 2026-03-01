@@ -28,7 +28,7 @@ function NarrowTaskItem({ task }: { task: BackgroundTaskInfo }) {
   return (
     <div className="hdr-overflow-item" style={{ fontSize: 11 }}>
       <span className={`task-status ${task.status}`}>{statusChar}</span>
-      <span style={{ flex: 1 }} title={task.description}>{task.description}</span>
+      <span className="hdr-task-desc" title={task.description}>{task.description}</span>
     </div>
   );
 }
@@ -55,6 +55,7 @@ export function Header() {
   const capsList = useUIStore(s => s.capsList);
   const ttsAvailable = useUIStore(s => s.ttsAvailable);
   const sttAvailable = useUIStore(s => s.sttAvailable);
+  const extensionConnected = useUIStore(s => s.extensionConnected);
   const { setSettingsOpen, setShortcutsOpen, setCtxInspectorOpen } = useUIStore.getState();
 
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
@@ -276,8 +277,7 @@ export function Header() {
 
 
                 {/* Capabilities */}
-                {(Object.keys(capsList).length > 0 || ttsAvailable || sttAvailable) && (
-                  <div className="hdr-overflow-section">
+                <div className="hdr-overflow-section">
                     <div className="hdr-overflow-label">Capabilities</div>
                     {Object.entries(capsList).map(([cap, info]) => {
                       const ci = CAP_INFO[cap];
@@ -309,8 +309,17 @@ export function Header() {
                         <span>STT</span>
                       </div>
                     )}
+                    <div
+                      className={`hdr-overflow-item${extensionConnected ? '' : ' cap-ext-off'}`}
+                      style={{ fontSize: 11 }}
+                      title={extensionConnected ? 'Chrome extension connected' : 'Chrome extension not connected — use sidebar for setup'}
+                    >
+                      <span className={`cap-grant ${extensionConnected ? 'allow' : 'deny'}`}>
+                        {extensionConnected ? 'on' : 'off'}
+                      </span>
+                      <span>Browser</span>
+                    </div>
                   </div>
-                )}
 
                 {/* Settings & shortcuts (moved from header bar) */}
                 <div className="hdr-overflow-section hdr-overflow-actions">

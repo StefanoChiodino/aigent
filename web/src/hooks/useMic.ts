@@ -26,6 +26,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
   const micProcessor = useRef<AudioWorkletNode | null>(null);
   const micChunkTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const micSilenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const micIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const micReqSeq = useRef(0);
   const micDisplayedSeq = useRef(0);
   const micBaseText = useRef('');
@@ -42,6 +43,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
   const silenceTailMs = () => getSetting('mic_silence_tail_ms') as number;
   const autoSend = () => getSetting('mic_auto_send') as boolean;
   const autoSendMs = () => getSetting('mic_auto_send_ms') as number;
+  const idleTimeoutS = () => getSetting('mic_idle_timeout_s') as number;
 
   const setMicState = useVoiceStore.getState().setMicState;
   const setVadActive = useVoiceStore.getState().setVadActive;
@@ -120,6 +122,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     // going through stopMic/abortMic).
     if (micChunkTimer.current) { clearInterval(micChunkTimer.current); micChunkTimer.current = null; }
     if (micSilenceTimer.current) { clearTimeout(micSilenceTimer.current); micSilenceTimer.current = null; }
+    if (micIdleTimer.current) { clearTimeout(micIdleTimer.current); micIdleTimer.current = null; }
     for (const c of micLiveAbortCtrls.current) c.abort();
 
     try {
@@ -180,6 +183,11 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
             clearTimeout(micSilenceTimer.current);
             micSilenceTimer.current = null;
           }
+          // Cancel any pending idle-timeout timer when speech resumes
+          if (micIdleTimer.current !== null) {
+            clearTimeout(micIdleTimer.current);
+            micIdleTimer.current = null;
+          }
           // Visual pulse: require a few consecutive loud frames to avoid flicker
           vadLoudFrames.current++;
           if (vadLoudFrames.current >= loudFramesNeeded && !vadSpeaking.current) {
@@ -205,6 +213,34 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
                 send({ type: 'command', cmd: '__submit__' });
               }
             }, autoSendMs());
+          }
+          // Idle timeout: in sticky mode, stop mic after prolonged silence to save battery
+          const idleMs = idleTimeoutS() * 1000;
+          if (micSticky && idleMs > 0 && micIdleTimer.current === null) {
+            micIdleTimer.current = setTimeout(() => {
+              micIdleTimer.current = null;
+              const vs = useVoiceStore.getState();
+              if (vs.micSticky && vs.micState === 'recording') {
+                vs.setMicSticky(false);
+                // Tear down mic infrastructure directly (stopMic is not in scope here)
+                for (const ctrl of micLiveAbortCtrls.current) ctrl.abort();
+                micLiveAbortCtrls.current = [];
+                if (micChunkTimer.current) { clearInterval(micChunkTimer.current); micChunkTimer.current = null; }
+                if (micSilenceTimer.current) { clearTimeout(micSilenceTimer.current); micSilenceTimer.current = null; }
+                micProcessor.current?.disconnect();
+                micSource.current?.disconnect();
+                micStream.current?.getTracks().forEach(t => t.stop());
+                micAudioCtx.current?.close();
+                micProcessor.current = null;
+                micSource.current = null;
+                micStream.current = null;
+                micAudioCtx.current = null;
+                micSamples.current = [];
+                vadSpeaking.current = false;
+                vs.setMicState('idle');
+                vs.setVadActive(false);
+              }
+            }, idleMs);
           }
         }
       };
@@ -244,6 +280,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     // Stop timers and abort all in-flight live STT requests
     if (micChunkTimer.current) { clearInterval(micChunkTimer.current); micChunkTimer.current = null; }
     if (micSilenceTimer.current) { clearTimeout(micSilenceTimer.current); micSilenceTimer.current = null; }
+    if (micIdleTimer.current) { clearTimeout(micIdleTimer.current); micIdleTimer.current = null; }
     for (const c of micLiveAbortCtrls.current) c.abort();
     micLiveAbortCtrls.current = [];
 
@@ -323,6 +360,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     micLiveAbortCtrls.current = [];
     if (micChunkTimer.current) { clearInterval(micChunkTimer.current); micChunkTimer.current = null; }
     if (micSilenceTimer.current) { clearTimeout(micSilenceTimer.current); micSilenceTimer.current = null; }
+    if (micIdleTimer.current) { clearTimeout(micIdleTimer.current); micIdleTimer.current = null; }
     micProcessor.current?.disconnect();
     micSource.current?.disconnect();
     micStream.current?.getTracks().forEach(t => t.stop());

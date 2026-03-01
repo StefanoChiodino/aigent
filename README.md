@@ -1,13 +1,38 @@
 # aigent
 
-**A self-modifying AI agent platform built for developers and AI researchers.**
+**An AI agent that learns from every interaction.**
 
-The agent runs directly on your machine as a child process, can read and edit its own source code, and talks to you through a browser-based UI. API keys never reach the agent process. All tool use is gated through a three-tier safety system.
+Most AI assistants are stateless — they forget everything between sessions. aigent doesn't. It records structured episodes from every conversation, tracks what worked and what didn't, and surfaces relevant past experience before each response. A reflection agent mines cross-session patterns at shutdown, writing actionable insights back into its own system prompt. Session N makes session N+1 better — automatically, with no manual training step.
+
+The agent runs directly on your machine, can read and edit its own source code, and talks to you through a browser-based UI. API keys never reach the agent process. All tool use is gated through a three-tier safety system.
+
+![Chat interface — sidebar with model picker, reasoning controls, and tool call blocks](docs/screenshots/chat.png)
+
+---
+
+## How it learns
+
+The continuous learning system runs automatically on every session. Five systems work together:
+
+1. **Episode logging** — every meaningful interaction is recorded as a structured episode: what was attempted, the outcome, tools used, cost, friction, and lessons learned. Logged automatically at session end, `/reset`, and context compaction.
+
+2. **Feedback collection** — star ratings (1–5) on any assistant message, tool failure tracking, and API error signals are accumulated into the current episode. The agent also logs episodes at natural conversation breaks when it detects friction or task completion.
+
+3. **Semantic retrieval** — local neural embeddings (all-MiniLM-L6-v2) index every episode. Before each agent turn, the system searches for relevant past experience (similarity > 0.4, top 3 results) and surfaces it as context. The agent sees its own past lessons before responding — no manual lookup needed.
+
+4. **Reflection agent** — at shutdown and `/reset`, Haiku analyzes the last 50 episodes to find recurring patterns: friction that keeps happening, success patterns worth reinforcing, low-rated episodes, and cost anomalies. Insights are appended to `MEMORY.md` (which feeds the system prompt next session) and improvement suggestions go to `TODO.md`.
+
+5. **Memory distillation** — on `/reset` or session end, the agent rewrites `MEMORY.md` from the day's logs. The reflection agent runs after, appending cross-session insights to a separate section.
+
+The result: the agent genuinely gets better over time without any explicit intervention. You can also point it at its own work — "look at your chat and improve X" — and it can inspect its own UI via the browser extension, cross-reference with episode history, and propose concrete improvements to its code, config, or prompts.
+
+> Full design: [`docs/design-continuous-learning.md`](docs/design-continuous-learning.md)
 
 ---
 
 ## What it does
 
+- Learns from every session — structured episodes, semantic retrieval, cross-session reflection
 - Streams responses from Claude (Anthropic) or GPT (OpenAI) or any OpenAI-compatible endpoint
 - Executes shell commands, reads/writes files, searches code, fetches URLs
 - Modifies its own source — changes hot-reload, conversation survives restarts
@@ -16,8 +41,6 @@ The agent runs directly on your machine as a child process, can read and edit it
 - Spawns background sub-agents for long tasks without blocking your conversation
 - Controls your Chrome browser via a companion extension (a11y tree, screenshots, tab management, script execution, DevTools monitoring); falls back to headless Playwright when the extension is not connected
 - Speaks responses aloud (local TTS) and listens via microphone (local STT)
-
-![Chat interface — sidebar with model picker, reasoning controls, and tool call blocks](docs/screenshots/chat.png)
 
 ---
 
@@ -266,7 +289,7 @@ Key settings groups:
 
 ---
 
-## Memory system
+## Memory & workspace
 
 ```
 /workspace/
@@ -277,18 +300,17 @@ Key settings groups:
 │   ├── IDENTITY.md    — identity framing
 │   └── TOOLS.md       — tool usage notes
 ├── MEMORY.md          — curated long-term knowledge (freely writable)
+├── episodes.ndjson    — structured episode records (continuous learning)
 └── memory/
     └── YYYY-MM-DD.md  — daily session logs
 ```
 
 - **Context compaction** at 70% usage — conversation is summarised in place; cost-optimised prompt
 - **Cache-aware** — stable system prompt blocks are cached with Anthropic prompt caching; workspace files skip disk reads when unchanged (mtime-based)
-- **Memory distillation** — on `/reset` or session end, the agent rewrites `MEMORY.md` from the day's logs
 - **Daily logs** — by default only an index of log files is included in the prompt; the agent reads specific logs on demand via `read_file`. Set `AIGENT_FULL_LOGS=1` to include recent logs in full.
 - **`search_memory`** — keyword search across all past daily logs at zero LLM cost
-- **`search_episodes`** — semantic similarity search over episode records using local neural embeddings (all-MiniLM-L6-v2). Finds relevant past experience even when wording differs.
-- **Proactive retrieval** — relevant past episodes are automatically surfaced before each agent turn (similarity > 0.4, max 3 results)
-- **Reflection agent** — at shutdown and `/reset`, Haiku analyzes the last 50 episodes to find recurring friction and success patterns, then appends actionable insights to `MEMORY.md` and improvement suggestions to `TODO.md`
+
+The continuous learning system (episodes, semantic retrieval, reflection, feedback) is described in [How it learns](#how-it-learns) above.
 
 ### Profiles and sessions
 

@@ -15,6 +15,7 @@ interface UIState {
   ttsAvailable: boolean;
   sttAvailable: boolean;
   extensionConnected: boolean;
+  extensionPath: string;
   modelName: string;
   availableModels: string[];
   availableTools: string[];
@@ -42,6 +43,7 @@ interface UIState {
   setTtsAvailable: (v: boolean) => void;
   setSttAvailable: (v: boolean) => void;
   setExtensionConnected: (v: boolean) => void;
+  setExtensionPath: (v: string) => void;
   setModelName: (name: string) => void;
   setAvailableModels: (models: string[]) => void;
   setAvailableTools: (tools: string[]) => void;
@@ -70,6 +72,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   ttsAvailable: false,
   sttAvailable: false,
   extensionConnected: false,
+  extensionPath: '',
   modelName: '',
   availableModels: [],
   availableTools: [],
@@ -148,6 +151,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setTtsAvailable: (v) => set({ ttsAvailable: v }),
   setSttAvailable: (v) => set({ sttAvailable: v }),
   setExtensionConnected: (v) => set({ extensionConnected: v }),
+  setExtensionPath: (v) => set({ extensionPath: v }),
   setModelName: (name) => set({ modelName: name }),
   setAvailableModels: (models) => set({ availableModels: models }),
   setAvailableTools: (tools) => set({ availableTools: tools }),

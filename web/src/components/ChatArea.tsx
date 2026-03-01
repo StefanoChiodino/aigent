@@ -71,7 +71,7 @@ export function ChatArea() {
             </div>
           );
         }
-        return <Message key={`${g.msg.timestamp}-${i}`} message={g.msg} />;
+        return <Message key={g.msg.id} message={g.msg} />;
       })}
       {streamingActive && <StreamingMessage />}
       <div ref={endRef} />

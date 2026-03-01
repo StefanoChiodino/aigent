@@ -4,6 +4,7 @@ import { useConnectionStore } from '../../stores/connection';
 import type { DiffFile } from '../../types';
 import DiffViewer from './DiffViewer';
 import { parseDiffIntoFiles } from '../../lib/diff';
+import { tryOpenPiP, isPiPOpen, pipSupported } from '../../hooks/usePiP';
 
 const TYPE_ICONS: Record<string, string> = {
   mount: '📂',
@@ -16,6 +17,7 @@ const TYPE_ICONS: Record<string, string> = {
   fetch_size: '📦',
   mcp_tool: '🔌',
   user_question: '❓',
+  pip_suggestion: '🪟',
 };
 
 export function PermissionModal() {
@@ -29,6 +31,7 @@ export function PermissionModal() {
 
   // Don't render if the front item is a user question — QuestionModal handles that
   const isQuestion = req?.type === 'user_question';
+  const isPipSuggestion = req?.type === 'pip_suggestion';
 
   useEffect(() => {
     setActiveFileIdx(0);
@@ -43,6 +46,18 @@ export function PermissionModal() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
         || (e.target as HTMLElement)?.isContentEditable) return;
 
+      if (isPipSuggestion) {
+        // Enter = Float & Continue, Escape = Skip
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          void handlePiPFloat();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          handlePiPSkip();
+        }
+        return;
+      }
+
       if (e.key === 'Enter') { e.preventDefault(); resolvePermRequest(send, true); }
       else if (e.key === 'Escape') { e.preventDefault(); resolvePermRequest(send, false); }
       else if ((e.key === 'a' || e.key === 'A') && req.alwaysAllowCmd) {
@@ -52,11 +67,41 @@ export function PermissionModal() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [req, send, resolvePermRequest]);
+  }, [req, send, resolvePermRequest, isPipSuggestion]);
+
+  function dismissFront(): void {
+    useUIStore.setState(s => {
+      const next = s.permQueue.slice(1);
+      return { permQueue: next, permShowing: next.length > 0 };
+    });
+  }
+
+  async function handlePiPFloat(): Promise<void> {
+    if (!req) return;
+    await tryOpenPiP();
+    send({ type: 'pip_suggestion_response', id: req.id, action: 'float' });
+    dismissFront();
+  }
+
+  function handlePiPSkip(): void {
+    if (!req) return;
+    send({ type: 'pip_suggestion_response', id: req.id, action: 'skip' });
+    dismissFront();
+  }
+
+  /** Float & Approve: open PiP then approve the browser write request. */
+  async function handleFloatAndApprove(): Promise<void> {
+    await tryOpenPiP();
+    resolvePermRequest(send, true);
+  }
 
   const isPatch = req?.type === 'patch';
   const isExec = req?.type === 'exec';
   const isFetch = req?.type === 'fetch';
+  const isBrowserWrite = req?.type === 'browser_write';
+  // Show "Float & Approve" for tab-switching browser actions
+  const showFloatApprove = isBrowserWrite && pipSupported && !isPiPOpen()
+    && req?.detail && /navigate|open.*tab/i.test(req.title);
 
   let diffFiles: DiffFile[] = req?.diffFiles ?? [];
   if (isPatch && diffFiles.length === 0 && req?.diff) {
@@ -74,7 +119,7 @@ export function PermissionModal() {
 
   return (
     <div id="perm-overlay" className={overlayClass}>
-      {req && (
+      {req && !isQuestion && (
         <div id="perm-card">
           <div id="perm-card-icon" className="perm-icon">{TYPE_ICONS[req.type] ?? '🔐'}</div>
           <div id="perm-card-title" className="perm-title">{req.title}</div>
@@ -155,84 +200,93 @@ export function PermissionModal() {
           )}
 
           <div id="perm-card-actions">
-            <button id="perm-approve-btn" className="perm-btn perm-approve" onClick={() => resolvePermRequest(send, true)}>
-              Approve
-            </button>
-            <button id="perm-deny-btn" className="perm-btn perm-deny" onClick={() => resolvePermRequest(send, false)}>
-              Deny
-            </button>
-            <button
-              id="perm-always-allow-btn"
-              className={`perm-btn perm-always-allow${req.alwaysAllowCmd ? '' : ' hidden'}`}
-              onClick={() => req.alwaysAllowCmd && resolvePermRequest(send, true, true, false)}
-            >
-              Always Allow
-            </button>
-            <button
-              id="perm-always-allow-domain-btn"
-              className={`perm-btn perm-always-allow-domain${req.alwaysAllowDomainCmd ? '' : ' hidden'}`}
-              onClick={() => req.alwaysAllowDomainCmd && resolvePermRequest(send, true, false, true)}
-            >
-              {req.type === 'file_access' ? 'Always Allow Dir' : 'Always Allow Domain'}
-            </button>
-            <button
-              id="perm-autonomous-btn"
-              className={`perm-btn perm-autonomous${req.autonomousCmd ? '' : ' hidden'}`}
-              onClick={() => {
-                if (!req.autonomousCmd) return;
-                send({ type: 'command', cmd: req.autonomousCmd });
-                useUIStore.setState(s => {
-                  const next = s.permQueue.slice(1);
-                  return { permQueue: next, permShowing: next.length > 0 };
-                });
-              }}
-            >
-              Go Autonomous
-            </button>
-            {req.alwaysReadCmd && (
-              <button
-                id="perm-always-read-btn"
-                className="perm-btn perm-always-read"
-                onClick={() => {
-                  send({ type: 'command', cmd: req.alwaysReadCmd! });
-                  useUIStore.setState(s => {
-                    const next = s.permQueue.slice(1);
-                    return { permQueue: next, permShowing: next.length > 0 };
-                  });
-                }}
-              >
-                Always Read
-              </button>
-            )}
-            {req.alwaysWriteCmd && (
-              <button
-                id="perm-always-write-btn"
-                className="perm-btn perm-always-write"
-                onClick={() => {
-                  send({ type: 'command', cmd: req.alwaysWriteCmd! });
-                  useUIStore.setState(s => {
-                    const next = s.permQueue.slice(1);
-                    return { permQueue: next, permShowing: next.length > 0 };
-                  });
-                }}
-              >
-                Always Write
-              </button>
-            )}
-            {req.alwaysScriptCmd && (
-              <button
-                id="perm-always-script-btn"
-                className="perm-btn perm-always-script"
-                onClick={() => {
-                  send({ type: 'command', cmd: req.alwaysScriptCmd! });
-                  useUIStore.setState(s => {
-                    const next = s.permQueue.slice(1);
-                    return { permQueue: next, permShowing: next.length > 0 };
-                  });
-                }}
-              >
-                Always Script
-              </button>
+            {isPipSuggestion ? (
+              <>
+                <button id="perm-approve-btn" className="perm-btn perm-approve" onClick={() => void handlePiPFloat()}>
+                  Float & Continue
+                </button>
+                <button id="perm-deny-btn" className="perm-btn perm-deny" onClick={handlePiPSkip}>
+                  Skip
+                </button>
+              </>
+            ) : (
+              <>
+                <button id="perm-approve-btn" className="perm-btn perm-approve" onClick={() => resolvePermRequest(send, true)}>
+                  Approve
+                </button>
+                <button id="perm-deny-btn" className="perm-btn perm-deny" onClick={() => resolvePermRequest(send, false)}>
+                  Deny
+                </button>
+                {showFloatApprove && (
+                  <button
+                    className="perm-btn perm-approve"
+                    onClick={() => void handleFloatAndApprove()}
+                  >
+                    Float & Approve
+                  </button>
+                )}
+                <button
+                  id="perm-always-allow-btn"
+                  className={`perm-btn perm-always-allow${req.alwaysAllowCmd ? '' : ' hidden'}`}
+                  onClick={() => req.alwaysAllowCmd && resolvePermRequest(send, true, true, false)}
+                >
+                  Always Allow
+                </button>
+                <button
+                  id="perm-always-allow-domain-btn"
+                  className={`perm-btn perm-always-allow-domain${req.alwaysAllowDomainCmd ? '' : ' hidden'}`}
+                  onClick={() => req.alwaysAllowDomainCmd && resolvePermRequest(send, true, false, true)}
+                >
+                  {req.type === 'file_access' ? 'Always Allow Dir' : 'Always Allow Domain'}
+                </button>
+                <button
+                  id="perm-autonomous-btn"
+                  className={`perm-btn perm-autonomous${req.autonomousCmd ? '' : ' hidden'}`}
+                  onClick={() => {
+                    if (!req.autonomousCmd) return;
+                    send({ type: 'command', cmd: req.autonomousCmd });
+                    dismissFront();
+                  }}
+                >
+                  Go Autonomous
+                </button>
+                {req.alwaysReadCmd && (
+                  <button
+                    id="perm-always-read-btn"
+                    className="perm-btn perm-always-read"
+                    onClick={() => {
+                      send({ type: 'command', cmd: req.alwaysReadCmd! });
+                      dismissFront();
+                    }}
+                  >
+                    Always Read
+                  </button>
+                )}
+                {req.alwaysWriteCmd && (
+                  <button
+                    id="perm-always-write-btn"
+                    className="perm-btn perm-always-write"
+                    onClick={() => {
+                      send({ type: 'command', cmd: req.alwaysWriteCmd! });
+                      dismissFront();
+                    }}
+                  >
+                    Always Write
+                  </button>
+                )}
+                {req.alwaysScriptCmd && (
+                  <button
+                    id="perm-always-script-btn"
+                    className="perm-btn perm-always-script"
+                    onClick={() => {
+                      send({ type: 'command', cmd: req.alwaysScriptCmd! });
+                      dismissFront();
+                    }}
+                  >
+                    Always Script
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

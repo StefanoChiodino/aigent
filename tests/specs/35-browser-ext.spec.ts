@@ -49,7 +49,7 @@ test.describe('@fast Browser Extension — sidebar capabilities', () => {
     await expect(list).toContainText(/Screenshot/i, { timeout: 3_000 });
   });
 
-  test('clearing capabilities resets caps list to placeholder', async () => {
+  test('clearing capabilities still shows Browser item', async () => {
     const page = getPage();
     // First set some caps
     await injectEvent({
@@ -60,8 +60,50 @@ test.describe('@fast Browser Extension — sidebar capabilities', () => {
 
     // Now clear (also reset ttsAvailable/sttAvailable which the server may have probed)
     await injectEvent({ type: 'host_state', capabilities: {}, ttsAvailable: false, sttAvailable: false });
-    // When capsList is empty the sidebar shows "--"
-    await expect(page.locator('#sb-caps-list')).toContainText('--', { timeout: 3_000 });
+    // Browser item is always present even when everything else is cleared
+    await expect(page.locator('#sb-caps-list')).toContainText('Browser', { timeout: 3_000 });
+  });
+
+  test('Browser item shows "off" badge when extension not connected', async () => {
+    const page = getPage();
+    await injectEvent({ type: 'host_state', extensionConnected: false, extensionPath: '/test/aigent-extension/dist' });
+    const capsList = page.locator('#sb-caps-list');
+    await expect(capsList).toContainText('Browser', { timeout: 3_000 });
+    await expect(capsList.locator('.cap-grant.deny')).toContainText('off');
+  });
+
+  test('Browser item shows "on" badge when extension connected', async () => {
+    const page = getPage();
+    await injectEvent({ type: 'host_state', extensionConnected: true });
+    const capsList = page.locator('#sb-caps-list');
+    await expect(capsList.locator('.cap-item-clickable .cap-grant.allow')).toContainText('on', { timeout: 3_000 });
+  });
+
+  test('clicking disconnected Browser shows setup guide with path', async () => {
+    const page = getPage();
+    await injectEvent({ type: 'host_state', extensionConnected: false, extensionPath: '/test/path/aigent-extension/dist' });
+    const browserItem = page.locator('#sb-caps-list .cap-item-clickable');
+    await browserItem.click();
+    const guide = page.locator('.ext-setup-guide');
+    await expect(guide).toBeVisible({ timeout: 2_000 });
+    await expect(guide).toContainText('chrome://extensions');
+    await expect(guide).toContainText('/test/path/aigent-extension/dist');
+  });
+
+  test('setup guide closes on "Got it" button', async () => {
+    const page = getPage();
+    await injectEvent({ type: 'host_state', extensionConnected: false, extensionPath: '/test/path' });
+    await page.locator('#sb-caps-list .cap-item-clickable').click();
+    await expect(page.locator('.ext-setup-guide')).toBeVisible({ timeout: 2_000 });
+    await page.locator('.ext-setup-close').click();
+    await expect(page.locator('.ext-setup-guide')).not.toBeVisible();
+  });
+
+  test('setup guide does not appear when extension is connected', async () => {
+    const page = getPage();
+    await injectEvent({ type: 'host_state', extensionConnected: true });
+    await page.locator('#sb-caps-list .cap-item-clickable').click();
+    await expect(page.locator('.ext-setup-guide')).not.toBeVisible();
   });
 });
 

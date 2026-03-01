@@ -120,9 +120,9 @@ export const Message = React.memo(function Message({ message }: Props) {
         {message.elapsed !== undefined && (
           <span className="elapsed">{message.elapsed.toFixed(1)}s</span>
         )}
-        {message.role === 'assistant' && <TTSButton text={ttsText} messageId={message.timestamp} />}
+        {message.role === 'assistant' && <TTSButton text={ttsText} messageId={message.id} />}
         {message.role === 'assistant' && <CopyButton text={stripSpeakTag(message.content)} />}
-        {message.role === 'assistant' && <RatingWidget messageId={message.timestamp} />}
+        {message.role === 'assistant' && <RatingWidget messageId={message.id} />}
         {speakContent && <SpeakPreview content={speakContent} />}
       </div>
       {message.attachments && message.attachments.length > 0 && (

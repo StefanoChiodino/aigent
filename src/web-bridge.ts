@@ -6,6 +6,7 @@
  * interception works automatically.
  */
 
+import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { resolve, join, extname } from 'node:path';
@@ -26,6 +27,7 @@ const log = createLogger('web-bridge');
 
 const __dirname = resolve(fileURLToPath(import.meta.url), '..');
 const WEB_DIR = resolve(__dirname, '..', 'web');
+const EXTENSION_DIST = resolve(__dirname, '..', 'aigent-extension', 'dist');
 
 type ClientSettings = Record<string, boolean | number | string>;
 
@@ -83,9 +85,9 @@ export interface ClassifierDecision { tier: 1 | 2 | 3; action: 'allow' | 'block'
 export async function startWebServer(
   client: AgentClient,
   port?: number,
-  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; getBrowserPermissions?: () => BrowserPermissions; pendingBrowserWriteApprovals?: Map<string, { action: string; domain?: string; requiredTier: 'read' | 'write' | 'script' }>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; autoHandledMcpIds?: Set<string>; onSettingsChanged?: () => void; extSecret?: string },
+  options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; getBrowserPermissions?: () => BrowserPermissions; pendingBrowserWriteApprovals?: Map<string, { action: string; domain?: string; requiredTier: 'read' | 'write' | 'script' }>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; autoHandledMcpIds?: Set<string>; onSettingsChanged?: () => void; extSecret?: string; setPiPOpen?: (open: boolean) => void; resolvePiPSuggestion?: (id: string, action: 'float' | 'skip') => void },
 ): Promise<{ port: number }> {
-  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged, extSecret } = options ?? {};
+  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged, extSecret, setPiPOpen, resolvePiPSuggestion } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -119,7 +121,7 @@ export async function startWebServer(
   });
   client.on('system', (content: string) => {
     if (cachedState) {
-      const sysMsg: ServerState['messages'][number] = { role: 'system', content, timestamp: new Date().toISOString() };
+      const sysMsg: ServerState['messages'][number] = { id: randomUUID(), role: 'system', content, timestamp: new Date().toISOString() };
       cachedState = { ...cachedState, messages: [...cachedState.messages, sysMsg] };
     }
   });
@@ -477,7 +479,7 @@ export async function startWebServer(
     // Regular (non-slash) message — echo back as a user message so UI tests can
     // observe the send without needing a real server round-trip.
     const ts = new Date().toISOString();
-    const userMsg = { role: 'user' as const, content: trimmed, timestamp: ts };
+    const userMsg = { id: randomUUID(), role: 'user' as const, content: trimmed, timestamp: ts };
     if (cachedState) cachedState = { ...cachedState, messages: [...cachedState.messages, userMsg] };
     broadcastToClients({ type: 'message', message: userMsg });
     return true;
@@ -510,6 +512,7 @@ export async function startWebServer(
       ttsAvailable: tts,
       sttAvailable: stt,
       extensionConnected: extensionBridge.isConnected(),
+      extensionPath: EXTENSION_DIST,
     });
     if (ws) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -537,6 +540,7 @@ export async function startWebServer(
     broadcastToClients({
       type: 'host_state',
       extensionConnected: connected,
+      extensionPath: EXTENSION_DIST,
     });
   };
   extensionBridge.on('connected', () => broadcastExtensionState(true));
@@ -560,6 +564,14 @@ export async function startWebServer(
     // Also forward to the agent server as a user message
     if (client) {
       client.send({ type: 'message', content: text, images: [] });
+    }
+  });
+
+  // Forward PiP suggestion from gatekeeper to web clients.
+  client.on('pip_suggestion', (id: string) => {
+    const payload = JSON.stringify({ type: 'pip_suggestion', id });
+    for (const ws of wss.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }
   });
 
@@ -828,6 +840,7 @@ export async function startWebServer(
             client.cancel();
             break;
           case 'cancel_queued':
+          case 'reorder_queue':
             client.send(cmd);
             break;
           case 'command':
@@ -922,6 +935,13 @@ export async function startWebServer(
             break;
           case 'ping':
             ws.send(JSON.stringify({ type: 'pong' }));
+            break;
+          case 'pip_state':
+            if (setPiPOpen && typeof cmd.open === 'boolean') setPiPOpen(cmd.open);
+            break;
+          case 'pip_suggestion_response':
+            if (resolvePiPSuggestion && typeof cmd.id === 'string')
+              resolvePiPSuggestion(cmd.id, cmd.action === 'float' ? 'float' : 'skip');
             break;
           case 'message_rating':
             client.send(cmd);

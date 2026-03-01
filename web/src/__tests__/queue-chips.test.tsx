@@ -76,4 +76,52 @@ describe('QueueChips component', () => {
     const dismissBtns = screen.getAllByTitle('Cancel queued message');
     expect(dismissBtns).toHaveLength(2);
   });
+
+  it('chips are draggable', () => {
+    useUIStore.setState({
+      queuedMessages: [
+        { id: 1, displayText: 'first' },
+        { id: 2, displayText: 'second' },
+      ],
+    });
+    const { container } = render(<QueueChips />);
+    const chips = container.querySelectorAll('.queue-chip');
+    expect(chips[0]!.getAttribute('draggable')).toBe('true');
+    expect(chips[1]!.getAttribute('draggable')).toBe('true');
+  });
+
+  it('renders drag handles', () => {
+    useUIStore.setState({
+      queuedMessages: [
+        { id: 1, displayText: 'first' },
+        { id: 2, displayText: 'second' },
+      ],
+    });
+    const { container } = render(<QueueChips />);
+    const handles = container.querySelectorAll('.queue-chip-handle');
+    expect(handles).toHaveLength(2);
+  });
+
+  it('drop sends reorder_queue with new ID order', () => {
+    useUIStore.setState({
+      queuedMessages: [
+        { id: 1, displayText: 'first' },
+        { id: 2, displayText: 'second' },
+        { id: 3, displayText: 'third' },
+      ],
+    });
+    const { container } = render(<QueueChips />);
+    const chips = container.querySelectorAll('.queue-chip');
+
+    // Simulate drag chip 0 onto chip 2 (move first to third)
+    const dataTransfer = { effectAllowed: '', dropEffect: '', setData: vi.fn(), getData: vi.fn() };
+    fireEvent.dragStart(chips[0]!, { dataTransfer });
+    fireEvent.dragOver(chips[2]!, { dataTransfer });
+    fireEvent.drop(chips[2]!, { dataTransfer });
+
+    expect(mockSend).toHaveBeenCalledWith({
+      type: 'reorder_queue',
+      ids: [2, 3, 1],
+    });
+  });
 });
