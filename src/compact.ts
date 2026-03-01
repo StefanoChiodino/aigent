@@ -11,23 +11,21 @@ const log = createLogger('compact');
  */
 const COMPACT_PROMPT_LIGHT = `Summarize completed topics from this conversation. Preserve all active threads, recent decisions, and ongoing work in detail. Only compress topics that are clearly finished.`;
 
-const COMPACT_PROMPT = `Summarize this conversation as a compact reference for continuing the current task.
+const COMPACT_PROMPT = `Summarize this entire conversation so the agent can continue seamlessly.
 
-Include ALL of:
-1. **Named entities & topics**: character names, chapter numbers, feature names, project names, people — use proper nouns, never "the character" or "the file"
-2. **User goals**: what the user wants to achieve, both immediate and overarching
-3. **Decisions made**: choices, preferences, direction changes
-4. **Current state**: what's done, what's in progress, what's blocked
-5. **Files & commands**: specific paths, commands run, errors encountered
-6. **Active discussion threads**: ongoing conversations/debates not yet resolved
+Structure your summary in two sections:
 
-Start with a "Key entities:" line listing every named entity discussed.
-Be specific and concrete — preserve the details that let someone pick up mid-conversation.
-No narrative or meta-commentary.`;
+## Key entities
+List every named entity discussed: file paths, feature names, project names, people, tools, models, chapter numbers, etc. Use proper nouns, never "the file" or "the character".
+
+## Summary
+Compressed history of the conversation: decisions made, what was done, what failed, preferences expressed, files modified. Be concise for older/completed topics.
+
+End this section with a detailed paragraph about the **current active conversation** — what is being discussed right now, what the user's latest request or question is, what the agent was about to do, and any context needed to continue that thread as if the conversation never stopped. This is the most important part.`;
 
 const COMPACT_PROMPT_MODERATE = COMPACT_PROMPT;
 
-const COMPACT_PROMPT_AGGRESSIVE = `Aggressively compress this conversation to essential context only. Keep: current task, key decisions, active file paths, critical errors. Drop: completed sub-tasks, exploration that led nowhere, verbose tool outputs, resolved discussions. Be extremely concise.`;
+const COMPACT_PROMPT_AGGRESSIVE = `Aggressively compress this conversation to essential context only. Keep: current task, key decisions, active file paths, critical errors. Drop: completed sub-tasks, exploration that led nowhere, verbose tool outputs, resolved discussions. End with a focused summary of the current active thread so the conversation can continue.`;
 
 /**
  * Prompt for end-of-session/reset memory distillation.
