@@ -8,7 +8,7 @@
 import { execSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { sanitizedEnv, validateFetchUrl, validateFetchUrlDns, checkCommandSafety, validateReadonlyCommand, checkSensitivePath } from '../safety.js';
+import { sanitizedEnv, validateFetchUrl, validateFetchUrlDns, checkCommandSafety, validateReadonlyCommand, checkSensitivePath, checkFilePermission, readFilePermissions } from '../safety.js';
 import { auditLog } from '../audit.js';
 import type { ToolContentBlock, ImageMediaType } from '../provider.js';
 import { fromClaudeCodeName } from './defs.js';
@@ -246,6 +246,57 @@ function executeCommand(
   });
 }
 
+// --- File access helper ---
+
+/**
+ * Check whether the agent is allowed to access a file.
+ *
+ * Fast path: if the path is already whitelisted by the file_permissions policy
+ * in settings.json we skip `checkSensitivePath` entirely, avoiding the
+ * gatekeeper round-trip that caused spurious UI prompts in background tasks.
+ *
+ * Returns null if access is permitted (audit already logged), or an error
+ * string if access should be denied.
+ */
+async function checkFileAccess(
+  absPath: string,
+  operation: 'read' | 'write',
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const filePerms = readFilePermissions();
+  const permLevel = checkFilePermission(absPath, filePerms, operation);
+
+  if (permLevel === 'deny') {
+    auditLog({ type: 'file_sensitive_block', detail: absPath, reason: 'denied by file permission policy' });
+    return 'Access denied by file permission policy';
+  }
+
+  if (permLevel === 'allow') {
+    // Whitelisted — skip checkSensitivePath and the gatekeeper round-trip entirely
+    auditLog({ type: operation === 'read' ? 'file_read' : 'file_write', detail: absPath });
+    return null;
+  }
+
+  // permLevel === 'prompt' — fall through to the sensitive-path check
+  const sensitivityLevel = checkSensitivePath(absPath);
+  if (sensitivityLevel === 'deny') {
+    auditLog({ type: 'file_sensitive_block', detail: absPath, reason: 'hard-denied sensitive path' });
+    return `Access denied: ${absPath} is a protected path (credentials or system interface)`;
+  }
+
+  if (sensitivityLevel === 'prompt') {
+    const { requestFileApproval } = await import('../server.js');
+    const approval = await requestFileApproval(absPath, operation, signal);
+    auditLog({ type: approval.ok ? 'file_user_approve' : 'file_user_deny', detail: absPath, approved: approval.ok });
+    if (!approval.ok) return `File access denied: ${approval.message}`;
+  } else {
+    // sensitivityLevel === null — not a sensitive path, permit without prompt
+    auditLog({ type: operation === 'read' ? 'file_read' : 'file_write', detail: absPath });
+  }
+
+  return null;
+}
+
 // --- Tool execution ---
 
 export async function executeTool(
@@ -285,19 +336,8 @@ export async function executeTool(
     case 'read_file': {
       const { path, offset, limit } = input as ReadFileInput;
       const absPath = resolve(path);
-      const sensitivityLevel = checkSensitivePath(absPath);
-      if (sensitivityLevel === 'deny') {
-        auditLog({ type: 'file_sensitive_block', detail: absPath, reason: 'hard-denied sensitive path' });
-        return `Access denied: ${absPath} is a protected path (credentials or system interface)`;
-      }
-      if (sensitivityLevel === 'prompt') {
-        const { requestFileApproval } = await import('../server.js');
-        const approval = await requestFileApproval(absPath, 'read', signal);
-        auditLog({ type: approval.ok ? 'file_user_approve' : 'file_user_deny', detail: absPath, approved: approval.ok });
-        if (!approval.ok) return `File access denied: ${approval.message}`;
-      } else {
-        auditLog({ type: 'file_read', detail: absPath });
-      }
+      const accessErr = await checkFileAccess(absPath, 'read', signal);
+      if (accessErr) return accessErr;
       try {
         const content = readFileSync(absPath, 'utf-8');
         if (!offset && !limit) return content;
@@ -316,19 +356,8 @@ export async function executeTool(
     case 'write_file': {
       const { path, content } = input as WriteFileInput;
       const absPath = resolve(path);
-      const sensitivityLevel = checkSensitivePath(absPath);
-      if (sensitivityLevel === 'deny') {
-        auditLog({ type: 'file_sensitive_block', detail: absPath, reason: 'hard-denied sensitive path (write)' });
-        return `Access denied: ${absPath} is a protected path`;
-      }
-      if (sensitivityLevel === 'prompt') {
-        const { requestFileApproval } = await import('../server.js');
-        const approval = await requestFileApproval(absPath, 'write', signal);
-        auditLog({ type: approval.ok ? 'file_user_approve' : 'file_user_deny', detail: absPath, approved: approval.ok });
-        if (!approval.ok) return `File write denied: ${approval.message}`;
-      } else {
-        auditLog({ type: 'file_write', detail: absPath });
-      }
+      const accessErr = await checkFileAccess(absPath, 'write', signal);
+      if (accessErr) return accessErr;
       try {
         mkdirSync(dirname(absPath), { recursive: true });
         writeFileSync(absPath, content, 'utf-8');
@@ -342,19 +371,8 @@ export async function executeTool(
     case 'edit_file': {
       const { path, old_text, new_text } = input as EditFileInput;
       const absPath = resolve(path);
-      const sensitivityLevel = checkSensitivePath(absPath);
-      if (sensitivityLevel === 'deny') {
-        auditLog({ type: 'file_sensitive_block', detail: absPath, reason: 'hard-denied sensitive path (edit)' });
-        return `Access denied: ${absPath} is a protected path`;
-      }
-      if (sensitivityLevel === 'prompt') {
-        const { requestFileApproval } = await import('../server.js');
-        const approval = await requestFileApproval(absPath, 'write', signal);
-        auditLog({ type: approval.ok ? 'file_user_approve' : 'file_user_deny', detail: absPath, approved: approval.ok });
-        if (!approval.ok) return `File edit denied: ${approval.message}`;
-      } else {
-        auditLog({ type: 'file_write', detail: absPath });
-      }
+      const accessErr = await checkFileAccess(absPath, 'write', signal);
+      if (accessErr) return accessErr;
       try {
         const content = readFileSync(absPath, 'utf-8');
         const index = content.indexOf(old_text);
@@ -528,6 +546,9 @@ export async function executeTool(
     case 'patch': {
       const { path: filePath, edits } = input as PatchInput;
       if (!edits || edits.length === 0) return 'Error: no edits provided';
+      const absPathPatch = resolve(filePath);
+      const accessErrPatch = await checkFileAccess(absPathPatch, 'write', signal);
+      if (accessErrPatch) return accessErrPatch;
       try {
         let content = readFileSync(filePath, 'utf-8');
         const applied: string[] = [];

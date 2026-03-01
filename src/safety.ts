@@ -12,6 +12,7 @@
 import { homedir } from 'node:os';
 import { promises as dnsPromises } from 'node:dns';
 import { minimatch } from 'minimatch';
+import { readSettingsSync } from './settings-file.js';
 
 // --- Environment sanitization ---
 
@@ -452,6 +453,39 @@ export function checkFilePermission(
     if (matchFilePattern(normalizedPath, pattern.toLowerCase())) return 'allow';
   }
   return 'prompt';
+}
+
+/**
+ * Read file permissions from settings.json, with backward-compat handling
+ * for legacy `alwaysAllow` field and merging of default deny entries.
+ *
+ * Exported so execute.ts can perform fast whitelist checks without the
+ * gatekeeper round-trip (which causes spurious UI prompts in background tasks).
+ */
+export function readFilePermissions(): FilePermissions {
+  try {
+    const settings = readSettingsSync();
+    const perms = settings['file_permissions'];
+    if (!perms || typeof perms !== 'object') return DEFAULT_FILE_PERMISSIONS;
+    const p = perms as Partial<FilePermissions> & { alwaysAllow?: string[] };
+    // Backward compat: if readWrite is missing but legacy alwaysAllow exists, use it
+    const readWrite = Array.isArray(p.readWrite)
+      ? p.readWrite
+      : Array.isArray(p.alwaysAllow)
+        ? p.alwaysAllow
+        : DEFAULT_FILE_PERMISSIONS.readWrite;
+    return {
+      readWrite,
+      readOnly: Array.isArray(p.readOnly)
+        ? p.readOnly
+        : DEFAULT_FILE_PERMISSIONS.readOnly,
+      deny: Array.isArray(p.deny)
+        ? [...new Set([...DEFAULT_FILE_PERMISSIONS.deny, ...p.deny])]
+        : DEFAULT_FILE_PERMISSIONS.deny,
+    };
+  } catch {
+    return DEFAULT_FILE_PERMISSIONS;
+  }
 }
 
 // --- Exec command permissions ---

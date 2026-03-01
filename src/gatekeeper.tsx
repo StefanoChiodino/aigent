@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { getDefaultWorkspace, getEnvFile } from './xdg.js';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
-import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, checkMCPPermission, DEFAULT_MCP_PERMISSIONS, type MCPPermissions, parseCommandPipeline, shouldForceClassify, checkBrowserPermission, classifyBrowserAction, browserTierSufficient, DEFAULT_BROWSER_PERMISSIONS, type BrowserPermissions } from './safety.js';
+import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, checkMCPPermission, DEFAULT_MCP_PERMISSIONS, type MCPPermissions, parseCommandPipeline, shouldForceClassify, checkBrowserPermission, classifyBrowserAction, browserTierSufficient, DEFAULT_BROWSER_PERMISSIONS, type BrowserPermissions, readFilePermissions } from './safety.js';
 import { initClassifier, classifyCommand, classifyFileAccess, isClassifierAvailable } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
 import { auditLog } from './audit.js';
@@ -1118,32 +1118,7 @@ function flushPendingFileAccessApprovals(): void {
 }
 
 // --- File path permissions ---
-
-function readFilePermissions(): FilePermissions {
-  try {
-    const settings = readSettingsSync();
-    const perms = settings['file_permissions'];
-    if (!perms || typeof perms !== 'object') return DEFAULT_FILE_PERMISSIONS;
-    const p = perms as Partial<FilePermissions> & { alwaysAllow?: string[] };
-    // Backward compat: if readWrite is missing but legacy alwaysAllow exists, use it
-    const readWrite = Array.isArray(p.readWrite)
-      ? p.readWrite
-      : Array.isArray(p.alwaysAllow)
-        ? p.alwaysAllow
-        : DEFAULT_FILE_PERMISSIONS.readWrite;
-    return {
-      readWrite,
-      readOnly: Array.isArray(p.readOnly)
-        ? p.readOnly
-        : DEFAULT_FILE_PERMISSIONS.readOnly,
-      deny: Array.isArray(p.deny)
-        ? [...new Set([...DEFAULT_FILE_PERMISSIONS.deny, ...p.deny])]
-        : DEFAULT_FILE_PERMISSIONS.deny,
-    };
-  } catch {
-    return DEFAULT_FILE_PERMISSIONS;
-  }
-}
+// readFilePermissions() is defined in safety.ts and imported above.
 
 function addPathToFileReadWrite(pattern: string): void {
   try {
