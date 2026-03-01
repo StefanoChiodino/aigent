@@ -51,22 +51,20 @@ Implemented `src/reflection.ts` — the cross-session pattern mining system. Thi
 |-------|--------|-------------|-------|
 | **1. Episode Logging** | DONE | NDJSON storage, `log_episode` + `query_episodes` tools, auto-log on reset/shutdown, domain inference, 10MB rotation | `src/episodes.ts`, 37 tests |
 | **2. Reflection Agent** | DONE | Haiku-powered pattern mining at session boundaries, MEMORY.md + TODO.md updates, NDJSON audit log | `src/reflection.ts`, 17 tests |
-| **3. Self-Play Harness** | NOT STARTED | Launch isolated test instance, drive via browser extension, evaluate results | Design in `docs/design-continuous-learning.md` §Pillar 2 |
+| **3. Self-Review** | DEFERRED | Optional: agent reviews its own work via browser extension + episode history. Original two-instance self-play harness deemed over-engineered — the agent can already inspect its own UI and evaluate past performance using existing infrastructure. | — |
 | **4. Feedback Collection** | DONE | UI rating widget (1-5 dots), compaction-triggered episodes, automated friction signals | `web/src/components/ChatView.tsx`, `src/server.ts`, 22 tests |
 | **5. Semantic Retrieval** | DONE | Local neural embeddings (all-MiniLM-L6-v2), `search_episodes` tool, proactive retrieval, auto-indexing | `src/embeddings.ts`, `src/episode-index.ts`, 23 tests |
 
-### Self-Play Harness (the remaining piece)
+### Self-Review (optional, deferred)
 
-This is the most complex continuous learning piece. The agent spins up a second instance of itself, gives it tasks through the browser, and evaluates the results. Infrastructure mostly exists already (browser extension, port isolation, profiles for workspace isolation, `dispatch_task` for async evaluation).
+Originally designed as a two-instance "self-play harness" where the agent would spin up a second copy and drive it via the browser. This was deemed over-engineered — the agent can already inspect its own UI via the browser extension and review its own work via episode history, tool call logs, and the reflection system.
 
-**What's needed:**
-1. Script to launch an isolated test instance on a different port (e.g., 3142) with a clean workspace
-2. Task library format: structured records with prompt, setup script, eval criteria
-3. Supervisor loop: load task → send to test instance via browser → wait for completion → evaluate
-4. Episode logging for self-play results (same Episode schema, tagged with `source: 'self-play'`)
-5. Initial task library (5-10 tasks covering bug finding, code generation, debugging, writing, research)
+The existing continuous learning system (episodes + ratings + friction tracking + semantic retrieval + reflection) is the real learning engine. Self-review is a workflow pattern on top of existing infrastructure, not a new subsystem. The user can already say "look at your chat and improve X" and the agent has everything it needs.
 
-**Complexity:** HIGH — involves process management, browser automation coordination, evaluation criteria, and cost management. May want to defer or simplify (e.g., start with CLI-only tasks that don't need the browser).
+**If revisited, the only additions would be:**
+- A task library (structured prompts with eval criteria) for repeatable self-testing
+- A `/self-review` command to kick off "do task, then evaluate" cycles
+- Tagging self-review episodes with `source: 'self-review'`
 
 ---
 

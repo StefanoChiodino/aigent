@@ -54,11 +54,15 @@ interface ScriptRunResult {
 interface ExtRequest {
   type: 'ext_request';
   id: string;
-  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab' | 'create_window' | 'close_agent_tabs';
+  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab' | 'create_window' | 'close_agent_tabs' | 'devtools_start' | 'devtools_snapshot' | 'devtools_stop';
   tabId?: number;
   rootSelector?: string;
   steps?: BrowserStep[];
   url?: string;
+  /** For devtools_snapshot: clear buffers after reading */
+  clear?: boolean;
+  /** For devtools_start: which CDP domains to enable (defaults all true) */
+  options?: { network?: boolean; console?: boolean; performance?: boolean };
 }
 
 interface TabInfo {

@@ -160,13 +160,25 @@ covers experiential quality. Both feed the same episode record.
 
 ---
 
-## Pillar 2: Self-Play
+## Pillar 2: Self-Review (revised)
 
-### The Concept
+> **Design decision (2026-03-01):** The original two-instance self-play
+> architecture was deemed over-engineered. The agent already has the browser
+> extension and can see its own UI — there's no need for a second instance.
+> The existing learning system (episodes, ratings, friction tracking, semantic
+> retrieval, reflection) is the real continuous learning engine. Self-review
+> is an optional workflow pattern, not a new subsystem.
 
-The agent spins up a second instance of itself, interacts with it through the
-browser as a user would, gives it tasks, and evaluates the results. This is
-dogfooding at the extreme — the agent is its own QA team.
+### The Concept (original → revised)
+
+~~The agent spins up a second instance of itself, interacts with it through the
+browser as a user would, gives it tasks, and evaluates the results.~~
+
+**Revised:** The user points the agent at an aspect of its own work ("look at
+your chat and improve X" or "do this task and then review how you did"). The
+agent uses the browser extension to inspect its own UI, cross-references with
+episode history and tool call logs, and proposes improvements — to its code,
+config, or prompts. No second instance needed.
 
 ### Why This Works for aigent Specifically
 
