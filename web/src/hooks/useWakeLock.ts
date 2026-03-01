@@ -3,53 +3,82 @@ import { useChatStore } from '../stores/chat';
 import { useSettingsStore } from '../stores/settings';
 
 /**
- * Acquires a Screen Wake Lock while the agent is streaming and the
- * user has enabled the "Keep screen awake" setting.
+ * Prevents the computer from sleeping while the agent is streaming,
+ * gated by the "Keep awake while working" setting.
  *
- * The wake lock prevents the screen from dimming/sleeping.
- * It's automatically released when streaming stops or the setting is toggled off.
- * Re-acquired on visibility change (Chrome releases wake locks when tab is hidden).
+ * Two mechanisms:
+ * 1. Screen Wake Lock API — prevents screen dimming (may not prevent system sleep)
+ * 2. Silent audio loop — playing audio prevents system sleep on most OSes
+ *
+ * Both are released when streaming stops or the setting is toggled off.
  */
 export function useWakeLock(): void {
   const isStreaming = useChatStore(s => s.streaming.active);
   const enabled = useSettingsStore(s => s.clientSettings.wake_lock ?? false);
   const sentinelRef = useRef<WakeLockSentinel | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   useEffect(() => {
-    if (!('wakeLock' in navigator)) return;
-    if (!enabled || !isStreaming) {
-      // Release if we have one
+    const active = enabled && isStreaming;
+
+    // --- Screen Wake Lock (prevents screen dimming) ---
+    if (!active || !('wakeLock' in navigator)) {
       sentinelRef.current?.release().catch(() => {});
       sentinelRef.current = null;
+    }
+
+    // --- Silent audio loop (prevents system sleep) ---
+    if (!active) {
+      sourceRef.current?.stop();
+      sourceRef.current = null;
+      audioCtxRef.current?.close().catch(() => {});
+      audioCtxRef.current = null;
       return;
     }
 
     let cancelled = false;
 
-    async function acquire() {
+    // Acquire screen wake lock
+    async function acquireWakeLock() {
+      if (!('wakeLock' in navigator)) return;
       try {
         const sentinel = await navigator.wakeLock.request('screen');
-        if (cancelled) {
-          sentinel.release().catch(() => {});
-          return;
-        }
+        if (cancelled) { sentinel.release().catch(() => {}); return; }
         sentinelRef.current = sentinel;
         sentinel.addEventListener('release', () => {
-          if (sentinelRef.current === sentinel) {
-            sentinelRef.current = null;
-          }
+          if (sentinelRef.current === sentinel) sentinelRef.current = null;
         });
-      } catch {
-        // Ignore — may fail on low battery or if not supported
-      }
+      } catch { /* ignore — may fail on low battery */ }
     }
 
-    acquire();
+    // Start silent audio to prevent system sleep
+    function startSilentAudio() {
+      try {
+        const ctx = new AudioContext();
+        // Create a 1-second silent buffer, looped
+        const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        src.loop = true;
+        // Connect through a gain node at zero volume (truly silent)
+        const gain = ctx.createGain();
+        gain.gain.value = 0.001; // near-silent — some OSes ignore true zero
+        src.connect(gain);
+        gain.connect(ctx.destination);
+        src.start();
+        audioCtxRef.current = ctx;
+        sourceRef.current = src;
+      } catch { /* ignore if AudioContext unavailable */ }
+    }
 
-    // Re-acquire on visibility change (Chrome releases wake locks when tab is hidden)
+    acquireWakeLock();
+    startSilentAudio();
+
+    // Re-acquire wake lock on visibility change (Chrome releases when tab hidden)
     function onVisibilityChange() {
       if (document.visibilityState === 'visible' && !cancelled && !sentinelRef.current) {
-        acquire();
+        acquireWakeLock();
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -59,6 +88,10 @@ export function useWakeLock(): void {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       sentinelRef.current?.release().catch(() => {});
       sentinelRef.current = null;
+      sourceRef.current?.stop();
+      sourceRef.current = null;
+      audioCtxRef.current?.close().catch(() => {});
+      audioCtxRef.current = null;
     };
   }, [enabled, isStreaming]);
 }

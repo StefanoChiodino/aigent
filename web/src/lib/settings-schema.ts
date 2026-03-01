@@ -144,8 +144,8 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'wake_lock',
     type: 'toggle',
-    label: 'Keep screen awake',
-    desc: 'Prevent screen from sleeping while the agent is working',
+    label: 'Keep awake while working',
+    desc: 'Prevent computer from sleeping while the agent is working (screen may still dim)',
     group: 'Input',
     scope: 'client',
     default: false,
