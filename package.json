@@ -47,10 +47,28 @@
     "ext:dev": "cd aigent-extension && npm install && node build.mjs --watch",
     "ext:typecheck": "tsc --noEmit --project aigent-extension/tsconfig.json"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "anthropic",
+    "llm",
+    "self-modifying",
+    "cli",
+    "automation",
+    "mcp"
+  ],
+  "author": "Stefano Chiodino <mannii@aigent.dev>",
   "license": "MIT",
-  "description": "",
+  "description": "A self-modifying AI agent platform — runs Claude locally, edits its own source, controls your browser, and speaks back.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/StefanoChiodino/aigent.git"
+  },
+  "homepage": "https://github.com/StefanoChiodino/aigent#readme",
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.75.0",
     "@types/ws": "^8.18.1",
