@@ -7,6 +7,7 @@ import { useUIStore } from '../stores/ui';
 import { useChatStore } from '../stores/chat';
 import { useSettingsStore } from '../stores/settings';
 import { useTTS } from '../hooks/useTTS';
+import { useWakeLock } from '../hooks/useWakeLock';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import { ChatArea } from './ChatArea';
@@ -39,6 +40,7 @@ const THEME_OPTIONS = ['aurora', 'spectrum', 'oscilloscope', 'circular', 'milkdr
 export function App() {
   useWebSocket();
   useDemoMode();
+  useWakeLock();
 
   // Wire TTS auto-speak to streaming text changes
   const { flushStream } = useTTS();

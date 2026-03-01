@@ -142,6 +142,15 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
+    key: 'wake_lock',
+    type: 'toggle',
+    label: 'Keep screen awake',
+    desc: 'Prevent screen from sleeping while the agent is working',
+    group: 'Input',
+    scope: 'client',
+    default: false,
+  },
+  {
     key: 'AIGENT_THEME',
     label: 'Background theme',
     desc: 'Visual background animation style.',
