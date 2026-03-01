@@ -44,6 +44,13 @@ describe('UI store', () => {
     expect(useUIStore.getState().permShowing).toBe(true);
   });
 
+  it('enqueuePermRequest deduplicates by id', () => {
+    useUIStore.getState().enqueuePermRequest(makePermReq({ id: 'dup-1' }));
+    useUIStore.getState().enqueuePermRequest(makePermReq({ id: 'dup-1' }));
+    expect(useUIStore.getState().permQueue).toHaveLength(1);
+    expect(useUIStore.getState().permShowing).toBe(true);
+  });
+
   it('dismissPermRequests removes by id and hides when empty', () => {
     useUIStore.getState().enqueuePermRequest(makePermReq({ id: 'a' }));
     useUIStore.getState().enqueuePermRequest(makePermReq({ id: 'b' }));

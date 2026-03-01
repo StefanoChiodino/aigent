@@ -86,6 +86,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setLoading: (loading) => set({ isLoading: loading }),
 
   enqueuePermRequest: (req) => set(s => {
+    if (s.permQueue.some(r => r.id === req.id)) return s;
     const queue = [...s.permQueue, req];
     return { permQueue: queue, permShowing: true };
   }),

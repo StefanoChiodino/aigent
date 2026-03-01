@@ -1066,6 +1066,12 @@ function handleClient(socket: Socket): void {
   execBroker.replayTo((id, meta) => {
     send(socket, { type: 'exec_request', id, command: meta.command });
   });
+  fetchBroker.replayTo((id, meta) => {
+    send(socket, { type: 'fetch_request', id, url: meta.url, ...(meta.method ? { method: meta.method } : {}) });
+  });
+  fileAccessBroker.replayTo((id, meta) => {
+    send(socket, { type: 'file_access_request', id, path: meta.path, operation: meta.operation, reason: `Agent wants to ${meta.operation} this path` });
+  });
   userQuestionBroker.replayTo((id, meta) => {
     send(socket, {
       type: 'user_question_request', id, question: meta.question,
