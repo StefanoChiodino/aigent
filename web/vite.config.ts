@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
       outDir: isDemo ? 'dist-demo' : 'dist',
       emptyOutDir: true,
       sourcemap: !isDemo,
-      minify: isDemo ? 'esbuild' : false,
+      minify: mode === 'development' ? false : 'esbuild',
     },
     server: {
       port: 5173,
