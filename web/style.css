@@ -2322,28 +2322,27 @@ html, body {
 
 #queue-chips {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 4px;
   padding: 0 0 8px;
-  flex-wrap: wrap;
 }
 
 .queue-chip {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--bg-surface);
-  font-size: 0.82rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
-  max-width: 300px;
 }
 
 .queue-chip-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  flex: 1;
 }
 
 .queue-chip-remove {

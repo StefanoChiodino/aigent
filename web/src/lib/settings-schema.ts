@@ -174,6 +174,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
       { value: 'lavalamp', label: 'Lava Lamp (metaball blobs)' },
       { value: 'pcb', label: 'PCB (circuit board)' },
       { value: 'neuron', label: 'Neuron (neural network)' },
+      { value: 'chroma', label: 'Chroma (colour wash)' },
     ],
     scope: 'client',
   },

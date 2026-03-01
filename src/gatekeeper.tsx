@@ -1309,6 +1309,7 @@ function handleAgentFileAccessRequest(id: string, path: string, operation: 'read
     autoHandledFileAccessIds.add(id);
     classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'YOLO mode' });
     client!.send({ type: 'file_access_response', id, ok: true, message: 'Allowed (YOLO mode)' });
+    client!.emit('perm_dismissed', [id]);
     return;
   }
 
@@ -1323,6 +1324,7 @@ function handleAgentFileAccessRequest(id: string, path: string, operation: 'read
     autoHandledFileAccessIds.add(id);
     classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'Allowed by file_permissions' });
     client!.send({ type: 'file_access_response', id, ok: true, message: 'Allowed by file permission policy' });
+    client!.emit('perm_dismissed', [id]);
     return;
   }
   if (level === 'deny') {
@@ -1332,6 +1334,7 @@ function handleAgentFileAccessRequest(id: string, path: string, operation: 'read
     autoHandledFileAccessIds.add(id);
     classifierDecisions.set(id, { tier: 2, action: 'block', reason: 'Denied by file_permissions' });
     client!.send({ type: 'file_access_response', id, ok: false, message: 'Denied by file permission policy' });
+    client!.emit('perm_dismissed', [id]);
     injectSystemMessage(`[file] Blocked by ${operation === 'write' ? 'deny/read-only' : 'deny'} policy: ${path}`);
     return;
   }

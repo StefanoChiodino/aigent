@@ -27,6 +27,7 @@ import { NeonGridBackground } from './backgrounds/NeonGridBackground';
 import { LavaLampBackground } from './backgrounds/LavaLampBackground';
 import { PCBBackground } from './backgrounds/PCBBackground';
 import { NeuronBackground } from './backgrounds/NeuronBackground';
+import { ChromaBackground } from './backgrounds/ChromaBackground';
 import { PermissionModal } from './modals/PermissionModal';
 import { SettingsModal } from './modals/SettingsModal';
 import { ContextInspector } from './modals/ContextInspector';
@@ -35,7 +36,7 @@ import { ShortcutsModal } from './modals/ShortcutsModal';
 import { TraceInspector } from './modals/TraceInspector';
 import { TasksInspector } from './modals/TasksInspector';
 
-const THEME_OPTIONS = ['aurora', 'spectrum', 'oscilloscope', 'circular', 'milkdrop', 'circuit', 'matrix', 'constellation', 'topology', 'ember', 'fireflies', 'rain', 'neongrid', 'lavalamp', 'pcb', 'neuron'];
+const THEME_OPTIONS = ['aurora', 'spectrum', 'oscilloscope', 'circular', 'milkdrop', 'circuit', 'matrix', 'constellation', 'topology', 'ember', 'fireflies', 'rain', 'neongrid', 'lavalamp', 'pcb', 'neuron', 'chroma'];
 
 export function App() {
   useWebSocket();
@@ -114,6 +115,7 @@ export function App() {
       {theme === 'lavalamp' && <LavaLampBackground />}
       {theme === 'pcb' && <PCBBackground />}
       {theme === 'neuron' && <NeuronBackground />}
+      {theme === 'chroma' && <ChromaBackground />}
       <Header />
       <div id="body">
         <Sidebar />
