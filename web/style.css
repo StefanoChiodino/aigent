@@ -1158,8 +1158,8 @@ html, body {
   grid-template-columns: 14px 1fr;
   grid-template-rows: auto auto;
   column-gap: 6px;
-  row-gap: 1px;
-  padding: 2px 0;
+  row-gap: 3px;
+  padding: 5px 0;
   min-width: 0;
 }
 
@@ -1196,20 +1196,23 @@ html, body {
 
 
 .task-desc {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
+  white-space: normal;
+  font-size: 12px;
   color: var(--text-secondary);
+  word-break: break-word;
+  line-height: 1.4;
 }
 
 .task-meta {
   font-size: 10px;
   color: var(--text-muted, var(--text-secondary));
   opacity: 0.7;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.task-item + .task-item {
+  border-top: 1px solid var(--border-subtle, rgba(255,255,255,0.08));
 }
 
 .task-item-pull {
