@@ -98,7 +98,7 @@ aigent --model claude-opus-4-6   # override model
 **Requirements:** Node.js 22+, Anthropic API key (or OAT subscription token)
 
 ```bash
-git clone <repo> && cd aigent
+git clone https://github.com/StefanoChiodino/aigent.git && cd aigent
 cp .env.example .env        # add your ANTHROPIC_API_KEY
 make dev-ts                 # launches gatekeeper + Vite dev server + Chrome plugin
 ```
