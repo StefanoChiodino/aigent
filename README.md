@@ -601,6 +601,23 @@ git checkout src/           # revert all of src/
 
 To trigger a clean restart after reverting: use the `/restart` slash command in the chat.
 
+### Auto-recovery
+
+If the agent breaks itself (code changes that fail `make check`), run:
+
+```bash
+make recover
+```
+
+This saves the broken state to a branch (`broken/YYYYMMDD-HHMMSS`), walks back through git history running `make check` on each commit, and resets your branch to the last passing one. By default it tries 20 commits back; pass a number for more: `./scripts/recover.sh 50`.
+
+After recovery, inspect what broke:
+
+```bash
+git diff HEAD..broken/20260301-231500   # compare working vs broken
+git log HEAD..broken/20260301-231500    # see the bad commits
+```
+
 **Policy:** The agent may autonomously edit files in `src/` and `web/src/` as part of self-improvement. Changes to `workspace/config/` (SOUL.md, AGENTS.md, USER.md, IDENTITY.md, TOOLS.md) go through the `request_config_write` tool — you see a diff and approve or reject before anything is written.
 
 ---
