@@ -284,7 +284,21 @@ describe('InputArea submission', () => {
 
   // ── Escape when loading sends cancel ───────────────────────────────────────
 
-  it('Escape while loading sends cancel', async () => {
+  it('Ctrl+Escape while loading sends cancel', async () => {
+    useUIStore.setState({ isLoading: true });
+
+    renderInputArea();
+    const input = screen.getByRole('textbox');
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape', ctrlKey: true });
+    });
+
+    const payloads = sentPayloads(ws);
+    expect(payloads).toContainEqual({ type: 'cancel' });
+  });
+
+  it('plain Escape while loading does NOT send cancel (only Ctrl+Escape does)', async () => {
     useUIStore.setState({ isLoading: true });
 
     renderInputArea();
@@ -295,7 +309,7 @@ describe('InputArea submission', () => {
     });
 
     const payloads = sentPayloads(ws);
-    expect(payloads).toContainEqual({ type: 'cancel' });
+    expect(payloads).not.toContainEqual({ type: 'cancel' });
   });
 
   // ── Cancel button visible when TTS is playing (not loading) ───────────────

@@ -568,6 +568,16 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
+    key: 'keybind_cancelResponse',
+    label: 'Cancel response',
+    desc: 'Chord to stop an in-progress agent response. Checked before Clear input, so use a more-specific chord (e.g. Ctrl+Escape) to avoid conflicts.',
+    group: 'Keybindings',
+    type: 'text',
+    default: 'Ctrl+Escape',
+    placeholder: 'Ctrl+Escape',
+    scope: 'client',
+  },
+  {
     key: 'keybind_clearInput',
     label: 'Clear input box',
     desc: 'Comma-separated list of chords.',

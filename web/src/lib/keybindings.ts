@@ -23,6 +23,7 @@ export type KeyBindingAction =
   | 'toggleMic'
   | 'toggleMicSticky'
   | 'showShortcuts'
+  | 'cancelResponse'
   | 'clearInput';
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,11 @@ export const DEFAULT_KEYBINDINGS: Record<KeyBindingAction, KeyBinding[]> = {
     { key: '?', ctrl: true },
     // Ctrl+Shift+/ — same physical key, different e.key on some platforms
     { key: '/', ctrl: true, shift: true },
+  ],
+  // Ctrl+Escape — cancel an in-progress response. Checked before clearInput so
+  // the more-specific chord wins; plain Escape falls through to clearInput.
+  cancelResponse: [
+    { code: 'Escape', ctrl: true },
   ],
   // Escape — only fires when the textarea is focused and no modal/palette is
   // intercepting. The actual precedence logic lives in InputArea's handleKeyDown;
@@ -230,7 +236,7 @@ export function getActiveBindings(): Record<KeyBindingAction, KeyBinding[]> {
 
   const result = { ...DEFAULT_KEYBINDINGS } as Record<KeyBindingAction, KeyBinding[]>;
 
-  const actions: KeyBindingAction[] = ['toggleMic', 'toggleMicSticky', 'showShortcuts', 'clearInput'];
+  const actions: KeyBindingAction[] = ['toggleMic', 'toggleMicSticky', 'showShortcuts', 'cancelResponse', 'clearInput'];
   for (const action of actions) {
     const settingKey = `keybind_${action}`;
     const raw = settings[settingKey];
