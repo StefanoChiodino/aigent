@@ -1064,8 +1064,13 @@ export const DEMO_SCENARIO: DemoScenario = {
       type: 'message',
       message: {
         role: 'user',
-        content: 'Does the endpoint look right?\n\n[Attached: terminal-output.png]',
+        content: 'Does the endpoint look right?',
         timestamp: new Date().toISOString(),
+        attachments: [{
+          name: 'terminal-output.png',
+          mediaType: 'image/png',
+          thumbnail: SCREENSHOT_DATA_URL,
+        }],
       },
     }),
 
