@@ -30,6 +30,7 @@ export function SettingsModal() {
   const [search, setSearch] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -38,6 +39,14 @@ export function SettingsModal() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [settingsOpen, setSettingsOpen]);
+
+  useEffect(() => {
+    if (settingsOpen) {
+      setSearch('');
+      // Defer focus so the modal is visible before we try to focus
+      requestAnimationFrame(() => searchRef.current?.focus());
+    }
+  }, [settingsOpen]);
 
   function showToast() {
     setToastVisible(true);
@@ -93,6 +102,7 @@ export function SettingsModal() {
           <nav id="settings-nav">
             <div id="settings-search-wrap">
               <input
+                ref={searchRef}
                 id="settings-search"
                 type="search"
                 placeholder="Search settings…"
