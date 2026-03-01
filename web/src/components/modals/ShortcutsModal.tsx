@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useUIStore } from '../../stores/ui';
 import { useSettingsStore } from '../../stores/settings';
 import { getActiveBindings, serializeBinding, type KeyBinding } from '../../lib/keybindings.js';
@@ -104,12 +105,14 @@ export function ShortcutsModal() {
   const open = useUIStore(s => s.shortcutsOpen);
   const close = () => useUIStore.getState().setShortcutsOpen(false);
   const multilineEnter = useSettingsStore(s => s.getClientSetting('AIGENT_MULTILINE_ENTER')) === true;
-  // Subscribe to keybinding settings changes so the display stays in sync
-  useSettingsStore(s => [
+  // Subscribe to keybinding settings changes so the display stays in sync.
+  // useShallow prevents infinite re-renders — without it the array selector
+  // returns a new reference every render, tripping React 19's useSyncExternalStore.
+  useSettingsStore(useShallow(s => [
     s.clientSettings['keybind_toggleMic'],
     s.clientSettings['keybind_toggleMicSticky'],
     s.clientSettings['keybind_showShortcuts'],
-  ]);
+  ]));
 
   const groups = getShortcutGroups(multilineEnter);
 

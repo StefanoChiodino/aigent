@@ -28,7 +28,7 @@ interface TTSControls {
 // When the page is embedded in an iframe (i.e., inside the PiP window), suppress
 // all TTS so the user doesn't hear responses twice — once from the main tab and
 // once from the PiP iframe.
-const IS_IFRAME = window !== window.top;
+const IS_IFRAME = typeof window !== 'undefined' && window !== window.top;
 
 // Module-level singletons so all useTTS() instances share the same audio state.
 // Without this, App.tsx's flushStream starts audio on one set of refs while
