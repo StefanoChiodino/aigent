@@ -615,6 +615,111 @@ html, body {
   color: var(--accent);
 }
 
+/* Rating widget — 5 dots, hidden until hover or rated */
+/* Rating widget — trigger button */
+.rating-widget {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  margin-left: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.message:hover .rating-widget,
+.rating-widget.rated {
+  opacity: 1;
+}
+.rating-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-dim);
+  transition: color 0.15s;
+}
+.rating-trigger:hover,
+.rating-trigger.active {
+  color: var(--accent);
+}
+.rating-trigger-score {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+/* Rating popover */
+.rating-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 200;
+  background: var(--bg-elevated, #1e1e2e);
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+}
+.rating-popover-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  user-select: none;
+}
+.rating-popover-stars {
+  display: flex;
+  gap: 4px;
+}
+.rating-dot {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-dim);
+  transition: color 0.1s, transform 0.1s;
+}
+.rating-dot:hover {
+  color: var(--accent);
+  transform: scale(1.15);
+}
+.rating-dot.active {
+  color: var(--accent);
+}
+.rating-notes {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  background: var(--bg-input, rgba(255,255,255,0.05));
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 7px;
+  outline: none;
+}
+.rating-notes:focus {
+  border-color: var(--accent);
+}
+.rating-notes::placeholder {
+  color: var(--text-dim);
+}
+.rating-popover-actions {
+  display: flex;
+  gap: 6px;
+}
+
 /* Milkdrop theme: extra softness via CSS blur */
 [data-theme="milkdrop"] .theme-canvas-bg {
   filter: blur(1px);
@@ -1121,12 +1226,17 @@ html, body {
 
 /* ── Task result / inspect panel ────────────────────────────── */
 
-.task-result-panel {
+.task-result-backdrop {
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
   z-index: 200;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.task-result-panel {
   width: min(680px, 90vw);
   max-height: 80vh;
   display: flex;
@@ -1136,10 +1246,6 @@ html, body {
   border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.6);
   overflow: hidden;
-}
-
-.task-result-panel.hidden {
-  display: none;
 }
 
 .task-result-header {
@@ -1219,14 +1325,6 @@ html, body {
   opacity: 0.85;
 }
 
-/* Backdrop — shown when panel is visible */
-.task-result-panel:not(.hidden)::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.5);
-  z-index: -1;
-}
 
 /* Close (×) button in header */
 .task-result-close {
@@ -4250,9 +4348,11 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   margin: 0;
 }
 
-.tski-result-md {
+.tski-result-md,
+.tski-prompt-md {
   font-family: inherit;
   font-size: 13px;
+  white-space: normal;
 }
 
 .tski-no-result {
