@@ -1,18 +1,7 @@
-# Test files — not needed in the published package
-dist/**/*.test.js
-dist/**/*.test.js.map
-dist/**/*.test.d.ts
-dist/**/*.test.d.ts.map
-
-# Source maps are large and rarely useful for end users
-# (keep them if you want easier bug reports)
-# dist/**/*.js.map
-
-# Dev / CI configs
+# Dev / CI configs — not needed in the published package
 tests/
 .env
 .env.*
 !.env.example
-*.spec.ts
 tsconfig.json
 Makefile
