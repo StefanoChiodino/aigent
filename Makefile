@@ -1,4 +1,4 @@
-.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots screenshots-diff clean stt stt-setup tts tts-setup demo-audio kill-ports plugin plugin-dev plugin-typecheck build-release
+.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots screenshots-diff clean stt stt-setup tts tts-setup demo-audio kill-ports plugin plugin-dev plugin-typecheck build-release recover
 
 # --- Development ---
 
@@ -40,6 +40,9 @@ web-dev:
 
 check: typecheck test test-web web plugin
 	@echo "\n✅ All checks passed."
+
+recover:
+	@./scripts/recover.sh
 
 # --- Utilities ---
 
