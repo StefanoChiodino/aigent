@@ -32,6 +32,8 @@ interface ChatState {
   // Streaming actions
   startStream: (turnStartCtx: number) => void;
   endStream: () => void;
+  /** Atomically append final message and end stream in one state update. */
+  finishStream: (msg: DisplayMessage, traces?: TraceEntry[]) => void;
   setStreamText: (text: string) => void;
 
   startThinkingBlock: () => void;
@@ -93,6 +95,13 @@ export const useChatStore = create<ChatState>()(
         streaming: { ...INITIAL_STREAMING, active: true, turnStartCtx },
       }),
       endStream: () => set(s => ({ streaming: { ...s.streaming, active: false, isThinking: false } })),
+      /** Atomically append the final message and end the stream in one state update.
+       *  This prevents any intermediate render where StreamingMessage is gone
+       *  but the final Message hasn't appeared yet (or vice versa). */
+      finishStream: (msg, traces?) => set(s => ({
+        messages: [...s.messages, traces && traces.length > 0 ? { ...msg, traces } : msg],
+        streaming: { ...s.streaming, active: false, isThinking: false },
+      })),
       setStreamText: (text) => set(s => ({ streaming: { ...s.streaming, text } })),
 
       startThinkingBlock: () => set(s => {
