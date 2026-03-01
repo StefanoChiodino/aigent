@@ -5,6 +5,7 @@ import { useChatStore } from '../stores/chat';
 import { useVoiceStore } from '../stores/voice';
 import { useSettingsStore } from '../stores/settings';
 import { useDemoPlaybackStore } from './demoStore';
+import { useRatingStore } from '../stores/rating';
 import type { DemoSection } from './demoStore';
 
 interface Snapshot {
@@ -348,6 +349,15 @@ export class DemoPlaybackEngine {
         this.currentInputText = step.text;
         break;
 
+      case 'rate_message': {
+        const msgs = useChatStore.getState().messages;
+        const msg = msgs[step.messageIndex];
+        if (msg) {
+          useRatingStore.getState().setRating(msg.timestamp, step.score, step.notes);
+        }
+        break;
+      }
+
       case 'loop': break;
     }
   }
@@ -448,13 +458,17 @@ export class DemoPlaybackEngine {
         await this.executeTtsToStt(step.text, step.voice, step.src);
         break;
 
+      case 'rate_message':
+        await this.executeRateMessage(step.messageIndex, step.score, step.notes);
+        break;
+
       case 'loop':
         await this.loopReset();
         break;
     }
   }
 
-  private setModal(modal: 'settings' | 'shortcuts' | 'context', open: boolean): void {
+  private setModal(modal: 'settings' | 'shortcuts' | 'context' | 'tasks', open: boolean): void {
     // Hide cursor when closing a modal (no more clicking to show)
     if (!open) this.removeCursor();
     const ui = useUIStore.getState();
@@ -462,6 +476,7 @@ export class DemoPlaybackEngine {
       case 'settings': ui.setSettingsOpen(open); break;
       case 'shortcuts': ui.setShortcutsOpen(open); break;
       case 'context': ui.setCtxInspectorOpen(open); break;
+      case 'tasks': ui.setTasksInspectorOpen(open); break;
     }
   }
 
@@ -708,6 +723,91 @@ export class DemoPlaybackEngine {
     useUIStore.setState({ permQueue: next, permShowing: next.length > 0 });
   }
 
+  /**
+   * Animate hovering over an assistant message, opening the rating popover,
+   * selecting stars one-by-one, optionally typing notes, then clicking Save.
+   * Uses the fake cursor for visual continuity.
+   */
+  private async executeRateMessage(messageIndex: number, score: number, notes?: string): Promise<void> {
+    if (this.shouldStop()) return;
+
+    const msgs = useChatStore.getState().messages;
+    const msg = msgs[messageIndex];
+    if (!msg) return;
+
+    // Find the message element and its rating trigger
+    const msgEls = document.querySelectorAll('.message.assistant:not(.streaming)');
+    const msgEl = msgEls[messageIndex] as HTMLElement | undefined;
+    if (!msgEl) return;
+
+    const triggerEl = msgEl.querySelector('.rating-trigger') as HTMLElement | null;
+    if (!triggerEl) return;
+
+    // Move cursor to the message to reveal the rating trigger
+    await this.animatedClick(`.message.assistant:not(.streaming):nth-of-type(${messageIndex + 1}) .role-label`);
+    if (this.shouldStop()) return;
+    await this.delay(400);
+    if (this.shouldStop()) return;
+
+    // Click the trigger to open the popover
+    triggerEl.click();
+    await this.delay(500);
+    if (this.shouldStop()) return;
+
+    // Click stars 1..score one by one with small delays
+    for (let i = 1; i <= score; i++) {
+      if (this.shouldStop()) return;
+      const starEl = msgEl.querySelector(`.rating-dot:nth-child(${i})`) as HTMLElement | null;
+      if (starEl) {
+        const rect = starEl.getBoundingClientRect();
+        const cursor = this.ensureCursor();
+        cursor.style.left = `${rect.left + rect.width / 2}px`;
+        cursor.style.top = `${rect.top + rect.height / 2}px`;
+        await this.delay(200);
+        if (this.shouldStop()) return;
+        starEl.click();
+        await this.delay(180);
+      }
+    }
+
+    // Type notes if provided
+    if (notes) {
+      if (this.shouldStop()) return;
+      const notesEl = msgEl.querySelector('.rating-notes') as HTMLTextAreaElement | null;
+      if (notesEl) {
+        notesEl.focus();
+        await this.delay(300);
+        for (const char of notes) {
+          if (this.shouldStop()) return;
+          notesEl.value += char;
+          notesEl.dispatchEvent(new Event('input', { bubbles: true }));
+          // React's onChange needs a synthetic event
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+            window.HTMLTextAreaElement.prototype, 'value',
+          )?.set;
+          if (nativeInputValueSetter) {
+            nativeInputValueSetter.call(notesEl, notesEl.value);
+            notesEl.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          await this.delay(60 + Math.random() * 40);
+        }
+        await this.delay(400);
+      }
+    }
+
+    if (this.shouldStop()) return;
+
+    // Click Save
+    const saveBtn = msgEl.querySelector('.rating-popover .perm-btn.perm-approve') as HTMLElement | null;
+    if (saveBtn) {
+      await this.animatedClick(`.message.assistant:not(.streaming):nth-of-type(${messageIndex + 1}) .rating-popover .perm-btn.perm-approve`);
+    }
+
+    // Persist rating in store (ensures fast-forward also works)
+    useRatingStore.getState().setRating(msg.timestamp, score, notes);
+    await this.delay(300);
+  }
+
   private async loopReset(): Promise<void> {
     // Hide cursor before fade
     this.removeCursor();
@@ -718,6 +818,7 @@ export class DemoPlaybackEngine {
     useChatStore.getState().setUsage({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     useChatStore.getState().endStream();
     useChatStore.getState().setTasks([]);
+    useRatingStore.getState().clearRatings();
     useUIStore.setState({
       permQueue: [], permShowing: false,
       settingsOpen: false, shortcutsOpen: false, ctxInspectorOpen: false,

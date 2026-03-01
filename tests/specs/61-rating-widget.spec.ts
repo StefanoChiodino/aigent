@@ -603,6 +603,123 @@ test.describe('@fast Rating widget', () => {
     client.close();
   });
 
+  // ── Star hover fill ────────────────────────────────────────────────────────
+
+  test('hovering a star fills it and all stars before it', async () => {
+    const page = getPage();
+    await injectAssistantMessage();
+
+    const msg = page.locator('.message.assistant:not(.streaming)').last();
+    await expect(msg).toBeVisible();
+    await msg.hover();
+    await msg.locator('.rating-trigger').click();
+
+    // Hover the 3rd star — should activate stars 1-3
+    await msg.locator('.rating-dot').nth(2).hover();
+    await expect(msg.locator('.rating-dot.active')).toHaveCount(3);
+  });
+
+  test('moving mouse away from stars reverts hover fill but keeps pending selection', async () => {
+    const page = getPage();
+    await injectAssistantMessage();
+
+    const msg = page.locator('.message.assistant:not(.streaming)').last();
+    await expect(msg).toBeVisible();
+    await msg.hover();
+    await msg.locator('.rating-trigger').click();
+
+    // Click score 4, then hover score 2 — display shows 2
+    await msg.locator('.rating-dot').nth(3).click(); // pending = 4
+    await msg.locator('.rating-dot').nth(1).hover(); // hover = 2, shows 2 active
+    await expect(msg.locator('.rating-dot.active')).toHaveCount(2);
+
+    // Move mouse off the stars entirely — pending (4) should reappear
+    await msg.locator('.rating-popover-header').hover();
+    await expect(msg.locator('.rating-dot.active')).toHaveCount(4);
+  });
+
+  // ── Rated widget stays visible ──────────────────────────────────────────────
+
+  test('rated widget stays visible at opacity 1 after moving mouse away', async () => {
+    const page = getPage();
+    await injectAssistantMessage();
+
+    const msg = page.locator('.message.assistant:not(.streaming)').last();
+    await expect(msg).toBeVisible();
+    await msg.hover();
+    await msg.locator('.rating-trigger').click();
+    await msg.locator('.rating-dot').nth(2).click(); // score 3
+    await msg.locator('.rating-popover .perm-btn.perm-approve').click();
+
+    // Move mouse far away from the message
+    await page.mouse.move(10, 10);
+
+    // Widget should still be visible because of .rated class
+    await expect(msg.locator('.rating-widget')).toHaveCSS('opacity', '1');
+  });
+
+  // ── Multiple messages — independent ratings ─────────────────────────────────
+
+  test('ratings are independent per message', async () => {
+    const page = getPage();
+    await injectAssistantMessage('First response');
+    await injectAssistantMessage('Second response');
+
+    // Use the last two injected messages (the shared page may already have messages)
+    const msgs = page.locator('.message.assistant:not(.streaming)');
+    const count = await msgs.count();
+    const first = msgs.nth(count - 2);
+    const second = msgs.nth(count - 1);
+
+    await expect(first).toBeVisible();
+    await expect(second).toBeVisible();
+
+    // Rate first message: 5
+    await first.hover();
+    await first.locator('.rating-trigger').click();
+    await first.locator('.rating-dot').nth(4).click();
+    await first.locator('.rating-popover .perm-btn.perm-approve').click();
+    await expect(first.locator('.rating-popover')).toHaveCount(0);
+
+    // Rate second message: 2
+    await second.hover();
+    await second.locator('.rating-trigger').click();
+    await second.locator('.rating-dot').nth(1).click();
+    await second.locator('.rating-popover .perm-btn.perm-approve').click();
+    await expect(second.locator('.rating-popover')).toHaveCount(0);
+
+    // Verify scores are independent
+    await expect(first.locator('.rating-trigger-score')).toHaveText('5');
+    await expect(second.locator('.rating-trigger-score')).toHaveText('2');
+  });
+
+  // ── Whitespace-only notes treated as no notes ───────────────────────────────
+
+  test('whitespace-only notes are not sent', async () => {
+    const page = getPage();
+    await injectAssistantMessage();
+
+    const client = new AigentWsClient();
+    await client.connect();
+
+    const msg = page.locator('.message.assistant:not(.streaming)').last();
+    await expect(msg).toBeVisible();
+    await msg.hover();
+    await msg.locator('.rating-trigger').click();
+
+    await msg.locator('.rating-dot').nth(2).click(); // score 3
+    await msg.locator('.rating-notes').fill('   ');  // spaces only
+    await msg.locator('.rating-popover .perm-btn.perm-approve').click();
+
+    const event = await client.waitForEvent(
+      e => e['type'] === 'message_rating' && e['rating'] === 3,
+      5_000,
+      'message_rating event'
+    );
+    expect(event['notes']).toBeUndefined();
+    client.close();
+  });
+
   // ── Streaming messages ──────────────────────────────────────────────────────
 
   test('no rating trigger during streaming', async () => {

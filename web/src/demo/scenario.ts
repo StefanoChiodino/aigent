@@ -600,6 +600,48 @@ export const DEMO_SCENARIO: DemoScenario = {
     }),
     wait(300),
 
+    // Tasks Inspector — seed extra history tasks, then open the modal
+    { action: 'label', text: 'Tasks inspector', id: 'tasks-inspector' },
+    // Seed a couple of earlier completed tasks so the inspector looks populated
+    emit({
+      type: 'task_update',
+      task: {
+        id: 'task-hist-1',
+        description: 'Scanning codebase for unused exports',
+        status: 'completed',
+        startedAt: new Date(Date.now() - 120_000).toISOString(),
+        completedAt: new Date(Date.now() - 105_000).toISOString(),
+        model: 'claude-haiku-4-5-20251001',
+        inputTokens: 4800,
+        outputTokens: 620,
+        cost: 0.005,
+        delivery: 'agent-review',
+        result: 'Found 3 unused exports in `src/utils.ts`:\n- `formatDate` (line 42)\n- `slugify` (line 78)\n- `debounce` (line 103)\n\nAll three are safe to remove — no imports reference them.',
+      },
+    }),
+    emit({
+      type: 'task_update',
+      task: {
+        id: 'task-hist-2',
+        description: 'Generating OpenAPI spec from route handlers',
+        status: 'completed',
+        startedAt: new Date(Date.now() - 60_000).toISOString(),
+        completedAt: new Date(Date.now() - 38_000).toISOString(),
+        model: 'claude-sonnet-4-6',
+        inputTokens: 12400,
+        outputTokens: 3200,
+        cost: 0.027,
+        delivery: 'user-pull',
+        result: 'Generated `openapi.yaml` with 8 endpoints:\n\n| Method | Path | Description |\n|--------|------|-------------|\n| GET | /health | Health check |\n| GET | /api/v1/users | List users |\n| POST | /api/v1/users | Create user |\n| GET | /api/v1/users/:id | Get user |\n| PUT | /api/v1/users/:id | Update user |\n| DELETE | /api/v1/users/:id | Delete user |\n| GET | /api/v1/search | Search |\n| POST | /api/v1/auth/login | Login |\n\nSpec written to `docs/openapi.yaml`.',
+      },
+    }),
+    wait(500),
+    // Open the Tasks Inspector modal
+    { action: 'open_modal', modal: 'tasks' as const },
+    wait(5000),
+    { action: 'close_modal', modal: 'tasks' as const },
+    wait(300),
+
     // Tool: switch_model — agent upgrades to Opus for code review
     { action: 'label', text: 'Tool: switch model', id: 'switch-model' },
     emit({
@@ -643,6 +685,15 @@ export const DEMO_SCENARIO: DemoScenario = {
         contextTokens: 33150,
       },
     }),
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 4.5: Message rating — hover, open popover, pick stars, add notes
+    // ════════════════════════════════════════════════════════════════════════
+
+    { action: 'label', text: 'Message rating', id: 'rating' },
+    wait(1800),
+    { action: 'rate_message', messageIndex: 0, score: 4, notes: 'Good explanation, clear steps' },
+    wait(800),
 
     // ════════════════════════════════════════════════════════════════════════
     //  PHASE 5: Flash settings modal

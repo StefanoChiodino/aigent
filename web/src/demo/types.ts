@@ -8,8 +8,8 @@ export type DemoStep =
   | { action: 'auto_approve'; delayMs: number }
   | { action: 'stream_text'; text: string; chunkSize: number; intervalMs: number }
   | { action: 'stream_thinking'; text: string; chunkSize: number; intervalMs: number }
-  | { action: 'open_modal'; modal: 'settings' | 'shortcuts' | 'context' }
-  | { action: 'close_modal'; modal: 'settings' | 'shortcuts' | 'context' }
+  | { action: 'open_modal'; modal: 'settings' | 'shortcuts' | 'context' | 'tasks' }
+  | { action: 'close_modal'; modal: 'settings' | 'shortcuts' | 'context' | 'tasks' }
   | { action: 'set_mic'; state: 'idle' | 'recording' | 'transcribing'; vadActive?: boolean }
   | { action: 'add_attachment'; attachment: PendingAttachment }
   | { action: 'clear_attachments' }
@@ -21,6 +21,7 @@ export type DemoStep =
   | { action: 'set_theme'; theme: string }
   | { action: 'close_pip' }
   | { action: 'tts_to_stt'; text: string; voice?: string; src?: string }
+  | { action: 'rate_message'; messageIndex: number; score: number; notes?: string }
   | { action: 'label'; text: string; id?: string }
   | { action: 'loop' };
 

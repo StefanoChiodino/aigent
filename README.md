@@ -83,6 +83,7 @@ Three-state control in the sidebar: **off** | **on** | **short**
   - **Edit during recording** — typing or pasting while the mic is recording preserves your edits; STT appends after your text instead of overwriting it
 - **Text-to-speech** — speaker button on each assistant message reads it aloud
 - **Speak preview** — assistant messages with a `<speak>` tag show a chat-bubble icon; hover to see the spoken summary without playing audio
+- **Message rating** — ★ star trigger on each assistant message (appears on hover). Click to open a popover with a 1–5 star score picker and optional short notes. Rated messages stay visible (score badge shown on trigger). Ratings and notes are sent via WebSocket and averaged into episode records for continuous learning.
 - **TTS rate control** — adjustable playback speed slider in the sidebar (-50% to +100%)
 - **Audio device pickers** — choose speaker and microphone devices from the sidebar when TTS/STT is available
 
