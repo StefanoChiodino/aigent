@@ -9,7 +9,7 @@ import { useTTS } from '../hooks/useTTS';
 import { captureScreenshot, registerScreenCapCallback, startScreenShare, stopScreenShare } from '../lib/screen';
 import { COMMANDS } from '../lib/settings-schema';
 import { useSettingsStore } from '../stores/settings';
-import { getActiveBindings, matchesAction } from '../lib/keybindings.js';
+import { getActiveBindings, matchesAction, matchesBinding } from '../lib/keybindings.js';
 import { CommandPalette } from './CommandPalette';
 import { AtPalette, getAtStaticMatches } from './AtPalette';
 import { AttachmentPreview } from './AttachmentPreview';
@@ -221,6 +221,8 @@ export function InputArea() {
   const micBaseTextRef = useRef('');
   const lastMicTextRef = useRef('');
   const lastSttValueRef = useRef('');
+  /** Timer ID for hold-to-cancel (hold:Escape). Cleared on keyup/blur. */
+  const holdCancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hasMicText, setHasMicText] = useState(false);
   const [micCapped, setMicCapped] = useState(false);
 
@@ -350,7 +352,10 @@ export function InputArea() {
       msg.thinkingOverride = thinkingLevel === 'off' ? 'high' : 'off';
     }
 
-    send(msg);
+    if (!send(msg)) {
+      setError('Not connected — message not sent');
+      return;
+    }
     broadcastSync({ type: 'input-clear' });
     setInputValue('');
     lastSttValueRef.current = '';
@@ -602,12 +607,34 @@ export function InputArea() {
       // Otherwise: let the browser insert the newline (Shift+Enter in normal, plain Enter in multiline)
     }
     const bindings = getActiveBindings();
-    // cancelResponse — Ctrl+Escape (or user-configured chord) stops an in-progress
-    // response. Checked BEFORE clearInput so the more-specific chord wins.
-    if (isLoading && matchesAction(e.nativeEvent, 'cancelResponse', bindings)) {
-      e.preventDefault();
-      send({ type: 'cancel' });
-      return;
+    // cancelResponse — stop an in-progress response.
+    // Supports two modes:
+    //   • hold binding (e.g. hold:Escape): start a timer on keydown; if the key
+    //     is released before the timer fires, the action is cancelled. This lets
+    //     plain Escape still fall through to clearInput.
+    //   • immediate binding (e.g. Ctrl+Escape): fire right away as before.
+    if (isLoading) {
+      const cancelBindings = bindings.cancelResponse ?? [];
+      for (const cb of cancelBindings) {
+        if (!matchesBinding(e.nativeEvent, cb)) continue;
+        if (cb.hold !== undefined) {
+          // Hold binding: start a timer; keyup/blur will clear it
+          if (holdCancelTimerRef.current === null) {
+            holdCancelTimerRef.current = setTimeout(() => {
+              holdCancelTimerRef.current = null;
+              send({ type: 'cancel' });
+            }, cb.hold);
+          }
+          // Don't preventDefault here — allow Escape to propagate so the
+          // browser can close any overlays, but we'll cancel on hold.
+          return;
+        } else {
+          // Immediate binding: fire now
+          e.preventDefault();
+          send({ type: 'cancel' });
+          return;
+        }
+      }
     }
     // clearInput — Escape (or user-configured key), but only when nothing
     // higher-priority is consuming Escape (palettes, cancelResponse).
@@ -635,6 +662,22 @@ export function InputArea() {
     }
   };
 
+  /** Cancel any pending hold-to-cancel timer when the key is released. */
+  const handleKeyUp = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (holdCancelTimerRef.current !== null && e.code === 'Escape') {
+      clearTimeout(holdCancelTimerRef.current);
+      holdCancelTimerRef.current = null;
+    }
+  };
+
+  /** Also clear the hold timer if the textarea loses focus mid-hold. */
+  const handleBlur = () => {
+    if (holdCancelTimerRef.current !== null) {
+      clearTimeout(holdCancelTimerRef.current);
+      holdCancelTimerRef.current = null;
+    }
+  };
+
   const handlePaletteComplete = (item: CommandDef) => {
     const newVal = item.argHint ? item.name + ' ' : item.name;
     setInputValue(newVal);
@@ -642,7 +685,10 @@ export function InputArea() {
     if (!item.argHint) {
       // Send directly with the completed value to avoid stale-closure issue
       // (submitMessage captures the pre-completion inputValue)
-      send({ type: 'message', content: newVal });
+      if (!send({ type: 'message', content: newVal })) {
+        setError('Not connected — message not sent');
+        return;
+      }
       setInputValue('');
     }
     inputRef.current?.focus();
@@ -793,6 +839,8 @@ export function InputArea() {
             value={inputValue}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
+            onKeyUp={handleKeyUp}
+            onBlur={handleBlur}
             onPaste={handlePaste}
             autoFocus
           />

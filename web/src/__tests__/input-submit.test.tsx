@@ -204,9 +204,9 @@ describe('InputArea submission', () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 
-  // ── Disconnected WebSocket: silent failure ─────────────────────────────────
+  // ── Disconnected WebSocket: preserves input and shows error ────────────────
 
-  it('message is silently lost when WebSocket is disconnected', async () => {
+  it('preserves input and shows error when WebSocket is disconnected', async () => {
     // Set WS to null (disconnected)
     useConnectionStore.setState({ ws: null });
 
@@ -220,10 +220,12 @@ describe('InputArea submission', () => {
       fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
     });
 
-    // Input still clears (the component doesn't know the WS is dead)
-    expect((input as HTMLTextAreaElement).value).toBe('');
-    // But nothing was sent
+    // Input is preserved (not cleared) so user doesn't lose their message
+    expect((input as HTMLTextAreaElement).value).toBe('lost message');
+    // Nothing was sent
     expect(ws.send).not.toHaveBeenCalled();
+    // Error is shown to the user
+    expect(useUIStore.getState().errorMsg).toMatch(/not connected/i);
   });
 
   // ── Slash commands go through the same path ────────────────────────────────
@@ -284,32 +286,57 @@ describe('InputArea submission', () => {
 
   // ── Escape when loading sends cancel ───────────────────────────────────────
 
-  it('Ctrl+Escape while loading sends cancel', async () => {
-    useUIStore.setState({ isLoading: true });
+  it('hold:Escape (1s) while loading sends cancel', async () => {
+    vi.useFakeTimers();
+    try {
+      useUIStore.setState({ isLoading: true });
 
-    renderInputArea();
-    const input = screen.getByRole('textbox');
+      renderInputArea();
+      const input = screen.getByRole('textbox');
 
-    await act(async () => {
-      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape', ctrlKey: true });
-    });
+      // Press and hold Escape
+      await act(async () => {
+        fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+      });
 
-    const payloads = sentPayloads(ws);
-    expect(payloads).toContainEqual({ type: 'cancel' });
+      // No cancel yet — not held long enough
+      expect(sentPayloads(ws)).not.toContainEqual({ type: 'cancel' });
+
+      // Advance past the 1-second hold threshold
+      await act(async () => { vi.advanceTimersByTime(1100); });
+
+      expect(sentPayloads(ws)).toContainEqual({ type: 'cancel' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('plain Escape while loading does NOT send cancel (only Ctrl+Escape does)', async () => {
-    useUIStore.setState({ isLoading: true });
+  it('plain Escape released early while loading does NOT send cancel (hold:Escape requires 1s hold)', async () => {
+    vi.useFakeTimers();
+    try {
+      useUIStore.setState({ isLoading: true });
 
-    renderInputArea();
-    const input = screen.getByRole('textbox');
+      renderInputArea();
+      const input = screen.getByRole('textbox');
 
-    await act(async () => {
-      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
-    });
+      // Press Escape
+      await act(async () => {
+        fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+      });
 
-    const payloads = sentPayloads(ws);
-    expect(payloads).not.toContainEqual({ type: 'cancel' });
+      // Release before 1 second
+      await act(async () => { vi.advanceTimersByTime(500); });
+      await act(async () => {
+        fireEvent.keyUp(input, { key: 'Escape', code: 'Escape' });
+      });
+
+      // Advance well past 1 second to confirm timer was cancelled
+      await act(async () => { vi.advanceTimersByTime(1000); });
+
+      expect(sentPayloads(ws)).not.toContainEqual({ type: 'cancel' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // ── Cancel button visible when TTS is playing (not loading) ───────────────

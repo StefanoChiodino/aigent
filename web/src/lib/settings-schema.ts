@@ -571,11 +571,11 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'keybind_cancelResponse',
     label: 'Cancel response',
-    desc: 'Chord to stop an in-progress agent response. Checked before Clear input, so use a more-specific chord (e.g. Ctrl+Escape) to avoid conflicts.',
+    desc: 'Chord to stop an in-progress agent response. Supports hold: prefix for long-press (e.g. hold:Escape = hold Escape for 1s, hold:500:Escape = hold for 500ms, Ctrl+Escape = immediate chord).',
     group: 'Keybindings',
     type: 'text',
-    default: 'Ctrl+Escape',
-    placeholder: 'Ctrl+Escape',
+    default: 'hold:Escape',
+    placeholder: 'hold:Escape',
     scope: 'client',
   },
   {

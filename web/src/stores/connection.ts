@@ -11,7 +11,7 @@ interface ConnectionState {
   setWs: (ws: WebSocket | null) => void;
   incrementReconnect: () => void;
   resetReconnect: () => void;
-  send: (data: Record<string, unknown>) => void;
+  send: (data: Record<string, unknown>) => boolean;
 }
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
@@ -27,6 +27,8 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
     const { ws } = get();
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(data));
+      return true;
     }
+    return false;
   },
 }));

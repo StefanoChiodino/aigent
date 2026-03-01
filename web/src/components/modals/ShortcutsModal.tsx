@@ -17,6 +17,20 @@ interface ShortcutGroup {
 /** Convert a KeyBinding into an array of display tokens like ['Ctrl', 'Shift', '`'] */
 function bindingToKeys(b: KeyBinding): string[] {
   const parts: string[] = [];
+  // Hold bindings get a special prefix token instead of individual modifier badges
+  if (b.hold !== undefined) {
+    const holdSec = b.hold === 1000 ? '1s' : `${b.hold}ms`;
+    if (b.ctrl) parts.push('Ctrl');
+    if (b.shift) parts.push('Shift');
+    if (b.alt) parts.push('Alt');
+    if (b.meta) parts.push('Meta');
+    if (b.code) {
+      parts.push(`Hold ${b.code === 'Backquote' ? '`' : b.code} (${holdSec})`);
+    } else if (b.key) {
+      parts.push(`Hold ${b.key.length === 1 ? b.key.toUpperCase() : b.key} (${holdSec})`);
+    }
+    return parts;
+  }
   if (b.ctrl) parts.push('Ctrl');
   if (b.shift) parts.push('Shift');
   if (b.alt) parts.push('Alt');
@@ -78,6 +92,7 @@ function getShortcutGroups(multilineEnter: boolean): ShortcutGroup[] {
             { keys: ['Ctrl', 'Enter'], description: 'Send message' },
             { keys: ['Shift', 'Enter'], description: 'Send with thinking toggle' },
             { keys: ['Escape'], description: 'Clear input / close palette' },
+            ...bindingsToShortcuts(bindings.cancelResponse, 'Cancel / stop response', 'Cancel / stop response'),
             { keys: ['/'], description: 'Open command palette' },
             { keys: ['@'], description: 'Open mention palette' },
           ]
@@ -86,6 +101,7 @@ function getShortcutGroups(multilineEnter: boolean): ShortcutGroup[] {
             { keys: ['Ctrl', 'Enter'], description: 'Send with thinking toggle' },
             { keys: ['Shift', 'Enter'], description: 'Insert newline' },
             { keys: ['Escape'], description: 'Clear input / close palette' },
+            ...bindingsToShortcuts(bindings.cancelResponse, 'Cancel / stop response', 'Cancel / stop response'),
             { keys: ['/'], description: 'Open command palette' },
             { keys: ['@'], description: 'Open mention palette' },
           ],

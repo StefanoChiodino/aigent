@@ -17,6 +17,9 @@ export interface KeyBinding {
   meta?: boolean;
   /** When true: only fire if no input/textarea/select/contenteditable is focused */
   requireNoFocus?: boolean;
+  /** When set: the key must be held for this many milliseconds before firing.
+   *  The caller (InputArea) handles the timer logic — matchesBinding() ignores this. */
+  hold?: number;
 }
 
 export type KeyBindingAction =
@@ -48,10 +51,10 @@ export const DEFAULT_KEYBINDINGS: Record<KeyBindingAction, KeyBinding[]> = {
     // Ctrl+Shift+/ — same physical key, different e.key on some platforms
     { key: '/', ctrl: true, shift: true },
   ],
-  // Ctrl+Escape — cancel an in-progress response. Checked before clearInput so
-  // the more-specific chord wins; plain Escape falls through to clearInput.
+  // Hold Escape (1 second) — cancel an in-progress response.
+  // Using a hold binding avoids conflicts with plain Escape (clearInput).
   cancelResponse: [
-    { code: 'Escape', ctrl: true },
+    { code: 'Escape', hold: 1000 },
   ],
   // Escape — only fires when the textarea is focused and no modal/palette is
   // intercepting. The actual precedence logic lives in InputArea's handleKeyDown;
@@ -144,10 +147,31 @@ const MODIFIER_NAMES = new Set(['ctrl', 'control', 'shift', 'alt', 'option', 'me
  * Modifiers: Ctrl / Control, Shift, Alt / Option, Meta / Cmd / Command / Win / Super
  * Keys: Backtick / ` → code Backquote; single letters → key (lowercase);
  *       ? / / → key match; other → key match as-is.
+ *
+ * Hold syntax:
+ *   "hold:Escape"        → { code: 'Escape', hold: 1000 }   (default 1000ms)
+ *   "hold:500:Escape"    → { code: 'Escape', hold: 500 }    (custom ms)
+ *   "hold:Ctrl+Escape"   → { code: 'Escape', ctrl: true, hold: 1000 }
  */
 export function parseBindingString(s: string): KeyBinding {
-  const parts = s.trim().split('+').map(p => p.trim());
+  let raw = s.trim();
+  let holdMs: number | undefined;
+
+  // Handle hold: prefix
+  if (raw.toLowerCase().startsWith('hold:')) {
+    raw = raw.slice(5); // strip "hold:"
+    holdMs = 1000;      // default duration
+    // Check for optional custom duration: "500:Escape" or "500:Ctrl+Escape"
+    const durationMatch = raw.match(/^(\d+):(.+)$/);
+    if (durationMatch) {
+      holdMs = parseInt(durationMatch[1]!, 10);
+      raw = durationMatch[2]!;
+    }
+  }
+
+  const parts = raw.split('+').map(p => p.trim());
   const binding: KeyBinding = {};
+  if (holdMs !== undefined) binding.hold = holdMs;
   let keyPart: string | undefined;
 
   for (let i = 0; i < parts.length; i++) {
@@ -198,7 +222,7 @@ export function parseBindingsString(s: string): KeyBinding[] {
 
 /**
  * Serialize a KeyBinding back to a human-readable string.
- * Used for display in the ShortcutsModal.
+ * Used for display in the ShortcutsModal and settings round-trips.
  */
 export function serializeBinding(b: KeyBinding): string {
   const parts: string[] = [];
@@ -218,7 +242,17 @@ export function serializeBinding(b: KeyBinding): string {
     parts.push(b.key.length === 1 ? b.key.toUpperCase() : b.key);
   }
 
-  return parts.join('+');
+  const chord = parts.join('+');
+
+  // Prepend hold: prefix if this is a hold binding
+  if (b.hold !== undefined) {
+    if (b.hold !== 1000) {
+      return `hold:${b.hold}:${chord}`;
+    }
+    return `hold:${chord}`;
+  }
+
+  return chord;
 }
 
 // ---------------------------------------------------------------------------

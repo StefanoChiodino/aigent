@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { serializeBinding } from '../lib/keybindings';
 import type { KeyBinding } from '../lib/keybindings';
+
+/** Duration (ms) a key must be held to register as a hold: binding. */
+const HOLD_THRESHOLD_MS = 1000;
 
 interface Props {
   onCapture: (bindingStr: string) => void;
@@ -80,28 +83,56 @@ function buildBindingString(e: KeyboardEvent): string | null {
 
 export function KeyCaptureButton({ onCapture }: Props) {
   const [recording, setRecording] = useState(false);
+  /** Timestamp when the current key was first pressed (for hold detection). */
+  const keydownTimeRef = useRef<number | null>(null);
+  /** The binding string built on keydown, held for comparison on keyup. */
+  const pendingBindingRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!recording) return;
 
-    const handler = (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
 
-      if (e.key === 'Escape') {
+      // Escape (without modifiers) cancels recording
+      if (e.key === 'Escape' && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey) {
         setRecording(false);
+        keydownTimeRef.current = null;
+        pendingBindingRef.current = null;
         return;
       }
 
-      const bindingStr = buildBindingString(e);
-      if (bindingStr) {
-        onCapture(bindingStr);
-        setRecording(false);
+      // Record when this key was pressed (only on fresh press, not repeat)
+      if (!e.repeat) {
+        keydownTimeRef.current = Date.now();
+        pendingBindingRef.current = buildBindingString(e);
       }
     };
 
-    window.addEventListener('keydown', handler, { capture: true });
-    return () => window.removeEventListener('keydown', handler, { capture: true });
+    const onKeyUp = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const bindingStr = pendingBindingRef.current;
+      const pressedAt = keydownTimeRef.current;
+      keydownTimeRef.current = null;
+      pendingBindingRef.current = null;
+
+      if (!bindingStr) return;
+
+      const heldMs = pressedAt !== null ? Date.now() - pressedAt : 0;
+      const finalBinding = heldMs >= HOLD_THRESHOLD_MS ? `hold:${bindingStr}` : bindingStr;
+      onCapture(finalBinding);
+      setRecording(false);
+    };
+
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    window.addEventListener('keyup', onKeyUp, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, { capture: true });
+      window.removeEventListener('keyup', onKeyUp, { capture: true });
+    };
   }, [recording, onCapture]);
 
   return (
