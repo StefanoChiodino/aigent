@@ -1,0 +1,64 @@
+name: Publish to npm
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Only run if the version in package.json changed
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if version changed
+        id: version_check
+        run: |
+          PREV=$(git show HEAD~1:package.json | node -e "process.stdin.resume();let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).version))" 2>/dev/null || echo "none")
+          CURR=$(node -e "console.log(require('./package.json').version)")
+          echo "prev=$PREV"
+          echo "curr=$CURR"
+          if [ "$PREV" != "$CURR" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if version unchanged
+        if: steps.version_check.outputs.changed == 'false'
+        run: echo "Version unchanged — skipping publish."
+
+      - uses: actions/setup-node@v4
+        if: steps.version_check.outputs.changed == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        if: steps.version_check.outputs.changed == 'true'
+        run: npm ci
+
+      - name: Typecheck
+        if: steps.version_check.outputs.changed == 'true'
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        if: steps.version_check.outputs.changed == 'true'
+        run: node --import tsx/esm --test src/**/*.test.ts
+
+      - name: Web component tests
+        if: steps.version_check.outputs.changed == 'true'
+        run: npx vitest run --config web/vite.config.ts
+
+      - name: Build
+        if: steps.version_check.outputs.changed == 'true'
+        run: npm run build-release
+
+      - name: Publish
+        if: steps.version_check.outputs.changed == 'true'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

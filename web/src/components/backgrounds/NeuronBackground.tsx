@@ -141,8 +141,8 @@ function drawNeuron(
   // Update action-potential rings
   for (let ri = n.actionRings.length - 1; ri >= 0; ri--) {
     const ring = n.actionRings[ri];
-    ring.r += dt * 80;
-    ring.alpha -= dt * 2.2;
+    ring.r += dt * 60;
+    ring.alpha -= dt * 1.6;
     if (ring.alpha <= 0) n.actionRings.splice(ri, 1);
   }
 
@@ -208,8 +208,8 @@ function drawNeuron(
   // Outer membrane glow (extended aura)
   const auraR = somaR * (4 + glow * 6);
   const aura = ctx.createRadialGradient(n.x, n.y, somaR * 0.5, n.x, n.y, auraR);
-  aura.addColorStop(0, `hsla(${n.hue}, 90%, 65%, ${glow * 0.45})`);
-  aura.addColorStop(0.4, `hsla(${n.hue}, 80%, 55%, ${glow * 0.15})`);
+  aura.addColorStop(0, `hsla(${n.hue}, 90%, 65%, ${glow * 0.28})`);
+  aura.addColorStop(0.4, `hsla(${n.hue}, 80%, 55%, ${glow * 0.09})`);
   aura.addColorStop(1, `hsla(${n.hue}, 80%, 50%, 0)`);
   ctx.fillStyle = aura;
   ctx.fillRect(n.x - auraR, n.y - auraR, auraR * 2, auraR * 2);
@@ -266,7 +266,7 @@ function drawNeuron(
   // Nucleolus (central bright dot)
   const nolR = nucR * 0.35;
   const nolGrad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, nolR);
-  nolGrad.addColorStop(0, `hsla(${n.hue + 60}, 100%, ${80 + fire * 18}%, ${0.7 + fire * 0.3})`);
+  nolGrad.addColorStop(0, `hsla(${n.hue + 60}, 100%, ${78 + fire * 10}%, ${0.65 + fire * 0.2})`);
   nolGrad.addColorStop(1, `hsla(${n.hue + 40}, 90%, 60%, 0)`);
   ctx.fillStyle = nolGrad;
   ctx.beginPath();
@@ -448,8 +448,8 @@ export function NeuronBackground() {
       const pulses = pulsesRef.current;
       const working = isWorkingRef.current;
 
-      neurons[fromIdx].fireLevel = 1;
-      neurons[fromIdx].actionRings.push({ r: neurons[fromIdx].r + 2, alpha: 0.9 });
+      neurons[fromIdx].fireLevel = 0.6;
+      neurons[fromIdx].actionRings.push({ r: neurons[fromIdx].r + 2, alpha: 0.45 });
 
       if (hops <= 0 || synapses.length === 0) return;
       const connected = synapses.filter(s => s.from === fromIdx || s.to === fromIdx);
@@ -552,8 +552,8 @@ export function NeuronBackground() {
         p.t += p.speed * dt;
         if (p.t >= 1) {
           syn.strength = Math.min(1, syn.strength + LINK_REINFORCE);
-          neurons[p.to].fireLevel = 1;
-          neurons[p.to].actionRings.push({ r: neurons[p.to].r + 2, alpha: 0.9 });
+          neurons[p.to].fireLevel = 0.6;
+          neurons[p.to].actionRings.push({ r: neurons[p.to].r + 2, alpha: 0.45 });
 
           if (p.cascadeLeft > 0 && Math.random() < (working ? 0.65 : 0.6))
             fireCascade(p.to, p.hue, p.cascadeLeft);
@@ -584,8 +584,8 @@ export function NeuronBackground() {
         e.t += e.speed * dt;
         if (e.t >= 1) {
           if (e.inbound && e.toNeuron >= 0) {
-            neurons[e.toNeuron].fireLevel = 1;
-            neurons[e.toNeuron].actionRings.push({ r: neurons[e.toNeuron].r + 2, alpha: 0.9 });
+            neurons[e.toNeuron].fireLevel = 0.6;
+            neurons[e.toNeuron].actionRings.push({ r: neurons[e.toNeuron].r + 2, alpha: 0.45 });
             fireCascade(e.toNeuron, e.hue, working ? 2 : 1);
           }
           edges.splice(i, 1);

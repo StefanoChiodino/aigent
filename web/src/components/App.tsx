@@ -34,6 +34,8 @@ import { ShortcutsModal } from './modals/ShortcutsModal';
 import { TraceInspector } from './modals/TraceInspector';
 import { TasksInspector } from './modals/TasksInspector';
 
+const THEME_OPTIONS = ['aurora', 'spectrum', 'oscilloscope', 'circular', 'milkdrop', 'circuit', 'matrix', 'constellation', 'topology', 'ember', 'fireflies', 'rain', 'neongrid', 'lavalamp', 'pcb', 'neuron'];
+
 export function App() {
   useWebSocket();
   useDemoMode();
@@ -57,6 +59,20 @@ export function App() {
 
   const isLoading = useUIStore(s => s.isLoading);
   const theme = useSettingsStore(s => s.getClientSetting('AIGENT_THEME')) as string || 'aurora';
+  const rotateMins = useSettingsStore(s => s.getClientSetting('AIGENT_THEME_ROTATE_MINS')) as number || 0;
+  const setClientSetting = useSettingsStore(s => s.setClientSetting);
+
+  // Theme rotation
+  useEffect(() => {
+    if (!rotateMins || rotateMins <= 0) return;
+    const ms = rotateMins * 60 * 1000;
+    const id = setInterval(() => {
+      const current = useSettingsStore.getState().getClientSetting('AIGENT_THEME') as string || 'aurora';
+      const idx = THEME_OPTIONS.indexOf(current);
+      setClientSetting('AIGENT_THEME', THEME_OPTIONS[(idx + 1) % THEME_OPTIONS.length]);
+    }, ms);
+    return () => clearInterval(id);
+  }, [rotateMins, setClientSetting]);
 
   // Sync data-working attribute on body for CSS / test selectors
   useEffect(() => {
