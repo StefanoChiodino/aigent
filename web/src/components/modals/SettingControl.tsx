@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { SettingDef } from '../../lib/settings-schema';
+import { KeyCaptureButton } from '../KeyCaptureButton';
 
 interface SettingControlProps {
   def: SettingDef;
@@ -112,6 +113,27 @@ export function SettingControl({ def, value, onChange }: SettingControlProps) {
       );
 
     case 'text':
+      if (def.key.startsWith('keybind_')) {
+        // Keybinding fields get an inline Record button
+        const currentValue = String(value);
+        return (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="text"
+              className="settings-text"
+              value={currentValue}
+              placeholder={def.placeholder}
+              onChange={e => onChange(e.target.value)}
+            />
+            <KeyCaptureButton
+              onCapture={captured => {
+                const trimmed = currentValue.trim();
+                onChange(trimmed ? `${trimmed}, ${captured}` : captured);
+              }}
+            />
+          </span>
+        );
+      }
       return (
         <input
           type="text"

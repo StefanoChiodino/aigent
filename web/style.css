@@ -5485,3 +5485,29 @@ body[data-demo]::after {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1);
 }
+
+
+/* ── Keybinding record button ────────────────────────────── */
+
+.kb-record-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.kb-record-btn:hover {
+  background: var(--bg-tertiary);
+}
+.kb-record-btn.recording {
+  background: var(--accent);
+  color: var(--bg);
+  animation: kb-pulse 1s ease-in-out infinite;
+}
+@keyframes kb-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
