@@ -1671,6 +1671,8 @@ interface PendingBrowserWrite {
   url?: string;
   domain?: string;
   requiredTier: 'read' | 'write' | 'script';
+  clear?: boolean;
+  options?: { network?: boolean; console?: boolean; performance?: boolean };
 }
 
 const pendingBrowserWriteApprovals = new Map<string, PendingBrowserWrite>();
@@ -1734,8 +1736,9 @@ function flushPendingBrowserApprovals(): void {
     if (pending.tabId !== undefined) params.tabId = pending.tabId;
     if (pending.steps !== undefined) params.steps = pending.steps;
     if (pending.url !== undefined) params.url = pending.url;
-    type BrowserAction = 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab';
-    void extensionBridge.request(pending.action as BrowserAction, params).then((result) => {
+    if (pending.clear !== undefined) params.clear = pending.clear;
+    if (pending.options !== undefined) params.options = pending.options;
+    void browserRequest(pending.action, params).then((result) => {
       sendBrowserExtResult(id, result);
     }).catch((err: Error) => {
       client!.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
@@ -1831,14 +1834,15 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
     injectSystemMessage(`Browser action approved (once): ${pending.action}`);
   }
 
-  const params: { tabId?: number; steps?: unknown[]; url?: string } = {};
+  const params: Record<string, unknown> = {};
   if (pending.tabId !== undefined) params.tabId = pending.tabId;
   if (pending.steps !== undefined) params.steps = pending.steps;
   if (pending.url !== undefined) params.url = pending.url;
+  if (pending.clear !== undefined) params.clear = pending.clear;
+  if (pending.options !== undefined) params.options = pending.options;
 
-  type BrowserAction = 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab';
   client!.emit('perm_dismissed', [id]);
-  extensionBridge.request(pending.action as BrowserAction, params).then((result) => {
+  browserRequest(pending.action, params).then((result) => {
     sendBrowserExtResult(id, result);
   }).catch((err: Error) => {
     client!.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
@@ -1847,8 +1851,31 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
   return true;
 }
 
+/**
+ * Route a browser action through the extension or Playwright fallback.
+ * Returns a promise that resolves with the response.
+ */
+async function browserRequest(action: string, params: Record<string, unknown>): Promise<{ ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; devtools?: unknown; error?: string }> {
+  if (extensionBridge.isConnected()) {
+    return extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params);
+  }
+
+  // Fallback to Playwright headless browser
+  try {
+    const { playwrightBridge } = await import('./playwright-bridge.js');
+    return await playwrightBridge.request(action, params);
+  } catch (err) {
+    throw new Error(
+      'No browser available. Either:\n' +
+      '  1. Install the aigent Chrome extension and connect it, or\n' +
+      '  2. Install playwright-core: npm install playwright-core && npx playwright install chromium\n' +
+      `Original error: ${String(err)}`,
+    );
+  }
+}
+
 /** Relay a browser extension result (used by both approval handler and auto-approval path). */
-function sendBrowserExtResult(id: string, result: { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; error?: string }): void {
+function sendBrowserExtResult(id: string, result: { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; devtools?: unknown; error?: string }): void {
   const msg: Extract<import('./protocol.js').ClientCommand, { type: 'browser_ext_result' }> = {
     type: 'browser_ext_result', id, ok: result.ok,
   };
@@ -1861,6 +1888,7 @@ function sendBrowserExtResult(id: string, result: { ok: boolean; treeText?: stri
   if (result.finalTitle !== undefined) msg.finalTitle = result.finalTitle;
   if (result.newTabId !== undefined) msg.newTabId = result.newTabId;
   if (result.screenshots !== undefined) msg.screenshots = result.screenshots;
+  if (result.devtools !== undefined) msg.devtools = result.devtools;
   if (result.error !== undefined) msg.error = result.error;
   client!.send(msg);
 }
@@ -2139,7 +2167,7 @@ client.on('mcp_tool_request', (id: string, server: string, tool: string, params:
 });
 
 // Handle browser extension requests — per-domain three-tier permission check
-client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab', tabId?: number, rootSelector?: string, steps?: unknown[], url?: string) => {
+client.on('browser_ext_request', (id: string, action: string, tabId?: number, rootSelector?: string, steps?: unknown[], url?: string, clear?: boolean, options?: { network?: boolean; console?: boolean; performance?: boolean }) => {
   // Classify what tier this action requires
   const requiredTier = classifyBrowserAction(action, steps);
 
@@ -2174,7 +2202,9 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
       if (rootSelector !== undefined) params.rootSelector = rootSelector;
       if (steps !== undefined) params.steps = steps;
       if (url !== undefined) params.url = url;
-      void extensionBridge.request(action, params).then((result) => {
+      if (clear !== undefined) params.clear = clear;
+      if (options !== undefined) params.options = options;
+      void browserRequest(action, params).then((result) => {
         sendBrowserExtResult(id, result);
       }).catch((err: Error) => {
         client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
@@ -2189,7 +2219,9 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
     const params: Record<string, unknown> = {};
     if (tabId !== undefined) params.tabId = tabId;
     if (rootSelector !== undefined) params.rootSelector = rootSelector;
-    void extensionBridge.request(action, params).then((result) => {
+    if (clear !== undefined) params.clear = clear;
+    if (options !== undefined) params.options = options;
+    void extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params).then((result) => {
       sendBrowserExtResult(id, result);
     }).catch((err: Error) => {
       client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
@@ -2206,6 +2238,8 @@ client.on('browser_ext_request', (id: string, action: 'extract_a11y' | 'screensh
     ...(steps !== undefined ? { steps } : {}),
     ...(url !== undefined ? { url } : {}),
     ...(domain !== undefined ? { domain } : {}),
+    ...(clear !== undefined ? { clear } : {}),
+    ...(options !== undefined ? { options } : {}),
     requiredTier,
   });
   log.info('Browser action approval requested', { id, action, domain, requiredTier });

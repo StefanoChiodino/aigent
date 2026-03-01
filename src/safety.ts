@@ -324,10 +324,10 @@ export function classifyBrowserAction(
   action: string,
   steps?: unknown[],
 ): 'read' | 'write' | 'script' {
-  if (action === 'extract_a11y' || action === 'screenshot' || action === 'list_tabs' || action === 'activate_tab') {
+  if (action === 'extract_a11y' || action === 'screenshot' || action === 'list_tabs' || action === 'activate_tab' || action === 'devtools_snapshot' || action === 'devtools_stop') {
     return 'read';
   }
-  if (action === 'navigate' || action === 'open_tab' || action === 'close_tab' || action === 'create_window' || action === 'close_agent_tabs') {
+  if (action === 'navigate' || action === 'open_tab' || action === 'close_tab' || action === 'create_window' || action === 'close_agent_tabs' || action === 'devtools_start') {
     return 'write';
   }
   // run_script — check if all steps are structured

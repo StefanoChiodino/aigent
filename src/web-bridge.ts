@@ -542,6 +542,27 @@ export async function startWebServer(
   extensionBridge.on('connected', () => broadcastExtensionState(true));
   extensionBridge.on('disconnected', () => broadcastExtensionState(false));
 
+  // Handle "Send to aigent" context menu events from the Chrome extension
+  extensionBridge.on('context_menu', (data: { selectionText?: string; pageUrl?: string; linkUrl?: string; srcUrl?: string; tabId?: number; tabTitle?: string }) => {
+    const parts: string[] = [];
+    if (data.selectionText) parts.push(`Selected text: "${data.selectionText}"`);
+    if (data.linkUrl) parts.push(`Link: ${data.linkUrl}`);
+    if (data.srcUrl) parts.push(`Image: ${data.srcUrl}`);
+    if (data.pageUrl) parts.push(`Page: ${data.pageUrl}`);
+    if (data.tabTitle) parts.push(`Tab: ${data.tabTitle}`);
+
+    if (parts.length === 0) return; // nothing useful to send
+
+    const text = `[Sent from browser via right-click context menu]\n${parts.join('\n')}`;
+
+    // Inject as a user message into the conversation
+    broadcastToClients({ type: 'context_menu_message', text });
+    // Also forward to the agent server as a user message
+    if (client) {
+      client.send({ type: 'message', content: text, images: [] });
+    }
+  });
+
   wss.on('connection', (ws: WebSocket) => {
     log.info('Web client connected');
 
@@ -658,7 +679,7 @@ export async function startWebServer(
         }
         send({ type: 'fetch_request', id, url, ...(method ? { method } : {}) });
       },
-      browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab', _tabId?: number, _rootSelector?: string, steps?: unknown[], url?: string) => {
+      browser_ext_request: (id: string, action: string, _tabId?: number, _rootSelector?: string, steps?: unknown[], url?: string) => {
         // Skip if gatekeeper already handled this (domain permission grant active)
         if (autoHandledBrowserWriteIds?.has(id)) {
           autoHandledBrowserWriteIds.delete(id);
@@ -674,6 +695,12 @@ export async function startWebServer(
           ? `Open new tab: ${url ?? '?'}`
           : action === 'close_tab'
           ? `Close tab ${_tabId ?? '?'}`
+          : action === 'devtools_start'
+          ? `Attach DevTools debugger${_tabId ? ` to tab ${_tabId}` : ''}`
+          : action === 'create_window'
+          ? 'Create agent browsing window'
+          : action === 'close_agent_tabs'
+          ? 'Close all agent tabs'
           : (() => {
               if (!steps || steps.length === 0) return 'run_script (no steps)';
               const verbs: string[] = [];

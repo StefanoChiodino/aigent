@@ -191,7 +191,7 @@ export class AgentClient extends EventEmitter {
         this.emit('fetch_request', event.id, event.url, event.method);
         break;
       case 'browser_ext_request':
-        this.emit('browser_ext_request', event.id, event.action, event.tabId, event.rootSelector, event.steps, event.url);
+        this.emit('browser_ext_request', event.id, event.action, event.tabId, event.rootSelector, event.steps, event.url, event.clear, event.options);
         break;
       case 'patch_request':
         this.emit('patch_request', event.id, event.diff, event.reason);

@@ -14,7 +14,7 @@ The agent runs directly on your machine as a child process, can read and edit it
 - Maintains persistent memory across sessions (daily logs, curated MEMORY.md, workspace files)
 - Proposes changes to host files via patches — you see a diff and approve before anything is written
 - Spawns background sub-agents for long tasks without blocking your conversation
-- Controls your Chrome browser via a companion extension (a11y tree, screenshots, tab management, script execution)
+- Controls your Chrome browser via a companion extension (a11y tree, screenshots, tab management, script execution, DevTools monitoring); falls back to headless Playwright when the extension is not connected
 - Speaks responses aloud (local TTS) and listens via microphone (local STT)
 
 ![Chat interface — sidebar with model picker, reasoning controls, and tool call blocks](docs/screenshots/chat.png)
@@ -322,7 +322,7 @@ Key settings groups:
 | `host_edit_file` | Propose str_replace edits to a host file — user sees diff and approves |
 | `request_config_write` | Propose edits to config files (SOUL.md, AGENTS.md, etc.) — user sees diff |
 | `search_memory` | Keyword search across past session logs (zero LLM cost) |
-| `browser_ext` | Interact with Chrome via the aigent extension (a11y tree, screenshots, tab control, script execution) |
+| `browser_ext` | Interact with Chrome via the aigent extension (a11y tree, screenshots, tab control, script execution, DevTools monitoring). Falls back to headless Playwright when extension is not connected. |
 | `ask_user` | Present a question to the user with optional multiple-choice options (free-text input always available) |
 | `log_episode` | Record a structured episode — what was attempted, outcome, friction, lessons learned |
 | `query_episodes` | Search and filter past episode records by domain, outcome, tags, date range |
@@ -421,6 +421,7 @@ The `aigent-extension/` directory contains a Chrome extension that enables the `
 - List, open, close, and switch tabs
 - Execute JavaScript in tabs (requires user approval)
 - Navigate tabs to URLs
+- Monitor network requests, console logs, and performance metrics via DevTools (CDP)
 
 Build with `make plugin`, or `make plugin-dev` for watch mode. The extension is also built automatically as part of `make dev` and `make dev-ts`.
 
@@ -429,6 +430,35 @@ Build with `make plugin`, or `make plugin-dev` for watch mode. The extension is 
 **Security:** The extension authenticates to the gatekeeper via a per-session shared secret — fetched over HTTP on connect, validated on WebSocket upgrade — preventing other local processes from injecting browser commands. Navigate URLs are validated against the same SSRF rules as `fetch` (private IPs, metadata endpoints, etc.). All browser extension events are recorded in the audit log.
 
 **Connection indicator:** When the extension connects, a "Browser" capability appears in the sidebar with an "on" badge. It disappears when the extension disconnects.
+
+### DevTools monitoring (CDP)
+
+The agent can attach Chrome DevTools Protocol to any tab to monitor network traffic, console output, and performance metrics — useful for debugging web apps.
+
+| Action | Tier | Description |
+|--------|------|-------------|
+| `devtools_start` | write | Attach CDP to a tab; enable Network, Runtime, and Performance domains |
+| `devtools_snapshot` | read | Read buffered network requests, console logs, exceptions, and performance metrics |
+| `devtools_stop` | read | Detach CDP and return the final buffer |
+
+While attached, Chrome shows the standard yellow "aigent is debugging this browser" banner. Events are stored in ring buffers (200 network entries, 500 console entries, 200 exceptions) to cap memory usage. Use the `clear` parameter on `devtools_snapshot` to reset buffers after reading. The `options` parameter on `devtools_start` controls which domains to enable (network, console, performance — all on by default).
+
+Sessions auto-detach when a tab is closed or the user dismisses the debug banner.
+
+### Context menu
+
+Right-click on selected text, a link, an image, or the page itself and choose **"Send to aigent"**. The selection, URL, or image info is injected into the conversation as a user message — a quick way to send page content to the agent without copy-pasting.
+
+### Headless fallback (Playwright)
+
+When the Chrome extension is not connected (CI, headless environments, remote servers), the agent automatically falls back to a headless Chromium via [playwright-core](https://playwright.dev/). The same `browser_ext` actions work transparently — the agent doesn't need to know which backend is active.
+
+```bash
+npm install playwright-core          # optional peer dependency
+npx playwright install chromium      # install browser binary
+```
+
+The headless browser launches lazily on first request and auto-closes after 15 minutes idle. All actions except DevTools (CDP) are supported. If neither the extension nor Playwright is available, the agent receives a clear error with install instructions.
 
 ---
 

@@ -31,7 +31,7 @@ export type ClientCommand =
   | { type: 'screen_share_response'; id: string; ok: boolean; message: string }
   | { type: 'host_state' }
   | { type: 'context_breakdown_request' }
-  | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; error?: string }
+  | { type: 'browser_ext_result'; id: string; ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; devtools?: unknown; error?: string }
   | { type: 'browser_write_response'; id: string; ok: boolean; message: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'user_question_response'; id: string; answer: string; selectedOptions?: string[]; dismissed: boolean }
@@ -148,8 +148,9 @@ export type ServerEvent =
   | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean; extensionConnected?: boolean }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
-  | { type: 'browser_ext_request'; id: string; action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string }
-  | { type: 'browser_write_request'; id: string; action: 'run_script' | 'navigate' | 'open_tab' | 'close_tab'; stepSummary: string; tabUrl?: string; domain?: string; requiredTier: 'read' | 'write' | 'script'; alwaysReadCmd?: string; alwaysWriteCmd?: string; alwaysScriptCmd?: string }
+  | { type: 'browser_ext_request'; id: string; action: string; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } }
+  | { type: 'browser_write_request'; id: string; action: string; stepSummary: string; tabUrl?: string; domain?: string; requiredTier: 'read' | 'write' | 'script'; alwaysReadCmd?: string; alwaysWriteCmd?: string; alwaysScriptCmd?: string }
+  | { type: 'context_menu_message'; text: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'classifier_decision'; tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
   | { type: 'user_question_request'; id: string; question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean; allowFreeText?: boolean }

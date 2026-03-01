@@ -98,7 +98,9 @@ The existing continuous learning system (episodes + ratings + friction tracking 
 > Strategy: `docs/os-automation-strategy.md`. Browser-first, a11y-tree-driven, screenshot on demand.
 
 - [x] **Phase 3c — Destructive action heuristics** — destructive browser actions flagged with warning icon, per-action confirmation required.
-- [ ] **Headless browser (deferred)** — Playwright fallback for unattended/CI runs. Design doc: `docs/design-headless-browser.md`. Not urgent until self-play or CI testing requires it.
+- [x] **Phase 4a — CDP DevTools** — `devtools_start`/`devtools_snapshot`/`devtools_stop` actions. Attaches Chrome DevTools Protocol to capture network requests, console output, JS exceptions, and performance metrics in real time.
+- [x] **Phase 4b — Context menu** — "Send to aigent" right-click menu. Selected text, links, or images are injected into the conversation as a user message.
+- [x] **Phase 4c — Playwright fallback** — when the Chrome extension is not connected, browser_ext tool falls back to headless Chromium via `playwright-core`. Same action interface. Optional peer dependency (`npm install playwright-core`).
 - [ ] **Computer-use loop (deferred)** — screenshot + Anthropic computer-use API for non-browser desktop apps. Expensive fallback, low priority.
 
 ---

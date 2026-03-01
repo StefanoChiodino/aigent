@@ -89,8 +89,62 @@ interface ExtResponse {
   screenshots?: Array<{ stepIndex: number; dataUrl: string }>;
   agentWindowId?: number;
   closedTabIds?: number[];
+  devtools?: DevToolsSnapshot;
   error?: string;
 }
+
+// --- CDP DevTools types ---
+
+interface NetworkEntry {
+  id: string;
+  url: string;
+  method: string;
+  status?: number;
+  mimeType?: string;
+  size?: number;
+  timing?: { dns: number; connect: number; ttfb: number; total: number };
+  error?: string;
+  timestamp: number;
+}
+
+interface ConsoleEntry {
+  type: 'log' | 'warn' | 'error' | 'info' | 'debug';
+  text: string;
+  url?: string;
+  line?: number;
+  timestamp: number;
+}
+
+interface ExceptionEntry {
+  text: string;
+  url?: string;
+  line?: number;
+  stack?: string;
+  timestamp: number;
+}
+
+interface DevToolsSnapshot {
+  network: NetworkEntry[];
+  console: ConsoleEntry[];
+  exceptions: ExceptionEntry[];
+  performance?: { metrics: Record<string, number> };
+}
+
+interface CdpSession {
+  network: NetworkEntry[];
+  console: ConsoleEntry[];
+  exceptions: ExceptionEntry[];
+  /** Partial network requests keyed by CDP requestId — merged on response/finish */
+  pendingRequests: Map<string, Partial<NetworkEntry>>;
+  domainsEnabled: { network: boolean; console: boolean; performance: boolean };
+}
+
+const CDP_MAX_NETWORK = 200;
+const CDP_MAX_CONSOLE = 500;
+const CDP_MAX_EXCEPTIONS = 200;
+
+/** Per-tab CDP debugger sessions */
+const cdpSessions = new Map<number, CdpSession>();
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -192,6 +246,12 @@ async function handleRequest(req: ExtRequest): Promise<ExtResponse> {
         return await createAgentWindow(req.id, req.url);
       case 'close_agent_tabs':
         return await closeAgentTabs(req.id);
+      case 'devtools_start':
+        return await devtoolsStart(req.id, req.tabId, req.options);
+      case 'devtools_snapshot':
+        return await devtoolsSnapshot(req.id, req.tabId, req.clear);
+      case 'devtools_stop':
+        return await devtoolsStop(req.id, req.tabId);
       default:
         return { type: 'ext_response', id: req.id, ok: false, error: `Unknown action: ${String((req as { action: string }).action)}` };
     }
@@ -313,9 +373,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-// Clean up agent tab tracking when tabs are closed
+// Clean up agent tab tracking and CDP sessions when tabs are closed
 chrome.tabs.onRemoved.addListener((tabId) => {
   agentTabIds.delete(tabId);
+  if (cdpSessions.has(tabId)) {
+    cdpSessions.delete(tabId);
+    // Detach is automatic when tab closes, but clean up our state
+  }
 });
 
 // Clean up agent window tracking when window is closed
@@ -528,6 +592,256 @@ async function closeAgentTabs(id: string): Promise<ExtResponse> {
     return { type: 'ext_response', id, ok: false, error: String(err) };
   }
 }
+
+// --- CDP DevTools actions ---
+
+/** Push to a ring buffer, evicting oldest entries when full. */
+function ringPush<T>(arr: T[], item: T, max: number): void {
+  if (arr.length >= max) arr.shift();
+  arr.push(item);
+}
+
+async function devtoolsStart(
+  id: string,
+  tabId?: number,
+  options?: { network?: boolean; console?: boolean; performance?: boolean },
+): Promise<ExtResponse> {
+  try {
+    const targetTabId = tabId ?? await getActiveTabId();
+
+    // Already attached?
+    if (cdpSessions.has(targetTabId)) {
+      return { type: 'ext_response', id, ok: false, error: `DevTools already attached to tab ${targetTabId}. Call devtools_stop first.` };
+    }
+
+    const domainsEnabled = {
+      network: options?.network !== false,
+      console: options?.console !== false,
+      performance: options?.performance !== false,
+    };
+
+    // Attach debugger (shows yellow "debugging" banner)
+    await chrome.debugger.attach({ tabId: targetTabId }, '1.3');
+
+    // Enable requested CDP domains
+    if (domainsEnabled.network) {
+      await chrome.debugger.sendCommand({ tabId: targetTabId }, 'Network.enable');
+    }
+    if (domainsEnabled.console) {
+      await chrome.debugger.sendCommand({ tabId: targetTabId }, 'Runtime.enable');
+    }
+    if (domainsEnabled.performance) {
+      await chrome.debugger.sendCommand({ tabId: targetTabId }, 'Performance.enable');
+    }
+
+    cdpSessions.set(targetTabId, {
+      network: [],
+      console: [],
+      exceptions: [],
+      pendingRequests: new Map(),
+      domainsEnabled,
+    });
+
+    return { type: 'ext_response', id, ok: true };
+  } catch (err) {
+    return { type: 'ext_response', id, ok: false, error: String(err) };
+  }
+}
+
+function buildSnapshot(session: CdpSession): DevToolsSnapshot {
+  return {
+    network: [...session.network],
+    console: [...session.console],
+    exceptions: [...session.exceptions],
+  };
+}
+
+async function devtoolsSnapshot(
+  id: string,
+  tabId?: number,
+  clear?: boolean,
+): Promise<ExtResponse> {
+  try {
+    const targetTabId = tabId ?? await getActiveTabId();
+    const session = cdpSessions.get(targetTabId);
+    if (!session) {
+      return { type: 'ext_response', id, ok: false, error: `No DevTools session on tab ${targetTabId}. Call devtools_start first.` };
+    }
+
+    const snapshot = buildSnapshot(session);
+
+    // Fetch performance metrics if that domain is enabled
+    if (session.domainsEnabled.performance) {
+      try {
+        const result = await chrome.debugger.sendCommand(
+          { tabId: targetTabId },
+          'Performance.getMetrics',
+        ) as { metrics?: Array<{ name: string; value: number }> } | undefined;
+        if (result?.metrics) {
+          const metrics: Record<string, number> = {};
+          for (const m of result.metrics) metrics[m.name] = m.value;
+          snapshot.performance = { metrics };
+        }
+      } catch {
+        // Performance.getMetrics can fail if page navigated — non-fatal
+      }
+    }
+
+    if (clear) {
+      session.network.length = 0;
+      session.console.length = 0;
+      session.exceptions.length = 0;
+      session.pendingRequests.clear();
+    }
+
+    return { type: 'ext_response', id, ok: true, devtools: snapshot };
+  } catch (err) {
+    return { type: 'ext_response', id, ok: false, error: String(err) };
+  }
+}
+
+async function devtoolsStop(id: string, tabId?: number): Promise<ExtResponse> {
+  try {
+    const targetTabId = tabId ?? await getActiveTabId();
+    const session = cdpSessions.get(targetTabId);
+    if (!session) {
+      return { type: 'ext_response', id, ok: false, error: `No DevTools session on tab ${targetTabId}.` };
+    }
+
+    // Build final snapshot before detaching
+    const snapshot = buildSnapshot(session);
+    if (session.domainsEnabled.performance) {
+      try {
+        const result = await chrome.debugger.sendCommand(
+          { tabId: targetTabId },
+          'Performance.getMetrics',
+        ) as { metrics?: Array<{ name: string; value: number }> } | undefined;
+        if (result?.metrics) {
+          const metrics: Record<string, number> = {};
+          for (const m of result.metrics) metrics[m.name] = m.value;
+          snapshot.performance = { metrics };
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Detach and clean up
+    cdpSessions.delete(targetTabId);
+    try {
+      await chrome.debugger.detach({ tabId: targetTabId });
+    } catch {
+      // Already detached (user closed the banner)
+    }
+
+    return { type: 'ext_response', id, ok: true, devtools: snapshot };
+  } catch (err) {
+    return { type: 'ext_response', id, ok: false, error: String(err) };
+  }
+}
+
+// --- CDP event listener (registered once) ---
+
+chrome.debugger.onEvent.addListener((source, method, params) => {
+  if (!source.tabId) return;
+  const session = cdpSessions.get(source.tabId);
+  if (!session) return;
+
+  const p = params as Record<string, unknown>;
+
+  switch (method) {
+    case 'Network.requestWillBeSent': {
+      const req = p['request'] as { url: string; method: string } | undefined;
+      const requestId = p['requestId'] as string;
+      if (req && requestId) {
+        session.pendingRequests.set(requestId, {
+          id: requestId,
+          url: req.url,
+          method: req.method,
+          timestamp: (p['wallTime'] as number ?? Date.now() / 1000) * 1000,
+        });
+      }
+      break;
+    }
+    case 'Network.responseReceived': {
+      const requestId = p['requestId'] as string;
+      const resp = p['response'] as { status: number; mimeType: string; timing?: { dnsStart: number; dnsEnd: number; connectStart: number; connectEnd: number; sslStart: number; sslEnd: number; receiveHeadersStart: number; sendEnd: number } } | undefined;
+      const pending = session.pendingRequests.get(requestId);
+      if (pending && resp) {
+        pending.status = resp.status;
+        pending.mimeType = resp.mimeType;
+        if (resp.timing) {
+          pending.timing = {
+            dns: resp.timing.dnsEnd - resp.timing.dnsStart,
+            connect: resp.timing.connectEnd - resp.timing.connectStart,
+            ttfb: resp.timing.receiveHeadersStart - resp.timing.sendEnd,
+            total: resp.timing.receiveHeadersStart - resp.timing.dnsStart,
+          };
+        }
+      }
+      break;
+    }
+    case 'Network.loadingFinished': {
+      const requestId = p['requestId'] as string;
+      const pending = session.pendingRequests.get(requestId);
+      if (pending) {
+        pending.size = (p['encodedDataLength'] as number) ?? undefined;
+        session.pendingRequests.delete(requestId);
+        ringPush(session.network, pending as NetworkEntry, CDP_MAX_NETWORK);
+      }
+      break;
+    }
+    case 'Network.loadingFailed': {
+      const requestId = p['requestId'] as string;
+      const pending = session.pendingRequests.get(requestId);
+      if (pending) {
+        pending.error = (p['errorText'] as string) ?? 'unknown error';
+        session.pendingRequests.delete(requestId);
+        ringPush(session.network, pending as NetworkEntry, CDP_MAX_NETWORK);
+      }
+      break;
+    }
+    case 'Runtime.consoleAPICalled': {
+      const type = (p['type'] as string) ?? 'log';
+      const args = (p['args'] as Array<{ type: string; value?: unknown; description?: string }>) ?? [];
+      const text = args.map(a => a.description ?? String(a.value ?? '')).join(' ');
+      const stackTrace = p['stackTrace'] as { callFrames?: Array<{ url: string; lineNumber: number }> } | undefined;
+      const frame = stackTrace?.callFrames?.[0];
+      ringPush(session.console, {
+        type: type as ConsoleEntry['type'],
+        text,
+        url: frame?.url,
+        line: frame?.lineNumber,
+        timestamp: (p['timestamp'] as number ?? Date.now()),
+      }, CDP_MAX_CONSOLE);
+      break;
+    }
+    case 'Runtime.exceptionThrown': {
+      const detail = p['exceptionDetails'] as {
+        text?: string;
+        url?: string;
+        lineNumber?: number;
+        exception?: { description?: string };
+        stackTrace?: { callFrames?: Array<{ url: string; lineNumber: number }> };
+      } | undefined;
+      if (detail) {
+        ringPush(session.exceptions, {
+          text: detail.exception?.description ?? detail.text ?? 'Unknown exception',
+          url: detail.url ?? detail.stackTrace?.callFrames?.[0]?.url,
+          line: detail.lineNumber ?? detail.stackTrace?.callFrames?.[0]?.lineNumber,
+          stack: detail.exception?.description,
+          timestamp: (p['timestamp'] as number ?? Date.now()),
+        }, CDP_MAX_EXCEPTIONS);
+      }
+      break;
+    }
+  }
+});
+
+// Auto-detach when the user dismisses the debugging banner or the debugger detaches
+chrome.debugger.onDetach.addListener((source) => {
+  if (source.tabId) {
+    cdpSessions.delete(source.tabId);
+  }
+});
 
 // --- run_script action ---
 
@@ -1040,6 +1354,27 @@ chrome.runtime.onMessage.addListener((message: { type?: string }) => {
   if (message.type === 'open-window') {
     openOrFocusTab().catch(console.error);
   }
+});
+
+// ── Context menu — "Send to aigent" ───────────────────────────────────────────
+
+chrome.contextMenus.create({
+  id: 'send-to-aigent',
+  title: 'Send to aigent',
+  contexts: ['selection', 'page', 'link', 'image'],
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId !== 'send-to-aigent') return;
+  send({
+    type: 'ext_context_menu',
+    selectionText: info.selectionText ?? undefined,
+    pageUrl: info.pageUrl ?? undefined,
+    linkUrl: info.linkUrl ?? undefined,
+    srcUrl: info.srcUrl ?? undefined,
+    tabId: tab?.id,
+    tabTitle: tab?.title ?? undefined,
+  });
 });
 
 // ── Keep-alive via chrome.alarms ──────────────────────────────────────────────

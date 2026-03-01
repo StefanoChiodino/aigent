@@ -35,6 +35,12 @@ interface ExtResponse {
   finalTitle?: string;
   newTabId?: number;
   screenshots?: Array<{ stepIndex: number; dataUrl: string }>;
+  devtools?: {
+    network: Array<{ id: string; url: string; method: string; status?: number; mimeType?: string; size?: number; error?: string; timestamp: number }>;
+    console: Array<{ type: string; text: string; url?: string; line?: number; timestamp: number }>;
+    exceptions: Array<{ text: string; url?: string; line?: number; stack?: string; timestamp: number }>;
+    performance?: { metrics: Record<string, number> };
+  };
   error?: string;
 }
 
@@ -45,7 +51,17 @@ interface ExtTabChanged {
   title: string;
 }
 
-type ExtMessage = ExtHello | ExtResponse | ExtTabChanged;
+interface ExtContextMenu {
+  type: 'ext_context_menu';
+  selectionText?: string;
+  pageUrl?: string;
+  linkUrl?: string;
+  srcUrl?: string;
+  tabId?: number;
+  tabTitle?: string;
+}
+
+type ExtMessage = ExtHello | ExtResponse | ExtTabChanged | ExtContextMenu;
 
 interface PendingRequest {
   resolve: (r: ExtResponse) => void;
@@ -89,6 +105,11 @@ class ExtensionBridge extends EventEmitter {
         return;
       }
 
+      if (msg.type === 'ext_context_menu') {
+        this.emit('context_menu', msg);
+        return;
+      }
+
       if (msg.type === 'ext_response') {
         const pending = this.pending.get(msg.id);
         if (!pending) {
@@ -128,8 +149,8 @@ class ExtensionBridge extends EventEmitter {
   }
 
   async request(
-    action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab',
-    params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string } = {},
+    action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab' | 'devtools_start' | 'devtools_snapshot' | 'devtools_stop',
+    params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } } = {},
     timeoutMs = 30_000,
   ): Promise<ExtResponse> {
     if (!this.ws || !this.isConnected()) {

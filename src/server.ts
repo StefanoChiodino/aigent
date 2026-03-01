@@ -93,10 +93,16 @@ const execBroker = new PendingRequestBroker<{ command: string }, OkAlwaysAllow>(
   timeoutResponse: { ok: false, alwaysAllow: false, message: 'Exec approval request timed out (60s)' },
 });
 
-type BrowserExtResponse = { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; error?: string };
+type DevToolsSnapshot = {
+  network: Array<{ id: string; url: string; method: string; status?: number; mimeType?: string; size?: number; timing?: { dns: number; connect: number; ttfb: number; total: number }; error?: string; timestamp: number }>;
+  console: Array<{ type: string; text: string; url?: string; line?: number; timestamp: number }>;
+  exceptions: Array<{ text: string; url?: string; line?: number; stack?: string; timestamp: number }>;
+  performance?: { metrics: Record<string, number> };
+};
+type BrowserExtResponse = { ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; devtools?: DevToolsSnapshot; error?: string };
 
 const browserExtBroker = new PendingRequestBroker<
-  { action: string; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string },
+  { action: string; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } },
   BrowserExtResponse
 >({
   prefix: 'bext',
@@ -180,8 +186,8 @@ export function requestExecApproval(command: string, signal?: AbortSignal): Prom
 }
 
 export async function requestBrowserExt(
-  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab',
-  params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string } = {},
+  action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab' | 'devtools_start' | 'devtools_snapshot' | 'devtools_stop',
+  params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } } = {},
   signal?: AbortSignal,
 ): Promise<string | import('./provider.js').ToolContentBlock[]> {
   if (signal?.aborted) return 'Aborted by user';
@@ -227,7 +233,76 @@ export async function requestBrowserExt(
   }
   if (action === 'activate_tab') return `Switched to tab: ${response.finalUrl ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`;
   if (action === 'open_tab') return `Opened new tab (id: ${response.newTabId ?? '?'}): ${response.finalUrl ?? params.url ?? '?'}\nTitle: ${response.finalTitle ?? '(unknown)'}`;
+
+  // --- DevTools actions ---
+  if ((action === 'devtools_snapshot' || action === 'devtools_stop') && response.devtools) {
+    return formatDevToolsSnapshot(response.devtools);
+  }
+  if (action === 'devtools_start') return 'DevTools attached. Network, console, and performance monitoring active. Use devtools_snapshot to read captured data.';
+
   return response.treeText ?? '(no content)';
+}
+
+function formatDevToolsSnapshot(dt: DevToolsSnapshot): string {
+  const parts: string[] = [];
+
+  // Network requests
+  if (dt.network.length > 0) {
+    parts.push(`## Network (${dt.network.length} requests)\n`);
+    parts.push('| Status | Method | URL | Size | Time |');
+    parts.push('|--------|--------|-----|------|------|');
+    for (const n of dt.network) {
+      const status = n.error ? `ERR` : String(n.status ?? '?');
+      const size = n.size !== undefined ? `${(n.size / 1024).toFixed(1)}KB` : '?';
+      const time = n.timing ? `${n.timing.total.toFixed(0)}ms` : '?';
+      const url = n.url.length > 80 ? n.url.slice(0, 77) + '...' : n.url;
+      parts.push(`| ${status} | ${n.method} | ${url} | ${size} | ${time} |`);
+    }
+  }
+
+  // Console output
+  if (dt.console.length > 0) {
+    parts.push(`\n## Console (${dt.console.length} entries)\n`);
+    for (const c of dt.console) {
+      const loc = c.url ? ` (${c.url}${c.line !== undefined ? ':' + c.line : ''})` : '';
+      parts.push(`[${c.type.toUpperCase()}] ${c.text}${loc}`);
+    }
+  }
+
+  // Exceptions
+  if (dt.exceptions.length > 0) {
+    parts.push(`\n## Exceptions (${dt.exceptions.length})\n`);
+    for (const e of dt.exceptions) {
+      const loc = e.url ? ` (${e.url}${e.line !== undefined ? ':' + e.line : ''})` : '';
+      parts.push(`ERROR: ${e.text}${loc}`);
+      if (e.stack) parts.push(`  ${e.stack.split('\n').slice(0, 3).join('\n  ')}`);
+    }
+  }
+
+  // Performance metrics
+  if (dt.performance?.metrics) {
+    const m = dt.performance.metrics;
+    parts.push(`\n## Performance Metrics\n`);
+    const interesting = ['Timestamp', 'Documents', 'Frames', 'JSEventListeners', 'Nodes', 'LayoutCount', 'RecalcStyleCount', 'ScriptDuration', 'TaskDuration', 'JSHeapUsedSize', 'JSHeapTotalSize', 'FirstContentfulPaint', 'LargestContentfulPaint'];
+    for (const key of interesting) {
+      if (m[key] !== undefined) {
+        let val: string;
+        if (key.includes('HeapSize') || key.includes('Size')) {
+          val = `${(m[key] / (1024 * 1024)).toFixed(1)} MB`;
+        } else if (key.includes('Duration')) {
+          val = `${(m[key] * 1000).toFixed(1)} ms`;
+        } else if (key.includes('Paint') && m[key] > 0) {
+          val = `${(m[key] * 1000).toFixed(0)} ms`;
+        } else {
+          val = String(m[key]);
+        }
+        parts.push(`${key}: ${val}`);
+      }
+    }
+  }
+
+  if (parts.length === 0) return 'DevTools snapshot: no data captured yet.';
+  return parts.join('\n');
 }
 
 export function requestFetchApproval(url: string, method?: string, signal?: AbortSignal): Promise<OkAlwaysAllow> {
@@ -1251,7 +1326,7 @@ function handleClient(socket: Socket): void {
             screenShareBroker.resolve(cmd.id, { ok: cmd.ok, message: cmd.message });
             break;
           case 'browser_ext_result':
-            browserExtBroker.resolve(cmd.id, cmd);
+            browserExtBroker.resolve(cmd.id, cmd as BrowserExtResponse);
             break;
           case 'user_question_response': {
             const questionResponse: { answer: string; selectedOptions?: string[]; dismissed: boolean } = {

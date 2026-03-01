@@ -149,6 +149,30 @@ describe('classifyBrowserAction', () => {
     assert.equal(classifyBrowserAction('run_script', []), 'script');
   });
 
+  // -- DevTools actions --
+
+  it('classifies devtools_start as write', () => {
+    assert.equal(classifyBrowserAction('devtools_start'), 'write');
+  });
+
+  it('classifies devtools_snapshot as read', () => {
+    assert.equal(classifyBrowserAction('devtools_snapshot'), 'read');
+  });
+
+  it('classifies devtools_stop as read', () => {
+    assert.equal(classifyBrowserAction('devtools_stop'), 'read');
+  });
+
+  // -- Other write actions --
+
+  it('classifies create_window as write', () => {
+    assert.equal(classifyBrowserAction('create_window'), 'write');
+  });
+
+  it('classifies close_agent_tabs as write', () => {
+    assert.equal(classifyBrowserAction('close_agent_tabs'), 'write');
+  });
+
   // -- Unknown action --
 
   it('classifies unknown action as script', () => {

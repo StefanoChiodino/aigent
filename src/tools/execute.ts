@@ -66,7 +66,7 @@ interface HostInput { capability: string; params?: Record<string, unknown>; reas
 interface RequestConfigWriteInput { file: string; content: string; reason: string }
 interface HostEditFileInput { path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
 interface SwitchModelInput { model: string; reason?: string }
-interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab'; tabId?: number; rootSelector?: string; steps?: Record<string, unknown>[]; url?: string }
+interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab' | 'devtools_start' | 'devtools_snapshot' | 'devtools_stop'; tabId?: number; rootSelector?: string; steps?: Record<string, unknown>[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } }
 interface AskUserInput { question: string; options?: { label: string; description?: string }[]; multi_select?: boolean }
 interface LogEpisodeInput { domain: string; task: string; outcome: 'completed' | 'partial' | 'abandoned' | 'failed'; friction?: string; lessons?: string[]; tags?: string[] }
 interface QueryEpisodesInput { domain?: string; outcome?: 'completed' | 'partial' | 'abandoned' | 'failed'; tags?: string[]; since?: string; until?: string; limit?: number }
@@ -161,6 +161,9 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
         const n = steps?.length ?? 0;
         return `browser: run_script (${n} step${n === 1 ? '' : 's'})`;
       }
+      if (action === 'devtools_start') return `browser: devtools attach${tabId ? ` (tab ${tabId})` : ''}`;
+      if (action === 'devtools_snapshot') return `browser: devtools snapshot`;
+      if (action === 'devtools_stop') return `browser: devtools detach`;
       return rootSelector ? `browser: ${action} (${rootSelector})` : `browser: ${action}`;
     }
     case 'ask_user': {
@@ -663,13 +666,15 @@ export async function executeTool(
     }
 
     case 'browser_ext': {
-      const { action, tabId, rootSelector, steps, url } = input as BrowserExtInput;
+      const { action, tabId, rootSelector, steps, url, clear, options } = input as BrowserExtInput;
       const { requestBrowserExt } = await import('../server.js');
-      const params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string } = {};
+      const params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } } = {};
       if (tabId !== undefined) params.tabId = tabId;
       if (rootSelector !== undefined) params.rootSelector = rootSelector;
       if (steps !== undefined) params.steps = steps;
       if (url !== undefined) params.url = url;
+      if (clear !== undefined) params.clear = clear;
+      if (options !== undefined) params.options = options;
       return requestBrowserExt(action, params, signal);
     }
 
