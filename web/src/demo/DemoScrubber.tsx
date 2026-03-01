@@ -78,8 +78,8 @@ export const DemoScrubber = React.memo(function DemoScrubber() {
   const onSectionClick = useCallback((id: string) => {
     const engine = getDemoEngine();
     if (!engine) return;
+    // seekToSection auto-resumes if playback was not manually paused
     engine.seekToSection(id);
-    engine.resume();
   }, []);
 
   if (totalSteps === 0) return null;

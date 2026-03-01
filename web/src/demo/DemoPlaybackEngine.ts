@@ -46,9 +46,11 @@ export class DemoPlaybackEngine {
   private snapshots: Snapshot[] = [];
   private currentInputText = '';
   private _seekTarget: number | null = null;
+  private _seekShouldResume = false;
   private _delayTimer: ReturnType<typeof setTimeout> | null = null;
   private _delayResolve: (() => void) | null = null;
   private _paused = false;
+  private _manuallyPaused = false;
   private _pauseResolve: (() => void) | null = null;
 
   /** Effective step count (excludes the final 'loop' step) */
@@ -145,15 +147,18 @@ export class DemoPlaybackEngine {
     this.removeCursor();
   }
 
-  seekTo(step: number): void {
+  seekTo(step: number, resumeAfter?: boolean): void {
     const target = Math.max(0, Math.min(step, this.effectiveSteps - 1));
     this._seekTarget = target;
+    // If resumeAfter is explicitly provided, use it; otherwise resume only if
+    // the user had not manually paused (i.e. playback was actively running).
+    this._seekShouldResume = resumeAfter !== undefined ? resumeAfter : !this._manuallyPaused;
     this.cancelDelay();
     // Stop any playing audio
     if (this.currentAudio) { this.currentAudio.pause(); this.currentAudio = null; }
     useVoiceStore.getState().setTtsPlaying(false);
     speechSynthesis.cancel();
-    // If paused, resume so the play loop processes the seek
+    // If paused, temporarily unblock the play loop so it can process the seek
     if (this._paused) {
       this._paused = false;
       this._pauseResolve?.();
@@ -164,15 +169,18 @@ export class DemoPlaybackEngine {
   seekToSection(id: string): void {
     const step = this.sectionIndex.get(id);
     if (step !== undefined) this.seekTo(step);
+    // resumeAfter is inferred from _manuallyPaused inside seekTo
   }
 
   pause(): void {
     this._paused = true;
+    this._manuallyPaused = true;
     useDemoPlaybackStore.getState().setPlaying(false);
   }
 
   resume(): void {
     this._paused = false;
+    this._manuallyPaused = false;
     useDemoPlaybackStore.getState().setPlaying(true);
     this._pauseResolve?.();
     this._pauseResolve = null;
@@ -223,9 +231,15 @@ export class DemoPlaybackEngine {
       }
     }
 
-    // Pause after seek so user can inspect
-    this._paused = true;
-    useDemoPlaybackStore.getState().setPlaying(false);
+    // If playback was running before the seek, auto-resume; otherwise stay paused.
+    if (this._seekShouldResume) {
+      this._paused = false;
+      this._manuallyPaused = false;
+      useDemoPlaybackStore.getState().setPlaying(true);
+    } else {
+      this._paused = true;
+      useDemoPlaybackStore.getState().setPlaying(false);
+    }
   }
 
   private restoreSnapshot(idx: number): void {
