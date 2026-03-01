@@ -930,6 +930,25 @@ html, body {
   overflow-x: hidden;
   overflow-y: auto;
   min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+
+#sb-tasks-section::-webkit-scrollbar {
+  width: 4px;
+}
+
+#sb-tasks-section::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#sb-tasks-section::-webkit-scrollbar-thumb {
+  background: var(--border-subtle, rgba(255,255,255,0.1));
+  border-radius: 2px;
+}
+
+#sb-tasks-section::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.2);
 }
 
 .sidebar-section {
