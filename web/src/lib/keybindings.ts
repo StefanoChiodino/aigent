@@ -22,7 +22,8 @@ export interface KeyBinding {
 export type KeyBindingAction =
   | 'toggleMic'
   | 'toggleMicSticky'
-  | 'showShortcuts';
+  | 'showShortcuts'
+  | 'clearInput';
 
 // ---------------------------------------------------------------------------
 // Defaults — mirror the hardcoded values that existed before this system
@@ -45,6 +46,13 @@ export const DEFAULT_KEYBINDINGS: Record<KeyBindingAction, KeyBinding[]> = {
     { key: '?', ctrl: true },
     // Ctrl+Shift+/ — same physical key, different e.key on some platforms
     { key: '/', ctrl: true, shift: true },
+  ],
+  // Escape — only fires when the textarea is focused and no modal/palette is
+  // intercepting. The actual precedence logic lives in InputArea's handleKeyDown;
+  // this entry exists so the binding is shown in the shortcuts modal and can
+  // be overridden via settings.
+  clearInput: [
+    { code: 'Escape' },
   ],
 };
 
@@ -222,7 +230,7 @@ export function getActiveBindings(): Record<KeyBindingAction, KeyBinding[]> {
 
   const result = { ...DEFAULT_KEYBINDINGS } as Record<KeyBindingAction, KeyBinding[]>;
 
-  const actions: KeyBindingAction[] = ['toggleMic', 'toggleMicSticky', 'showShortcuts'];
+  const actions: KeyBindingAction[] = ['toggleMic', 'toggleMicSticky', 'showShortcuts', 'clearInput'];
   for (const action of actions) {
     const settingKey = `keybind_${action}`;
     const raw = settings[settingKey];

@@ -601,16 +601,31 @@ export function InputArea() {
       }
       // Otherwise: let the browser insert the newline (Shift+Enter in normal, plain Enter in multiline)
     }
-    if (e.key === 'Escape') {
+    // clearInput — Escape (or user-configured key), but only when nothing
+    // higher-priority is consuming Escape (palettes, cancel-while-loading).
+    const bindings = getActiveBindings();
+    if (matchesAction(e.nativeEvent, 'clearInput', bindings)) {
       if (paletteItems.length > 0 && !paletteHidden) {
         // First Escape: hide palette but keep text
         setPaletteHidden(true);
         setPaletteSelected(0);
       } else if (isLoading) {
         send({ type: 'cancel' });
-      } else {
+      } else if (inputValue) {
+        // Clear the input — mirror the ✕ button logic
+        e.preventDefault();
+        if (micState === 'recording') {
+          clearTranscript();
+          lastMicTextRef.current = '';
+          lastSttValueRef.current = '';
+          setHasMicText(false);
+          setMicCapped(false);
+        }
+        lastSttValueRef.current = '';
         setInputValue('');
+        broadcastSync({ type: 'input-clear' });
         setPaletteHidden(false);
+        inputRef.current?.focus();
       }
     }
   };
