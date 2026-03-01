@@ -73,6 +73,11 @@ function TaskRow({ task }: { task: BackgroundTaskInfo }) {
     ? `${task.description}\n\nContext: ${task.context}`
     : task.description;
 
+  const renderedPrompt = useMemo(
+    () => renderMarkdown(prompt),
+    [prompt]
+  );
+
   return (
     <div className="tski-row-wrap">
       <div className="tski-row" onClick={() => setExpanded(e => !e)}>
@@ -136,7 +141,10 @@ function TaskRow({ task }: { task: BackgroundTaskInfo }) {
               <span className="tski-section-label">Prompt</span>
               <CopyButton text={prompt} />
             </div>
-            <pre className="tski-section-body">{prompt}</pre>
+            <div
+              className="tski-section-body tski-prompt-md message-content"
+              dangerouslySetInnerHTML={{ __html: renderedPrompt }}
+            />
           </div>
 
           <div className="tski-section">

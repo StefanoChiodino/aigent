@@ -888,6 +888,9 @@ export async function startWebServer(
           case 'ping':
             ws.send(JSON.stringify({ type: 'pong' }));
             break;
+          case 'message_rating':
+            client.send(cmd);
+            break;
           case 'browser_error': {
             const level = cmd.level === 'warn' ? 'warn' : 'error';
             const msg = String(cmd.message ?? '');

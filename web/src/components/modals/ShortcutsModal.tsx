@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { useUIStore } from '../../stores/ui';
+import { useSettingsStore } from '../../stores/settings';
 
 interface Shortcut {
   keys: string[];
@@ -11,41 +12,55 @@ interface ShortcutGroup {
   shortcuts: Shortcut[];
 }
 
-const SHORTCUT_GROUPS: ShortcutGroup[] = [
-  {
-    label: 'Global',
-    shortcuts: [
-      { keys: ['Ctrl', 'Shift', '?'], description: 'Show keyboard shortcuts' },
-      { keys: ['Ctrl', '`'], description: 'Toggle microphone' },
-      { keys: ['Ctrl', 'Shift', '`'], description: 'Toggle sticky mic (always-on)' },
-      { keys: ['`'], description: 'Toggle mic (when not typing)' },
-      { keys: ['M'], description: 'Toggle mic (when not typing)' },
-    ],
-  },
-  {
-    label: 'Input',
-    shortcuts: [
-      { keys: ['Enter'], description: 'Send message' },
-      { keys: ['Ctrl', 'Enter'], description: 'Send with thinking toggle' },
-      { keys: ['Shift', 'Enter'], description: 'Insert newline' },
-      { keys: ['Escape'], description: 'Clear input / close palette' },
-      { keys: ['/'], description: 'Open command palette' },
-      { keys: ['@'], description: 'Open mention palette' },
-    ],
-  },
-  {
-    label: 'Permission Modal',
-    shortcuts: [
-      { keys: ['Enter'], description: 'Approve' },
-      { keys: ['Escape'], description: 'Deny' },
-      { keys: ['A'], description: 'Always allow' },
-    ],
-  },
-];
+function getShortcutGroups(multilineEnter: boolean): ShortcutGroup[] {
+  return [
+    {
+      label: 'Global',
+      shortcuts: [
+        { keys: ['Ctrl', 'Shift', '?'], description: 'Show keyboard shortcuts' },
+        { keys: ['Ctrl', '`'], description: 'Toggle microphone' },
+        { keys: ['Ctrl', 'Shift', '`'], description: 'Toggle sticky mic (always-on)' },
+        { keys: ['`'], description: 'Toggle mic (when not typing)' },
+        { keys: ['M'], description: 'Toggle mic (when not typing)' },
+      ],
+    },
+    {
+      label: 'Input',
+      shortcuts: multilineEnter
+        ? [
+            { keys: ['Enter'], description: 'Insert newline' },
+            { keys: ['Ctrl', 'Enter'], description: 'Send message' },
+            { keys: ['Shift', 'Enter'], description: 'Send with thinking toggle' },
+            { keys: ['Escape'], description: 'Clear input / close palette' },
+            { keys: ['/'], description: 'Open command palette' },
+            { keys: ['@'], description: 'Open mention palette' },
+          ]
+        : [
+            { keys: ['Enter'], description: 'Send message' },
+            { keys: ['Ctrl', 'Enter'], description: 'Send with thinking toggle' },
+            { keys: ['Shift', 'Enter'], description: 'Insert newline' },
+            { keys: ['Escape'], description: 'Clear input / close palette' },
+            { keys: ['/'], description: 'Open command palette' },
+            { keys: ['@'], description: 'Open mention palette' },
+          ],
+    },
+    {
+      label: 'Permission Modal',
+      shortcuts: [
+        { keys: ['Enter'], description: 'Approve' },
+        { keys: ['Escape'], description: 'Deny' },
+        { keys: ['A'], description: 'Always allow' },
+      ],
+    },
+  ];
+}
 
 export function ShortcutsModal() {
   const open = useUIStore(s => s.shortcutsOpen);
   const close = () => useUIStore.getState().setShortcutsOpen(false);
+  const multilineEnter = useSettingsStore(s => s.getClientSetting('AIGENT_MULTILINE_ENTER')) === true;
+
+  const groups = getShortcutGroups(multilineEnter);
 
   useEffect(() => {
     if (!open) return;
@@ -70,7 +85,7 @@ export function ShortcutsModal() {
           </button>
         </div>
         <div id="shortcuts-body">
-          {SHORTCUT_GROUPS.map(group => (
+          {groups.map(group => (
             <div key={group.label} className="shortcuts-group">
               <div className="shortcuts-group-label">{group.label}</div>
               {group.shortcuts.map((sc, i) => (

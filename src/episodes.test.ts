@@ -222,6 +222,15 @@ describe('queryEpisodes', () => {
     assert.equal(result.length, 1);
     assert.equal(result[0]!.source, 'agent');
   });
+
+  it('filters by auto-compact source', () => {
+    appendEpisode(tmpDir, makeEpisode({ source: 'auto-compact' }));
+    appendEpisode(tmpDir, makeEpisode({ source: 'agent' }));
+    appendEpisode(tmpDir, makeEpisode({ source: 'auto-compact' }));
+    const result = queryEpisodes(tmpDir, { source: 'auto-compact' });
+    assert.equal(result.length, 2);
+    assert.ok(result.every(ep => ep.source === 'auto-compact'));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -312,6 +321,58 @@ describe('autoLogEpisode', () => {
     autoLogEpisode(makeCtx({ source: 'auto-reset' }));
     const ep = JSON.parse(readLines(tmpDir)[0]!) as Episode;
     assert.equal(ep.source, 'auto-reset');
+  });
+
+  it('accepts auto-compact source', () => {
+    autoLogEpisode(makeCtx({ source: 'auto-compact' }));
+    const ep = JSON.parse(readLines(tmpDir)[0]!) as Episode;
+    assert.equal(ep.source, 'auto-compact');
+  });
+
+  it('computes average userRating from per-message ratings', () => {
+    autoLogEpisode(makeCtx({
+      ratings: { 'msg1': 5, 'msg2': 3, 'msg3': 4 },
+    }));
+    const ep = JSON.parse(readLines(tmpDir)[0]!) as Episode;
+    assert.equal(ep.userRating, 4); // Math.round((5+3+4)/3) = 4
+  });
+
+  it('sets userRating to null when no ratings provided', () => {
+    autoLogEpisode(makeCtx());
+    const ep = JSON.parse(readLines(tmpDir)[0]!) as Episode;
+    assert.equal(ep.userRating, null);
+  });
+
+  it('sets userRating to null when ratings is empty', () => {
+    autoLogEpisode(makeCtx({ ratings: {} }));
+    const ep = JSON.parse(readLines(tmpDir)[0]!) as Episode;
+    assert.equal(ep.userRating, null);
+  });
+
+  it('joins friction signals into friction field', () => {
+    autoLogEpisode(makeCtx({
+      frictionSignals: ['exec failed', 'API error: rate limited'],
+    }));
+    const ep = JSON.parse(readLines(tmpDir)[0]!) as Episode;
+    assert.equal(ep.friction, 'exec failed; API error: rate limited');
+  });
+
+  it('sets friction to null when no friction signals', () => {
+    autoLogEpisode(makeCtx());
+    const ep = JSON.parse(readLines(tmpDir)[0]!) as Episode;
+    assert.equal(ep.friction, null);
+  });
+
+  it('sets friction to null when frictionSignals is empty array', () => {
+    autoLogEpisode(makeCtx({ frictionSignals: [] }));
+    const ep = JSON.parse(readLines(tmpDir)[0]!) as Episode;
+    assert.equal(ep.friction, null);
+  });
+
+  it('handles single rating correctly', () => {
+    autoLogEpisode(makeCtx({ ratings: { 'msg1': 2 } }));
+    const ep = JSON.parse(readLines(tmpDir)[0]!) as Episode;
+    assert.equal(ep.userRating, 2);
   });
 });
 

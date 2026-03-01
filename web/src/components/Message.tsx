@@ -5,6 +5,7 @@ import { useVoiceStore } from '../stores/voice';
 import { useTTS } from '../hooks/useTTS';
 import { TraceBlock } from './TraceBlock';
 import { SpeakPreview } from './SpeakPreview';
+import { RatingWidget } from './RatingWidget';
 
 interface Props {
   message: DisplayMessage;
@@ -121,6 +122,7 @@ export const Message = React.memo(function Message({ message }: Props) {
         )}
         {message.role === 'assistant' && <TTSButton text={ttsText} messageId={message.timestamp} />}
         {message.role === 'assistant' && <CopyButton text={stripSpeakTag(message.content)} />}
+        {message.role === 'assistant' && <RatingWidget messageId={message.timestamp} />}
         {speakContent && <SpeakPreview content={speakContent} />}
       </div>
       {message.attachments && message.attachments.length > 0 && (

@@ -46,6 +46,7 @@ For architecture details see `docs/architecture.md`. For roadmap and current sta
 10. **Rebuild web UI after changing `web/src/` or `web/style.css`.** Run `rm -rf web/dist && npx vite build --outDir dist web/`. The test server and prod server both serve from `web/dist/`. Playwright e2e tests will fail on stale builds.
 11. **Commit early, commit small.** Make atomic commits after each logical change — don't batch multiple unrelated changes. Write clear commit messages that explain *what* changed and *why*. This makes `git revert` trivial when something breaks.
 12. **When fixing a bug, write a test first.** Reproduce the failure with a test, then fix the code. This prevents regressions from recurring.
+13. **Test both branches.** Every UI conditional (`disabled`, `hidden`, class toggle) and every state-gated behavior needs tests for both the truthy and falsy paths. Inject alternate state (different model, empty store, disconnected) — don't rely solely on the test fixture's happy-path defaults.
 
 ## TODO.md
 

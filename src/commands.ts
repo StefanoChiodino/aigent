@@ -47,6 +47,8 @@ export interface CommandContext {
   get availableModels(): string[];
   get toolsUsed(): string[];
   get sessionStartedAt(): string;
+  get ratings(): Record<string, number>;
+  get frictionSignals(): string[];
   resetSessionTracking(): void;
 
   // Helpers
@@ -149,6 +151,8 @@ const commands: CommandDef[] = [
               toolsUsed: ctx.toolsUsed,
               sessionStartedAt: ctx.sessionStartedAt,
               source: 'auto-reset',
+              ratings: ctx.ratings,
+              frictionSignals: ctx.frictionSignals,
             });
           }
         }).catch(() => {});

@@ -4,6 +4,7 @@ import { useConnectionStore } from '../stores/connection';
 import { useUIStore } from '../stores/ui';
 import { useSettingsStore } from '../stores/settings';
 import { useVoiceStore } from '../stores/voice';
+import { useRatingStore } from '../stores/rating';
 import { parseDiffIntoFiles } from '../lib/diff';
 import { captureScreenshot, startScreenShare } from '../lib/screen';
 import { playPermissionSound } from '../lib/audio';
@@ -423,6 +424,7 @@ export function useWebSocket(): void {
 
         case 'reset':
           chat().clearMessages();
+          useRatingStore.getState().clearRatings();
           break;
 
         case 'pong':

@@ -62,10 +62,9 @@ describe('TaskResultPanel', () => {
     cleanup();
   });
 
-  it('is hidden when taskResultTask is null', () => {
+  it('renders nothing when taskResultTask is null', () => {
     render(<TaskResultPanel />);
-    const panel = document.getElementById('task-result-panel');
-    expect(panel?.className).toContain('hidden');
+    expect(document.getElementById('task-result-panel')).toBeNull();
   });
 
   it('shows task description as title', async () => {
@@ -218,12 +217,49 @@ describe('TaskResultPanel', () => {
     expect(payloads[0].content as string).not.toContain(result);
   });
 
-  it('panel is not hidden when a task is set', async () => {
+  it('renders the panel when a task is set', async () => {
     render(<TaskResultPanel />);
     await act(async () => {
       useUIStore.getState().setTaskResultTask(makeTask());
     });
-    const panel = document.getElementById('task-result-panel');
-    expect(panel?.className).not.toContain('hidden');
+    expect(document.getElementById('task-result-panel')).not.toBeNull();
+  });
+
+  it('closes on Escape key', async () => {
+    render(<TaskResultPanel />);
+    await act(async () => {
+      useUIStore.getState().setTaskResultTask(makeTask());
+    });
+    expect(document.getElementById('task-result-panel')).not.toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(useUIStore.getState().taskResultTask).toBeNull();
+    expect(document.getElementById('task-result-panel')).toBeNull();
+  });
+
+  it('closes on backdrop click', async () => {
+    render(<TaskResultPanel />);
+    await act(async () => {
+      useUIStore.getState().setTaskResultTask(makeTask());
+    });
+    const backdrop = document.querySelector('.task-result-backdrop');
+    expect(backdrop).not.toBeNull();
+    await act(async () => {
+      backdrop!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(useUIStore.getState().taskResultTask).toBeNull();
+  });
+
+  it('does not close when clicking inside the modal', async () => {
+    render(<TaskResultPanel />);
+    await act(async () => {
+      useUIStore.getState().setTaskResultTask(makeTask());
+    });
+    const panel = document.getElementById('task-result-panel')!;
+    await act(async () => {
+      panel.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(useUIStore.getState().taskResultTask).not.toBeNull();
   });
 });

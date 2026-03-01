@@ -276,27 +276,9 @@ export function Sidebar() {
 
         {/* Input mode */}
         <div className="sidebar-section">
-          <div className="sidebar-label">Input</div>
+          <div className="sidebar-label" style={{ cursor: 'pointer' }} onClick={() => useUIStore.getState().setShortcutsOpen(true)}>Input <span className="ctx-open-hint">?</span></div>
           <div className="sb-reasoning-controls">
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>
-              Multiline Enter
-              <span className="sb-keyhint-wrap">
-                <kbd className="sb-keyhint-trigger">?</kbd>
-                <div className="sb-keyhint-tooltip">
-                  {(multilineEnter
-                    ? [['Enter', 'newline'], ['Ctrl+Enter', 'send'], ['Shift+Enter', 'thinking']]
-                    : [['Enter', 'send'], ['Shift+Enter', 'newline'], ['Ctrl+Enter', 'thinking']]
-                  ).map(([keys, desc]) => (
-                    <div key={keys} className="sb-keyhint-row">
-                      <span className="sb-keyhint-keys">{keys!.split('+').map((k, i) => (
-                        <React.Fragment key={k}>{i > 0 && <span className="shortcut-plus">+</span>}<kbd>{k}</kbd></React.Fragment>
-                      ))}</span>
-                      <span className="sb-keyhint-desc">{desc}</span>
-                    </div>
-                  ))}
-                </div>
-              </span>
-            </span>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Multiline Enter</span>
             <button
               className={`sb-toggle${multilineEnter ? ' on' : ''}`}
               onClick={() => setClientSetting('AIGENT_MULTILINE_ENTER', !multilineEnter)}

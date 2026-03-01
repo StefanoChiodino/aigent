@@ -57,7 +57,7 @@ export interface Episode {
   /** Token usage and estimated cost */
   cost: EpisodeCost;
   /** How this episode was recorded */
-  source: 'agent' | 'auto-reset' | 'auto-shutdown';
+  source: 'agent' | 'auto-reset' | 'auto-shutdown' | 'auto-compact';
   /** Profile name (for multi-profile support) */
   profile: string;
   /** Session ID for correlation */
@@ -109,7 +109,7 @@ export interface EpisodeQuery {
   tags?: string[] | undefined;       // match ANY of these tags
   since?: string | undefined;        // ISO date or YYYY-MM-DD
   until?: string | undefined;        // ISO date or YYYY-MM-DD
-  source?: Episode['source'] | undefined;
+  source?: Episode['source'] | undefined;  // 'agent' | 'auto-reset' | 'auto-shutdown' | 'auto-compact'
   limit?: number | undefined;        // max results (default 50, cap 200)
 }
 
@@ -163,9 +163,13 @@ export interface AutoEpisodeContext {
   profile: string;
   sessionId: string;
   workspacePath: string;
-  toolsUsed?: string[];
-  sessionStartedAt?: string;
-  source: 'auto-reset' | 'auto-shutdown';
+  toolsUsed?: string[] | undefined;
+  sessionStartedAt?: string | undefined;
+  source: 'auto-reset' | 'auto-shutdown' | 'auto-compact';
+  /** Per-message ratings from the UI (messageTimestamp → 1-5) */
+  ratings?: Record<string, number> | undefined;
+  /** Automated friction signals (tool failures, errors) */
+  frictionSignals?: string[] | undefined;
 }
 
 /**
@@ -186,6 +190,17 @@ export function autoLogEpisode(ctx: AutoEpisodeContext): void {
   const endedAt = ctx.messages[ctx.messages.length - 1]?.timestamp ?? new Date().toISOString();
   const toolsUsed = ctx.toolsUsed ? [...new Set(ctx.toolsUsed)] : [];
 
+  // Compute average rating from per-message UI ratings
+  const ratingValues = Object.values(ctx.ratings ?? {});
+  const avgRating = ratingValues.length > 0
+    ? Math.round(ratingValues.reduce((a, b) => a + b, 0) / ratingValues.length)
+    : null;
+
+  // Combine automated friction signals into a string
+  const friction = ctx.frictionSignals && ctx.frictionSignals.length > 0
+    ? ctx.frictionSignals.join('; ')
+    : null;
+
   const episode: Episode = {
     id: generateEpisodeId(),
     startedAt,
@@ -193,10 +208,10 @@ export function autoLogEpisode(ctx: AutoEpisodeContext): void {
     domain,
     task,
     outcome: 'completed',
-    friction: null,
+    friction,
     lessons: [],
     tags: [],
-    userRating: null,
+    userRating: avgRating,
     toolsUsed,
     turns: userMessages.length,
     model: ctx.model,

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import { useUIStore } from '../../stores/ui';
 import { useConnectionStore } from '../../stores/connection';
 import { renderMarkdown } from '../../lib/markdown';
@@ -34,9 +34,16 @@ export function TaskResultPanel() {
   const isUserPullDone = task?.delivery === 'user-pull' &&
     (task.status === 'completed' || task.status === 'failed') && !!task.result;
 
-  function close() {
-    setTaskResultTask(null);
-  }
+  const close = useCallback(() => setTaskResultTask(null), [setTaskResultTask]);
+
+  useEffect(() => {
+    if (!task) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') close();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [task, close]);
 
   function discuss() {
     close();
@@ -46,10 +53,11 @@ export function TaskResultPanel() {
     });
   }
 
+  if (!task) return null;
+
   return (
-    <div id="task-result-panel" className={task ? 'task-result-panel' : 'task-result-panel hidden'}>
-      {task && (
-        <>
+    <div className="task-result-backdrop" onClick={e => { if (e.target === e.currentTarget) close(); }}>
+      <div id="task-result-panel" className="task-result-panel" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
           <div className="task-result-header">
             <span className="task-result-title">{task.description}</span>
           </div>
@@ -123,8 +131,7 @@ export function TaskResultPanel() {
               </button>
             )}
           </div>
-        </>
-      )}
+      </div>
     </div>
   );
 }

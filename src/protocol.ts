@@ -36,6 +36,7 @@ export type ClientCommand =
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }
   | { type: 'user_question_response'; id: string; answer: string; selectedOptions?: string[]; dismissed: boolean }
   | { type: 'cancel_queued'; id: number }
+  | { type: 'message_rating'; messageId: string; rating: number; notes?: string }
   | { type: 'set_thinking'; enabled: boolean }
   | { type: 'set_effort'; level: ThinkingLevel }
   | { type: 'set_short'; enabled: boolean }

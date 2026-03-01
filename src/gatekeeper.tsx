@@ -1227,6 +1227,8 @@ function handleAgentFileAccessRequest(id: string, path: string, operation: 'read
           autoHandledFileAccessIds.add(id);
           classifierDecisions.set(id, { tier: 3, action: 'allow', reason: result.reason });
           client!.send({ type: 'file_access_response', id, ok: true, message: `Allowed by classifier: ${result.reason}` });
+          // If the browser modal was shown before classifier resolved, dismiss it now.
+          client!.emit('perm_dismissed', [id]);
           return;
         }
 
@@ -1237,6 +1239,8 @@ function handleAgentFileAccessRequest(id: string, path: string, operation: 'read
           autoHandledFileAccessIds.add(id);
           classifierDecisions.set(id, { tier: 3, action: 'block', reason: result.reason });
           client!.send({ type: 'file_access_response', id, ok: false, message: `Blocked by classifier: ${result.reason}` });
+          // If the browser modal was shown before classifier resolved, dismiss it now.
+          client!.emit('perm_dismissed', [id]);
           injectSystemMessage(`[file] Blocked by classifier: ${result.reason}\n  Path: ${path}`);
           return;
         }
@@ -1300,7 +1304,7 @@ function handleFileAccessApproveReject(input: string): boolean {
 
   const pending = pendingFileAccessApprovals.get(id);
   if (!pending) {
-    if (!IS_TEST_MODE) injectSystemMessage(`No pending file access request: ${id}`);
+    // Already resolved (e.g. auto-approved by classifier before user clicked) — silently ignore.
     return true;
   }
 

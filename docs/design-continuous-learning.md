@@ -115,17 +115,23 @@ compaction) and does three things:
    - File structured improvement proposals (see below)
    - For small, safe fixes: implement, test, and commit autonomously
 
-### Feedback Collection
+### Feedback Collection (implemented)
 
-The agent should actively seek feedback, but cheaply:
+Three feedback channels feed into episode records:
 
-- **After complex tasks:** "How did that go? Anything I should do differently?"
-  (via `ask_user` tool)
-- **Periodic check-ins:** At session end, if there were friction points, ask
-  about them specifically: "I noticed I had to retry the CSS layout twice —
-  was the final result what you wanted?"
-- **Lightweight ratings:** When presenting results (especially visual/UX work
-  the agent can't fully evaluate itself), ask for a quick 1-5 score.
+1. **UI rating widget** — 5 small dots on each assistant message (1-5 scale),
+   visible on hover, persistent via localStorage. Ratings are sent to the server
+   and averaged into the episode's `userRating` at log time.
+2. **Compaction-triggered episodes** — when context compacts (~80% window),
+   an `auto-compact` episode is auto-logged capturing all ratings/friction
+   accumulated so far. Counters reset for the new episode segment.
+3. **Automated friction signals** — tool failures (`onToolComplete` with
+   `ok: false`) and API errors are accumulated as `frictionSignals` strings
+   and joined into the episode `friction` field.
+
+Additionally, the system prompt instructs the agent to call `log_episode`
+at natural conversation breaks and when it detects user frustration — the
+LLM-driven channel requires no code machinery, just prompt guidance.
 
 Feedback goes directly into the episode record's `user_rating` and `friction`
 fields.
@@ -376,14 +382,14 @@ Benchmarks are the measurement layer that emerges from both.
 
 **Depends on:** Phase 1 (episode logging), browser extension (already exists).
 
-### Phase 4: Feedback & Ratings
+### Phase 4: Feedback & Ratings (done)
 
-- `ask_user` integration: prompt for rating after complex tasks
-- `user_rating` field populated in episode records
-- Reflection agent incorporates ratings into pattern analysis
-- Trend queries: "show me rating trends by domain over the last month"
-
-**Depends on:** Phase 1 + Phase 2 (episodes + reflection).
+- ~~`ask_user` integration~~ → replaced with UI rating widget (1-5 dots on each message)
+- `user_rating` field populated via averaged per-message ratings
+- Compaction-triggered episode boundaries (`auto-compact` source)
+- Automated friction signals from tool failures and API errors
+- System prompt instructs agent to call `log_episode` at natural breaks
+- Trend queries available via `query_episodes` tool
 
 ### Phase 5: Semantic Retrieval
 

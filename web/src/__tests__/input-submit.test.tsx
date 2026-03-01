@@ -14,6 +14,7 @@ import { render, screen, fireEvent, act, cleanup } from '@testing-library/react'
 import { useConnectionStore } from '../stores/connection';
 import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
+import { useSettingsStore } from '../stores/settings';
 import { InputArea } from '../components/InputArea';
 
 // --- Mock heavy dependencies that InputArea imports but we don't need ---
@@ -484,5 +485,103 @@ describe('InputArea submission', () => {
     });
 
     expect(mockCommitBase).not.toHaveBeenCalled();
+  });
+});
+
+// ── Multiline Enter mode ────────────────────────────────────────────────────
+
+describe('InputArea multiline-enter mode', () => {
+  let ws: WebSocket;
+
+  beforeEach(() => {
+    ws = fakeWs();
+    useConnectionStore.setState({ status: 'connected', ws, reconnectAttempt: 0 });
+    useUIStore.setState({
+      isLoading: false,
+      errorMsg: null,
+      thinkingLevel: 'off',
+      permQueue: [],
+      pendingAttachments: [],
+    });
+    useVoiceStore.setState({
+      micState: 'idle',
+      vadActive: false,
+      ttsPlaying: false,
+      micSticky: false,
+    });
+    // Enable multiline-enter mode
+    useSettingsStore.setState({
+      clientSettings: { AIGENT_MULTILINE_ENTER: true },
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    // Reset settings
+    useSettingsStore.setState({ clientSettings: {} });
+  });
+
+  it('plain Enter does NOT send in multiline mode', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox');
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'hello' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+    });
+
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('Ctrl+Enter sends the message in multiline mode', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox');
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'multiline send' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', ctrlKey: true });
+    });
+
+    const payloads = sentPayloads(ws);
+    expect(payloads).toContainEqual(expect.objectContaining({ type: 'message', content: 'multiline send' }));
+  });
+
+  it('Shift+Enter sends with thinkingOverride in multiline mode', async () => {
+    useUIStore.setState({ thinkingLevel: 'off' });
+
+    renderInputArea();
+    const input = screen.getByRole('textbox');
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'think multiline' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', shiftKey: true });
+    });
+
+    const payloads = sentPayloads(ws);
+    const thinkMsg = payloads.find(p => p.type === 'message' && p.thinkingOverride);
+    expect(thinkMsg).toBeDefined();
+    expect(thinkMsg!.content).toBe('think multiline');
+    expect(thinkMsg!.thinkingOverride).toBe('high');
+  });
+
+  it('Shift+Enter does NOT insert newline in multiline mode (it sends)', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox');
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'test' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', shiftKey: true });
+    });
+
+    // Message was sent (thinking override), input cleared
+    expect((input as HTMLTextAreaElement).value).toBe('');
   });
 });

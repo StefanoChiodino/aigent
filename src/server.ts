@@ -31,6 +31,7 @@ import {
   buildHostSystemPrompt as _buildHostSystemPrompt,
   buildBrowserExtSystemPrompt as _buildBrowserExtSystemPrompt,
   SHORT_MODE_PROMPT,
+  EPISODE_LOGGING_PROMPT,
   ensureSpeakTag as _ensureSpeakTag,
 } from './system-prompts.js';
 import { handleCommand as _handleCommand, setThinking, setEffort, setShort, setModel, type CommandContext } from './commands.js';
@@ -68,6 +69,16 @@ const clients = new Set<Socket>();
 // --- Episode tracking ---
 let sessionToolsUsed: string[] = [];
 let sessionStartedAt: string = new Date().toISOString();
+interface SessionRating { score: number; notes?: string }
+const sessionRatings = new Map<string, SessionRating>();  // messageTimestamp → { score, notes? }
+
+/** Extract plain score map for episode logging */
+function getRatingScores(): Record<string, number> {
+  const scores: Record<string, number> = {};
+  for (const [id, entry] of sessionRatings) scores[id] = entry.score;
+  return scores;
+}
+let sessionFrictionSignals: string[] = [];
 
 // --- Permission request brokers ---
 // Each broker manages one category of pending request (exec, fetch, etc.).
@@ -318,6 +329,8 @@ export function getCurrentSessionContext(): {
   sessionId: string;
   usage: TokenUsage;
   workspacePath: string;
+  ratings: Record<string, number>;
+  frictionSignals: string[];
 } {
   const userTurns = messages.filter(m => m.role === 'user').length;
   return {
@@ -329,6 +342,8 @@ export function getCurrentSessionContext(): {
     sessionId: currentSessionId,
     usage,
     workspacePath,
+    ratings: getRatingScores(),
+    frictionSignals: [...sessionFrictionSignals],
   };
 }
 
@@ -533,6 +548,33 @@ async function processAgentTurn(
       },
       onCompact: (summary) => {
         addSystemMessage(`Context compacted: ${summary.slice(0, 200)}...`);
+        // Auto-log episode at compaction boundary (natural "chapter break")
+        void (async () => {
+          try {
+            const { autoLogEpisode } = await import('./episodes.js');
+            const userMsgs = messages.filter(m => m.role === 'user');
+            if (userMsgs.length >= 2) {
+              autoLogEpisode({
+                messages,
+                usage,
+                model,
+                profile: currentProfile,
+                sessionId: currentSessionId,
+                workspacePath,
+                toolsUsed: sessionToolsUsed,
+                sessionStartedAt,
+                source: 'auto-compact',
+                ratings: getRatingScores(),
+                frictionSignals: sessionFrictionSignals,
+              });
+              // Reset counters for the new episode segment
+              sessionToolsUsed = [];
+              sessionStartedAt = new Date().toISOString();
+              sessionRatings.clear();
+              sessionFrictionSignals = [];
+            }
+          } catch { /* fire-and-forget */ }
+        })();
       },
       onDispatchTask: (input) => dispatchBackgroundTask(input as { task: string; context?: string; model?: string; thinking?: ThinkingLevel; max_iterations?: number; capabilities?: string[]; delivery?: 'agent-batch' | 'agent-review' | 'user-pull' }),
       onModelSwitch: (newModel, reason) => {
@@ -545,6 +587,9 @@ async function processAgentTurn(
       onToolComplete: (info) => {
         appendToolLog(join(workspacePath, 'memory'), info, getReqId());
         sessionToolsUsed.push(info.tool);
+        if (!info.ok) {
+          sessionFrictionSignals.push(`${info.tool} failed`);
+        }
       },
     });
 
@@ -570,6 +615,7 @@ async function processAgentTurn(
       if (e.status === 401) errorMsg = 'Authentication failed. Check ANTHROPIC_API_KEY.';
       if (e.status === 429) errorMsg = 'Rate limited. Wait a moment.';
       broadcast({ type: 'error', message: errorMsg });
+      sessionFrictionSignals.push(`API error: ${errorMsg.slice(0, 100)}`);
     }
   } finally {
     abortController = null;
@@ -870,9 +916,13 @@ function getCommandContext(): CommandContext {
     get availableModels() { return AVAILABLE_MODELS; },
     get toolsUsed() { return [...new Set(sessionToolsUsed)]; },
     get sessionStartedAt() { return sessionStartedAt; },
+    get ratings() { return getRatingScores(); },
+    get frictionSignals() { return [...sessionFrictionSignals]; },
     resetSessionTracking() {
       sessionToolsUsed = [];
       sessionStartedAt = new Date().toISOString();
+      sessionRatings.clear();
+      sessionFrictionSignals = [];
     },
     addSystemMessage,
     broadcast,
@@ -1126,6 +1176,15 @@ function handleClient(socket: Socket): void {
           case 'set_model':
             setModel(cmd.model, getCommandContext());
             break;
+          case 'message_rating': {
+            const { rating, messageId, notes } = cmd as { rating: number; messageId: string; notes?: string };
+            if (rating >= 1 && rating <= 5) {
+              sessionRatings.set(messageId, { score: rating, ...(notes ? { notes } : {}) });
+            } else if (rating === 0) {
+              sessionRatings.delete(messageId);
+            }
+            break;
+          }
           case 'host_state':
             // Refresh system prompt so the agent sees current state
             agent?.setExtraSystemPrompt(buildExtraSystemPrompt());
@@ -1324,6 +1383,7 @@ let browserExtConnected = false;
 function buildExtraSystemPrompt(): string {
   let extra = _buildHostSystemPrompt(hostClient);
   extra += _buildBrowserExtSystemPrompt(browserExtConnected);
+  extra += EPISODE_LOGGING_PROMPT;
   if (currentShort) extra += SHORT_MODE_PROMPT;
   return extra;
 }
@@ -1519,6 +1579,8 @@ async function shutdown(): Promise<void> {
         toolsUsed: sessionToolsUsed,
         sessionStartedAt,
         source: 'auto-shutdown',
+        ratings: getRatingScores(),
+        frictionSignals: sessionFrictionSignals,
       });
     }
   } catch { /* non-critical */ }

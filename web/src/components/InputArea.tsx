@@ -8,6 +8,7 @@ import { useMic } from '../hooks/useMic';
 import { useTTS } from '../hooks/useTTS';
 import { captureScreenshot, registerScreenCapCallback, startScreenShare, stopScreenShare } from '../lib/screen';
 import { COMMANDS } from '../lib/settings-schema';
+import { useSettingsStore } from '../stores/settings';
 import { CommandPalette } from './CommandPalette';
 import { AtPalette, getAtStaticMatches } from './AtPalette';
 import { AttachmentPreview } from './AttachmentPreview';
@@ -167,6 +168,8 @@ export function InputArea() {
   const atItemsRef = useRef<AtItem[]>([]);
   const [screenCapActive, setScreenCapActive] = useState(false);
   const [ctrlHeld, setCtrlHeld] = useState(false);
+  const [shiftHeld, setShiftHeld] = useState(false);
+  const multilineEnter = useSettingsStore(s => s.getClientSetting('AIGENT_MULTILINE_ENTER')) === true;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
@@ -418,6 +421,7 @@ export function InputArea() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Control') setCtrlHeld(true);
+      if (e.key === 'Shift') setShiftHeld(true);
       if ((e.key === '?' || (e.key === '/' && e.shiftKey)) && e.ctrlKey) {
         e.preventDefault();
         const { shortcutsOpen, setShortcutsOpen } = useUIStore.getState();
@@ -448,8 +452,9 @@ export function InputArea() {
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Control') setCtrlHeld(false);
+      if (e.key === 'Shift') setShiftHeld(false);
     };
-    const onBlur = () => setCtrlHeld(false);
+    const onBlur = () => { setCtrlHeld(false); setShiftHeld(false); };
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
     window.addEventListener('blur', onBlur);
@@ -473,7 +478,8 @@ export function InputArea() {
 
   const showCancel = isLoading || ttsPlaying;
   const currentlyOn = thinkingLevel !== 'off';
-  const willThink = ctrlHeld ? !currentlyOn : currentlyOn;
+  const overrideHeld = multilineEnter ? shiftHeld : ctrlHeld;
+  const willThink = overrideHeld ? !currentlyOn : currentlyOn;
 
   const paletteItems = (() => {
     if (!inputValue.startsWith('/')) return [];
@@ -518,30 +524,41 @@ export function InputArea() {
         return;
       }
     }
-    // While dictating: Enter stops mic and sends
-    if (micState === 'recording' && e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      void stopMic().then(() => submitMessage());
-      return;
-    }
-    // Ctrl+Enter: thinking override
-    if (e.key === 'Enter' && e.ctrlKey && !e.shiftKey) {
-      e.preventDefault();
-      submitMessage(true);
-      return;
-    }
-    // Enter: send
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (paletteItems.length > 0 && !paletteHidden) {
-        const trimmed = inputValue.trim();
-        if (!COMMANDS.some(c => c.name === trimmed)) {
-          const item = paletteItems[paletteSelected];
-          if (item) { handlePaletteComplete(item); return; }
-        }
+    // --- Enter key behaviour (depends on multilineEnter setting) ---
+    if (e.key === 'Enter') {
+      const isSend = multilineEnter
+        ? e.ctrlKey && !e.shiftKey        // Ctrl+Enter sends
+        : !e.shiftKey && !e.ctrlKey;      // plain Enter sends
+      const isThinkingOverride = multilineEnter
+        ? e.shiftKey && !e.ctrlKey        // Shift+Enter = thinking toggle
+        : e.ctrlKey && !e.shiftKey;       // Ctrl+Enter = thinking toggle
+
+      // While dictating: send-key stops mic and sends
+      if (micState === 'recording' && isSend) {
+        e.preventDefault();
+        void stopMic().then(() => submitMessage());
+        return;
       }
-      submitMessage();
-      return;
+      // Thinking override
+      if (isThinkingOverride) {
+        e.preventDefault();
+        submitMessage(true);
+        return;
+      }
+      // Send
+      if (isSend) {
+        e.preventDefault();
+        if (paletteItems.length > 0 && !paletteHidden) {
+          const trimmed = inputValue.trim();
+          if (!COMMANDS.some(c => c.name === trimmed)) {
+            const item = paletteItems[paletteSelected];
+            if (item) { handlePaletteComplete(item); return; }
+          }
+        }
+        submitMessage();
+        return;
+      }
+      // Otherwise: let the browser insert the newline (Shift+Enter in normal, plain Enter in multiline)
     }
     if (e.key === 'Escape') {
       if (paletteItems.length > 0 && !paletteHidden) {
@@ -836,9 +853,9 @@ export function InputArea() {
         </button>
         <button
           id="send"
-          className={ctrlHeld ? 'thinking-override' : ''}
-          title={ctrlHeld ? (currentlyOn ? 'Send without thinking' : 'Send with thinking') : (showCancel ? 'Queue message' : 'Send')}
-          onClick={() => submitMessage(ctrlHeld)}
+          className={overrideHeld ? 'thinking-override' : ''}
+          title={overrideHeld ? (currentlyOn ? 'Send without thinking' : 'Send with thinking') : (showCancel ? 'Queue message' : 'Send')}
+          onClick={() => submitMessage(overrideHeld)}
         >
           <svg className={`icon-brain${willThink ? '' : ' hidden'}`} viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>

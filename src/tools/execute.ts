@@ -684,6 +684,12 @@ export async function executeTool(
       const { getCurrentSessionContext } = await import('../server.js');
       const ctx = getCurrentSessionContext();
 
+      // Compute average from UI ratings if agent didn't provide one
+      const ratingValues = Object.values(ctx.ratings ?? {});
+      const avgRating = ratingValues.length > 0
+        ? Math.round(ratingValues.reduce((a, b) => a + b, 0) / ratingValues.length)
+        : null;
+
       const episode = {
         id: generateEpisodeId(),
         startedAt: ctx.sessionStartedAt,
@@ -694,7 +700,7 @@ export async function executeTool(
         friction: friction ?? null,
         lessons: lessons ?? [],
         tags: tags ?? [],
-        userRating: null,
+        userRating: avgRating,
         toolsUsed: ctx.toolsUsed,
         turns: ctx.turns,
         model: ctx.model,

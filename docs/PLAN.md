@@ -158,7 +158,7 @@ Server process (spawned directly, no Docker)
 - [x] Episode logging — `src/episodes.ts`, NDJSON storage, `log_episode` + `query_episodes` tools, auto-log on reset/shutdown
 - [ ] Reflection agent — background agent at session boundaries, pattern extraction, auto-improvements
 - [ ] Self-play harness — isolated test instance + browser-driven evaluation + task library
-- [ ] Feedback collection — lightweight user ratings, trend tracking by domain
+- [x] Feedback collection — UI rating widget (1-5 dots), compaction-triggered episode boundaries, automated friction signals, LLM-driven episode logging via system prompt
 - [ ] Semantic episode retrieval — embeddings + vector search over episode history
 
 ### Memory System
