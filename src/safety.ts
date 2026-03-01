@@ -821,7 +821,12 @@ export async function validateFetchUrlDns(url: string): Promise<DnsValidationRes
         }
       }
     }
-    return { resolvedIps: addrs, hostname };
+    // Only pin IPv4 addresses — IPv6 pinning via --resolve breaks curl's
+    // happy-eyeballs fallback in environments without IPv6 connectivity,
+    // causing "Couldn't connect to server" errors for all fetches.
+    // We still validate AAAA records above for the private-IP security check.
+    const ipv4Only = addrs.filter(a => !a.includes(':'));
+    return { resolvedIps: ipv4Only, hostname };
   } catch {
     // DNS resolution failed — let the fetch fail at the network layer naturally
     return { resolvedIps: [], hostname };

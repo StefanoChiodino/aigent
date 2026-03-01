@@ -446,8 +446,7 @@ export async function executeTool(
           const parsed = new URL(url);
           const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
           for (const ip of dnsResult.resolvedIps) {
-            const resolveIp = ip.includes(':') ? `[${ip}]` : ip;
-            args.push('--resolve', `${parsed.hostname}:${port}:${resolveIp}`);
+            args.push('--resolve', `${parsed.hostname}:${port}:${ip}`);
           }
         }
         args.push(url);

@@ -16,8 +16,8 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import 'dotenv/config'; // Load .env from cwd (repo root)
 import { fileURLToPath } from 'node:url';
+import { getDefaultWorkspace, getEnvFile } from './xdg.js';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
 import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, checkMCPPermission, DEFAULT_MCP_PERMISSIONS, type MCPPermissions, parseCommandPipeline, shouldForceClassify, checkBrowserPermission, classifyBrowserAction, browserTierSufficient, DEFAULT_BROWSER_PERMISSIONS, type BrowserPermissions } from './safety.js';
@@ -40,8 +40,32 @@ const log = createLogger('gatekeeper');
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_DIR = resolve(__dirname, '..');
 
+// Detect whether we're running from compiled dist/ (production / global install)
+// or from source via tsx (dev mode). In prod mode we skip the file watcher and
+// spawn node instead of tsx.
+const COMPILED_SERVER = resolve(__dirname, 'server.js');
+const IS_DEV_MODE = !existsSync(COMPILED_SERVER);
+
+// Load .env files — XDG location first (global install), then cwd/repo root (dev compat).
+// This replaces the former `import 'dotenv/config'` which only loaded from cwd.
+{
+  const { config: dotenvConfig } = await import('dotenv');
+  const xdgEnvFile = getEnvFile();
+  const cwdEnvFile = resolve(process.cwd(), '.env');
+  const repoEnvFile = resolve(REPO_DIR, '.env');
+  // XDG .env takes priority (global install)
+  if (existsSync(xdgEnvFile)) dotenvConfig({ path: xdgEnvFile });
+  // Cwd / repo root .env for dev workflow — only if different and not already loaded
+  for (const envFile of [cwdEnvFile, repoEnvFile]) {
+    if (existsSync(envFile) && envFile !== xdgEnvFile) {
+      dotenvConfig({ path: envFile, override: false });
+      break;
+    }
+  }
+}
+
 // Load settings.json and apply non-secret values to process.env.
-// .env (already loaded via dotenv) takes lowest priority; CLI flags override all.
+// .env (already loaded above) takes lowest priority; CLI flags override all.
 {
   const settingsPath = resolve(REPO_DIR, 'settings.json');
   if (existsSync(settingsPath)) {
@@ -188,17 +212,33 @@ const CRASH_WINDOW_MS = 30_000;
 let crashTimestamps: number[] = [];
 
 function startServerProcess(): void {
-  const serverEntry = resolve(__dirname, 'server.ts');
-  const tsconfig = resolve(REPO_DIR, 'tsconfig.json');
+  log.info('Starting server...', { devMode: IS_DEV_MODE });
 
-  log.info('Starting server...');
+  // In prod/global-install mode spawn the compiled server.js directly (no tsx).
+  // In dev mode spawn server.ts via tsx (as before).
+  const defaultWorkspace = IS_DEV_MODE
+    ? resolve(REPO_DIR, 'workspace')
+    : getDefaultWorkspace();
 
-  serverProcess = spawn('tsx', ['--tsconfig', tsconfig, serverEntry], {
+  let spawnCmd: string;
+  let spawnArgs: string[];
+
+  if (IS_DEV_MODE) {
+    const serverEntry = resolve(__dirname, 'server.ts');
+    const tsconfig = resolve(REPO_DIR, 'tsconfig.json');
+    spawnCmd = 'tsx';
+    spawnArgs = ['--tsconfig', tsconfig, serverEntry];
+  } else {
+    spawnCmd = 'node';
+    spawnArgs = [COMPILED_SERVER];
+  }
+
+  serverProcess = spawn(spawnCmd, spawnArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],
-    cwd: REPO_DIR,
+    cwd: IS_DEV_MODE ? REPO_DIR : process.cwd(),
     env: {
       ...process.env,
-      AIGENT_WORKSPACE: process.env['AIGENT_WORKSPACE'] ?? resolve(REPO_DIR, 'workspace'),
+      AIGENT_WORKSPACE: process.env['AIGENT_WORKSPACE'] ?? defaultWorkspace,
     },
   });
 
@@ -385,7 +425,8 @@ function isGatekeeperCommand(input: string): boolean {
  * Empty-string values remove the key. Boolean false for toggle keys → removes key.
  */
 function writeEnvVars(updates: Record<string, boolean | number | string>): void {
-  const envPath = resolve(REPO_DIR, '.env');
+  // In prod/global mode write to XDG config .env; in dev mode write to repo root .env.
+  const envPath = IS_DEV_MODE ? resolve(REPO_DIR, '.env') : getEnvFile();
   let content = existsSync(envPath) ? readFileSync(envPath, 'utf-8') : '';
   const lines = content.split('\n');
 
@@ -730,6 +771,7 @@ function handleAgentExecRequest(id: string, command: string): void {
     classifierDecisions.set(id, { tier: 1, action: 'block', reason: tier1 });
     client!.send({ type: 'exec_response', id, ok: false, message: `Blocked (safety): ${tier1}` });
     injectSystemMessage(`[exec] Blocked by safety engine: ${tier1}\n  Command: ${command}`);
+    client!.emit('perm_dismissed', [id]);
     return;
   }
 
@@ -740,6 +782,7 @@ function handleAgentExecRequest(id: string, command: string): void {
     autoHandledExecIds.add(id);
     classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'YOLO mode' });
     client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed (YOLO mode)' });
+    client!.emit('perm_dismissed', [id]);
     return;
   }
 
@@ -759,6 +802,7 @@ function handleAgentExecRequest(id: string, command: string): void {
       autoHandledExecIds.add(id);
       classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'Allowed by permission policy' });
       client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by permission policy' });
+      client!.emit('perm_dismissed', [id]);
       return;
     }
   }
@@ -770,6 +814,7 @@ function handleAgentExecRequest(id: string, command: string): void {
     classifierDecisions.set(id, { tier: 2, action: 'block', reason: 'Denied by permission policy' });
     client!.send({ type: 'exec_response', id, ok: false, message: 'Denied by permission policy' });
     injectSystemMessage(`[exec] Blocked by deny policy: ${command}`);
+    client!.emit('perm_dismissed', [id]);
     return;
   }
 
@@ -784,6 +829,7 @@ function handleAgentExecRequest(id: string, command: string): void {
           autoHandledExecIds.add(id);
           classifierDecisions.set(id, { tier: 3, action: 'allow', reason: result.reason });
           client!.send({ type: 'exec_response', id, ok: true, message: `Allowed by classifier: ${result.reason}` });
+          client!.emit('perm_dismissed', [id]);
           return;
         }
 
@@ -794,6 +840,7 @@ function handleAgentExecRequest(id: string, command: string): void {
           classifierDecisions.set(id, { tier: 3, action: 'block', reason: result.reason });
           client!.send({ type: 'exec_response', id, ok: false, message: `Blocked by classifier: ${result.reason}` });
           injectSystemMessage(`[exec] Blocked by classifier: ${result.reason}\n  Command: ${command}`);
+          client!.emit('perm_dismissed', [id]);
           return;
         }
 
@@ -877,6 +924,7 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
 
     auditLog({ type: 'exec_user_approve', detail: pending.command, approved: true });
     client!.send({ type: 'exec_response', id, ok: true, alwaysAllow, message: 'Approved by user' });
+    client!.emit('perm_dismissed', [id]);
     return true;
   }
 
@@ -911,6 +959,7 @@ async function handleExecApproveReject(input: string): Promise<boolean> {
 
     auditLog({ type: 'exec_user_deny', detail: pending.command, approved: false });
     client!.send({ type: 'exec_response', id, ok: false, alwaysAllow: false, message: 'Denied by user' });
+    client!.emit('perm_dismissed', [id]);
     return true;
   }
 
@@ -1072,6 +1121,7 @@ function handleAgentFetchRequest(id: string, url: string, method?: string): void
     auditLog({ type: 'fetch_yolo_allow', detail: url });
     autoHandledFetchIds.add(id);
     client!.send({ type: 'fetch_response', id, ok: true, message: 'Allowed (YOLO mode)' });
+    client!.emit('perm_dismissed', [id]);
     return;
   }
 
@@ -1082,6 +1132,7 @@ function handleAgentFetchRequest(id: string, url: string, method?: string): void
     log.info('Fetch auto-allowed', { id, url });
     autoHandledFetchIds.add(id);
     client!.send({ type: 'fetch_response', id, ok: true, message: 'Allowed by permission policy' });
+    client!.emit('perm_dismissed', [id]);
     return;
   }
 
@@ -1090,6 +1141,7 @@ function handleAgentFetchRequest(id: string, url: string, method?: string): void
     autoHandledFetchIds.add(id);
     client!.send({ type: 'fetch_response', id, ok: false, message: 'Denied by permission policy' });
     injectSystemMessage(`[fetch] Blocked by deny policy: ${url}`);
+    client!.emit('perm_dismissed', [id]);
     return;
   }
 
@@ -1144,6 +1196,7 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
     }
 
     client!.send({ type: 'fetch_response', id, ok: true, alwaysAllow, message: 'Approved by user' });
+    client!.emit('perm_dismissed', [id]);
     return true;
   }
 
@@ -1168,6 +1221,7 @@ async function handleFetchApproveReject(input: string): Promise<boolean> {
     pendingFetchApprovals.delete(id);
     injectSystemMessage(`Denied: ${pending.url}`);
     client!.send({ type: 'fetch_response', id, ok: false, alwaysAllow: false, message: 'Denied by user' });
+    client!.emit('perm_dismissed', [id]);
     return true;
   }
 
@@ -1341,6 +1395,7 @@ function handleFileAccessApproveReject(input: string): boolean {
     injectSystemMessage(`Denied file ${pending.operation}: ${pending.path}`);
     client!.send({ type: 'file_access_response', id, ok: false, message: 'Denied by user' });
   }
+  client!.emit('perm_dismissed', [id]);
   return true;
 }
 
@@ -1395,6 +1450,7 @@ function handleFetchSizeApproveReject(input: string): boolean {
     injectSystemMessage(`Denied larger fetch from ${pending.url}`);
     client!.send({ type: 'fetch_size_response', id, ok: false, approvedBytes: pending.defaultBytes, message: 'Denied by user' });
   }
+  client!.emit('perm_dismissed', [id]);
   return true;
 }
 
@@ -1512,6 +1568,7 @@ function handleMcpToolApproveReject(input: string): boolean {
     injectSystemMessage(`Denied MCP tool: ${pending.server}/${pending.tool}`);
     client!.send({ type: 'mcp_tool_response', id, ok: false, message: 'Denied by user' });
   }
+  client!.emit('perm_dismissed', [id]);
   return true;
 }
 
@@ -1684,6 +1741,7 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
     auditLog({ type: 'browser_ext_user_deny', detail: `${pending.action}`, approved: false });
     injectSystemMessage(`Browser action denied: ${id}`);
     client!.send({ type: 'browser_ext_result', id, ok: false, error: 'User denied browser action' });
+    client!.emit('perm_dismissed', [id]);
     return true;
   }
 
@@ -1709,6 +1767,7 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
   if (pending.url !== undefined) params.url = pending.url;
 
   type BrowserAction = 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab';
+  client!.emit('perm_dismissed', [id]);
   extensionBridge.request(pending.action as BrowserAction, params).then((result) => {
     sendBrowserExtResult(id, result);
   }).catch((err: Error) => {
