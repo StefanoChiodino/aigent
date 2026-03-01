@@ -26,29 +26,23 @@ export const RatingWidget = React.memo(function RatingWidget({ messageId }: Prop
     setOpen(true);
   }, [entry]);
 
-  // Close on outside click
+  // Close on outside click — but ignore clicks inside portal overlays
+  // (e.g. permission modal rendered via createPortal to document.body).
   useEffect(() => {
     if (!open) return;
     function onMouseDown(e: MouseEvent) {
+      const target = e.target as Node;
       if (
-        popoverRef.current && !popoverRef.current.contains(e.target as Node) &&
-        triggerRef.current && !triggerRef.current.contains(e.target as Node)
-      ) {
-        setOpen(false);
-      }
+        (popoverRef.current && popoverRef.current.contains(target)) ||
+        (triggerRef.current && triggerRef.current.contains(target))
+      ) return;
+      // Don't close when the user interacts with a portal overlay
+      const permOverlay = document.getElementById('perm-overlay');
+      if (permOverlay && permOverlay.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener('mousedown', onMouseDown);
     return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [open]);
-
-  // Close on Escape
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false);
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
   const handleSubmit = useCallback(() => {
@@ -80,7 +74,13 @@ export const RatingWidget = React.memo(function RatingWidget({ messageId }: Prop
       </button>
 
       {open && (
-        <div className="rating-popover" ref={popoverRef} role="dialog" aria-label="Rate response">
+        <div
+          className="rating-popover"
+          ref={popoverRef}
+          role="dialog"
+          aria-label="Rate response"
+          onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); } }}
+        >
           <div className="rating-popover-header">Rate this response</div>
           <div className="rating-popover-stars">
             {[1, 2, 3, 4, 5].map(v => (

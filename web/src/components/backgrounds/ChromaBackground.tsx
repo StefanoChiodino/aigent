@@ -1,22 +1,27 @@
 import React, { useEffect, useRef } from 'react';
 
-// Curated palette of soft, beautiful hues (HSL: hue, saturation%, lightness%)
-// Kept low-saturation and mid-lightness so they never feel garish
+// Curated palette ordered so hues step continuously around the colour wheel —
+// no large jumps, so every crossfade feels gradual.
+// Format: [hue 0-360, saturation%, lightness%]
 const PALETTE: [number, number, number][] = [
-  [210, 40, 18],  // steel blue
-  [260, 35, 18],  // indigo violet
-  [300, 30, 17],  // soft magenta
-  [340, 35, 17],  // dusty rose
-  [20,  38, 18],  // warm amber
-  [50,  35, 17],  // muted gold
-  [160, 35, 16],  // sage teal
-  [190, 38, 17],  // slate cyan
+  [200, 38, 17],  // slate cyan
+  [225, 38, 18],  // periwinkle
+  [250, 33, 18],  // soft indigo
+  [280, 30, 17],  // dusty violet
+  [310, 28, 17],  // muted mauve
+  [340, 33, 17],  // dusty rose
+  [10,  35, 18],  // terracotta
+  [35,  36, 18],  // warm amber
+  [55,  33, 17],  // muted gold
+  [100, 28, 16],  // sage green
+  [155, 30, 16],  // cool sage
+  [180, 32, 16],  // teal
 ];
 
 // How long to spend on each colour (ms)
-const DWELL_MS = 8000;
+const DWELL_MS = 7000;
 // How long the crossfade between colours takes (ms)
-const FADE_MS  = 4000;
+const FADE_MS  = 6000;
 
 export function ChromaBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -57,18 +62,6 @@ export function ChromaBackground() {
       return `hsla(${h},${s}%,${l}%,${a})`;
     }
 
-    // Lerp between two PALETTE entries, returns CSS colour string
-    function lerpHSL(a: [number, number, number], b: [number, number, number], t: number): string {
-      // Interpolate hue via the shortest arc
-      let dh = b[0] - a[0];
-      if (dh > 180)  dh -= 360;
-      if (dh < -180) dh += 360;
-      const hue = a[0] + dh * t;
-      const sat = a[1] + (b[1] - a[1]) * t;
-      const lit = a[2] + (b[2] - a[2]) * t;
-      return `hsl(${hue},${sat}%,${lit}%)`;
-    }
-
     function easeInOut(t: number) {
       return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
     }
@@ -78,19 +71,10 @@ export function ChromaBackground() {
       lastTime = now;
       elapsed += dt;
 
-      let colour: string;
-
+      // Advance state machine
       if (!inFade) {
-        // Dwelling on fromIdx colour
-        colour = hsl(...PALETTE[fromIdx]);
-        if (elapsed >= DWELL_MS) {
-          inFade  = true;
-          elapsed = 0;
-        }
+        if (elapsed >= DWELL_MS) { inFade = true; elapsed = 0; }
       } else {
-        // Crossfading from → to
-        const t = easeInOut(Math.min(elapsed / FADE_MS, 1));
-        colour = lerpHSL(PALETTE[fromIdx], PALETTE[toIdx], t);
         if (elapsed >= FADE_MS) {
           fromIdx = toIdx;
           toIdx   = (toIdx + 1) % PALETTE.length;
@@ -99,26 +83,27 @@ export function ChromaBackground() {
         }
       }
 
-      // Radial gradient: slightly brighter centre, fades to the current hue at edges
-      // This gives a natural vignette feel rather than a flat wash
-      const from_hsl = PALETTE[fromIdx];
+      // Interpolation factor (0 during dwell, 0→1 during fade)
+      const t = inFade ? easeInOut(Math.min(elapsed / FADE_MS, 1)) : 0;
+
+      // Interpolate hue via shortest arc
+      const ca = PALETTE[fromIdx];
+      const cb = PALETTE[toIdx];
+      let dh = cb[0] - ca[0];
+      if (dh > 180)  dh -= 360;
+      if (dh < -180) dh += 360;
+      const curH = ca[0] + dh * t;
+      const curS = ca[1] + (cb[1] - ca[1]) * t;
+      const curL = ca[2] + (cb[2] - ca[2]) * t;
+
+      // Radial gradient: slightly brighter centre for a gentle glow effect
       const cx = w / 2;
       const cy = h / 2;
       const r  = Math.max(w, h) * 0.75;
 
       const grad = ctx!.createRadialGradient(cx, cy, 0, cx, cy, r);
-
-      // Centre: bump lightness by ~6pts for a gentle glow
-      if (!inFade) {
-        const [hv, sv, lv] = from_hsl;
-        grad.addColorStop(0,   hsl(hv, sv, Math.min(lv + 6, 40)));
-        grad.addColorStop(1,   colour);
-      } else {
-        // During fade, just use the interpolated colour uniformly — gradient
-        // variation is barely visible mid-transition and adds complexity for no gain
-        grad.addColorStop(0, colour);
-        grad.addColorStop(1, colour);
-      }
+      grad.addColorStop(0, hsl(curH, curS, Math.min(curL + 6, 40)));
+      grad.addColorStop(1, hsl(curH, curS, curL));
 
       ctx!.fillStyle = grad;
       ctx!.fillRect(0, 0, w, h);
