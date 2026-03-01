@@ -621,6 +621,22 @@ html, body {
 .message.assistant .role-label { color: var(--accent); }
 .message.system .role-label { color: var(--system-text); }
 
+.message.cancelled {
+  opacity: 0.5;
+}
+
+.cancelled-badge {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--system-text);
+  background: var(--system-bg);
+  border: 1px solid var(--system-border);
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: lowercase;
+  letter-spacing: 0;
+}
+
 .message .msg-id {
   font-size: 9px;
   font-weight: 400;

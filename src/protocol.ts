@@ -58,6 +58,7 @@ export interface DisplayMessage {
   content: string;
   timestamp: string;
   elapsed?: number | undefined;
+  cancelled?: boolean;
   attachments?: DisplayAttachment[];
 }
 

@@ -67,7 +67,6 @@ let currentSessionId = generateSessionId();
 let model: string;
 let workspacePath: string;
 let isLoading = false;
-let isProcessingTaskResult = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
 
@@ -575,7 +574,6 @@ async function processAgentTurn(
   }
 
   isLoading = true;
-  isProcessingTaskResult = isTaskResult;
   broadcast({ type: 'loading', isLoading: true });
   log.info('Agent turn start', { isTaskResult });
 
@@ -769,7 +767,6 @@ async function processAgentTurn(
   } finally {
     abortController = null;
     isLoading = false;
-    isProcessingTaskResult = false;
     currentStreamingTraces = [];
     broadcast({ type: 'loading', isLoading: false });
 
@@ -1158,21 +1155,18 @@ function handleCancel(): void {
   if (isLoading && abortController) {
     abortController.abort();
     abortController = null;
-    messageQueue.length = 0;
-    broadcastQueueUpdate();
+    // Preserve queued messages — only cancel the current turn, not the queue.
     isLoading = false;
-
-    // Remove the trailing user message — but only for normal user turns.
-    // Task result turns don't add user messages to the display.
-    if (!isProcessingTaskResult && messages.length > 0 && messages[messages.length - 1]!.role === 'user') {
-      messages.pop();
-    }
-    isProcessingTaskResult = false;
 
     taskQueue.cancelAll();
     broadcast({ type: 'text', content: '' });
     broadcast({ type: 'loading', isLoading: false });
     addSystemMessage('Cancelled.');
+
+    // Resume draining the queue if there are pending messages
+    if (messageQueue.length > 0) {
+      queueMicrotask(() => void processQueue());
+    }
   }
 }
 

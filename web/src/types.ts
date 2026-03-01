@@ -50,6 +50,7 @@ export interface DisplayMessage {
   content: string;
   timestamp: string;
   elapsed?: number;
+  cancelled?: boolean;
   traces?: TraceEntry[];
   attachments?: DisplayAttachment[];
 }

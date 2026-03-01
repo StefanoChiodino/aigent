@@ -6,9 +6,11 @@ import { createLogger } from './logger.js';
 const log = createLogger('compact');
 
 /**
- * Prompt for mid-conversation compaction.
+ * Prompt variants for mid-conversation compaction.
  * Goal: stay task-focused, keep the agent on track. NOT long-term memory.
  */
+const COMPACT_PROMPT_LIGHT = `Summarize completed topics from this conversation. Preserve all active threads, recent decisions, and ongoing work in detail. Only compress topics that are clearly finished.`;
+
 const COMPACT_PROMPT = `Summarize this conversation as a compact reference for continuing the current task.
 
 Include ALL of:
@@ -22,6 +24,10 @@ Include ALL of:
 Start with a "Key entities:" line listing every named entity discussed.
 Be specific and concrete — preserve the details that let someone pick up mid-conversation.
 No narrative or meta-commentary.`;
+
+const COMPACT_PROMPT_MODERATE = COMPACT_PROMPT;
+
+const COMPACT_PROMPT_AGGRESSIVE = `Aggressively compress this conversation to essential context only. Keep: current task, key decisions, active file paths, critical errors. Drop: completed sub-tasks, exploration that led nowhere, verbose tool outputs, resolved discussions. Be extremely concise.`;
 
 /**
  * Prompt for end-of-session/reset memory distillation.
@@ -139,8 +145,18 @@ export async function compactConversation(
   model: string,
   messages: ProviderMessage[],
   _workspacePath?: string,
-  keepRecentTurns: number = 2,
+  keepRecentTurns?: number,
+  aggressiveness?: 'light' | 'moderate' | 'aggressive',
 ): Promise<{ messages: ProviderMessage[]; summary: string }> {
+  // Resolve keepRecentTurns: explicit value takes priority, else derive from aggressiveness
+  const defaultTurns = aggressiveness === 'light' ? 4 : aggressiveness === 'aggressive' ? 1 : 2;
+  const effectiveTurns = keepRecentTurns ?? defaultTurns;
+  // Resolve prompt
+  const compactPrompt = aggressiveness === 'light'
+    ? COMPACT_PROMPT_LIGHT
+    : aggressiveness === 'aggressive'
+      ? COMPACT_PROMPT_AGGRESSIVE
+      : COMPACT_PROMPT_MODERATE;
   // Count "turns" — a turn is either a real user message OR a tool_result
   // (which the API sends as role:'user'). During long tool-use loops there may
   // be only 1 real user message but dozens of assistant+tool_result pairs.
@@ -154,7 +170,7 @@ export async function compactConversation(
     const role = messages[i]!.role;
     if (role === 'user' || role === 'tool_result') {
       turnCount++;
-      if (turnCount > keepRecentTurns) {
+      if (turnCount > effectiveTurns) {
         splitIdx = i + 1; // keep from i+1 onward
         break;
       }
@@ -169,7 +185,7 @@ export async function compactConversation(
     return { messages, summary: '' };
   }
 
-  log.info('Compaction starting', { totalMessages: messages.length, splitIdx, keepRecentTurns });
+  log.info('Compaction starting', { totalMessages: messages.length, splitIdx, effectiveTurns, aggressiveness });
 
   const oldMessages = messages.slice(0, splitIdx);
   const recentMessages = messages.slice(splitIdx);
@@ -178,7 +194,7 @@ export async function compactConversation(
   const summaryMessages = messagesToSummaryInput(oldMessages);
 
   // Add the summarization request
-  summaryMessages.push({ role: 'user', content: COMPACT_PROMPT });
+  summaryMessages.push({ role: 'user', content: compactPrompt });
 
   // Send to provider (no tools, no thinking — just a summary)
   const response = await provider.sendMessage(

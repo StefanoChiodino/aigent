@@ -236,6 +236,7 @@ export function useWebSocket(): void {
                 role: 'assistant',
                 content: streaming.text || '*(cancelled)*',
                 timestamp: new Date().toISOString(),
+                cancelled: true,
               }, traces);
             } else {
               chat().endStream();

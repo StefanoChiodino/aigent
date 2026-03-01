@@ -2280,12 +2280,13 @@ client.on('browser_ext_request', (id: string, action: string, tabId?: number, ro
   }
 
   // Determine the target domain (from explicit url, or fall back to the active tab)
-  const domain = extractDomain(url);
+  const effectiveUrl = url || extensionBridge.getActiveTabUrl() || undefined;
+  const domain = extractDomain(effectiveUrl);
 
   // Check per-domain permissions
   if (domain) {
     const perms = readBrowserPermissions();
-    const granted = checkBrowserPermission(url!, perms);
+    const granted = checkBrowserPermission(effectiveUrl!, perms);
 
     if (granted === 'deny') {
       auditLog({ type: 'browser_ext_domain_deny', detail: `${action} on ${domain}` });

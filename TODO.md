@@ -6,7 +6,13 @@ When the text comes streaming down the first part of the text that is actually t
 
 add syntax highlighting in the chat for code blocks
 
+Shall we migrate from makefile to npm commands? I'm used to makefile but it seems a bit redundant
+
 ## Active Bugs
+
+The left panel now has horizontal scroll! Cringe!
+
+cancelling a message shouldn't cancell all the queue!!!
 
 a bug was reintroduced where in short speech mode the audio produced is literally "speech" :(
 

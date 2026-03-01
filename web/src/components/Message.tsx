@@ -114,9 +114,10 @@ export const Message = React.memo(function Message({ message }: Props) {
   const ttsText = speakContent ?? message.content;
 
   return (
-    <div className={`message ${message.role}`}>
+    <div className={`message ${message.role}${message.cancelled ? ' cancelled' : ''}`}>
       <div className="role-label">
         {message.role === 'assistant' ? 'aigent' : message.role}
+        {message.cancelled && <span className="cancelled-badge">cancelled</span>}
         {message.id && (
           <span
             className="msg-id"
