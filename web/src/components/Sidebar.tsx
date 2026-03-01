@@ -304,7 +304,7 @@ export function Sidebar() {
 
         {/* Input mode */}
         <div className="sidebar-section">
-          <div className="sidebar-label">Input{' '}<button className="sb-help" data-tip="Keyboard shortcuts (Ctrl+Shift+?)" title="Keyboard shortcuts" onClick={() => useUIStore.getState().setShortcutsOpen(true)}>?</button></div>
+          <div className="sidebar-label">Input{' '}<button className="sb-help" data-tip="Keyboard shortcuts (Ctrl+Shift+?)" onClick={() => useUIStore.getState().setShortcutsOpen(true)}>?</button></div>
           <div className="sb-reasoning-controls">
             <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Enter inserts newline</span>
             <button

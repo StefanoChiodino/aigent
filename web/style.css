@@ -1053,19 +1053,23 @@ html, body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 13px;
-  height: 13px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  border: 1px solid var(--text-dim);
-  font-size: 8px;
-  font-weight: 700;
-  color: var(--text-dim);
+  border: 1px solid var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
   cursor: default;
   position: relative;
   vertical-align: middle;
-  opacity: 0.6;
+  opacity: 0.7;
   text-transform: none;
   letter-spacing: 0;
+  line-height: 1;
+  background: transparent;
+  padding: 0;
+  flex-shrink: 0;
 }
 
 .sb-help:hover {
@@ -1093,7 +1097,7 @@ html, body {
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.15s;
-  z-index: 100;
+  z-index: 9999;
   text-transform: none;
   letter-spacing: 0;
 }
@@ -1129,7 +1133,7 @@ html, body {
   pointer-events: none;
   opacity: 0;
   transition: opacity 0.15s;
-  z-index: 100;
+  z-index: 9999;
 }
 
 .has-tip:hover::after {
