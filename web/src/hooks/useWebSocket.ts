@@ -182,10 +182,13 @@ export function useWebSocket(): void {
           if (event.message.role === 'assistant' && streaming.active) {
             if (streaming.isThinking) chat().finalizeThinkingBlock();
             chat().finalizeToolBlock();
-            // Capture traces before endStream resets streaming state
+            // Capture traces before endStream resets streaming state.
+            // Append message BEFORE ending stream so React batches both
+            // state changes — avoids a blank frame between unmounting
+            // StreamingMessage and mounting the final Message.
             const traces = chat().streaming.traces;
-            chat().endStream();
             chat().appendMessage(event.message, traces);
+            chat().endStream();
             // Transfer any rating set during streaming to the final message ID
             const streamingRating = useRatingStore.getState().ratings[STREAMING_MESSAGE_ID];
             if (streamingRating) {

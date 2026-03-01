@@ -745,7 +745,6 @@ async function processAgentTurn(
       const elapsed = (Date.now() - startTime) / 1000;
       log.info('Agent turn complete', { elapsed, messages: messages.length });
       const finalContent = _ensureSpeakTag(response, currentShort);
-      broadcast({ type: 'text', content: '' });
       const assistantMsg: DisplayMessage = {
         id: generateMsgId(),
         role: 'assistant',
