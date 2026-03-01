@@ -95,23 +95,44 @@ describe('TasksInspector', () => {
     expect(screen.getByText('Haiku 4.5')).toBeTruthy();
   });
 
-  it('expands task row to show details on click', async () => {
+  it('clicking task row opens detail modal', async () => {
     render(<TasksInspector />);
     await act(async () => {
       useChatStore.getState().upsertTaskHistory(makeTask());
       useUIStore.getState().setTasksInspectorOpen(true);
     });
-    // Click the task row
     await act(async () => {
       (document.querySelector('.tski-row') as HTMLElement)?.click();
     });
-    // Should show detail sections
-    expect(screen.getByText('Prompt')).toBeTruthy();
-    expect(screen.getByText('Result')).toBeTruthy();
-    expect(document.querySelector('.tski-detail')).not.toBeNull();
+    expect(document.querySelector('.tski-dm-panel')).not.toBeNull();
   });
 
-  it('shows task ID in expanded detail', async () => {
+  it('detail modal shows task description in header', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useChatStore.getState().upsertTaskHistory(makeTask());
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    await act(async () => {
+      (document.querySelector('.tski-row') as HTMLElement)?.click();
+    });
+    expect(document.querySelector('.tski-dm-title')?.textContent).toBe('Analyze codebase');
+  });
+
+  it('detail modal shows Prompt and Result sections', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useChatStore.getState().upsertTaskHistory(makeTask());
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    await act(async () => {
+      (document.querySelector('.tski-row') as HTMLElement)?.click();
+    });
+    expect(screen.getByText('Prompt')).toBeTruthy();
+    expect(screen.getByText('Result')).toBeTruthy();
+  });
+
+  it('detail modal shows task ID in metadata', async () => {
     render(<TasksInspector />);
     await act(async () => {
       useChatStore.getState().upsertTaskHistory(makeTask());
@@ -123,7 +144,7 @@ describe('TasksInspector', () => {
     expect(screen.getByText('task-1-abc')).toBeTruthy();
   });
 
-  it('shows context in prompt when available', async () => {
+  it('detail modal shows context in prompt when available', async () => {
     render(<TasksInspector />);
     await act(async () => {
       useChatStore.getState().upsertTaskHistory(makeTask({ context: 'Files: src/main.ts' }));
@@ -136,7 +157,69 @@ describe('TasksInspector', () => {
     expect(promptSection?.textContent).toContain('Context: Files: src/main.ts');
   });
 
-  it('closes on Escape key', async () => {
+  it('first Escape closes detail modal but keeps inspector open', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useChatStore.getState().upsertTaskHistory(makeTask());
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    // Open detail
+    await act(async () => {
+      (document.querySelector('.tski-row') as HTMLElement)?.click();
+    });
+    expect(document.querySelector('.tski-dm-panel')).not.toBeNull();
+    // First Escape: close detail
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(document.querySelector('.tski-dm-panel')).toBeNull();
+    expect(useUIStore.getState().tasksInspectorOpen).toBe(true);
+  });
+
+  it('second Escape closes inspector when detail is not open', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(useUIStore.getState().tasksInspectorOpen).toBe(false);
+  });
+
+  it('clicking detail backdrop closes detail, keeps inspector open', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useChatStore.getState().upsertTaskHistory(makeTask());
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    await act(async () => {
+      (document.querySelector('.tski-row') as HTMLElement)?.click();
+    });
+    expect(document.querySelector('.tski-dm-backdrop')).not.toBeNull();
+    await act(async () => {
+      (document.querySelector('.tski-dm-backdrop') as HTMLElement)?.click();
+    });
+    expect(document.querySelector('.tski-dm-panel')).toBeNull();
+    expect(useUIStore.getState().tasksInspectorOpen).toBe(true);
+  });
+
+  it('clicking detail panel body does not close detail', async () => {
+    render(<TasksInspector />);
+    await act(async () => {
+      useChatStore.getState().upsertTaskHistory(makeTask());
+      useUIStore.getState().setTasksInspectorOpen(true);
+    });
+    await act(async () => {
+      (document.querySelector('.tski-row') as HTMLElement)?.click();
+    });
+    await act(async () => {
+      (document.querySelector('.tski-dm-panel') as HTMLElement)?.click();
+    });
+    expect(document.querySelector('.tski-dm-panel')).not.toBeNull();
+  });
+
+  it('closes on Escape key when no detail open', async () => {
     render(<TasksInspector />);
     await act(async () => {
       useUIStore.getState().setTasksInspectorOpen(true);

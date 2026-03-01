@@ -2,6 +2,8 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
+HELP ME PUBLISH THIS TO NPM!
+
 ## Active Bugs
 
 sometimes I'm reading an interesting piece of info that's coming streaming in, then it disappears and the agents goes back thinking. Maybe this is reasoning, but it sure feels poor.

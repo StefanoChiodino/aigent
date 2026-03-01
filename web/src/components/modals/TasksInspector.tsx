@@ -51,9 +51,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function TaskRow({ task }: { task: BackgroundTaskInfo }) {
-  const [expanded, setExpanded] = useState(false);
-
+function TaskRow({ task, onSelect }: { task: BackgroundTaskInfo; onSelect: (t: BackgroundTaskInfo) => void }) {
   const statusChar =
     task.status === 'running' ? '\u25B6' :
     task.status === 'completed' ? '\u2713' :
@@ -64,33 +62,63 @@ function TaskRow({ task }: { task: BackgroundTaskInfo }) {
     ? (task.cost < 0.01 ? `$${task.cost.toFixed(4)}` : `$${task.cost.toFixed(3)}`)
     : null;
 
-  const rendered = useMemo(
-    () => task.result ? renderMarkdown(task.result) : '',
-    [task.result]
-  );
-
-  const prompt = task.context
-    ? `${task.description}\n\nContext: ${task.context}`
-    : task.description;
-
-  const renderedPrompt = useMemo(
-    () => renderMarkdown(prompt),
-    [prompt]
-  );
-
   return (
     <div className="tski-row-wrap">
-      <div className="tski-row" onClick={() => setExpanded(e => !e)}>
+      <div className="tski-row" onClick={() => onSelect(task)}>
         <span className={`tski-status tski-status-${task.status}`}>{statusChar}</span>
         <span className="tski-desc" title={task.description}>{task.description}</span>
         <span className="tski-date">{fmtDateShort(task.startedAt)}</span>
         <span className="tski-model">{task.model ? modelDisplayName(task.model) : '--'}</span>
         <span className="tski-tokens">{tokTotal > 0 ? tokTotal.toLocaleString() : '--'}</span>
         <span className="tski-cost">{costStr ?? '--'}</span>
-        <span className="tski-chevron">{expanded ? '\u2304' : '\u203A'}</span>
+        <span className="tski-chevron">&rsaquo;</span>
       </div>
-      {expanded && (
-        <div className="tski-detail">
+    </div>
+  );
+}
+
+function TaskDetailModal({ task, onClose }: { task: BackgroundTaskInfo | null; onClose: () => void }) {
+  const rendered = useMemo(
+    () => task?.result ? renderMarkdown(task.result) : '',
+    [task?.result]
+  );
+
+  const prompt = task
+    ? (task.context ? `${task.description}\n\nContext: ${task.context}` : task.description)
+    : '';
+
+  const renderedPrompt = useMemo(
+    () => prompt ? renderMarkdown(prompt) : '',
+    [prompt]
+  );
+
+  useEffect(() => {
+    if (!task) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+    }
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [task, onClose]);
+
+  if (!task) return null;
+
+  const costStr = task.cost !== undefined && task.cost > 0
+    ? (task.cost < 0.01 ? `$${task.cost.toFixed(4)}` : `$${task.cost.toFixed(3)}`)
+    : null;
+
+  return (
+    <div
+      className="tski-dm-backdrop"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="tski-dm-panel" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div className="tski-dm-header">
+          <span className="tski-dm-title" title={task.description}>{task.description}</span>
+          <button className="tski-close" onClick={onClose} title="Close (Esc)">&times;</button>
+        </div>
+
+        <div className="tski-dm-body">
           <div className="tski-meta">
             <div className="tski-meta-row">
               <span className="tim-key">ID</span>
@@ -164,7 +192,7 @@ function TaskRow({ task }: { task: BackgroundTaskInfo }) {
             )}
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -174,17 +202,27 @@ export function TasksInspector() {
   const setOpen = useUIStore(s => s.setTasksInspectorOpen);
   const taskHistory = useChatStore(s => s.taskHistory);
   const clearTaskHistory = useChatStore(s => s.clearTaskHistory);
+  const [selectedTask, setSelectedTask] = useState<BackgroundTaskInfo | null>(null);
 
-  const close = useCallback(() => setOpen(false), [setOpen]);
+  const closeDetail = useCallback(() => setSelectedTask(null), []);
+  const closeInspector = useCallback(() => { setSelectedTask(null); setOpen(false); }, [setOpen]);
 
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') close();
+      if (e.key === 'Escape') {
+        // Only handle if the detail modal isn't consuming it (it uses capture phase)
+        if (selectedTask === null) closeInspector();
+      }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, close]);
+  }, [open, selectedTask, closeInspector]);
+
+  // Clear selected task when inspector closes
+  useEffect(() => {
+    if (!open) setSelectedTask(null);
+  }, [open]);
 
   if (!open) return null;
 
@@ -196,7 +234,7 @@ export function TasksInspector() {
   return (
     <div
       className="tski-backdrop"
-      onClick={e => { if (e.target === e.currentTarget) close(); }}
+      onClick={e => { if (e.target === e.currentTarget) closeInspector(); }}
     >
       <div className="tski-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="tski-header">
@@ -205,7 +243,7 @@ export function TasksInspector() {
             {taskHistory.length > 0 && (
               <button className="tski-clear" onClick={clearTaskHistory} title="Clear task history">Clear</button>
             )}
-            <button className="tski-close" onClick={close} title="Close (Esc)">&times;</button>
+            <button className="tski-close" onClick={closeInspector} title="Close (Esc)">&times;</button>
           </div>
         </div>
         <div className="tski-summary">
@@ -227,11 +265,13 @@ export function TasksInspector() {
                 <span className="tski-col-h tski-col-r">Cost</span>
                 <span />
               </div>
-              {sorted.map(t => <TaskRow key={t.id} task={t} />)}
+              {sorted.map(t => <TaskRow key={t.id} task={t} onSelect={setSelectedTask} />)}
             </>
           )}
         </div>
       </div>
+
+      <TaskDetailModal task={selectedTask} onClose={closeDetail} />
     </div>
   );
 }

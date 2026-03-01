@@ -13,11 +13,19 @@ import { existsSync, readFileSync, writeFileSync, renameSync, appendFileSync } f
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLogger } from './logger.js';
+import { getSettingsFile } from './xdg.js';
 
 const log = createLogger('settings-file');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SETTINGS_PATH = resolve(__dirname, '..', 'settings.json');
+
+// Default settings path: XDG config dir for global install, repo root for dev.
+// Can always be overridden via AIGENT_SETTINGS_PATH env var.
+const COMPILED_MARKER = resolve(__dirname, 'server.js');
+const IS_DEV = !existsSync(COMPILED_MARKER);
+const DEFAULT_SETTINGS_PATH = IS_DEV
+  ? resolve(__dirname, '..', 'settings.json')  // dev: repo root
+  : getSettingsFile();                          // prod: ~/.config/aigent/settings.json
 
 const envPath = process.env['AIGENT_SETTINGS_PATH'];
 let settingsPath = envPath ? resolve(envPath) : DEFAULT_SETTINGS_PATH;

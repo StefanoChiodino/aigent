@@ -927,6 +927,7 @@ html, body {
 
 #sb-tasks-section {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
   min-height: 0;
 }
@@ -1159,6 +1160,7 @@ html, body {
   column-gap: 6px;
   row-gap: 1px;
   padding: 2px 0;
+  min-width: 0;
 }
 
 .task-status {
@@ -4275,13 +4277,8 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 .tski-chevron {
   color: var(--text-dim);
   text-align: center;
-  font-size: 14px;
-}
-
-.tski-detail {
-  padding: 12px 16px 16px 40px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: rgba(255, 255, 255, 0.02);
+  font-size: 16px;
+  line-height: 1;
 }
 
 .tski-meta {
@@ -4343,8 +4340,6 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 300px;
-  overflow-y: auto;
   margin: 0;
 }
 
@@ -4358,6 +4353,79 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 .tski-no-result {
   color: var(--text-dim);
   font-style: italic;
+}
+
+/* ── Task Detail Modal (level 2) ──────────────────────────── */
+
+.tski-dm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 2100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.12s ease;
+}
+
+.tski-dm-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: min(900px, 92vw);
+  height: min(88vh, 800px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 60px rgba(0, 0, 0, 0.7);
+  animation: scaleIn 0.12s ease;
+  overflow: hidden;
+}
+
+.tski-dm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.tski-dm-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.tski-dm-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+}
+
+.tski-dm-body .tski-meta {
+  margin-bottom: 16px;
+}
+
+.tski-dm-body .tski-meta-row {
+  font-size: 12px;
+}
+
+.tski-dm-body .tski-section {
+  margin-top: 14px;
+}
+
+.tski-dm-body .tski-section-body {
+  font-size: 13px;
 }
 
 /* ── Settings modal ───────────────────────────────────────── */

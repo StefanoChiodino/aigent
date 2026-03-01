@@ -100,6 +100,72 @@ let gatekeeperArgs: GatekeeperArgs;
 let client: InstanceType<typeof import('./client.js').AgentClient> | null = null;
 let isRestarting = false;
 
+// --- Sleep inhibitor ---
+// Prevents the OS from sleeping while the agent is working.
+// WSL2: uses PowerShell SetThreadExecutionState (Windows API)
+// Native Linux: uses systemd-inhibit
+// macOS: uses caffeinate
+// Falls back silently if none available.
+
+type WakeLockBackend = 'wsl-powershell' | 'systemd-inhibit' | 'caffeinate' | 'none';
+
+function detectWakeLockBackend(): WakeLockBackend {
+  const isWSL = existsSync('/proc/version') &&
+    readFileSync('/proc/version', 'utf-8').toLowerCase().includes('microsoft');
+  if (isWSL) {
+    const psPath = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+    if (existsSync(psPath)) return 'wsl-powershell';
+    return 'none';
+  }
+  if (process.platform === 'darwin') return 'caffeinate';
+  try { execSync('which systemd-inhibit', { stdio: 'ignore' }); return 'systemd-inhibit'; } catch {}
+  return 'none';
+}
+
+const WAKE_LOCK_BACKEND = detectWakeLockBackend();
+let wakeLockProcess: ChildProcess | null = null;
+
+function acquireWakeLock(): void {
+  if (wakeLockProcess) return; // already held
+  if (WAKE_LOCK_BACKEND === 'none') return;
+
+  try {
+    if (WAKE_LOCK_BACKEND === 'wsl-powershell') {
+      const ps = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
+      // Spawn a PS process that sets ES_CONTINUOUS|ES_SYSTEM_REQUIRED on its own thread,
+      // then blocks reading stdin. Killing the process clears the flag automatically.
+      wakeLockProcess = spawn(ps, ['-NoProfile', '-NonInteractive', '-Command', `
+Add-Type -Namespace Win32 -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);'
+[Win32.Power]::SetThreadExecutionState([uint32]::Parse('80000001','HexNumber')) | Out-Null
+[Console]::In.ReadLine() | Out-Null
+`], { stdio: ['pipe', 'ignore', 'ignore'] });
+    } else if (WAKE_LOCK_BACKEND === 'systemd-inhibit') {
+      // systemd-inhibit --mode=block keeps the lock while the child process lives
+      wakeLockProcess = spawn('systemd-inhibit', [
+        '--what=idle:sleep', '--who=aigent', '--why=Agent is working', '--mode=block',
+        'sleep', '86400',
+      ], { stdio: 'ignore' });
+    } else if (WAKE_LOCK_BACKEND === 'caffeinate') {
+      wakeLockProcess = spawn('caffeinate', ['-dis'], { stdio: 'ignore' });
+    }
+
+    wakeLockProcess?.on('error', () => { wakeLockProcess = null; });
+    wakeLockProcess?.on('exit', () => { wakeLockProcess = null; });
+    log.info('Sleep inhibitor acquired', { backend: WAKE_LOCK_BACKEND });
+  } catch (err) {
+    log.warn('Failed to acquire sleep inhibitor', { err: String(err) });
+  }
+}
+
+function releaseWakeLock(): void {
+  if (!wakeLockProcess) return;
+  try {
+    wakeLockProcess.kill();
+  } catch {}
+  wakeLockProcess = null;
+  log.info('Sleep inhibitor released');
+}
+
 // In test mode the server is not started, so injected requests are never registered
 // in the pending maps. Suppress "no pending X" error messages to keep tests clean.
 const IS_TEST_MODE = process.env['AIGENT_TEST_MODE'] === '1';
@@ -403,6 +469,7 @@ function cleanupSocket(): void {
 }
 
 function cleanupAll(): void {
+  releaseWakeLock();
   stopHostDaemon();
   if (serverProcess) {
     try { serverProcess.kill('SIGTERM'); } catch {}
@@ -2019,6 +2086,12 @@ if (!process.env['AIGENT_TEST_MODE']) {
 // Push host state to web UI when client connects to the worker
 client.on('connected', () => {
   setTimeout(() => emitHostState(), 100);
+});
+
+// Inhibit sleep while the agent is working
+client.on('loading', (isLoading: boolean) => {
+  if (isLoading) acquireWakeLock();
+  else releaseWakeLock();
 });
 
 // Track recent conversation messages for classifier context

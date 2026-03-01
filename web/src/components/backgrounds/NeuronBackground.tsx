@@ -455,14 +455,14 @@ export function NeuronBackground() {
       const connected = synapses.filter(s => s.from === fromIdx || s.to === fromIdx);
       if (connected.length === 0) return;
 
-      const count = Math.min(connected.length, 1 + Math.floor(Math.random() * (working ? 3 : 2)));
+      const count = Math.min(connected.length, 1 + Math.floor(Math.random() * (working ? 2 : 2)));
       const sorted = [...connected].sort((a, b) => b.strength - a.strength);
       for (const syn of sorted.slice(0, count)) {
         const toIdx = syn.from === fromIdx ? syn.to : syn.from;
         pulses.push({
           from: fromIdx, to: toIdx,
           t: 0,
-          speed: (working ? 0.55 : 0.28) + Math.random() * 0.25,
+          speed: (working ? 0.38 : 0.28) + Math.random() * 0.18,
           hue, size: 4 + Math.random() * 4,
           cascadeLeft: hops - 1,
         });
@@ -474,8 +474,8 @@ export function NeuronBackground() {
       const working = isWorkingRef.current;
       if (!neurons.length) return;
       const idx = Math.floor(Math.random() * neurons.length);
-      const hue = working ? Math.random() * 360 : 175 + Math.random() * 70;
-      fireCascade(idx, hue, working ? 5 + Math.floor(Math.random() * 7) : 2 + Math.floor(Math.random() * 4));
+      const hue = working ? 175 + Math.random() * 90 : 175 + Math.random() * 70;
+      fireCascade(idx, hue, working ? 3 + Math.floor(Math.random() * 3) : 2 + Math.floor(Math.random() * 4));
 
       if (Math.random() < 0.5) {
         const ep = randomEdgePoint(w, h);
@@ -505,8 +505,7 @@ export function NeuronBackground() {
       thoughtTimerRef.current -= dt;
       if (thoughtTimerRef.current <= 0) {
         spawnThought();
-        if (working && Math.random() < 0.5) spawnThought();
-        thoughtTimerRef.current = working ? 0.35 + Math.random() * 0.7 : 1.5 + Math.random() * 2.5;
+        thoughtTimerRef.current = working ? 1.2 + Math.random() * 1.0 : 1.5 + Math.random() * 2.5;
       }
 
       // Synapse formation
@@ -514,14 +513,13 @@ export function NeuronBackground() {
         const n = neurons[i];
         const cnt = synapses.filter(s => s.from === i || s.to === i).length;
         if (cnt >= MAX_SYNAPSES) continue;
-        if (Math.random() > LINK_FORM_CHANCE * (working ? 3 : 1)) continue;
+        if (Math.random() > LINK_FORM_CHANCE * (working ? 1.5 : 1)) continue;
         const candidates = neurons
           .map((m, j) => ({ j, d: Math.hypot(m.x - n.x, m.y - n.y) }))
           .filter(c => c.j !== i && c.d < CONNECT_RANGE && !findSynapse(synapses, i, c.j));
         if (!candidates.length) continue;
         const pick = candidates[Math.floor(Math.random() * candidates.length)];
         const other = neurons[pick.j];
-        const midX = (n.x + other.x) / 2, midY = (n.y + other.y) / 2;
         const perp = { x: -(other.y - n.y), y: other.x - n.x };
         const plen = Math.hypot(perp.x, perp.y) || 1;
         const curve = (Math.random() - 0.5) * pick.d * 0.4;
@@ -535,7 +533,7 @@ export function NeuronBackground() {
       for (let i = synapses.length - 1; i >= 0; i--) {
         const s = synapses[i];
         s.age += dt;
-        s.strength -= LINK_FADE_RATE * dt * (working ? 0.25 : 1);
+        s.strength -= LINK_FADE_RATE * dt * (working ? 0.6 : 1);
         if (s.strength < LINK_PRUNE) synapses.splice(i, 1);
       }
 
@@ -557,11 +555,11 @@ export function NeuronBackground() {
           neurons[p.to].fireLevel = 1;
           neurons[p.to].actionRings.push({ r: neurons[p.to].r + 2, alpha: 0.9 });
 
-          if (p.cascadeLeft > 0 && Math.random() < (working ? 0.85 : 0.6))
+          if (p.cascadeLeft > 0 && Math.random() < (working ? 0.65 : 0.6))
             fireCascade(p.to, p.hue, p.cascadeLeft);
 
           // Bounce back with shifted hue
-          if (p.cascadeLeft > 0 && Math.random() < 0.3)
+          if (p.cascadeLeft > 0 && Math.random() < (working ? 0.15 : 0.3))
             pulses.push({ from: p.to, to: p.from, t: 0, speed: p.speed * 0.8,
               hue: (p.hue + 35) % 360, size: p.size * 0.75, cascadeLeft: p.cascadeLeft - 1 });
 
@@ -588,7 +586,7 @@ export function NeuronBackground() {
           if (e.inbound && e.toNeuron >= 0) {
             neurons[e.toNeuron].fireLevel = 1;
             neurons[e.toNeuron].actionRings.push({ r: neurons[e.toNeuron].r + 2, alpha: 0.9 });
-            fireCascade(e.toNeuron, e.hue, working ? 3 : 1);
+            fireCascade(e.toNeuron, e.hue, working ? 2 : 1);
           }
           edges.splice(i, 1);
           continue;
