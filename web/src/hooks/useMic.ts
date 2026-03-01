@@ -43,7 +43,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
   const silenceTailMs = () => getSetting('mic_silence_tail_ms') as number;
   const autoSend = () => getSetting('mic_auto_send') as boolean;
   const autoSendMs = () => getSetting('mic_auto_send_ms') as number;
-  const idleTimeoutS = () => getSetting('mic_idle_timeout_s') as number;
+  const idleTimeoutMin = () => getSetting('mic_idle_timeout_min') as number;
 
   const setMicState = useVoiceStore.getState().setMicState;
   const setVadActive = useVoiceStore.getState().setVadActive;
@@ -215,7 +215,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
             }, autoSendMs());
           }
           // Idle timeout: in sticky mode, stop mic after prolonged silence to save battery
-          const idleMs = idleTimeoutS() * 1000;
+          const idleMs = idleTimeoutMin() * 60_000;
           if (micSticky && idleMs > 0 && micIdleTimer.current === null) {
             micIdleTimer.current = setTimeout(() => {
               micIdleTimer.current = null;

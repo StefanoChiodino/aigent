@@ -117,6 +117,13 @@ export const Message = React.memo(function Message({ message }: Props) {
     <div className={`message ${message.role}`}>
       <div className="role-label">
         {message.role === 'assistant' ? 'aigent' : message.role}
+        {message.id && (
+          <span
+            className="msg-id"
+            title={`Click to copy: ${message.id}`}
+            onClick={() => { navigator.clipboard.writeText(message.id!); }}
+          >{message.id.slice(0, 6)}</span>
+        )}
         {message.elapsed !== undefined && (
           <span className="elapsed">{message.elapsed.toFixed(1)}s</span>
         )}

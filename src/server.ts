@@ -15,7 +15,7 @@ import { join, dirname } from 'node:path';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { generateSessionId, autoSaveSession, autoLoadSession } from './profiles.js';
 import type { ProviderMessage, UserContent, TextContent, ImageContent, DocumentContent, ImageMediaType, ToolResult } from './provider.js';
-import type { ClientCommand, ServerEvent, DisplayMessage, DisplayAttachment, ServerState, TokenUsage } from './protocol.js';
+import type { ClientCommand, ServerEvent, DisplayMessage, DisplayAttachment, ServerState, TokenUsage, StreamingTrace } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
 import { computeCost } from './pricing.js';
 import { distillToMemory } from './compact.js';
@@ -70,6 +70,10 @@ let isLoading = false;
 let isProcessingTaskResult = false;
 let abortController: AbortController | null = null;
 const clients = new Set<Socket>();
+
+// --- Streaming trace accumulator ---
+// Holds tool traces for the current turn so reconnecting clients can restore them.
+let currentStreamingTraces: StreamingTrace[] = [];
 
 // --- Episode tracking ---
 let sessionToolsUsed: string[] = [];
@@ -632,18 +636,58 @@ async function processAgentTurn(
       },
       onToolStart: (name, toolInput, summary, meta) => {
         if (controller.signal.aborted) return;
+        const traceId = `trace-srv-${currentStreamingTraces.length}-${Date.now()}`;
+        currentStreamingTraces.push({
+          id: traceId,
+          type: 'tool',
+          toolName: name,
+          toolSummary: summary,
+          toolInput: toolInput,
+          toolOutput: '',
+          running: true,
+          ...(meta?.model ? { model: meta.model } : {}),
+          ...(meta?.thinking ? { thinking: meta.thinking } : {}),
+        });
         broadcast({ type: 'tool_start', name, input: toolInput, summary, ...meta });
       },
       onToolOutput: (toolContent) => {
         if (controller.signal.aborted) return;
+        // Append output to the last running trace
+        for (let i = currentStreamingTraces.length - 1; i >= 0; i--) {
+          if (currentStreamingTraces[i]!.running) {
+            currentStreamingTraces[i] = {
+              ...currentStreamingTraces[i]!,
+              toolOutput: currentStreamingTraces[i]!.toolOutput + toolContent,
+            };
+            break;
+          }
+        }
         broadcast({ type: 'tool_output', content: toolContent });
       },
       onToolImages: (images) => {
         if (controller.signal.aborted) return;
+        // Attach images to the last running trace
+        for (let i = currentStreamingTraces.length - 1; i >= 0; i--) {
+          if (currentStreamingTraces[i]!.running) {
+            const existing = currentStreamingTraces[i]!.images ?? [];
+            currentStreamingTraces[i] = {
+              ...currentStreamingTraces[i]!,
+              images: [...existing, ...images],
+            };
+            break;
+          }
+        }
         broadcast({ type: 'tool_images', images });
       },
       onToolEnd: () => {
         if (controller.signal.aborted) return;
+        // Mark the last running trace as done
+        for (let i = currentStreamingTraces.length - 1; i >= 0; i--) {
+          if (currentStreamingTraces[i]!.running) {
+            currentStreamingTraces[i] = { ...currentStreamingTraces[i]!, running: false };
+            break;
+          }
+        }
         broadcast({ type: 'tool_end' });
       },
       onUsage: (u) => {
@@ -711,6 +755,7 @@ async function processAgentTurn(
       };
       messages.push(assistantMsg);
       broadcast({ type: 'message', message: assistantMsg });
+      currentStreamingTraces = [];
       doAutoSave();
     }
   } catch (err: unknown) {
@@ -726,6 +771,7 @@ async function processAgentTurn(
     abortController = null;
     isLoading = false;
     isProcessingTaskResult = false;
+    currentStreamingTraces = [];
     broadcast({ type: 'loading', isLoading: false });
 
     // If messages were queued while this turn was running (e.g. during a task
@@ -980,6 +1026,7 @@ function getState(): ServerState {
       id: m.id,
       displayText: m.displayText ?? (typeof m.content === 'string' ? m.content : '[attachment]'),
     })),
+    ...(currentStreamingTraces.length > 0 ? { streamingTraces: currentStreamingTraces } : {}),
   };
 }
 

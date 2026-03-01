@@ -559,6 +559,18 @@ html, body {
 .message.assistant .role-label { color: var(--accent); }
 .message.system .role-label { color: var(--system-text); }
 
+.message .msg-id {
+  font-size: 9px;
+  font-weight: 400;
+  font-family: var(--mono);
+  color: var(--text-dim);
+  opacity: 0.4;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+  user-select: none;
+}
+.message .msg-id:hover { opacity: 0.8; }
 .message .elapsed {
   font-size: 10px;
   font-weight: 400;
@@ -1194,6 +1206,52 @@ html, body {
 .cap-ext-off:hover {
   opacity: 1;
 }
+#ext-badge { font-size: 12px; padding: 2px 4px; }
+#ext-badge.ext-on { opacity: 1; }
+#ext-badge.ext-off { filter: grayscale(1) brightness(0.5); }
+#ext-badge.ext-off:has(.ext-setup-popup) { filter: none; }
+#ext-badge[data-copied]::after {
+  content: 'Copied chrome://extensions';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  background: var(--surface-2, #333);
+  color: var(--text-primary, #fff);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  z-index: 100;
+}
+#ext-badge { position: relative; }
+.ext-setup-popup {
+  display: block;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  background: #2d2d3d;
+  border: 1px solid #666;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  width: max-content;
+  max-width: 90vw;
+  z-index: 200;
+  text-align: left;
+  color: var(--text-primary, #eee);
+  cursor: default;
+  overflow-wrap: break-word;
+}
+.ext-setup-popup strong { display: block; margin-bottom: 6px; font-size: 13px; }
+.ext-setup-popup ol { margin: 0; padding-left: 18px; }
+.ext-setup-popup li { margin-bottom: 4px; }
+.ext-setup-popup code { background: var(--surface-3, #1a1a1a); padding: 2px 6px; border-radius: 3px; font-size: 11px; user-select: all; word-break: break-all; display: inline-block; }
+.ext-copy-btn { cursor: pointer; font-size: 13px; vertical-align: middle; opacity: 0.6; }
+.ext-copy-btn:hover { opacity: 1; }
+
 
 .ext-setup-guide {
   margin-top: 6px;
@@ -1927,11 +1985,14 @@ html, body {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  overflow: hidden;
+  overflow-y: auto;       /* match #input overflow so box model is identical */
+  scrollbar-width: none;  /* hide the scrollbar (mirror #input behaviour) */
   pointer-events: none;
   color: var(--text);
   border-radius: var(--radius);
 }
+
+#input-highlight::-webkit-scrollbar { display: none; }
 
 .input-hl-code {
   color: var(--accent);
@@ -3881,8 +3942,9 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
     height: 44px;
   }
 
-  #input {
-    font-size: 16px; /* prevent iOS zoom on focus */
+  #input,
+  #input-highlight {
+    font-size: 16px; /* prevent iOS zoom on focus — must match both layers or caret misaligns */
   }
 
   #input-hint { display: none; }

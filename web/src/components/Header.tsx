@@ -56,6 +56,19 @@ export function Header() {
   const ttsAvailable = useUIStore(s => s.ttsAvailable);
   const sttAvailable = useUIStore(s => s.sttAvailable);
   const extensionConnected = useUIStore(s => s.extensionConnected);
+  const extensionPath = useUIStore(s => s.extensionPath);
+  const [extSetupOpen, setExtSetupOpen] = useState(false);
+  const extBadgeRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!extSetupOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (extBadgeRef.current && !extBadgeRef.current.contains(e.target as Node)) {
+        setExtSetupOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [extSetupOpen]);
   const { setSettingsOpen, setShortcutsOpen, setCtxInspectorOpen } = useUIStore.getState();
 
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
@@ -111,7 +124,25 @@ export function Header() {
         <div id="header-left">
           <span id="logo">aigent</span>
           <span id="conn-badge" className={`badge ${status}`}>{status}</span>
-          <span id="task-badge" className={`badge${running > 0 ? '' : ' hidden'}`}>{running} task{running > 1 ? 's' : ''}</span>
+          <span ref={extBadgeRef} id="ext-badge" className={`badge ${extensionConnected ? 'ext-on' : 'ext-off'}`} title={extensionConnected ? 'Extension connected — click to copy extensions URL' : 'Extension not connected — click for setup'} onClick={(e) => {
+            if (extensionConnected) {
+              navigator.clipboard.writeText('chrome://extensions');
+              const el = e.currentTarget; el.dataset.copied = '1'; setTimeout(() => delete el.dataset.copied, 1500);
+            } else {
+              setExtSetupOpen(!extSetupOpen);
+            }
+          }} style={{ cursor: 'pointer' }}>🧩{!extensionConnected && extSetupOpen && (
+            <div id="ext-setup-popup" className="ext-setup-popup">
+              <strong>Extension Setup</strong>
+              <ol>
+                <li>Copy this URL and paste in address bar:<br/><code>chrome://extensions</code> <span className="ext-copy-btn" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText('chrome://extensions'); const el = e.currentTarget; el.textContent = '✓'; setTimeout(() => el.textContent = '📋', 1200); }} title="Copy">📋</span></li>
+                <li>Enable <b>Developer mode</b> (top-right toggle)</li>
+                <li>Click <b>Load unpacked</b></li>
+                <li>Navigate to:<br/><code>{extensionPath || 'aigent-extension/dist'}</code> <span className="ext-copy-btn" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(extensionPath || 'aigent-extension/dist'); const el = e.currentTarget; el.textContent = '✓'; setTimeout(() => el.textContent = '📋', 1200); }} title="Copy">📋</span></li>
+              </ol>
+            </div>
+          )}</span>
+          {running > 0 && <span id="task-badge" className="badge" title={`${running} running task${running > 1 ? 's' : ''}`} onClick={() => useUIStore.getState().setTasksInspectorOpen(true)} style={{ cursor: 'pointer' }}>⚡{running}</span>}
         </div>
         <div id="header-right">
           {cost > 0 && (

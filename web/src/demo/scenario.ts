@@ -933,9 +933,26 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'submit_input' },
     // (message is now in the queue — shown as a chip above input)
     emit({ type: 'queue_update', queue: [{ id: 1, displayText: 'Also add a cache-control header' }] }),
-    wait(2500),
+    wait(800),
 
-    // Agent finishes first exchange — queued message auto-sends
+    // User queues a third message
+    { action: 'type_input', text: 'And update the README with the new endpoints', charDelayMs: 45 },
+    wait(600),
+    { action: 'submit_input' },
+    emit({ type: 'queue_update', queue: [
+      { id: 1, displayText: 'Also add a cache-control header' },
+      { id: 2, displayText: 'And update the README with the new endpoints' },
+    ] }),
+    wait(1200),
+
+    // User drags the second chip above the first — reorder
+    emit({ type: 'queue_update', queue: [
+      { id: 2, displayText: 'And update the README with the new endpoints' },
+      { id: 1, displayText: 'Also add a cache-control header' },
+    ] }),
+    wait(1500),
+
+    // Agent finishes first exchange — queued messages auto-send in new order
     { action: 'stream_text', text: RESPONSE_QUEUE_1, chunkSize: 5, intervalMs: 22 },
     wait(200),
     emit({

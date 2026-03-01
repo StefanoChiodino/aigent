@@ -1,4 +1,8 @@
 import { useEffect, useRef } from 'react';
+
+function generateMsgId(): string {
+  return crypto.randomUUID();
+}
 import { useChatStore } from '../stores/chat';
 import { useConnectionStore } from '../stores/connection';
 import { useUIStore } from '../stores/ui';
@@ -12,7 +16,7 @@ import { playPermissionSound } from '../lib/audio';
 import { isPiPOpen, pipSupported } from './usePiP';
 import { isDemo, getDemoWebSocket } from '../demo/useDemoMode';
 import { setupErrorRelay, teardownErrorRelay } from '../lib/errorRelay';
-import type { ServerEvent } from '../types';
+import type { ServerEvent, TraceEntry } from '../types';
 
 export function useWebSocket(): void {
   const chat = useChatStore.getState;
@@ -69,6 +73,11 @@ export function useWebSocket(): void {
               const turnStartCtx = chat().usage.contextTokens ?? 0;
               voice().setSpeakBlockSpoken(false);
               chat().startStream(turnStartCtx);
+            }
+            // Restore tool traces accumulated before the refresh
+            if (event.state.streamingTraces?.length) {
+              const traces = event.state.streamingTraces as TraceEntry[];
+              useChatStore.setState({ streaming: { ...chat().streaming, traces } });
             }
           } else {
             chat().endStream();
@@ -221,6 +230,7 @@ export function useWebSocket(): void {
               const traces = streaming.traces;
               chat().endStream();
               chat().appendMessage({
+                id: generateMsgId(),
                 role: 'assistant',
                 content: streaming.text || '*(cancelled)*',
                 timestamp: new Date().toISOString(),
@@ -477,6 +487,7 @@ export function useWebSocket(): void {
 
         case 'browser_error':
           chat().appendMessage({
+            id: generateMsgId(),
             role: 'system',
             content: `[browser:${event.level}]${event.source ? ` (${event.source})` : ''} ${event.message}`,
             timestamp: new Date().toISOString(),

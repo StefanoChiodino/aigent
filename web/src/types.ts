@@ -88,6 +88,8 @@ export interface ServerState {
   tasks: BackgroundTaskInfo[];
   pendingResults: number;
   queue: QueuedMessageInfo[];
+  /** Tool traces accumulated during the current streaming turn (for refresh recovery). */
+  streamingTraces?: ToolTrace[];
 }
 
 export interface ToolSummaryRecord {

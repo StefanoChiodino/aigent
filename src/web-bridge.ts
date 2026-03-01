@@ -9,13 +9,15 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { resolve, join, extname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { AgentClient } from './client.js';
 import { extensionBridge } from './ext-bridge.js';
-import type { ServerEvent, ServerState, BackgroundTaskInfo } from './protocol.js';
+import type { ServerEvent, ServerState, BackgroundTaskInfo, StreamingTrace } from './protocol.js';
 import type { ThinkingLevel } from './agent.js';
 import type { ExecPermissions, FetchPermissions, BrowserPermissions } from './safety.js';
 import { classifyBrowserAction } from './safety.js';
@@ -28,6 +30,19 @@ const log = createLogger('web-bridge');
 const __dirname = resolve(fileURLToPath(import.meta.url), '..');
 const WEB_DIR = resolve(__dirname, '..', 'web');
 const EXTENSION_DIST = resolve(__dirname, '..', 'aigent-extension', 'dist');
+
+// WSL detection: convert Linux path to Windows-accessible path for Chrome
+function getExtensionPath(): string {
+  try {
+    const isWSL = readFileSync('/proc/version', 'utf8').toLowerCase().includes('microsoft');
+    if (isWSL) {
+      return execSync(`wslpath -w "${EXTENSION_DIST}"`, { encoding: 'utf8' }).trim();
+    }
+  } catch { /* not WSL or wslpath unavailable */ }
+  return EXTENSION_DIST;
+}
+
+const EXTENSION_PATH_DISPLAY = getExtensionPath();
 
 type ClientSettings = Record<string, boolean | number | string>;
 
@@ -146,6 +161,68 @@ export async function startWebServer(
       cachedState = { ...cachedState, tasks: next };
     } else {
       cachedState = { ...cachedState, tasks: [...cachedState.tasks, task] };
+    }
+  });
+
+  // Accumulate streaming traces in cachedState so reconnecting browser clients
+  // can restore them via the `connected` event's streamingTraces field.
+  let bridgeTraces: StreamingTrace[] = [];
+  let bridgeTraceIdCounter = 0;
+
+  client.on('tool_start', (name: string, input: string, summary: string, model?: string, thinking?: string) => {
+    const trace: StreamingTrace = {
+      id: `trace-bridge-${++bridgeTraceIdCounter}-${Date.now()}`,
+      type: 'tool',
+      toolName: name,
+      toolSummary: summary,
+      toolInput: input,
+      toolOutput: '',
+      running: true,
+      ...(model ? { model } : {}),
+      ...(thinking ? { thinking } : {}),
+    };
+    bridgeTraces = [...bridgeTraces, trace];
+    if (cachedState) cachedState = { ...cachedState, streamingTraces: bridgeTraces };
+  });
+
+  client.on('tool_output', (content: string) => {
+    bridgeTraces = bridgeTraces.map((t, i) =>
+      i === bridgeTraces.length - 1 && t.running
+        ? { ...t, toolOutput: t.toolOutput + content }
+        : t
+    );
+    if (cachedState) cachedState = { ...cachedState, streamingTraces: bridgeTraces };
+  });
+
+  client.on('tool_images', (images: { mediaType: string; data: string }[]) => {
+    bridgeTraces = bridgeTraces.map((t, i) =>
+      i === bridgeTraces.length - 1 && t.running
+        ? { ...t, images: [...(t.images ?? []), ...images] }
+        : t
+    );
+    if (cachedState) cachedState = { ...cachedState, streamingTraces: bridgeTraces };
+  });
+
+  client.on('tool_end', () => {
+    // Mark the last running trace as done
+    const next = [...bridgeTraces];
+    for (let i = next.length - 1; i >= 0; i--) {
+      if (next[i]!.running) { next[i] = { ...next[i]!, running: false }; break; }
+    }
+    bridgeTraces = next;
+    if (cachedState) cachedState = { ...cachedState, streamingTraces: bridgeTraces };
+  });
+
+  // Reset trace buffer when a turn completes (message finalizes) or loading stops
+  client.on('message', () => {
+    bridgeTraces = [];
+    if (cachedState) { const { streamingTraces: _, ...rest } = cachedState; cachedState = rest as ServerState; }
+  });
+
+  client.on('loading', (isLoading: boolean) => {
+    if (!isLoading) {
+      bridgeTraces = [];
+      if (cachedState) { const { streamingTraces: _, ...rest } = cachedState; cachedState = rest as ServerState; }
     }
   });
 
@@ -512,7 +589,7 @@ export async function startWebServer(
       ttsAvailable: tts,
       sttAvailable: stt,
       extensionConnected: extensionBridge.isConnected(),
-      extensionPath: EXTENSION_DIST,
+      extensionPath: EXTENSION_PATH_DISPLAY,
     });
     if (ws) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
@@ -540,7 +617,7 @@ export async function startWebServer(
     broadcastToClients({
       type: 'host_state',
       extensionConnected: connected,
-      extensionPath: EXTENSION_DIST,
+      extensionPath: EXTENSION_PATH_DISPLAY,
     });
   };
   extensionBridge.on('connected', () => broadcastExtensionState(true));
@@ -643,8 +720,8 @@ export async function startWebServer(
       connected: (state: ServerState) => send({ type: 'connected', state }),
       text: (content: string) => send({ type: 'text', content }),
       thinking: (content: string) => send({ type: 'thinking', content }),
-      tool_start: (name: string, input: string, summary: string) =>
-        send({ type: 'tool_start', name, input, summary }),
+      tool_start: (name: string, input: string, summary: string, model?: string, thinking?: string) =>
+        send({ type: 'tool_start', name, input, summary, ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) }),
       tool_output: (content: string) => send({ type: 'tool_output', content }),
       tool_images: (images: { mediaType: string; data: string }[]) => send({ type: 'tool_images', images }),
       tool_end: () => send({ type: 'tool_end' }),

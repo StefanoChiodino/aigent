@@ -53,9 +53,10 @@ export function useWakeLock(): void {
     }
 
     // Start silent audio to prevent system sleep
-    function startSilentAudio() {
+    async function startSilentAudio() {
       try {
         const ctx = new AudioContext();
+        await ctx.resume(); // ensure context is running (autoplay policy)
         // Create a 1-second silent buffer, looped
         const buffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
         const src = ctx.createBufferSource();

@@ -163,6 +163,8 @@ export function useTTS(): TTSControls {
 
   const flushStream = useCallback((final = false): void => {
     if (!getAutoSpeak()) return;
+    // Never talk over the user — suppress TTS while mic is active
+    if (useVoiceStore.getState().micState !== 'idle') return;
     const streamText = useChatStore.getState().streaming.text;
 
     // Concise mode: responses wrap the TTS summary in <speak>...</speak>.

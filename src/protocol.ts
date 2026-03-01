@@ -106,6 +106,24 @@ export interface QueuedMessageInfo {
   displayText: string;
 }
 
+/**
+ * A single tool trace entry accumulated during a streaming turn.
+ * Matches the shape of ToolTrace in web/src/types.ts so the browser
+ * can restore streaming.traces on reconnect/refresh.
+ */
+export interface StreamingTrace {
+  id: string;
+  type: 'tool';
+  toolName: string;
+  toolSummary: string;
+  toolInput: string;
+  toolOutput: string;
+  running: boolean;
+  model?: string;
+  thinking?: string;
+  images?: { mediaType: string; data: string }[];
+}
+
 export interface ServerState {
   messages: DisplayMessage[];
   usage: TokenUsage;
@@ -120,6 +138,8 @@ export interface ServerState {
   tasks: BackgroundTaskInfo[];
   pendingResults: number;
   queue: QueuedMessageInfo[];
+  /** Tool traces accumulated during the current streaming turn (for refresh recovery). */
+  streamingTraces?: StreamingTrace[];
 }
 
 export type ServerEvent =
