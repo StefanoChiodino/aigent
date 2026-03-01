@@ -62,7 +62,7 @@ export const RatingWidget = React.memo(function RatingWidget({ messageId }: Prop
   const displayScore = open ? (hoverScore || pendingScore) : currentScore;
 
   return (
-    <span className={`rating-widget${currentScore > 0 ? ' rated' : ''}`}>
+    <span className={`rating-widget${currentScore > 0 ? ' rated' : ''}${open ? ' open' : ''}`}>
       <button
         ref={triggerRef}
         className={`rating-trigger${currentScore > 0 ? ' active' : ''}`}

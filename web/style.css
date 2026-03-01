@@ -626,7 +626,8 @@ html, body {
   transition: opacity 0.15s;
 }
 .message:hover .rating-widget,
-.rating-widget.rated {
+.rating-widget.rated,
+.rating-widget.open {
   opacity: 1;
 }
 .rating-trigger {

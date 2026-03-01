@@ -276,15 +276,18 @@ export function Sidebar() {
 
         {/* Input mode */}
         <div className="sidebar-section">
-          <div className="sidebar-label" style={{ cursor: 'pointer' }} onClick={() => useUIStore.getState().setShortcutsOpen(true)}>Input <span className="ctx-open-hint">?</span></div>
+          <div className="sidebar-label">Input{' '}<button className="sb-help" data-tip="Keyboard shortcuts (Ctrl+Shift+?)" title="Keyboard shortcuts" onClick={() => useUIStore.getState().setShortcutsOpen(true)}>?</button></div>
           <div className="sb-reasoning-controls">
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Multiline Enter</span>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Enter inserts newline</span>
             <button
               className={`sb-toggle${multilineEnter ? ' on' : ''}`}
               onClick={() => setClientSetting('AIGENT_MULTILINE_ENTER', !multilineEnter)}
             >
               {multilineEnter ? 'ON' : 'OFF'}
             </button>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+            {multilineEnter ? 'Ctrl+Enter to send' : 'Shift+Enter for newline'}
           </div>
         </div>
 
