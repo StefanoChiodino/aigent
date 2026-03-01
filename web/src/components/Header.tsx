@@ -122,16 +122,29 @@ export function Header() {
     <div id="header-wrap">
       <header id="header">
         <div id="header-left">
-          <span id="logo">aigent</span>
-          <span id="conn-badge" className={`badge ${status}`}>{status}</span>
-          <span ref={extBadgeRef} id="ext-badge" className={`badge ${extensionConnected ? 'ext-on' : 'ext-off'}`} title={extensionConnected ? 'Extension connected — click to copy extensions URL' : 'Extension not connected — click for setup'} onClick={(e) => {
-            if (extensionConnected) {
-              navigator.clipboard.writeText('chrome://extensions');
-              const el = e.currentTarget; el.dataset.copied = '1'; setTimeout(() => delete el.dataset.copied, 1500);
-            } else {
-              setExtSetupOpen(!extSetupOpen);
-            }
-          }} style={{ cursor: 'pointer' }}>🧩{!extensionConnected && extSetupOpen && (
+          <span id="logo"><span className="logo-ai">AI</span><span className="logo-dot">·</span>gent</span>
+          <span id="conn-badge" className={`conn-icon ${status}`} title={`Backend: ${status}`}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+              <circle cx="8" cy="13" r="2.5"/>
+              <path d="M3.5 8.5a6.5 6.5 0 0 1 9 0" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity={status === 'connected' ? 1 : 0.25}/>
+              <path d="M1 5.5a10 10 0 0 1 14 0" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity={status === 'connected' ? 1 : 0.25}/>
+            </svg>
+          </span>
+          <span ref={extBadgeRef} id="ext-badge" className={`conn-icon ${extensionConnected ? 'ext-on' : 'ext-off'}`}
+                title={extensionConnected ? 'Extension connected — click to copy extensions URL' : 'Extension not connected — click for setup'}
+                onClick={(e) => {
+                  if (extensionConnected) {
+                    navigator.clipboard.writeText('chrome://extensions');
+                    const el = e.currentTarget; el.dataset.copied = '1'; setTimeout(() => delete el.dataset.copied, 1500);
+                  } else {
+                    setExtSetupOpen(!extSetupOpen);
+                  }
+                }}
+                style={{ cursor: 'pointer' }}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+              <path d="M9 1.5a1.5 1.5 0 0 1 3 0V3h1.5A1.5 1.5 0 0 1 15 4.5V6h-1.5a1.5 1.5 0 0 0 0 3H15v1.5a1.5 1.5 0 0 1-1.5 1.5H12v1.5a1.5 1.5 0 0 1-3 0V12H7.5A1.5 1.5 0 0 1 6 10.5V9h1.5a1.5 1.5 0 0 0 0-3H6V4.5A1.5 1.5 0 0 1 7.5 3H9V1.5z"/>
+            </svg>
+            {!extensionConnected && extSetupOpen && (
             <div id="ext-setup-popup" className="ext-setup-popup">
               <strong>Extension Setup</strong>
               <ol>

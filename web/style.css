@@ -162,6 +162,20 @@ html, body {
   color: var(--accent);
   letter-spacing: -0.5px;
 }
+.logo-ai {
+  background: linear-gradient(135deg, var(--accent), #a78bfa, #60a5fa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: brightness(1.2);
+  font-weight: 800;
+}
+.logo-dot {
+  opacity: 0.4;
+  font-size: 10px;
+  vertical-align: middle;
+  margin: 0 1px;
+}
 
 .icon-btn {
   display: inline-flex;
@@ -413,6 +427,31 @@ html, body {
   color: var(--warning);
   background: rgba(224, 160, 64, 0.1);
   animation: pulse 1.5s ease-in-out infinite;
+}
+
+.conn-icon {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  transition: color 0.3s, opacity 0.3s;
+}
+.conn-icon.connected {
+  color: var(--success);
+}
+.conn-icon.connecting {
+  color: var(--text-dim);
+}
+.conn-icon.reconnecting {
+  color: var(--warning);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+.conn-icon.ext-on {
+  color: var(--success);
+}
+.conn-icon.ext-off {
+  color: var(--text-dim);
+  opacity: 0.4;
 }
 
 /* Wrapper makes the whole meter + hint clickable */
@@ -1206,10 +1245,9 @@ html, body {
 .cap-ext-off:hover {
   opacity: 1;
 }
-#ext-badge { font-size: 12px; padding: 2px 4px; }
+#ext-badge { font-size: 12px; }
 #ext-badge.ext-on { opacity: 1; }
-#ext-badge.ext-off { filter: grayscale(1) brightness(0.5); }
-#ext-badge.ext-off:has(.ext-setup-popup) { filter: none; }
+#ext-badge.ext-off:has(.ext-setup-popup) { opacity: 1; }
 #ext-badge[data-copied]::after {
   content: 'Copied chrome://extensions';
   position: absolute;

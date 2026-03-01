@@ -835,7 +835,7 @@ export class DemoPlaybackEngine {
     useRatingStore.getState().clearRatings();
     useUIStore.setState({
       permQueue: [], permShowing: false,
-      settingsOpen: false, shortcutsOpen: false, ctxInspectorOpen: false,
+      settingsOpen: false, shortcutsOpen: false, ctxInspectorOpen: false, tasksInspectorOpen: false,
       pendingAttachments: [],
       queuedMessages: [],
     });
