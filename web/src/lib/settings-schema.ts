@@ -568,6 +568,16 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     scope: 'client',
   },
   {
+    key: 'keybind_clearInput',
+    label: 'Clear input box',
+    desc: 'Comma-separated list of chords.',
+    group: 'Keybindings',
+    type: 'text',
+    default: 'Escape',
+    placeholder: 'Escape',
+    scope: 'client',
+  },
+  {
     key: 'keybind_showShortcuts',
     label: 'Show keyboard shortcuts',
     desc: 'Comma-separated list of chords.',

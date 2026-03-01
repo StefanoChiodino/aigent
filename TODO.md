@@ -98,6 +98,7 @@ The existing continuous learning system (episodes + ratings + friction tracking 
 
 - [x] **Browser extension** — fully implemented through Phase 3c.
 - [x] **Browser a11y tree** — `extract_a11y` returns structured element tree.
+- [ ] **STT → ask_user integration** — When the agent asks a question (via `ask_user`), should the STT transcript go directly into the answer input? Need to figure out UX: what happens to text already in the main input box? Options: park existing draft, append, or use a separate input context for ask_user responses.
 
 ---
 
