@@ -5,6 +5,7 @@ import { useUIStore } from '../stores/ui';
 import { useSettingsStore } from '../stores/settings';
 import { useVoiceStore } from '../stores/voice';
 import { useRatingStore } from '../stores/rating';
+import { STREAMING_MESSAGE_ID } from '../components/StreamingMessage';
 import { parseDiffIntoFiles } from '../lib/diff';
 import { captureScreenshot, startScreenShare } from '../lib/screen';
 import { playPermissionSound } from '../lib/audio';
@@ -175,6 +176,17 @@ export function useWebSocket(): void {
             const traces = chat().streaming.traces;
             chat().endStream();
             chat().appendMessage(event.message, traces);
+            // Transfer any rating set during streaming to the final message ID
+            const streamingRating = useRatingStore.getState().ratings[STREAMING_MESSAGE_ID];
+            if (streamingRating) {
+              useRatingStore.getState().remapRating(STREAMING_MESSAGE_ID, event.message.timestamp);
+              conn().send({
+                type: 'message_rating',
+                messageId: event.message.timestamp,
+                rating: streamingRating.score,
+                notes: streamingRating.notes,
+              });
+            }
           } else {
             chat().appendMessage(event.message);
           }

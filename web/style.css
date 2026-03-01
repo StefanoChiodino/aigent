@@ -931,7 +931,6 @@ html, body {
   overflow-y: auto;
   min-height: 0;
   scrollbar-width: thin;
-  scrollbar-gutter: stable;
 }
 
 #sb-tasks-section::-webkit-scrollbar {
