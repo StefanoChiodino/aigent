@@ -1046,6 +1046,7 @@ function getCommandContext(): CommandContext {
   return {
     agent,
     taskQueue,
+    provider: agentProvider ?? agent.underlyingProvider,
     get messages() { return messages; },
     set messages(v) { messages = v; },
     get usage() { return usage; },

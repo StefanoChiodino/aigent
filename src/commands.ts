@@ -6,7 +6,7 @@
  */
 
 import type { Agent, ThinkingLevel } from './agent.js';
-import type { UserContent, ProviderMessage } from './provider.js';
+import type { UserContent, ProviderMessage, Provider } from './provider.js';
 import type { ServerEvent, TokenUsage, DisplayAttachment } from './protocol.js';
 import type { TaskQueue } from './tasks.js';
 import { distillToMemory } from './compact.js';
@@ -24,6 +24,7 @@ import { readImageBase64 } from './image-support.js';
 export interface CommandContext {
   agent: Agent;
   taskQueue: TaskQueue;
+  provider: Provider;
 
   // State (read/write)
   get messages(): import('./protocol.js').DisplayMessage[];
@@ -483,6 +484,44 @@ const commands: CommandDef[] = [
     },
   },
 
+  // --- /reflect ---
+  {
+    match: '/reflect',
+    execute: (_input, ctx) => {
+      ctx.addSystemMessage('Running reflection — mining patterns from recent episodes…');
+      void (async () => {
+        try {
+          const { runReflection } = await import('./reflection.js');
+          const result = await Promise.race([
+            runReflection(ctx.provider, ctx.workspacePath),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Reflection timed out after 30s')), 30_000),
+            ),
+          ]);
+
+          const lines: string[] = ['Reflection complete.'];
+          lines.push(`  Patterns found: ${result.patternsFound}`);
+          lines.push(`  MEMORY.md updated: ${result.memoryUpdated ? 'yes' : 'no'}`);
+          lines.push(`  TODO.md updated:   ${result.todoUpdated ? 'yes' : 'no'}`);
+          if (result.insights.length > 0) {
+            lines.push('  Insights:');
+            for (const insight of result.insights) {
+              lines.push(`    • ${insight}`);
+            }
+          }
+          if (result.patternsFound === 0) {
+            lines.push('  (No recurring patterns found — need more episodes or they are already documented.)');
+          }
+          ctx.addSystemMessage(lines.join('\n'));
+        } catch (err: unknown) {
+          const msg = (err as { message?: string }).message ?? 'unknown error';
+          ctx.addSystemMessage(`Reflection failed: ${msg}`);
+        }
+      })();
+      return true;
+    },
+  },
+
   // --- /help ---
   {
     match: '/help',
@@ -493,6 +532,7 @@ const commands: CommandDef[] = [
         '  /restart            Restart server (picks up code changes)\n' +
         '  /refresh            Reload workspace files\n' +
         '  /compact            Compact context (free up space)\n' +
+        '  /reflect            Mine patterns from episodes → update MEMORY.md & TODO.md\n' +
         '  /reasoning on|off   Toggle reasoning\n' +
         '  /effort <level>     Set effort (low/medium/high/max)\n' +
         '  /short on|off       Short/voice mode (brief plain-text replies)\n' +
