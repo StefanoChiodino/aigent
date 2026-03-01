@@ -88,6 +88,7 @@ interface GatekeeperArgs {
   model?: string;
   thinking?: string;
   headless: boolean;
+  watch: boolean;
   provider?: string;
   baseURL?: string;
   apiKey?: string;
@@ -174,7 +175,7 @@ const IS_TEST_MODE = process.env['AIGENT_TEST_MODE'] === '1';
 
 function parseArgs(): GatekeeperArgs {
   const args = process.argv.slice(2);
-  const result: GatekeeperArgs = { headless: false };
+  const result: GatekeeperArgs = { headless: false, watch: false };
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -184,6 +185,8 @@ function parseArgs(): GatekeeperArgs {
       result.thinking = args[++i]!;
     } else if (arg === '--headless') {
       result.headless = true;
+    } else if (arg === '--watch') {
+      result.watch = true;
     } else if (arg === '--provider' && args[i + 1]) {
       result.provider = args[++i]!;
     } else if (arg === '--base-url' && args[i + 1]) {
@@ -199,6 +202,7 @@ Options:
   --model <model>        Model to use (default: claude-opus-4-6)
   --thinking <level>     Thinking level: off, low, medium, high, max
   --headless             Web UI only, no terminal interface
+  --watch                Watch src/ for changes, auto-restart server (preserves gatekeeper)
   --provider <type>      LLM provider: anthropic (default) or openai
   --base-url <url>       Base URL for OpenAI-compatible endpoint
   --api-key <key>        API key / token for the LLM provider
@@ -384,9 +388,10 @@ async function restartServer(): Promise<void> {
   }
 }
 
-// --- File watcher (self-modification auto-restart, ported from worker.ts) ---
+// --- File watcher (auto-restart server on src/ changes, rebuild web on web/src/ changes) ---
 
 const SRC_DIR = join(REPO_DIR, 'src');
+const WEB_SRC_DIR = join(REPO_DIR, 'web', 'src');
 
 function getFileHashes(dir: string): Map<string, number> {
   const hashes = new Map<string, number>();
@@ -397,7 +402,7 @@ function getFileHashes(dir: string): Map<string, number> {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
         for (const [k, v] of getFileHashes(full)) hashes.set(k, v);
-      } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+      } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx') || entry.name.endsWith('.css')) {
         try {
           hashes.set(full, statSync(full).mtimeMs);
         } catch {}
@@ -407,47 +412,73 @@ function getFileHashes(dir: string): Map<string, number> {
   return hashes;
 }
 
-let lastFileHashes = getFileHashes(SRC_DIR);
+let lastSrcHashes = getFileHashes(SRC_DIR);
+let lastWebHashes = getFileHashes(WEB_SRC_DIR);
 let fileWatchDebounce: ReturnType<typeof setTimeout> | null = null;
 
 function startFileWatcher(): void {
   setInterval(() => {
-    const current = getFileHashes(SRC_DIR);
-    let changed = false;
-    for (const [file, mtime] of current) {
-      if (lastFileHashes.get(file) !== mtime) {
-        changed = true;
-        break;
-      }
+    // Check server-side src/ changes
+    const currentSrc = getFileHashes(SRC_DIR);
+    let srcChanged = false;
+    for (const [file, mtime] of currentSrc) {
+      if (lastSrcHashes.get(file) !== mtime) { srcChanged = true; break; }
     }
-    if (current.size !== lastFileHashes.size) changed = true;
+    if (currentSrc.size !== lastSrcHashes.size) srcChanged = true;
 
-    if (changed) {
-      lastFileHashes = current;
-      if (fileWatchDebounce) clearTimeout(fileWatchDebounce);
-      fileWatchDebounce = setTimeout(() => {
-        fileWatchDebounce = null;
+    // Check web/src/ changes
+    const currentWeb = getFileHashes(WEB_SRC_DIR);
+    let webChanged = false;
+    for (const [file, mtime] of currentWeb) {
+      if (lastWebHashes.get(file) !== mtime) { webChanged = true; break; }
+    }
+    if (currentWeb.size !== lastWebHashes.size) webChanged = true;
 
-        // Typecheck before restarting
-        log.info('Source files changed — typechecking');
+    if (!srcChanged && !webChanged) return;
+    if (srcChanged) lastSrcHashes = currentSrc;
+    if (webChanged) lastWebHashes = currentWeb;
+
+    if (fileWatchDebounce) clearTimeout(fileWatchDebounce);
+    fileWatchDebounce = setTimeout(() => {
+      fileWatchDebounce = null;
+
+      // Typecheck before anything
+      log.info('Source files changed — typechecking');
+      try {
+        execSync('npx tsc --noEmit', {
+          cwd: REPO_DIR,
+          stdio: ['ignore', 'ignore', 'pipe'],
+          timeout: 30_000,
+        });
+        log.info('Typecheck passed');
+      } catch (err: unknown) {
+        const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
+        const errorLines = stderr.split('\n').filter((l: string) => l.includes('error TS')).slice(0, 5);
+        const detail = errorLines.length > 0 ? errorLines.map((l: string) => l.trim()).join('; ') : stderr.slice(0, 500);
+        log.warn('Typecheck failed — not reloading', { errors: detail });
+        return;
+      }
+
+      // Rebuild web UI if web sources changed
+      if (webChanged) {
+        log.info('Rebuilding web UI');
         try {
-          execSync('npx tsc --noEmit', {
+          execSync('npx vite build --config web/vite.config.ts', {
             cwd: REPO_DIR,
             stdio: ['ignore', 'ignore', 'pipe'],
             timeout: 30_000,
           });
-          log.info('Typecheck passed — restarting server');
+          log.info('Web build complete');
         } catch (err: unknown) {
           const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
-          const errorLines = stderr.split('\n').filter((l: string) => l.includes('error TS')).slice(0, 5);
-          const detail = errorLines.length > 0 ? errorLines.map((l: string) => l.trim()).join('; ') : stderr.slice(0, 500);
-          log.warn('Typecheck failed — not restarting', { errors: detail });
-          return;
+          log.warn('Web build failed', { error: stderr.slice(0, 500) });
         }
+      }
 
-        void restartServer();
-      }, 2000);
-    }
+      // Restart server (which also restarts web-bridge serving new static files)
+      log.info('Restarting server');
+      void restartServer();
+    }, 2000);
   }, 1000);
 }
 
@@ -2088,7 +2119,7 @@ if (!process.env['AIGENT_TEST_MODE']) {
     await waitForSocket();
     log.info('Server ready');
     // Optional file watcher for self-modification auto-restart (opt-in)
-    if (process.env['AIGENT_AUTO_RELOAD'] === '1') {
+    if (gatekeeperArgs.watch || process.env['AIGENT_AUTO_RELOAD'] === '1') {
       startFileWatcher();
       log.info('Auto-reload enabled (watching src/ for changes)');
     }
