@@ -10,6 +10,7 @@ export const COMMANDS: CommandDef[] = [
   { name: '/compact',   desc: 'Compact context' },
   { name: '/refresh',   desc: 'Reload workspace files' },
   { name: '/restart',   desc: 'Restart server' },
+  { name: '/reload',    desc: 'Typecheck → build → restart server' },
   { name: '/reasoning', desc: 'Toggle reasoning',          argHint: 'on|off' },
   { name: '/effort',    desc: 'Set effort level',          argHint: 'low|medium|high|max' },
   { name: '/short',     desc: 'Short/voice mode',            argHint: 'on|off' },

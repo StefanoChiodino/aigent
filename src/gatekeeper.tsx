@@ -511,7 +511,7 @@ function cleanupAll(): void {
 // --- Command interception ---
 
 /** Commands the gatekeeper handles locally (not forwarded to worker). */
-const GATEKEEPER_COMMANDS = new Set(['/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-file', '/deny-file', '/approve-fetchsize', '/deny-fetchsize', '/approve-mcp', '/deny-mcp', '/approve-browser-write', '/deny-browser-write', '/set-env']);
+const GATEKEEPER_COMMANDS = new Set(['/approve', '/reject', '/preview', '/approve-patch', '/reject-patch', '/approve-exec', '/deny-exec', '/approve-fetch', '/deny-fetch', '/approve-file', '/deny-file', '/approve-fetchsize', '/deny-fetchsize', '/approve-mcp', '/deny-mcp', '/approve-browser-write', '/deny-browser-write', '/set-env', '/reload']);
 
 function isGatekeeperCommand(input: string): boolean {
   const cmd = input.trim().split(/\s+/)[0]?.toLowerCase();
@@ -583,6 +583,51 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   const cmd = parts[0]?.toLowerCase();
 
   switch (cmd) {
+    case '/reload': {
+      injectSystemMessage('Reloading: running typecheck…');
+      void (async () => {
+        // Step 1: Typecheck
+        try {
+          execSync('npx tsc --noEmit', {
+            cwd: REPO_DIR,
+            stdio: ['ignore', 'ignore', 'pipe'],
+            timeout: 30_000,
+          });
+          log.info('/reload: typecheck passed');
+        } catch (err: unknown) {
+          const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
+          const errorLines = stderr.split('\n').filter((l: string) => l.includes('error TS')).slice(0, 5);
+          const detail = errorLines.length > 0 ? errorLines.map((l: string) => l.trim()).join('\n') : stderr.slice(0, 500);
+          injectSystemMessage(`Reload aborted — typecheck failed:\n${detail}`);
+          log.warn('/reload: typecheck failed', { errors: detail });
+          return;
+        }
+
+        // Step 2: Vite build
+        injectSystemMessage('Typecheck passed. Building web UI…');
+        try {
+          execSync('npx vite build --config web/vite.config.ts', {
+            cwd: REPO_DIR,
+            stdio: ['ignore', 'ignore', 'pipe'],
+            timeout: 60_000,
+          });
+          log.info('/reload: vite build complete');
+        } catch (err: unknown) {
+          const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
+          injectSystemMessage(`Reload aborted — web build failed:\n${stderr.slice(0, 500)}`);
+          log.warn('/reload: vite build failed', { error: stderr.slice(0, 500) });
+          return;
+        }
+
+        // Step 3: Restart server
+        injectSystemMessage('Build complete. Restarting server…');
+        log.info('/reload: restarting server');
+        await restartServer();
+        injectSystemMessage('Server reloaded.');
+      })();
+      break;
+    }
+
     case '/set-env': {
       const jsonStr = input.slice('/set-env'.length).trim();
       let updates: Record<string, boolean | number | string>;

@@ -204,6 +204,18 @@ const commands: CommandDef[] = [
     },
   },
 
+  // --- /reload ---
+  // Note: /reload is intercepted by the gatekeeper (typecheck → build → restart).
+  // This entry is a fallback for environments where the gatekeeper is not running.
+  {
+    match: '/reload',
+    execute: (_input, ctx) => {
+      ctx.addSystemMessage('Reloading server (typecheck → build → restart)...\nNote: /reload is normally handled by the gatekeeper.');
+      setTimeout(() => ctx.requestRestart(), 200);
+      return true;
+    },
+  },
+
   // --- /reasoning ---
   {
     match: (input) => input === '/reasoning' || input === '/reasoning on' || input === '/reasoning off',
@@ -530,6 +542,7 @@ const commands: CommandDef[] = [
         'Commands:\n' +
         '  /reset              Clear conversation\n' +
         '  /restart            Restart server (picks up code changes)\n' +
+        '  /reload             Typecheck → build → restart (explicit full reload)\n' +
         '  /refresh            Reload workspace files\n' +
         '  /compact            Compact context (free up space)\n' +
         '  /reflect            Mine patterns from episodes → update MEMORY.md & TODO.md\n' +
