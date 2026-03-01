@@ -4,6 +4,86 @@ Completed items moved here to keep `TODO.md` focused on active work.
 
 ---
 
+## Archived 2026-03-01
+
+### Completed / Resolved (top-level)
+
+- ~~HELP ME PUBLISH THIS TO NPM!~~ ✓ Published as `@stefanochiodino/aigent`
+- ~~I often notice that when an agent is spawn instead of being completely asynchronous, it the agent seems to be waiting for those results and I don't quite understand why.~~ ✓ Behavioral — using dispatch_task (non-blocking) instead of spawn_agent (blocking)
+- ~~The microphone often resets to the default which is incorrect and needs to be sticky to the one that I pick. Why is it so difficult?~~ ✓ Fixed — now persists device label alongside ID, re-matches by label when Chrome regenerates IDs (f764229)
+- ~~keybindings should be configurable in the settings, and not just typing text, but capturing the keybindings~~ ✓ Implemented — configurable keybindings in settings with ⌨ Record capture button
+
+### Security & Safety (completed)
+
+- [x] **SSRF: pin curl to resolved IP** — `validateFetchUrlDns()` returns resolved IPs; curl receives `--resolve host:port:IP` flags.
+- [x] **MCP server permission model** — per-server/tool allow/deny/prompt in `settings.json`.
+
+### UI / UX (completed)
+
+- [x] **Browser extension** — fully implemented through Phase 3c.
+- [x] **Browser a11y tree** — `extract_a11y` returns structured element tree.
+
+### Browser Automation (completed)
+
+- [x] **Phase 3c — Destructive action heuristics** — destructive browser actions flagged with warning icon, per-action confirmation required.
+- [x] **Phase 4a — CDP DevTools** — `devtools_start`/`devtools_snapshot`/`devtools_stop` actions. Attaches Chrome DevTools Protocol to capture network requests, console output, JS exceptions, and performance metrics in real time.
+- [x] **Phase 4b — Context menu** — "Send to aigent" right-click menu. Selected text, links, or images are injected into the conversation as a user message.
+- [x] **Phase 4c — Playwright fallback** — when the Chrome extension is not connected, browser_ext tool falls back to headless Chromium via `playwright-core`. Same action interface. Optional peer dependency (`npm install playwright-core`).
+
+### Extensibility & Docs (completed)
+
+- [x] **README: MCP permissions** — documented in README.md.
+
+### Future / Low Priority (completed)
+
+- [x] **Packaging / installer** — `npm install -g @stefanochiodino/aigent` + `aigent init` wizard. `src/xdg.ts`, `src/init.ts`, `src/cli.ts`.
+- [x] **TTS/STT one-click setup** — handled by `aigent init`.
+
+### What Was Done This Session (2026-03-01)
+
+#### Reflection Agent — COMPLETE
+
+Implemented `src/reflection.ts` — the cross-session pattern mining system. This is Pillar 2 of the continuous learning system (see `docs/design-continuous-learning.md`).
+
+**What it does:**
+- Runs automatically at shutdown (SIGTERM/SIGINT) and `/reset`, after `distillToMemory()`
+- Loads the last 50 episodes from `workspace/episodes.ndjson`
+- Asks Haiku (`claude-haiku-4-5-20251001`) to find recurring patterns — friction, success patterns, low-rated episodes, cost anomalies
+- Appends actionable insights to `workspace/MEMORY.md` under `## Reflection Insights (auto-generated)`
+- Appends improvement suggestions to `TODO.md` under `## Reflection-Suggested`
+- Writes audit record to `workspace/reflections.ndjson`
+- Skips entirely if fewer than 5 episodes exist (not enough data for patterns)
+- Cost: ~$0.005 per reflection call
+
+**Files:**
+- `src/reflection.ts` — core module (~180 lines)
+- `src/reflection.test.ts` — 17 unit tests (mock provider, no real LLM calls)
+- `src/server.ts` — integrated into shutdown handler (after distillToMemory, before MCP shutdown)
+- `src/commands.ts` — chained after distillToMemory in `/reset` handler (fire-and-forget)
+
+**Design decisions:**
+- Direct Haiku call, NOT `dispatch_task` — at shutdown the server is closing, background tasks won't complete
+- Runs AFTER `distillToMemory()` — distill rewrites MEMORY.md, then reflection appends to a marked section, avoiding conflicts
+- Always on — no env var or config gate (user explicitly rejected opt-in patterns)
+- Minimum 5 episodes threshold prevents calling the LLM on too little data
+
+### Continuous Learning System — Status (all phases done/deferred)
+
+> Full design: `docs/design-continuous-learning.md`
+> Implementation phases in `docs/PLAN.md` under "Continuous Learning"
+
+| Phase | Status | Description | Files |
+|-------|--------|-------------|-------|
+| **1. Episode Logging** | DONE | NDJSON storage, `log_episode` + `query_episodes` tools, auto-log on reset/shutdown, domain inference, 10MB rotation | `src/episodes.ts`, 37 tests |
+| **2. Reflection Agent** | DONE | Haiku-powered pattern mining at session boundaries, MEMORY.md + TODO.md updates, NDJSON audit log | `src/reflection.ts`, 17 tests |
+| **3. Self-Review** | DEFERRED | Optional: agent reviews its own work via browser extension + episode history. Original two-instance self-play harness deemed over-engineered — the agent can already inspect its own UI and evaluate past performance using existing infrastructure. | — |
+| **4. Feedback Collection** | DONE | UI rating widget (1-5 dots), compaction-triggered episodes, automated friction signals | `web/src/components/ChatView.tsx`, `src/server.ts`, 22 tests |
+| **5. Semantic Retrieval** | DONE | Local neural embeddings (all-MiniLM-L6-v2), `search_episodes` tool, proactive retrieval, auto-indexing | `src/embeddings.ts`, `src/episode-index.ts`, 23 tests |
+
+**Self-Review (optional, deferred):** Originally designed as a two-instance "self-play harness" where the agent would spin up a second copy and drive it via the browser. Deemed over-engineered — the agent can already inspect its own UI via the browser extension and review its own work via episode history, tool call logs, and the reflection system. If revisited, additions would be: a task library (structured prompts with eval criteria), a `/self-review` command, and tagging self-review episodes with `source: 'self-review'`.
+
+---
+
 ## UI / UX
 
 - [x] **Message queue chip UI** — queued messages now appear as dismissable chips above the input bar (not `[queued]` chat bubbles). Per-message cancel via ✕ button removes from server queue. New `queue_update` protocol event syncs queue state to all connected clients.

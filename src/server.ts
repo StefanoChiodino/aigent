@@ -628,7 +628,7 @@ async function processAgentTurn(
       signal: controller.signal,
       onText: (text) => {
         if (controller.signal.aborted) return;
-        broadcast({ type: 'text', content: text });
+        broadcast({ type: 'text', content: _ensureSpeakTag(text, currentShort) });
       },
       onThinking: (text) => {
         if (controller.signal.aborted) return;
