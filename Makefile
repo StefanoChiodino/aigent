@@ -8,7 +8,7 @@ dev-ts:
 		--names "gate,web,plugin" \
 		--prefix-colors "cyan,blue,green" \
 		--kill-others-on-fail \
-		"npx tsx src/gatekeeper.tsx --headless $(ARGS)" \
+		"npx tsx --watch --clear-screen=false src/gatekeeper.tsx --headless $(ARGS)" \
 		"npx vite dev --config web/vite.config.ts" \
 		"cd aigent-extension && npm run dev"
 
@@ -18,7 +18,7 @@ dev: kill-ports
 		--names "gate,web,tts,stt,plugin" \
 		--prefix-colors "cyan,blue,yellow,magenta,green" \
 		--kill-others-on-fail \
-		"npx tsx src/gatekeeper.tsx --headless $(ARGS)" \
+		"npx tsx --watch --clear-screen=false src/gatekeeper.tsx --headless $(ARGS)" \
 		"npx vite dev --config web/vite.config.ts" \
 		"$(TTS_PYTHON) tts/main.py" \
 		"$(STT_PYTHON) stt/main.py --eager" \
