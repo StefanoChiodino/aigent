@@ -174,7 +174,7 @@ html, body {
   opacity: 0.4;
   font-size: 10px;
   vertical-align: middle;
-  margin: 0 1px;
+  margin: 0 -1px;
 }
 
 .icon-btn {
@@ -435,6 +435,29 @@ html, body {
   padding: 2px;
   border-radius: 4px;
   transition: color 0.3s, opacity 0.3s;
+  position: relative;
+}
+.conn-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-2, #1e1e2e);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.conn-icon:hover .conn-tooltip {
+  opacity: 1;
 }
 .conn-icon.connected {
   color: var(--success);
