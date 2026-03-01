@@ -1725,9 +1725,24 @@ function writeEndOfSessionSummary(): void {
 let restartRequested = false;
 let isShuttingDown = false;
 
-async function shutdown(): Promise<void> {
+/**
+ * Shutdown the server.
+ *
+ * @param skipDistill - When true (SIGTERM from gatekeeper restart), skip the slow
+ *   distillation and reflection passes and delete the socket immediately so the
+ *   new process can bind without interference.  Only run distillation for
+ *   user-initiated restarts (exit code 100) and clean exits (SIGINT).
+ */
+async function shutdown(skipDistill = false): Promise<void> {
   if (isShuttingDown) return;
   isShuttingDown = true;
+
+  // Delete the socket and close the server IMMEDIATELY so the new process can
+  // bind without waiting for distillation (which can take up to 60 s).
+  server.close();
+  if (existsSync(SOCKET_PATH)) {
+    try { unlinkSync(SOCKET_PATH); } catch { /* ignore */ }
+  }
 
   // If the agent was mid-tool-loop, cancel before saving to avoid
   // autosaving a conversation that ends with tool_result (which would
@@ -1743,6 +1758,13 @@ async function shutdown(): Promise<void> {
   // state is preserved even if docker SIGKILL arrives during distillation.
   saveLifetimeUsage(workspacePath, usage);
   doAutoSave();
+
+  if (skipDistill) {
+    // SIGTERM from gatekeeper — the new process is already starting, skip slow work.
+    if (mcpManager) mcpManager.shutdown();
+    process.exit(restartRequested ? 100 : 0);
+    return;
+  }
 
   // Auto-log episode if agent didn't explicitly log one
   try {
@@ -1792,10 +1814,6 @@ async function shutdown(): Promise<void> {
   }
 
   if (mcpManager) mcpManager.shutdown();
-  server.close();
-  if (existsSync(SOCKET_PATH)) {
-    try { unlinkSync(SOCKET_PATH); } catch { /* ignore */ }
-  }
   process.exit(restartRequested ? 100 : 0);
 }
 
@@ -1804,8 +1822,10 @@ function requestRestart(): void {
   void shutdown();
 }
 
-process.on('SIGTERM', () => { void shutdown(); });
-process.on('SIGINT', () => { void shutdown(); });
+// SIGTERM = gatekeeper is restarting us — skip slow distillation, release socket immediately
+process.on('SIGTERM', () => { void shutdown(true); });
+// SIGINT = user Ctrl+C — run full shutdown including distillation
+process.on('SIGINT', () => { void shutdown(false); });
 
 // Keep alive
 setInterval(() => {}, 60_000);

@@ -14,6 +14,7 @@
 import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, unlinkSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { resolve, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -325,7 +326,7 @@ function startServerProcess(): void {
     serverProcess = null;
 
     if (isRestarting) {
-      setTimeout(startServerProcess, 300);
+      // restartServer() is already managing the restart — don't spawn a second process
       return;
     }
 
@@ -360,6 +361,10 @@ function startServerProcess(): void {
 }
 
 async function restartServer(): Promise<void> {
+  if (isRestarting) {
+    log.info('restartServer: already restarting — skipping');
+    return;
+  }
   isRestarting = true;
 
   if (serverProcess) {
@@ -442,6 +447,11 @@ function startFileWatcher(): void {
     fileWatchDebounce = setTimeout(() => {
       fileWatchDebounce = null;
 
+      if (isRestarting) {
+        log.info('File change detected but restart already in progress — skipping');
+        return;
+      }
+
       // Typecheck before anything
       log.info('Source files changed — typechecking');
       try {
@@ -485,7 +495,15 @@ function startFileWatcher(): void {
 async function waitForSocket(timeoutMs = 60_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (existsSync(SOCKET_PATH)) return;
+    if (existsSync(SOCKET_PATH)) {
+      // Verify the socket is actually connectable, not just present on disk
+      const ok = await new Promise<boolean>((resolve) => {
+        const sock = createConnection(SOCKET_PATH);
+        sock.on('connect', () => { sock.destroy(); resolve(true); });
+        sock.on('error', () => { resolve(false); });
+      });
+      if (ok) return;
+    }
     await new Promise<void>((r) => setTimeout(r, 200));
   }
   throw new Error(`Worker socket not found after ${Math.round(timeoutMs / 1000)}s`);
@@ -584,46 +602,65 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
 
   switch (cmd) {
     case '/reload': {
+      const ttyLog = (msg: string) => process.stdout.write(`[reload] ${msg}\n`);
       injectSystemMessage('Reloading: running typecheck…');
       void (async () => {
         // Step 1: Typecheck
+        ttyLog('Running typecheck…');
+        log.info('/reload: starting typecheck');
         try {
           execSync('npx tsc --noEmit', {
             cwd: REPO_DIR,
             stdio: ['ignore', 'ignore', 'pipe'],
             timeout: 30_000,
           });
+          ttyLog('Typecheck passed ✓');
           log.info('/reload: typecheck passed');
         } catch (err: unknown) {
           const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
           const errorLines = stderr.split('\n').filter((l: string) => l.includes('error TS')).slice(0, 5);
           const detail = errorLines.length > 0 ? errorLines.map((l: string) => l.trim()).join('\n') : stderr.slice(0, 500);
+          ttyLog(`Typecheck FAILED ✗\n${detail}`);
           injectSystemMessage(`Reload aborted — typecheck failed:\n${detail}`);
           log.warn('/reload: typecheck failed', { errors: detail });
           return;
         }
 
         // Step 2: Vite build
+        ttyLog('Building web UI…');
         injectSystemMessage('Typecheck passed. Building web UI…');
+        log.info('/reload: starting vite build');
         try {
           execSync('npx vite build --config web/vite.config.ts', {
             cwd: REPO_DIR,
             stdio: ['ignore', 'ignore', 'pipe'],
             timeout: 60_000,
           });
+          ttyLog('Vite build complete ✓');
           log.info('/reload: vite build complete');
         } catch (err: unknown) {
           const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
+          ttyLog(`Vite build FAILED ✗\n${stderr.slice(0, 500)}`);
           injectSystemMessage(`Reload aborted — web build failed:\n${stderr.slice(0, 500)}`);
           log.warn('/reload: vite build failed', { error: stderr.slice(0, 500) });
           return;
         }
 
         // Step 3: Restart server
+        ttyLog('Restarting server…');
         injectSystemMessage('Build complete. Restarting server…');
         log.info('/reload: restarting server');
-        await restartServer();
-        injectSystemMessage('Server reloaded.');
+        try {
+          await restartServer();
+          ttyLog('Server reloaded ✓');
+          injectSystemMessage('Server reloaded.');
+          log.info('/reload: restart complete');
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          ttyLog(`Server restart FAILED ✗ — ${msg}`);
+          injectSystemMessage(`Server reload failed: ${msg}`);
+          log.error('/reload: restart failed', { error: msg });
+        }
       })();
       break;
     }

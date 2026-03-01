@@ -4,9 +4,13 @@
 
 When the text comes streaming down the first part of the text that is actually the short answer displays and then as soon as it finishes it is wiped and then replaced by the full answer. That is quite jarring and should stop.
 
+add syntax highlighting in the chat for code blocks
+
 ## Active Bugs
 
-- [ ] **Streaming text wipe bug** — Short answer renders during streaming, then gets wiped/replaced when full response arrives. Root cause: `_ensureSpeakTag()` transforms final content in `server.ts:747` so the committed message differs from what was streamed. Fix: either apply the transform during streaming too, or use raw streamed text as final.
+a bug was reintroduced where in short speech mode the audio produced is literally "speech" :(
+
+- [x] **Streaming text wipe bug** — Fixed in commit `dcda5bc`. Applied `ensureSpeakTag` during streaming `onText` callback so streamed text matches the final committed message.
 - [ ] **Agent iteration limits** — Sub-agents and the main agent frequently hit tool-use iteration limits mid-task. Need to investigate: better iteration budgets, auto-continuation, task decomposition strategies, or a way for agents to self-checkpoint and resume.
 - [ ] **Mic speech truncation (parked)** — 5 code-level bugs identified (worklet flush, abort race, window-cap, energy gate, live timeout) but symptoms are intermittent and likely mic-hardware-dependent. Revisit if it recurs with the Razer mic. See MEMORY.md for full analysis.
 
@@ -31,6 +35,7 @@ When the text comes streaming down the first part of the text that is actually t
 
 ## UI / UX
 
+- [ ] **Edit queued messages** — Messages in the send queue should have an "edit" action that moves the message text back into the input box for editing. Guard: only allow if input box is currently empty (or prompt to discard current draft). Remove the message from the queue when pulled back.
 - [ ] **Undo Escape clear** — When Escape clears the input box, Ctrl+Z (or just Escape again?) should restore the previous text. Store last cleared draft and allow undo.
 - [ ] **STT → ask_user integration** — When the agent asks a question (via `ask_user`), should the STT transcript go directly into the answer input? Need to figure out UX: what happens to text already in the main input box? Options: park existing draft, append, or use a separate input context for ask_user responses.
 
