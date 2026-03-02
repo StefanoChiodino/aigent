@@ -357,10 +357,10 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'tools_summarizeLargeResults',
     label: 'Summarize large results',
-    desc: 'Summarize tool outputs that exceed the token threshold.',
+    desc: 'Summarize tool outputs that exceed the token threshold. Full output saved to disk for retrieval.',
     group: 'Context',
     type: 'toggle',
-    default: false,
+    default: true,
     scope: 'client',
   },
   {
@@ -369,7 +369,7 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     desc: 'Tool outputs larger than this (in tokens) will be summarized.',
     group: 'Context',
     type: 'number',
-    default: 500,
+    default: 300,
     min: 100,
     max: 10000,
     step: 100,
@@ -389,10 +389,10 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
   {
     key: 'tools_summarizeMode',
     label: 'Tool filter mode',
-    desc: 'allowlist: only summarize checked tools. blocklist: all except checked. all: every tool.',
+    desc: 'blocklist: summarize all except checked tools. allowlist: only checked. all: every tool.',
     group: 'Context',
     type: 'select',
-    default: 'allowlist',
+    default: 'blocklist',
     options: [
       { value: 'allowlist', label: 'Allowlist (only checked)' },
       { value: 'blocklist', label: 'Blocklist (all except checked)' },

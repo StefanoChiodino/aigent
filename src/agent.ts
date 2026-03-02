@@ -37,6 +37,14 @@ that need to be reflected in your next steps.
 Never default to "I'll just do it myself" for multi-step work. The right move is almost always:
 think about what's parallelizable, dispatch those parts, handle the synthesis yourself.
 
+## Tool Result Retrieval
+
+Large tool outputs are automatically summarized to save context. When you see
+"[Full output (N tokens) → /tmp/aigent/tool-results/...]", the complete output
+is available on disk. To analyze it in detail, spawn a cheap sub-agent (Haiku)
+to read and extract what you need — do NOT pull the full output into your own
+context with read_file, as that defeats the purpose of summarization.
+
 ## Your Own Source Code
 
 You are a self-authoring agent. Your source code lives directly on the host filesystem.
@@ -136,6 +144,8 @@ export class Agent {
   private extraSystemPrompt: string;
   /** Track image hashes to deduplicate identical screenshots/images in tool results. */
   private seenImageHashes = new Set<string>();
+  /** Active capabilities — used to dynamically filter tools per API call. */
+  private capabilities = new Set<string>();
   private compactPromise: Promise<void> | null = null;
   /** Track tool results that were summarized to save context tokens. */
   private toolSummaries = new Map<string, ToolSummaryRecord>();
@@ -350,12 +360,27 @@ export class Agent {
             const summarized = await this.maybeSummarizeToolResult(tc.id, toolName, result);
             const effective = summarized ?? result;
             const maxLen = this.getToolOutputMaxChars(effective.length);
-            const truncated = effective.length > maxLen
-              ? effective.slice(0, maxLen) + `\n\n... [truncated, ${effective.length} bytes total]`
-              : effective;
+            let truncated: string;
+            if (effective.length > maxLen) {
+              // Persist full output to disk so sub-agents can retrieve it on demand.
+              // maybeSummarizeToolResult already stores when it runs; this covers
+              // the fallback path when summarization is disabled or skipped.
+              const fullPath = summarized ? null : this.storeFullToolOutput(tc.id, result);
+              // Head + tail truncation: keep 70% head + 20% tail so error messages
+              // and final results (which tend to be at the end) are preserved.
+              const headLen = Math.floor(maxLen * 0.7);
+              const tailLen = Math.floor(maxLen * 0.2);
+              const head = effective.slice(0, headLen);
+              const tail = effective.slice(-tailLen);
+              const omitted = effective.length - headLen - tailLen;
+              const pathHint = fullPath ? ` — full output at ${fullPath}` : '';
+              truncated = head + `\n\n... [${omitted} chars omitted${pathHint}]\n\n` + tail;
+            } else {
+              truncated = effective;
+            }
             results.push({ id: tc.id, content: truncated });
           } else {
-            results.push({ id: tc.id, content: this.deduplicateImages(result) });
+            results.push({ id: tc.id, content: await this.deduplicateAndCompressImages(result) });
           }
         }
       } catch (toolErr: unknown) {
@@ -441,7 +466,7 @@ export class Agent {
         return await this.provider.sendMessage(
           this.systemPromptParts,
           this.messages,
-          this.toolDefs,
+          this.getActiveTools(),
           { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking, ...(signal ? { signal } : {}) },
           {
             onText: callbacks?.onText,
@@ -502,8 +527,8 @@ export class Agent {
     // Reuse the agent's provider — creating a new one would fail because the agent
     // process has no API keys; the SocketProvider proxies through the gatekeeper.
     const subProvider = this.provider;
-    // Exclude spawn_agent from sub-agent tools to prevent recursion
-    const subToolDefs = this.toolDefs.filter((t) => t.name !== 'spawn_agent');
+    // Exclude spawn_agent from sub-agent tools to prevent recursion; also apply capability filtering
+    const subToolDefs = this.getActiveTools().filter((t) => t.name !== 'spawn_agent');
 
     const subMessages: ProviderMessage[] = [
       { role: 'user', content: task + (context ? `\n\nContext: ${context}` : '') },
@@ -640,32 +665,61 @@ export class Agent {
   }
 
   /**
-   * Deduplicate images in tool results. If an image's hash was already seen,
-   * replace it with a text placeholder to avoid re-sending identical data.
+   * Deduplicate and compress images in tool results. Identical images (by hash)
+   * are replaced with a text placeholder. Remaining images are downscaled and
+   * re-encoded to reduce token cost.
    */
-  private deduplicateImages(blocks: ToolContentBlock[]): ToolContentBlock[] {
-    return blocks.map((block) => {
-      if (block.type !== 'image') return block;
+  private async deduplicateAndCompressImages(blocks: ToolContentBlock[]): Promise<ToolContentBlock[]> {
+    const result: ToolContentBlock[] = [];
+    for (const block of blocks) {
+      if (block.type !== 'image') { result.push(block); continue; }
       const hash = createHash('sha256').update(block.data.slice(0, 2048)).digest('hex').slice(0, 16);
       if (this.seenImageHashes.has(hash)) {
         log.info('Image deduplicated', { hash });
-        return { type: 'text', text: '[identical screenshot omitted — same as previously sent]' };
+        result.push({ type: 'text', text: '[identical screenshot omitted — same as previously sent]' });
+        continue;
       }
       this.seenImageHashes.add(hash);
-      return block;
-    });
+
+      // OCR: extract text from screenshots (free, ~200-500ms).
+      // Prepend as text block so the agent has the content without image tokens.
+      try {
+        const { extractTextFromImage } = await import('./ocr.js');
+        const ocrText = await extractTextFromImage(block.data);
+        if (ocrText) {
+          result.push({ type: 'text', text: `[OCR text extracted from screenshot:]\n${ocrText}` });
+        }
+      } catch { /* OCR unavailable — no problem */ }
+
+      // Compress: downscale to 1568px max, convert to JPEG where possible
+      try {
+        const { compressImage } = await import('./image-compress.js');
+        const compressed = await compressImage(block.data, block.mediaType);
+        const savedPct = Math.round((1 - compressed.data.length / block.data.length) * 100);
+        if (savedPct > 5) log.info('Image compressed', { hash, savedPct: `${savedPct}%` });
+        result.push({ ...block, data: compressed.data, mediaType: compressed.mediaType });
+      } catch {
+        result.push(block); // compression failed — use original
+      }
+    }
+    return result;
   }
 
   /**
    * Read tool summarization config from settings.json.
    * Falls back to safe defaults if the file is missing or malformed.
    */
+  /** Tools that return content the agent typically needs verbatim (code, search results, edits). */
+  private static SUMMARIZE_BLOCKLIST = new Set([
+    'read_file', 'grep', 'glob', 'list_files', 'edit_file', 'write_file', 'patch',
+  ]);
+
   private _defaultSummarizeConfig() {
     return {
-      enabled: false,
-      thresholdTokens: 500,
+      enabled: true,
+      thresholdTokens: 300,
       model: 'claude-haiku-4-5-20251001',
-      shouldSummarizeTool: (_name: string) => false,
+      shouldSummarizeTool: (name: string) => !Agent.SUMMARIZE_BLOCKLIST.has(name),
     };
   }
 
@@ -687,8 +741,9 @@ export class Agent {
       const c = settings['tools'] as Record<string, unknown> | undefined;
       if (!c) return this._defaultSummarizeConfig();
 
-      const mode = typeof c['summarizeMode'] === 'string' ? c['summarizeMode'] : 'allowlist';
-      const list: string[] = Array.isArray(c['summarizeTools']) ? (c['summarizeTools'] as string[]) : ['exec', 'fetch'];
+      const mode = typeof c['summarizeMode'] === 'string' ? c['summarizeMode'] : 'blocklist';
+      const defaultBlocklist = [...Agent.SUMMARIZE_BLOCKLIST];
+      const list: string[] = Array.isArray(c['summarizeTools']) ? (c['summarizeTools'] as string[]) : defaultBlocklist;
 
       let shouldSummarizeTool: (name: string) => boolean;
       if (mode === 'all') {
@@ -700,8 +755,8 @@ export class Agent {
       }
 
       return {
-        enabled: c['summarizeLargeResults'] === true,
-        thresholdTokens: typeof c['summarizeThresholdTokens'] === 'number' ? c['summarizeThresholdTokens'] : 500,
+        enabled: c['summarizeLargeResults'] !== false, // default: true (opt-out)
+        thresholdTokens: typeof c['summarizeThresholdTokens'] === 'number' ? c['summarizeThresholdTokens'] : 300,
         model: typeof c['summarizeModel'] === 'string' ? c['summarizeModel'] : 'claude-haiku-4-5-20251001',
         shouldSummarizeTool,
       };
@@ -760,7 +815,7 @@ export class Agent {
       return null;
     }
 
-    const summarizedContent = `${summary}\n\n[Full output (${originalTokens} tokens) saved to ${fullOutputPath} — use read_file to retrieve]`;
+    const summarizedContent = `${summary}\n\n[Full output (${originalTokens} tokens) → ${fullOutputPath}]\n[To analyze in detail: spawn_agent with Haiku to read and extract what you need]`;
     const summarizedTokens = Math.round(summarizedContent.length / 4);
 
     this.toolSummaries.set(toolCallId, {
@@ -775,6 +830,24 @@ export class Agent {
 
     log.info('Tool result summarized', { toolName, originalTokens, summarizedTokens, saved: originalTokens - summarizedTokens });
     return summarizedContent;
+  }
+
+  /**
+   * Persist a large tool result to disk so sub-agents can retrieve it on demand.
+   * Called when truncation kicks in but summarization didn't run (disabled/skipped/failed).
+   * Returns the file path, or null on failure.
+   */
+  private storeFullToolOutput(toolCallId: string, result: string): string | null {
+    const dir = '/tmp/aigent/tool-results';
+    try { mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+    const path = `${dir}/${toolCallId}.txt`;
+    try {
+      writeFileSync(path, result, 'utf-8');
+      return path;
+    } catch (e) {
+      log.warn('Failed to store full tool output', { error: (e as Error).message });
+      return null;
+    }
   }
 
   /**
@@ -872,6 +945,28 @@ export class Agent {
   getToolDefs(): ProviderToolDef[] { return [...this.toolDefs]; }
   get usingOAuth(): boolean { return this.isOAuth; }
 
+  /** Update active capabilities — controls dynamic tool filtering. */
+  setCapabilities(caps: Set<string>): void { this.capabilities = new Set(caps); }
+
+  /** Tools that require specific capabilities to be useful. */
+  private static TOOL_CAPABILITIES: Record<string, string> = {
+    browser_ext: 'browser',
+    screenshot: 'display',
+    request_screenshot: 'browser',
+    host: 'host',
+    host_edit_file: 'host',
+    request_config_write: 'host',
+  };
+
+  /** Filter toolDefs to only include tools whose prerequisites are met. */
+  private getActiveTools(): ProviderToolDef[] {
+    if (this.capabilities.size === 0) return this.toolDefs; // no filtering if no caps set
+    return this.toolDefs.filter((t) => {
+      const required = Agent.TOOL_CAPABILITIES[t.name];
+      return !required || this.capabilities.has(required);
+    });
+  }
+
   reloadSystemPrompt(): void {
     const workspaceContext = loadWorkspaceContext(this.workspacePath);
     this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext + `\n\nCurrent model: ${this.model}`];
@@ -921,8 +1016,12 @@ export class Agent {
     const messages = this.messages.map((m) => {
       const payload = m.role === 'tool_result' ? m.results : m.content;
       const raw = JSON.stringify(payload);
-      // Pretty-print for readability in the inspector — no truncation, panel scrolls
-      const pretty = JSON.stringify(payload, null, 2);
+      // Truncate preview to avoid OOM on large tool results (base64 images, a11y trees).
+      // Full content is available in the raw message; pretty-print only for small payloads.
+      const MAX_PREVIEW = 4000;
+      const pretty = raw.length > MAX_PREVIEW
+        ? raw.slice(0, MAX_PREVIEW) + `\n\n... [${raw.length - MAX_PREVIEW} chars omitted]`
+        : JSON.stringify(payload, null, 2);
 
       // Attach summary record if this tool_result message contains a summarized result
       let summaryRecord: ToolSummaryRecord | undefined;
