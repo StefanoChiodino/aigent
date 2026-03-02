@@ -21,8 +21,8 @@ import { fileURLToPath } from 'node:url';
 import { getDefaultWorkspace, getEnvFile } from './xdg.js';
 import { SOCKET_DIR, SOCKET_PATH } from './protocol.js';
 import { createLogger } from './logger.js';
-import { checkExecPermission, checkTier1Deny, DEFAULT_EXEC_PERMISSIONS, type ExecPermissions, checkFetchPermission, DEFAULT_FETCH_PERMISSIONS, type FetchPermissions, checkFilePermission, DEFAULT_FILE_PERMISSIONS, type FilePermissions, checkMCPPermission, DEFAULT_MCP_PERMISSIONS, type MCPPermissions, parseCommandPipeline, shouldForceClassify, checkBrowserPermission, classifyBrowserAction, browserTierSufficient, DEFAULT_BROWSER_PERMISSIONS, type BrowserPermissions, readFilePermissions } from './safety.js';
-import { initClassifier, classifyCommand, classifyFileAccess, isClassifierAvailable } from './classifier.js';
+import { checkFilePermission, type BrowserPermissions, checkBrowserPermission, classifyBrowserAction, browserTierSufficient, DEFAULT_BROWSER_PERMISSIONS, readFilePermissions } from './safety.js';
+import { initClassifier } from './classifier.js';
 import { extensionBridge } from './ext-bridge.js';
 import { auditLog } from './audit.js';
 import { rotateIfNeeded } from './log-rotate.js';
@@ -35,6 +35,36 @@ import {
   handleEditFileApproveReject as _handleEditFileApproveReject,
   type ConfigWriteContext,
 } from './gk-config-writes.js';
+import { type PermCtx, type ClassifierDecision } from './gk-perm-utils.js';
+import {
+  pendingExecApprovals,
+  readExecPermissions,
+  flushPendingExecApprovals,
+  handleAgentExecRequest as _handleAgentExecRequest,
+  handleExecApproveReject as _handleExecApproveReject,
+} from './gk-exec-perms.js';
+import {
+  pendingFetchApprovals,
+  readFetchPermissions,
+  flushPendingFetchApprovals,
+  handleAgentFetchRequest as _handleAgentFetchRequest,
+  handleFetchApproveReject as _handleFetchApproveReject,
+  handleAgentFetchSizeRequest as _handleAgentFetchSizeRequest,
+  handleFetchSizeApproveReject as _handleFetchSizeApproveReject,
+} from './gk-fetch-perms.js';
+import {
+  pendingFileAccessApprovals,
+  flushPendingFileAccessApprovals,
+  handleAgentFileAccessRequest as _handleAgentFileAccessRequest,
+  handleFileAccessApproveReject as _handleFileAccessApproveReject,
+} from './gk-file-perms.js';
+import {
+  pendingMcpToolApprovals,
+  readMCPPermissions,
+  flushPendingMCPApprovals,
+  handleAgentMcpToolRequest as _handleAgentMcpToolRequest,
+  handleMcpToolApproveReject as _handleMcpToolApproveReject,
+} from './gk-mcp-perms.js';
 
 const log = createLogger('gatekeeper');
 
@@ -67,8 +97,9 @@ const IS_DEV_MODE = !existsSync(COMPILED_SERVER);
 
 // Load settings.json and apply non-secret values to process.env.
 // .env (already loaded above) takes lowest priority; CLI flags override all.
+// Uses getSettingsPath() which respects AIGENT_SETTINGS_PATH for test isolation.
 {
-  const settingsPath = resolve(REPO_DIR, 'settings.json');
+  const settingsPath = getSettingsPath();
   if (existsSync(settingsPath)) {
     try {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
@@ -631,11 +662,12 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
   // Check dynamic commands first (approve/reject/preview)
   if (await handleConfigApproveReject(input)) return;
   if (await handleEditFileApproveReject(input)) return;
-  if (await handleExecApproveReject(input)) return;
-  if (await handleFetchApproveReject(input)) return;
-  if (handleFileAccessApproveReject(input)) return;
-  if (handleFetchSizeApproveReject(input)) return;
-  if (handleMcpToolApproveReject(input)) return;
+  const permCtx = getPermCtx();
+  if (await _handleExecApproveReject(permCtx, input)) return;
+  if (await _handleFetchApproveReject(permCtx, input)) return;
+  if (_handleFileAccessApproveReject(permCtx, input)) return;
+  if (_handleFetchSizeApproveReject(permCtx, input)) return;
+  if (_handleMcpToolApproveReject(permCtx, input)) return;
   if (await handleBrowserWriteApproveReject(input)) return;
 
   const parts = input.trim().split(/\s+/);
@@ -808,7 +840,8 @@ function handleEditFileApproveReject(input: string): Promise<boolean> {
 
 // --- Classifier decision metadata ---
 // Shared with web-bridge so it can broadcast decisions to browser clients.
-export interface ClassifierDecision { tier: 1 | 2 | 3; action: 'allow' | 'block' | 'ask'; reason: string }
+// ClassifierDecision type is imported from gk-perm-utils.ts
+export type { ClassifierDecision } from './gk-perm-utils.js';
 const classifierDecisions = new Map<string, ClassifierDecision>();
 
 // Rolling buffer of recent conversation messages (last 2 rounds = up to 4 messages).
@@ -823,49 +856,30 @@ function getRecentContext(): string | undefined {
     .join('\n');
 }
 
-// --- Exec command approval ---
-
-const pendingExecApprovals = new Map<string, {
-  command: string;
-  classifierReason?: string;
-  suggestedPatterns?: string[];
-}>();
-// IDs auto-handled (allow/deny) before any browser listener fires — web-bridge skips these
-const autoHandledExecIds = new Set<string>();
-
-function readExecPermissions(): ExecPermissions {
-  try {
-    const settings = readSettingsSync();
-    const perms = settings['exec_permissions'];
-    if (!perms || typeof perms !== 'object') return DEFAULT_EXEC_PERMISSIONS;
-    const p = perms as Partial<ExecPermissions>;
-    return {
-      // alwaysAllow/alwaysClassify: user's list is authoritative — no default merging.
-      // Defaults are only used as a fallback when the key doesn't exist at all.
-      alwaysAllow: Array.isArray(p.alwaysAllow)
-        ? p.alwaysAllow
-        : DEFAULT_EXEC_PERMISSIONS.alwaysAllow,
-      alwaysClassify: Array.isArray(p.alwaysClassify)
-        ? p.alwaysClassify
-        : DEFAULT_EXEC_PERMISSIONS.alwaysClassify,
-      // deny: always merge with defaults for safety — prevents accidentally un-blocking
-      // dangerous patterns like sudo, rm -rf /, etc.
-      deny: Array.isArray(p.deny)
-        ? [...new Set([...DEFAULT_EXEC_PERMISSIONS.deny, ...p.deny])]
-        : DEFAULT_EXEC_PERMISSIONS.deny,
-    };
-  } catch {
-    return DEFAULT_EXEC_PERMISSIONS;
-  }
+/** Build the PermCtx for permission handler modules. */
+function getPermCtx(): PermCtx {
+  return {
+    client,
+    log,
+    injectSystemMessage,
+    broadcastUpdatedPermissions,
+    auditLog,
+    classifierDecisions,
+    getRecentContext,
+  };
 }
+
+// --- Exec, fetch, file, MCP permission handlers are delegated to gk-*-perms.ts modules ---
+// Browser permissions remain here due to tight coupling with browserRequest().
 
 /** Called by web-bridge when POST /settings completes — re-evaluate all pending approvals. */
 function handleSettingsChanged(): void {
   broadcastUpdatedPermissions();
-  flushPendingExecApprovals();
-  flushPendingFetchApprovals();
-  flushPendingFileAccessApprovals();
-  flushPendingMCPApprovals();
+  const ctx = getPermCtx();
+  flushPendingExecApprovals(ctx);
+  flushPendingFetchApprovals(ctx);
+  flushPendingFileAccessApprovals(ctx);
+  flushPendingMCPApprovals(ctx);
   flushPendingBrowserApprovals();
 }
 
@@ -895,916 +909,6 @@ function broadcastUpdatedPermissions(): void {
     browser_perm_deny: JSON.stringify(browserPerms.deny),
     mcp_perm_servers: JSON.stringify(mcpPerms.servers),
   });
-}
-
-/**
- * Derive glob patterns from a command for "always allow".
- * For simple commands, extracts the executable and returns both `"<exe>"` and `"<exe> *"`.
- * For pipelines or commands already containing globs, returns the raw command as-is.
- */
-function deriveExecPatterns(command: string): string[] {
-  const cmd = command.trim();
-  // Already a glob pattern — save as-is
-  if (cmd.includes('*') || cmd.includes('?') || cmd.includes('[')) return [cmd];
-  // Pipeline — too complex to extract a meaningful pattern
-  const segments = parseCommandPipeline(cmd);
-  if (segments.length > 1) return [cmd];
-  const exe = segments[0]?.executable;
-  if (!exe) return [cmd];
-  // Save both bare executable and "<exe> *" to cover args/no-args
-  return [exe, `${exe} *`];
-}
-
-function addCommandToAlwaysAllow(command: string): void {
-  try {
-    const patterns = deriveExecPatterns(command);
-    writeSettingsSync('gatekeeper:addToExecAlwaysAllow', (settings) => {
-      const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
-      const current = Array.isArray(perms.alwaysAllow) ? [...perms.alwaysAllow] : [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow];
-      for (const pattern of patterns) {
-        if (!current.includes(pattern)) {
-          current.push(pattern);
-        }
-      }
-      return { ...settings, exec_permissions: { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current } };
-    });
-    log.info('Added command to always-allow', { command, patterns });
-    broadcastUpdatedPermissions();
-    flushPendingExecApprovals();
-  } catch (err) {
-    log.error('Failed to update exec permissions', { error: String(err) });
-  }
-}
-
-function addCommandToDenyList(command: string): void {
-  try {
-    const patterns = deriveExecPatterns(command);
-    writeSettingsSync('gatekeeper:addToExecDeny', (settings) => {
-      const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
-      const current = Array.isArray(perms.deny) ? [...perms.deny] : [...DEFAULT_EXEC_PERMISSIONS.deny];
-      for (const pattern of patterns) {
-        if (!current.includes(pattern)) {
-          current.push(pattern);
-        }
-      }
-      return { ...settings, exec_permissions: { ...DEFAULT_EXEC_PERMISSIONS, ...perms, deny: current } };
-    });
-    log.info('Added command to deny list', { command, patterns });
-    broadcastUpdatedPermissions();
-  } catch (err) {
-    log.error('Failed to update exec permissions', { error: String(err) });
-  }
-}
-
-function addPatternsToAlwaysAllow(patterns: string[]): void {
-  try {
-    writeSettingsSync('gatekeeper:addClassifierPatterns', (settings) => {
-      const perms = (settings['exec_permissions'] as Partial<ExecPermissions> | undefined) ?? {};
-      const current = Array.isArray(perms.alwaysAllow) ? [...perms.alwaysAllow] : [...DEFAULT_EXEC_PERMISSIONS.alwaysAllow];
-      for (const pattern of patterns) {
-        if (!current.includes(pattern)) {
-          current.push(pattern);
-        }
-      }
-      return { ...settings, exec_permissions: { ...DEFAULT_EXEC_PERMISSIONS, ...perms, alwaysAllow: current } };
-    });
-    log.info('Added classifier-suggested patterns to always-allow', { patterns });
-    broadcastUpdatedPermissions();
-    flushPendingExecApprovals();
-  } catch (err) {
-    log.error('Failed to update exec permissions', { error: String(err) });
-  }
-}
-
-/** Re-check pending exec approvals against updated permissions and auto-resolve matches. */
-function flushPendingExecApprovals(): void {
-  if (pendingExecApprovals.size === 0) return;
-  const yolo = readSettingsSync()['exec_perm_yolo'] === true;
-  const permissions = readExecPermissions();
-  const dismissed: string[] = [];
-  for (const [id, pending] of pendingExecApprovals) {
-    const shouldAllow = yolo || (checkExecPermission(pending.command, permissions) === 'allow' && !shouldForceClassify(pending.command, permissions.alwaysClassify));
-    if (shouldAllow) {
-      const reason = yolo ? 'YOLO mode' : 'updated permission policy';
-      log.info('Flush: auto-approving pending exec', { id, command: pending.command, reason });
-      auditLog({ type: 'exec_tier2_allow', detail: pending.command });
-      pendingExecApprovals.delete(id);
-      client!.send({ type: 'exec_response', id, ok: true, message: `Allowed by ${reason}` });
-      dismissed.push(id);
-    }
-  }
-  if (dismissed.length > 0 && client) {
-    client.emit('perm_dismissed', dismissed);
-  }
-}
-
-function handleAgentExecRequest(id: string, command: string): void {
-  // --- Tier 1: Static deny (instant block, no override) ---
-  const tier1 = checkTier1Deny(command);
-  if (tier1) {
-    log.info('Exec blocked by Tier 1 (static deny)', { id, command, reason: tier1 });
-    auditLog({ type: 'exec_tier1_block', detail: command, reason: tier1 });
-    autoHandledExecIds.add(id);
-    classifierDecisions.set(id, { tier: 1, action: 'block', reason: tier1 });
-    client!.send({ type: 'exec_response', id, ok: false, message: `Blocked (safety): ${tier1}` });
-    injectSystemMessage(`[exec] Blocked by safety engine: ${tier1}\n  Command: ${command}`);
-    client!.emit('perm_dismissed', [id]);
-    return;
-  }
-
-  // --- YOLO mode: auto-approve everything that passed Tier 1 ---
-  if (readSettingsSync()['exec_perm_yolo'] === true) {
-    log.info('Exec auto-allowed (YOLO mode)', { id, command });
-    auditLog({ type: 'exec_yolo_allow', detail: command });
-    autoHandledExecIds.add(id);
-    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'YOLO mode' });
-    client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed (YOLO mode)' });
-    client!.emit('perm_dismissed', [id]);
-    return;
-  }
-
-  // --- Tier 2: Static allow/deny (from settings.json) ---
-  const permissions = readExecPermissions();
-  const level = checkExecPermission(command, permissions);
-
-  if (level === 'allow') {
-    // Check if this command should be forced through the classifier despite matching alwaysAllow
-    if (shouldForceClassify(command, permissions.alwaysClassify)) {
-      log.info('Exec Tier 2 allow overridden by alwaysClassify', { id, command });
-      auditLog({ type: 'exec_tier2_force_classify', detail: command });
-      // Fall through to Tier 3 below
-    } else {
-      log.info('Exec auto-allowed (Tier 2)', { id, command });
-      auditLog({ type: 'exec_tier2_allow', detail: command });
-      autoHandledExecIds.add(id);
-      classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'Allowed by permission policy' });
-      client!.send({ type: 'exec_response', id, ok: true, message: 'Allowed by permission policy' });
-      client!.emit('perm_dismissed', [id]);
-      return;
-    }
-  }
-
-  if (level === 'deny') {
-    log.info('Exec auto-denied (Tier 2)', { id, command });
-    auditLog({ type: 'exec_tier2_deny', detail: command });
-    autoHandledExecIds.add(id);
-    classifierDecisions.set(id, { tier: 2, action: 'block', reason: 'Denied by permission policy' });
-    client!.send({ type: 'exec_response', id, ok: false, message: 'Denied by permission policy' });
-    injectSystemMessage(`[exec] Blocked by deny policy: ${command}`);
-    client!.emit('perm_dismissed', [id]);
-    return;
-  }
-
-  // --- Tier 3: Haiku classifier (async) ---
-  if (isClassifierAvailable() && process.env['AIGENT_CLASSIFIER'] !== '0') {
-    const ctx = getRecentContext();
-    classifyCommand(command, { cwd: process.cwd(), ...(ctx ? { recentContext: ctx } : {}) })
-      .then(result => {
-        if (result.action === 'allow') {
-          log.info('Exec auto-allowed (Tier 3 classifier)', { id, command, reason: result.reason });
-          auditLog({ type: 'exec_tier3_allow', detail: command, reason: result.reason });
-          autoHandledExecIds.add(id);
-          classifierDecisions.set(id, { tier: 3, action: 'allow', reason: result.reason });
-          client!.send({ type: 'exec_response', id, ok: true, message: `Allowed by classifier: ${result.reason}` });
-          client!.emit('perm_dismissed', [id]);
-          return;
-        }
-
-        if (result.action === 'block') {
-          log.info('Exec blocked (Tier 3 classifier)', { id, command, reason: result.reason });
-          auditLog({ type: 'exec_tier3_block', detail: command, reason: result.reason });
-          autoHandledExecIds.add(id);
-          classifierDecisions.set(id, { tier: 3, action: 'block', reason: result.reason });
-          client!.send({ type: 'exec_response', id, ok: false, message: `Blocked by classifier: ${result.reason}` });
-          injectSystemMessage(`[exec] Blocked by classifier: ${result.reason}\n  Command: ${command}`);
-          client!.emit('perm_dismissed', [id]);
-          return;
-        }
-
-        // 'ask' — prompt the user with the classifier's assessment
-        promptUserForExec(id, command, result.reason, result.suggestedPatterns);
-      })
-      .catch(() => {
-        // Classifier failed — fall back to user prompt
-        promptUserForExec(id, command);
-      });
-    return;
-  }
-
-  // No classifier — fall back to user prompt
-  promptUserForExec(id, command);
-}
-
-function promptUserForExec(
-  id: string,
-  command: string,
-  classifierReason?: string,
-  suggestedPatterns?: string[],
-): void {
-  pendingExecApprovals.set(id, {
-    command,
-    ...(classifierReason ? { classifierReason } : {}),
-    ...(suggestedPatterns?.length ? { suggestedPatterns } : {}),
-  });
-  log.info('Exec approval requested', { id, command, classifierReason, suggestedPatterns });
-
-  let msg = `Agent wants to run: ${command}\n`;
-  if (classifierReason) {
-    msg += `  Classifier: ${classifierReason}\n`;
-  }
-  if (suggestedPatterns?.length) {
-    msg += `  Suggested always-allow patterns: ${suggestedPatterns.join(', ')}\n`;
-  }
-  msg += `  Reply: /approve-exec ${id} or /deny-exec ${id}\n`;
-  msg += `  To always allow: /approve-exec ${id} --always`;
-  msg += `  To always deny: /deny-exec ${id} --always`;
-  injectSystemMessage(msg);
-}
-
-async function handleExecApproveReject(input: string): Promise<boolean> {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase();
-
-  if (cmd === '/approve-exec') {
-    let id = parts[1];
-    if (!id && pendingExecApprovals.size === 1) {
-      id = pendingExecApprovals.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingExecApprovals.size === 0
-        ? 'No pending exec requests.'
-        : `Multiple pending — specify ID: ${[...pendingExecApprovals.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingExecApprovals.get(id);
-    if (!pending) {
-      // Request was already auto-resolved by flushPendingExecApprovals() — silently ignore
-      return true;
-    }
-
-    const alwaysAllow = parts.includes('--always');
-    pendingExecApprovals.delete(id);
-
-    if (alwaysAllow) {
-      if (pending.suggestedPatterns?.length) {
-        addPatternsToAlwaysAllow(pending.suggestedPatterns);
-        injectSystemMessage(`Approved and added to always-allow: ${pending.suggestedPatterns.join(', ')}`);
-      } else {
-        addCommandToAlwaysAllow(pending.command);
-        const patterns = deriveExecPatterns(pending.command);
-        injectSystemMessage(`Approved and added to always-allow: ${patterns.join(', ')}`);
-      }
-    } else {
-      injectSystemMessage(`Approved (once): ${pending.command}`);
-    }
-
-    auditLog({ type: 'exec_user_approve', detail: pending.command, approved: true });
-    client!.send({ type: 'exec_response', id, ok: true, alwaysAllow, message: 'Approved by user' });
-    client!.emit('perm_dismissed', [id]);
-    return true;
-  }
-
-  if (cmd === '/deny-exec') {
-    let id = parts[1];
-    if (!id && pendingExecApprovals.size === 1) {
-      id = pendingExecApprovals.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingExecApprovals.size === 0
-        ? 'No pending exec requests.'
-        : `Multiple pending — specify ID: ${[...pendingExecApprovals.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingExecApprovals.get(id);
-    if (!pending) {
-      // Request was already auto-resolved by flushPendingExecApprovals() — silently ignore
-      return true;
-    }
-
-    const alwaysDeny = parts.includes('--always');
-    pendingExecApprovals.delete(id);
-
-    if (alwaysDeny) {
-      addCommandToDenyList(pending.command);
-      const patterns = deriveExecPatterns(pending.command);
-      injectSystemMessage(`Denied and added to always-deny: ${patterns.join(', ')}`);
-    } else {
-      injectSystemMessage(`Denied: ${pending.command}`);
-    }
-
-    auditLog({ type: 'exec_user_deny', detail: pending.command, approved: false });
-    client!.send({ type: 'exec_response', id, ok: false, alwaysAllow: false, message: 'Denied by user' });
-    client!.emit('perm_dismissed', [id]);
-    return true;
-  }
-
-  return false;
-}
-
-// --- Fetch URL approval ---
-
-const pendingFetchApprovals = new Map<string, { url: string; method?: string }>();
-const autoHandledFetchIds = new Set<string>();
-
-function readFetchPermissions(): FetchPermissions {
-  try {
-    const settings = readSettingsSync();
-    const perms = settings['fetch_permissions'];
-    if (!perms || typeof perms !== 'object') return DEFAULT_FETCH_PERMISSIONS;
-    const p = perms as Partial<FetchPermissions>;
-    return {
-      alwaysAllow: Array.isArray(p.alwaysAllow)
-        ? p.alwaysAllow
-        : DEFAULT_FETCH_PERMISSIONS.alwaysAllow,
-      deny: Array.isArray(p.deny)
-        ? [...new Set([...DEFAULT_FETCH_PERMISSIONS.deny, ...p.deny])]
-        : DEFAULT_FETCH_PERMISSIONS.deny,
-    };
-  } catch {
-    return DEFAULT_FETCH_PERMISSIONS;
-  }
-}
-
-function addToFetchAlwaysAllow(pattern: string): void {
-  try {
-    writeSettingsSync('gatekeeper:addToFetchAlwaysAllow', (settings) => {
-      const perms = (settings['fetch_permissions'] as Partial<FetchPermissions> | undefined) ?? {};
-      const current = Array.isArray(perms.alwaysAllow) ? [...perms.alwaysAllow] : [...DEFAULT_FETCH_PERMISSIONS.alwaysAllow];
-      if (!current.includes(pattern)) {
-        current.push(pattern);
-      }
-      return { ...settings, fetch_permissions: { ...DEFAULT_FETCH_PERMISSIONS, ...perms, alwaysAllow: current } };
-    });
-    log.info('Added pattern to fetch always-allow', { pattern });
-    broadcastUpdatedPermissions();
-    flushPendingFetchApprovals();
-  } catch (err) {
-    log.error('Failed to update fetch permissions', { error: String(err) });
-  }
-}
-
-/** Re-check pending fetch approvals against updated permissions and auto-resolve matches. */
-function flushPendingFetchApprovals(): void {
-  if (pendingFetchApprovals.size === 0) return;
-  const yolo = readSettingsSync()['fetch_perm_yolo'] === true;
-  const permissions = readFetchPermissions();
-  const dismissed: string[] = [];
-  for (const [id, pending] of pendingFetchApprovals) {
-    const shouldAllow = yolo || checkFetchPermission(pending.url, permissions) === 'allow';
-    if (shouldAllow) {
-      const reason = yolo ? 'YOLO mode' : 'updated permission policy';
-      log.info('Flush: auto-approving pending fetch', { id, url: pending.url, reason });
-      pendingFetchApprovals.delete(id);
-      client!.send({ type: 'fetch_response', id, ok: true, message: `Allowed by ${reason}` });
-      dismissed.push(id);
-    }
-  }
-  if (dismissed.length > 0 && client) {
-    client.emit('perm_dismissed', dismissed);
-  }
-}
-
-/** Re-check pending file access approvals against updated permissions and auto-resolve matches. */
-function flushPendingFileAccessApprovals(): void {
-  if (pendingFileAccessApprovals.size === 0) return;
-  const yolo = readSettingsSync()['file_perm_yolo'] === true;
-  const permissions = readFilePermissions();
-  const dismissed: string[] = [];
-  for (const [id, pending] of pendingFileAccessApprovals) {
-    const shouldAllow = yolo || checkFilePermission(pending.path, permissions, pending.operation) === 'allow';
-    if (shouldAllow) {
-      const reason = yolo ? 'YOLO mode' : 'updated file permission policy';
-      log.info('Flush: auto-approving pending file access', { id, path: pending.path, operation: pending.operation, reason });
-      pendingFileAccessApprovals.delete(id);
-      client!.send({ type: 'file_access_response', id, ok: true, message: `Allowed by ${reason}` });
-      dismissed.push(id);
-    }
-  }
-  if (dismissed.length > 0 && client) {
-    client.emit('perm_dismissed', dismissed);
-  }
-}
-
-// --- File path permissions ---
-// readFilePermissions() is defined in safety.ts and imported above.
-
-function addPathToFileReadWrite(pattern: string): void {
-  try {
-    writeSettingsSync('gatekeeper:addToFileReadWrite', (settings) => {
-      const perms = (settings['file_permissions'] as Partial<FilePermissions> | undefined) ?? {};
-      const current = Array.isArray(perms.readWrite) ? [...perms.readWrite] : [...DEFAULT_FILE_PERMISSIONS.readWrite];
-      if (!current.includes(pattern)) {
-        current.push(pattern);
-      }
-      return { ...settings, file_permissions: { ...DEFAULT_FILE_PERMISSIONS, ...perms, readWrite: current } };
-    });
-    log.info('Added path to file read-write', { pattern });
-    broadcastUpdatedPermissions();
-    flushPendingFileAccessApprovals();
-  } catch (err) {
-    log.error('Failed to update file permissions', { error: String(err) });
-  }
-}
-
-function addPathToFileReadOnly(pattern: string): void {
-  try {
-    writeSettingsSync('gatekeeper:addToFileReadOnly', (settings) => {
-      const perms = (settings['file_permissions'] as Partial<FilePermissions> | undefined) ?? {};
-      const current = Array.isArray(perms.readOnly) ? [...perms.readOnly] : [...DEFAULT_FILE_PERMISSIONS.readOnly];
-      if (!current.includes(pattern)) {
-        current.push(pattern);
-      }
-      return { ...settings, file_permissions: { ...DEFAULT_FILE_PERMISSIONS, ...perms, readOnly: current } };
-    });
-    log.info('Added path to file read-only', { pattern });
-    broadcastUpdatedPermissions();
-    flushPendingFileAccessApprovals();
-  } catch (err) {
-    log.error('Failed to update file permissions', { error: String(err) });
-  }
-}
-
-function handleAgentFetchRequest(id: string, url: string, method?: string): void {
-  // --- YOLO mode: auto-approve all fetch requests ---
-  if (readSettingsSync()['fetch_perm_yolo'] === true) {
-    log.info('Fetch auto-allowed (YOLO mode)', { id, url });
-    auditLog({ type: 'fetch_yolo_allow', detail: url });
-    autoHandledFetchIds.add(id);
-    client!.send({ type: 'fetch_response', id, ok: true, message: 'Allowed (YOLO mode)' });
-    client!.emit('perm_dismissed', [id]);
-    return;
-  }
-
-  const permissions = readFetchPermissions();
-  const level = checkFetchPermission(url, permissions);
-
-  if (level === 'allow') {
-    log.info('Fetch auto-allowed', { id, url });
-    autoHandledFetchIds.add(id);
-    client!.send({ type: 'fetch_response', id, ok: true, message: 'Allowed by permission policy' });
-    client!.emit('perm_dismissed', [id]);
-    return;
-  }
-
-  if (level === 'deny') {
-    log.info('Fetch auto-denied', { id, url });
-    autoHandledFetchIds.add(id);
-    client!.send({ type: 'fetch_response', id, ok: false, message: 'Denied by permission policy' });
-    injectSystemMessage(`[fetch] Blocked by deny policy: ${url}`);
-    client!.emit('perm_dismissed', [id]);
-    return;
-  }
-
-  // 'prompt' — store and forward to web UI for user approval
-  pendingFetchApprovals.set(id, { url, ...(method !== undefined ? { method } : {}) });
-  log.info('Fetch approval requested', { id, url, method });
-
-  injectSystemMessage(
-    `Agent wants to fetch: ${method ?? 'GET'} ${url}\n` +
-    `  Reply: /approve-fetch ${id} or /deny-fetch ${id}\n` +
-    `  To always allow this URL: /approve-fetch ${id} --always\n` +
-    `  To always allow this domain: /approve-fetch ${id} --always-domain`
-  );
-}
-
-async function handleFetchApproveReject(input: string): Promise<boolean> {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase();
-
-  if (cmd === '/approve-fetch') {
-    let id = parts[1];
-    if (!id && pendingFetchApprovals.size === 1) {
-      id = pendingFetchApprovals.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingFetchApprovals.size === 0
-        ? 'No pending fetch requests.'
-        : `Multiple pending — specify ID: ${[...pendingFetchApprovals.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingFetchApprovals.get(id);
-    if (!pending) {
-      // Already resolved (e.g. auto-approved by settings flush before user clicked) — silently ignore.
-      return true;
-    }
-
-    const alwaysAllow = parts.includes('--always') || parts.includes('--always-domain');
-    const alwaysDomain = parts.includes('--always-domain');
-    pendingFetchApprovals.delete(id);
-
-    if (alwaysDomain) {
-      let hostname = pending.url;
-      try { hostname = new URL(pending.url).hostname; } catch { /* keep raw */ }
-      addToFetchAlwaysAllow(hostname);
-      injectSystemMessage(`Approved and domain added to always-allow: ${hostname}`);
-    } else if (alwaysAllow) {
-      addToFetchAlwaysAllow(pending.url);
-      injectSystemMessage(`Approved and URL added to always-allow: ${pending.url}`);
-    } else {
-      injectSystemMessage(`Approved (once): ${pending.url}`);
-    }
-
-    client!.send({ type: 'fetch_response', id, ok: true, alwaysAllow, message: 'Approved by user' });
-    client!.emit('perm_dismissed', [id]);
-    return true;
-  }
-
-  if (cmd === '/deny-fetch') {
-    let id = parts[1];
-    if (!id && pendingFetchApprovals.size === 1) {
-      id = pendingFetchApprovals.keys().next().value as string;
-    }
-    if (!id) {
-      injectSystemMessage(pendingFetchApprovals.size === 0
-        ? 'No pending fetch requests.'
-        : `Multiple pending — specify ID: ${[...pendingFetchApprovals.keys()].join(', ')}`);
-      return true;
-    }
-
-    const pending = pendingFetchApprovals.get(id);
-    if (!pending) {
-      // Already resolved — silently ignore.
-      return true;
-    }
-
-    pendingFetchApprovals.delete(id);
-    injectSystemMessage(`Denied: ${pending.url}`);
-    client!.send({ type: 'fetch_response', id, ok: false, alwaysAllow: false, message: 'Denied by user' });
-    client!.emit('perm_dismissed', [id]);
-    return true;
-  }
-
-  return false;
-}
-
-// --- File access approval (sensitive paths / out-of-project writes) ---
-
-const pendingFileAccessApprovals = new Map<string, { path: string; operation: 'read' | 'write' }>();
-const autoHandledFileAccessIds = new Set<string>();
-
-function handleAgentFileAccessRequest(id: string, path: string, operation: 'read' | 'write', reason: string): void {
-  // --- YOLO mode: auto-approve all file access ---
-  if (readSettingsSync()['file_perm_yolo'] === true) {
-    const auditType = operation === 'read' ? 'file_read' : 'file_write';
-    log.info(`File ${operation} auto-allowed (YOLO mode)`, { id, path });
-    auditLog({ type: `${auditType}_yolo_allow`, detail: path });
-    autoHandledFileAccessIds.add(id);
-    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'YOLO mode' });
-    client!.send({ type: 'file_access_response', id, ok: true, message: 'Allowed (YOLO mode)' });
-    client!.emit('perm_dismissed', [id]);
-    return;
-  }
-
-  // Check file permissions (deny/readOnly/readWrite) for all operations
-  const filePerms = readFilePermissions();
-  const level = checkFilePermission(path, filePerms, operation);
-
-  if (level === 'allow') {
-    const auditType = operation === 'read' ? 'file_read' : 'file_write';
-    log.info(`File ${operation} auto-allowed by permission policy`, { id, path });
-    auditLog({ type: auditType, detail: path, reason: 'allowed by file_permissions' });
-    autoHandledFileAccessIds.add(id);
-    classifierDecisions.set(id, { tier: 2, action: 'allow', reason: 'Allowed by file_permissions' });
-    client!.send({ type: 'file_access_response', id, ok: true, message: 'Allowed by file permission policy' });
-    client!.emit('perm_dismissed', [id]);
-    return;
-  }
-  if (level === 'deny') {
-    const auditType = operation === 'read' ? 'file_read_block' : 'file_write_block';
-    log.info(`File ${operation} auto-denied by permission policy`, { id, path });
-    auditLog({ type: auditType, detail: path, reason: 'denied by file_permissions' });
-    autoHandledFileAccessIds.add(id);
-    classifierDecisions.set(id, { tier: 2, action: 'block', reason: 'Denied by file_permissions' });
-    client!.send({ type: 'file_access_response', id, ok: false, message: 'Denied by file permission policy' });
-    client!.emit('perm_dismissed', [id]);
-    injectSystemMessage(`[file] Blocked by ${operation === 'write' ? 'deny/read-only' : 'deny'} policy: ${path}`);
-    return;
-  }
-
-  // --- Tier 3: Haiku file access classifier (async) ---
-  if (isClassifierAvailable() && process.env['AIGENT_CLASSIFIER'] !== '0') {
-    const ctx = getRecentContext();
-    classifyFileAccess(path, operation, { cwd: process.cwd(), ...(ctx ? { recentContext: ctx } : {}) })
-      .then(result => {
-        if (result.action === 'allow') {
-          const auditType = operation === 'read' ? 'file_read' : 'file_write';
-          log.info(`File ${operation} auto-allowed (Tier 3 classifier)`, { id, path, reason: result.reason });
-          auditLog({ type: auditType, detail: path, reason: `classifier: ${result.reason}` });
-          autoHandledFileAccessIds.add(id);
-          classifierDecisions.set(id, { tier: 3, action: 'allow', reason: result.reason });
-          client!.send({ type: 'file_access_response', id, ok: true, message: `Allowed by classifier: ${result.reason}` });
-          // If the browser modal was shown before classifier resolved, dismiss it now.
-          client!.emit('perm_dismissed', [id]);
-          return;
-        }
-
-        if (result.action === 'block') {
-          const auditType = operation === 'read' ? 'file_read_block' : 'file_write_block';
-          log.info(`File ${operation} blocked (Tier 3 classifier)`, { id, path, reason: result.reason });
-          auditLog({ type: auditType, detail: path, reason: `classifier: ${result.reason}` });
-          autoHandledFileAccessIds.add(id);
-          classifierDecisions.set(id, { tier: 3, action: 'block', reason: result.reason });
-          client!.send({ type: 'file_access_response', id, ok: false, message: `Blocked by classifier: ${result.reason}` });
-          // If the browser modal was shown before classifier resolved, dismiss it now.
-          client!.emit('perm_dismissed', [id]);
-          injectSystemMessage(`[file] Blocked by classifier: ${result.reason}\n  Path: ${path}`);
-          return;
-        }
-
-        // 'ask' — prompt the user with the classifier's assessment
-        promptUserForFileAccess(id, path, operation, reason, result.reason, result.suggestedPatterns);
-      })
-      .catch(() => {
-        // Classifier failed — fall back to user prompt
-        promptUserForFileAccess(id, path, operation, reason);
-      });
-    return;
-  }
-
-  // No classifier — fall back to user prompt
-  promptUserForFileAccess(id, path, operation, reason);
-}
-
-function promptUserForFileAccess(
-  id: string,
-  path: string,
-  operation: 'read' | 'write',
-  reason: string,
-  classifierReason?: string,
-  suggestedPatterns?: string[],
-): void {
-  pendingFileAccessApprovals.set(id, { path, operation });
-  log.info('File access approval requested', { id, path, operation, classifierReason, suggestedPatterns });
-  let msg = `Agent wants to ${operation.toUpperCase()} file outside project or in a sensitive location:\n` +
-    `  Path: ${path}\n` +
-    `  Reason: "${reason}"\n`;
-  if (classifierReason) {
-    msg += `  Classifier: ${classifierReason}\n`;
-  }
-  msg += `\n  Reply: /approve-file ${id} or /deny-file ${id}\n` +
-    `  To always allow this file (read-write): /approve-file ${id} --always\n` +
-    `  To always allow this directory (read-write): /approve-file ${id} --always-dir\n` +
-    `  To allow read-only: /approve-file ${id} --read-only\n` +
-    `  To allow read-only for directory: /approve-file ${id} --read-only-dir`;
-  injectSystemMessage(msg);
-}
-
-function handleFileAccessApproveReject(input: string): boolean {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase();
-
-  if (cmd !== '/approve-file' && cmd !== '/deny-file') return false;
-
-  let id = parts[1];
-  // If the first arg is a flag, not an id, and there's only one pending request
-  if (id && id.startsWith('--')) id = undefined;
-  if (!id && pendingFileAccessApprovals.size === 1) {
-    id = pendingFileAccessApprovals.keys().next().value as string;
-  }
-  if (!id) {
-    injectSystemMessage(pendingFileAccessApprovals.size === 0
-      ? 'No pending file access requests.'
-      : `Multiple pending — specify ID: ${[...pendingFileAccessApprovals.keys()].join(', ')}`);
-    return true;
-  }
-
-  const pending = pendingFileAccessApprovals.get(id);
-  if (!pending) {
-    // Already resolved (e.g. auto-approved by classifier before user clicked) — silently ignore.
-    return true;
-  }
-
-  pendingFileAccessApprovals.delete(id);
-
-  if (cmd === '/approve-file') {
-    const isReadOnly = parts.includes('--read-only') || parts.includes('--read-only-dir');
-    const isDir = parts.includes('--always-dir') || parts.includes('--read-only-dir');
-    const isPersistent = parts.includes('--always') || isDir || isReadOnly;
-
-    if (isDir) {
-      const dirPattern = dirname(pending.path) + '/**';
-      if (isReadOnly) {
-        addPathToFileReadOnly(dirPattern);
-        injectSystemMessage(`Approved and directory added to read-only: ${dirPattern}`);
-      } else {
-        addPathToFileReadWrite(dirPattern);
-        injectSystemMessage(`Approved and directory added to read-write: ${dirPattern}`);
-      }
-    } else if (isReadOnly) {
-      addPathToFileReadOnly(pending.path);
-      injectSystemMessage(`Approved and path added to read-only: ${pending.path}`);
-    } else if (isPersistent) {
-      addPathToFileReadWrite(pending.path);
-      injectSystemMessage(`Approved and path added to read-write: ${pending.path}`);
-    } else {
-      injectSystemMessage(`Approved (once): ${pending.path}`);
-    }
-
-    log.info('File access approved', { id, path: pending.path, persistent: isPersistent, readOnly: isReadOnly, dir: isDir });
-    client!.send({ type: 'file_access_response', id, ok: true, message: 'Approved by user' });
-  } else {
-    log.info('File access denied', { id, path: pending.path });
-    injectSystemMessage(`Denied file ${pending.operation}: ${pending.path}`);
-    client!.send({ type: 'file_access_response', id, ok: false, message: 'Denied by user' });
-  }
-  client!.emit('perm_dismissed', [id]);
-  return true;
-}
-
-// --- Fetch size approval ---
-
-const pendingFetchSizeApprovals = new Map<string, { url: string; requestedBytes: number; defaultBytes: number }>();
-
-function handleAgentFetchSizeRequest(id: string, url: string, requestedBytes: number, defaultBytes: number): void {
-  pendingFetchSizeApprovals.set(id, { url, requestedBytes, defaultBytes });
-  const mb = (requestedBytes / (1024 * 1024)).toFixed(1);
-  const defaultMb = (defaultBytes / (1024 * 1024)).toFixed(0);
-  log.info('Fetch size approval requested', { id, url, requestedBytes });
-  injectSystemMessage(
-    `Agent wants to fetch up to ${mb} MB from:\n` +
-    `  ${url}\n` +
-    `  Default limit is ${defaultMb} MB.\n\n` +
-    `  Reply: /approve-fetchsize ${id} or /deny-fetchsize ${id}`
-  );
-}
-
-function handleFetchSizeApproveReject(input: string): boolean {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase();
-
-  if (cmd !== '/approve-fetchsize' && cmd !== '/deny-fetchsize') return false;
-
-  let id = parts[1];
-  if (!id && pendingFetchSizeApprovals.size === 1) {
-    id = pendingFetchSizeApprovals.keys().next().value as string;
-  }
-  if (!id) {
-    injectSystemMessage(pendingFetchSizeApprovals.size === 0
-      ? 'No pending fetch size requests.'
-      : `Multiple pending — specify ID: ${[...pendingFetchSizeApprovals.keys()].join(', ')}`);
-    return true;
-  }
-
-  const pending = pendingFetchSizeApprovals.get(id);
-  if (!pending) {
-    // Already resolved — silently ignore.
-    return true;
-  }
-
-  pendingFetchSizeApprovals.delete(id);
-
-  if (cmd === '/approve-fetchsize') {
-    log.info('Fetch size approved', { id, bytes: pending.requestedBytes });
-    injectSystemMessage(`Approved fetch up to ${(pending.requestedBytes / (1024 * 1024)).toFixed(1)} MB from ${pending.url}`);
-    client!.send({ type: 'fetch_size_response', id, ok: true, approvedBytes: pending.requestedBytes, message: 'Approved by user' });
-  } else {
-    log.info('Fetch size denied', { id });
-    injectSystemMessage(`Denied larger fetch from ${pending.url}`);
-    client!.send({ type: 'fetch_size_response', id, ok: false, approvedBytes: pending.defaultBytes, message: 'Denied by user' });
-  }
-  client!.emit('perm_dismissed', [id]);
-  return true;
-}
-
-// --- MCP tool approval ---
-
-const pendingMcpToolApprovals = new Map<string, { server: string; tool: string; params: string }>();
-const autoHandledMcpIds = new Set<string>();
-
-function readMCPPermissions(): MCPPermissions {
-  try {
-    const settings = readSettingsSync();
-    const perms = settings['mcp_permissions'];
-    if (!perms || typeof perms !== 'object') return DEFAULT_MCP_PERMISSIONS;
-    const p = perms as Partial<MCPPermissions>;
-    return {
-      servers: (p.servers && typeof p.servers === 'object') ? p.servers : {},
-    };
-  } catch {
-    return DEFAULT_MCP_PERMISSIONS;
-  }
-}
-
-function addMCPToolToAlwaysAllow(server: string, tool: string): void {
-  try {
-    writeSettingsSync('gatekeeper:addToMCPAlwaysAllow', (settings) => {
-      const perms = (settings['mcp_permissions'] as Partial<MCPPermissions> | undefined) ?? {};
-      const servers = (perms.servers && typeof perms.servers === 'object') ? { ...perms.servers } : {};
-      const existing = servers[server];
-      const serverPerms = existing ? { ...existing } : { default: 'prompt' as const };
-      const tools = serverPerms.tools ? { ...serverPerms.tools } : {};
-      tools[tool] = 'allow';
-      serverPerms.tools = tools;
-      servers[server] = serverPerms;
-      return { ...settings, mcp_permissions: { servers } };
-    });
-    log.info('Added MCP tool to always-allow', { server, tool });
-    broadcastUpdatedPermissions();
-    flushPendingMCPApprovals();
-  } catch (err) {
-    log.error('Failed to update MCP permissions', { error: String(err) });
-  }
-}
-
-function handleAgentMcpToolRequest(id: string, server: string, tool: string, params: string): void {
-  const permissions = readMCPPermissions();
-  const level = checkMCPPermission(server, tool, permissions);
-
-  if (level === 'allow') {
-    log.info('MCP tool auto-allowed', { id, server, tool });
-    auditLog({ type: 'mcp_tool_allow', detail: `${server}/${tool}` });
-    autoHandledMcpIds.add(id);
-    client!.send({ type: 'mcp_tool_response', id, ok: true, message: 'Allowed by permission policy' });
-    return;
-  }
-
-  if (level === 'deny') {
-    log.info('MCP tool auto-denied', { id, server, tool });
-    auditLog({ type: 'mcp_tool_deny', detail: `${server}/${tool}` });
-    autoHandledMcpIds.add(id);
-    client!.send({ type: 'mcp_tool_response', id, ok: false, message: 'Denied by permission policy' });
-    injectSystemMessage(`[mcp] Blocked by deny policy: ${server}/${tool}`);
-    return;
-  }
-
-  // 'prompt' — store and forward to web UI for user approval
-  pendingMcpToolApprovals.set(id, { server, tool, params });
-  log.info('MCP tool approval requested', { id, server, tool });
-  auditLog({ type: 'mcp_tool_prompt', detail: `${server}/${tool}` });
-  const paramsPreview = params.length > 200 ? params.slice(0, 200) + '\n  ...' : params;
-  injectSystemMessage(
-    `Agent wants to call MCP tool: ${server}/${tool}\n` +
-    `  Parameters:\n${paramsPreview}\n\n` +
-    `  Reply: /approve-mcp ${id} or /deny-mcp ${id}\n` +
-    `  To always allow this tool: /approve-mcp ${id} --always`
-  );
-}
-
-function handleMcpToolApproveReject(input: string): boolean {
-  const parts = input.trim().split(/\s+/);
-  const cmd = parts[0]?.toLowerCase();
-
-  if (cmd !== '/approve-mcp' && cmd !== '/deny-mcp') return false;
-
-  const hasAlways = parts.includes('--always');
-  let id = parts.find(p => p !== cmd && p !== '--always');
-  if (!id && pendingMcpToolApprovals.size === 1) {
-    id = pendingMcpToolApprovals.keys().next().value as string;
-  }
-  if (!id) {
-    injectSystemMessage(pendingMcpToolApprovals.size === 0
-      ? 'No pending MCP tool requests.'
-      : `Multiple pending — specify ID: ${[...pendingMcpToolApprovals.keys()].join(', ')}`);
-    return true;
-  }
-
-  const pending = pendingMcpToolApprovals.get(id);
-  if (!pending) {
-    // Already resolved — silently ignore.
-    return true;
-  }
-
-  pendingMcpToolApprovals.delete(id);
-
-  if (cmd === '/approve-mcp') {
-    log.info('MCP tool approved', { id, server: pending.server, tool: pending.tool, always: hasAlways });
-    auditLog({ type: 'mcp_user_approve', detail: `${pending.server}/${pending.tool}` });
-    injectSystemMessage(`Approved MCP tool: ${pending.server}/${pending.tool}${hasAlways ? ' (always)' : ''}`);
-    client!.send({ type: 'mcp_tool_response', id, ok: true, message: 'Approved by user' });
-    if (hasAlways) {
-      addMCPToolToAlwaysAllow(pending.server, pending.tool);
-    }
-  } else {
-    log.info('MCP tool denied', { id, server: pending.server, tool: pending.tool });
-    auditLog({ type: 'mcp_user_deny', detail: `${pending.server}/${pending.tool}` });
-    injectSystemMessage(`Denied MCP tool: ${pending.server}/${pending.tool}`);
-    client!.send({ type: 'mcp_tool_response', id, ok: false, message: 'Denied by user' });
-  }
-  client!.emit('perm_dismissed', [id]);
-  return true;
-}
-
-/** Re-check pending MCP tool approvals against updated permissions and auto-resolve matches. */
-function flushPendingMCPApprovals(): void {
-  if (pendingMcpToolApprovals.size === 0) return;
-  const permissions = readMCPPermissions();
-  const dismissed: string[] = [];
-  for (const [id, pending] of pendingMcpToolApprovals) {
-    const level = checkMCPPermission(pending.server, pending.tool, permissions);
-    if (level === 'allow') {
-      log.info('Flush: auto-approving pending MCP tool', { id, server: pending.server, tool: pending.tool });
-      auditLog({ type: 'mcp_tool_allow', detail: `${pending.server}/${pending.tool}` });
-      pendingMcpToolApprovals.delete(id);
-      client!.send({ type: 'mcp_tool_response', id, ok: true, message: 'Allowed by permission policy' });
-      dismissed.push(id);
-    }
-  }
-  if (dismissed.length > 0 && client) {
-    client.emit('perm_dismissed', dismissed);
-  }
 }
 
 // --- Browser per-domain permissions ---
@@ -2195,13 +1299,22 @@ await startHostDaemon();
 await startLLMProxy();
 log.info('LLM proxy ready');
 
-// Initialize Tier 3 classifier (uses Anthropic API key if available)
-const classifierKey = process.env['ANTHROPIC_API_KEY'];
-if (classifierKey && process.env['AIGENT_CLASSIFIER'] !== '0') {
-  initClassifier(classifierKey);
-  log.info('Tier 3 classifier initialized');
+// Initialize Tier 3 classifier — uses the active provider's credentials
+if (process.env['AIGENT_CLASSIFIER'] !== '0') {
+  const { detectProvider: _detectProvider } = await import('./provider.js');
+  const _providerType = _detectProvider();
+  const classifierApiKey = _providerType === 'anthropic'
+    ? process.env['ANTHROPIC_API_KEY']
+    : (process.env['OPENAI_API_KEY'] ?? process.env['AIGENT_API_KEY'] ?? '');
+  const classifierBaseURL = _providerType === 'openai' ? (process.env['AIGENT_BASE_URL'] ?? undefined) : undefined;
+  if (classifierApiKey) {
+    initClassifier(classifierApiKey, classifierBaseURL);
+    log.info('Tier 3 classifier initialized', { provider: _providerType });
+  } else {
+    log.info('Tier 3 classifier disabled', { reason: 'no API key configured' });
+  }
 } else {
-  log.info('Tier 3 classifier disabled', { reason: classifierKey ? 'AIGENT_CLASSIFIER=0' : 'no ANTHROPIC_API_KEY' });
+  log.info('Tier 3 classifier disabled', { reason: 'AIGENT_CLASSIFIER=0' });
 }
 
 // Set up client early (before server) so the web server can start immediately.
@@ -2256,7 +1369,7 @@ client.sendCommand = (cmd: string) => {
 // Start web UI server before the server process so it's available during startup/restarts.
 const extSecret = randomUUID();
 const { startWebServer } = await import('./web-bridge.js');
-startWebServer(client, undefined, { autoHandledExecIds, getExecPermissions: readExecPermissions, autoHandledFetchIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions: readBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged: handleSettingsChanged, extSecret, setPiPOpen, resolvePiPSuggestion }).then(({ port }) => {
+startWebServer(client, undefined, { autoHandledExecIds: pendingExecApprovals.autoHandledIds, getExecPermissions: readExecPermissions, autoHandledFetchIds: pendingFetchApprovals.autoHandledIds, getFetchPermissions: readFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions: readBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledFileAccessIds: pendingFileAccessApprovals.autoHandledIds, autoHandledMcpIds: pendingMcpToolApprovals.autoHandledIds, onSettingsChanged: handleSettingsChanged, extSecret, setPiPOpen, resolvePiPSuggestion }).then(({ port }) => {
   log.info('Web UI ready', { url: `http://localhost:${port}` });
 }).catch((err) => {
   log.error('Web UI failed to start', { error: (err as Error).message });
@@ -2323,27 +1436,27 @@ client.on('edit_file_request', (id: string, path: string, edits: Array<{ old_str
 
 // Handle exec approval requests from the worker
 client.on('exec_request', (id: string, command: string) => {
-  handleAgentExecRequest(id, command);
+  _handleAgentExecRequest(getPermCtx(), id, command);
 });
 
 // Handle fetch approval requests from the worker
 client.on('fetch_request', (id: string, url: string, method?: string) => {
-  handleAgentFetchRequest(id, url, method);
+  _handleAgentFetchRequest(getPermCtx(), id, url, method);
 });
 
 // Handle file access approval requests (sensitive paths / out-of-project writes)
 client.on('file_access_request', (id: string, path: string, operation: 'read' | 'write', reason: string) => {
-  handleAgentFileAccessRequest(id, path, operation, reason);
+  _handleAgentFileAccessRequest(getPermCtx(), id, path, operation, reason);
 });
 
 // Handle fetch size approval requests (agent wants more than the default 1 MB)
 client.on('fetch_size_request', (id: string, url: string, requestedBytes: number, defaultBytes: number) => {
-  handleAgentFetchSizeRequest(id, url, requestedBytes, defaultBytes);
+  _handleAgentFetchSizeRequest(getPermCtx(), id, url, requestedBytes, defaultBytes);
 });
 
 // Handle MCP tool approval requests
 client.on('mcp_tool_request', (id: string, server: string, tool: string, params: string) => {
-  handleAgentMcpToolRequest(id, server, tool, params);
+  _handleAgentMcpToolRequest(getPermCtx(), id, server, tool, params);
 });
 
 // Cancel an in-flight browser request when the agent aborts.
