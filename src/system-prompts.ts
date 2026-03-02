@@ -99,23 +99,43 @@ RULES:
 7. NEVER include long-form content in your response — no blockquotes, no before/after comparisons, no full paragraphs of quoted text. If the user needs to see content, write it to a file or use a tool. Your text response stays short.
 8. This applies even when showing diffs, edits, rewrites, or comparisons. Describe the change in 1 sentence; do not reproduce the content.`;
 
+export interface SpeakExtraction {
+  /** Text with <speak> tags stripped — safe for display. */
+  content: string;
+  /** Extracted speak content for TTS, or null if not in short mode. */
+  spokenText: string | null;
+}
+
 /**
- * If short mode is on but the model omitted the <speak> tag, synthesize one
- * from the first sentence so TTS and the speak-preview icon still work.
+ * Extract <speak> content and strip tags from text.
+ * If short mode is on but the model omitted the tag, synthesize spokenText
+ * from the first sentence. The returned content never contains <speak> tags.
  */
-export function ensureSpeakTag(text: string, shortMode: boolean): string {
-  if (!shortMode) return text;
-  if (text.includes('<speak>')) return text;
-  // Extract the first sentence for the speak block
-  const stripped = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '').trim();
+export function extractAndStripSpeak(text: string, shortMode: boolean): SpeakExtraction {
+  if (!shortMode) return { content: text, spokenText: null };
+
+  // Extract content from <speak>...</speak> if present
+  const speakMatch = text.match(/<speak>([\s\S]*?)<\/speak>/);
+  if (speakMatch) {
+    const spokenText = speakMatch[1]!.trim();
+    // Strip all speak tags from content
+    let content = text.replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
+    // If entire text was in <speak> tags, use speak content as display too
+    if (!content) content = spokenText;
+    return { content, spokenText };
+  }
+
+  // Strip partial (unclosed) <speak> tag at end of streaming text
+  const content = text.replace(/<speak>[^<]*$/, '').trimEnd() || text;
+
+  // No <speak> tag — synthesize spokenText from first sentence
+  const forExtract = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '').trim();
   const sentenceEnd = /[.!?]\s+/g;
   let end = 0;
   let m: RegExpExecArray | null;
-  if ((m = sentenceEnd.exec(stripped)) !== null) {
-    end = m.index + 1; // include the punctuation
+  if ((m = sentenceEnd.exec(forExtract)) !== null) {
+    end = m.index + 1;
   }
-  // If no sentence boundary found, take up to 100 chars
-  const summary = end > 0 ? stripped.slice(0, end).trim() : stripped.slice(0, 100).trim();
-  if (!summary) return text;
-  return `<speak>${summary}</speak>\n\n${text}`;
+  const summary = end > 0 ? forExtract.slice(0, end).trim() : forExtract.slice(0, 100).trim();
+  return { content, spokenText: summary || null };
 }

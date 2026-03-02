@@ -8,6 +8,12 @@ const RESPONSE_1 =
   '1. **Read** `src/config.ts` to understand the existing route structure\n' +
   '2. **Searched** for route registration patterns across the codebase\n' +
   '3. **Added** a `/health` endpoint that returns `{ status: "ok", uptime: <seconds> }`\n\n' +
+  'Here\'s the new endpoint:\n\n' +
+  '```typescript\n' +
+  'app.get("/health", (_req, res) => {\n' +
+  '  res.json({ status: "ok", uptime: process.uptime() });\n' +
+  '});\n' +
+  '```\n\n' +
   'The endpoint is now available at `GET /health` and will return the server\'s ' +
   'uptime in seconds. You can use this for load balancer health checks or monitoring.';
 
@@ -115,8 +121,9 @@ const RESPONSE_2 =
   'All existing tests pass. Run `npm test` to verify the new tests as well.';
 
 const RESPONSE_3 =
-  'Health endpoint looks good — status ok, uptime reporting correctly, rate limit headers active at 30/min. Ready for production.' +
-  '\n\n<speak>Health endpoint checks out — status ok, rate limiting active.</speak>';
+  'Health endpoint looks good — status ok, uptime reporting correctly, rate limit headers active at 30/min. Ready for production.';
+
+const RESPONSE_3_SPOKEN = 'Health endpoint checks out — status ok, rate limiting active.';
 
 const RESPONSE_QUEUE_1 =
   "Sure — I'll add error handling next. I'll wrap the uptime call in a try/catch and " +
@@ -1080,6 +1087,9 @@ export const DEMO_SCENARIO: DemoScenario = {
     // Short-mode response (no extended thinking in short mode)
     { action: 'stream_text', text: RESPONSE_3, chunkSize: 8, intervalMs: 25 },
 
+    // Server sends spokenText as a separate event in short mode
+    emit({ type: 'speak', content: RESPONSE_3_SPOKEN }),
+
     // Finalize
     wait(200),
     emit({
@@ -1089,6 +1099,7 @@ export const DEMO_SCENARIO: DemoScenario = {
         content: RESPONSE_3,
         timestamp: new Date().toISOString(),
         elapsed: 1.4,
+        spokenText: RESPONSE_3_SPOKEN,
       },
     }),
     emit({ type: 'loading', isLoading: false }),

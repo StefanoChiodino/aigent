@@ -67,9 +67,6 @@ export function renderMarkdown(text: string): string {
 }
 
 export function stripMarkdownForTTS(text: string): string {
-  // Strip <speak>...</speak> tags but keep the content inside them.
-  // This prevents TTS from literally reading the word "speak".
-  text = text.replace(/<\/?speak>/g, '');
   text = text.replace(/```[\s\S]*?```/g, ' code block. ');
   text = text.replace(/`([^`]+)`/g, '$1');
   text = text.replace(/^#+\s+/gm, '');
@@ -84,20 +81,4 @@ export function stripMarkdownForTTS(text: string): string {
   text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
   text = text.replace(/\n{3,}/g, '\n\n');
   return text.trim();
-}
-
-export function extractSpeakContent(text: string): string | null {
-  const m = text.match(/<speak>([\s\S]*?)<\/speak>/);
-  return m ? m[1]!.trim() : null;
-}
-
-export function stripSpeakTag(text: string): string {
-  const stripped = text.replace(/<speak>[\s\S]*?<\/speak>/g, '').trimEnd();
-  // If the entire response was inside <speak> tags, show the speak content
-  // instead of an empty message.
-  if (!stripped) {
-    const inner = extractSpeakContent(text);
-    if (inner) return inner;
-  }
-  return stripped;
 }

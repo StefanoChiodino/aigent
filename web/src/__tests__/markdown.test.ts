@@ -1,9 +1,8 @@
 /**
- * Markdown utilities — HTML escaping, markdown rendering,
- * TTS stripping, speak tag extraction/stripping.
+ * Markdown utilities — HTML escaping, markdown rendering, TTS stripping.
  */
 import { describe, it, expect } from 'vitest';
-import { escapeHtml, renderMarkdown, stripMarkdownForTTS, extractSpeakContent, stripSpeakTag } from '../lib/markdown';
+import { escapeHtml, renderMarkdown, stripMarkdownForTTS } from '../lib/markdown';
 
 describe('escapeHtml', () => {
   it('escapes angle brackets', () => {
@@ -27,10 +26,40 @@ describe('renderMarkdown', () => {
   it('renders inline code', () => {
     expect(renderMarkdown('use `console.log`')).toContain('<code>console.log</code>');
   });
-  it('renders code blocks with language class', () => {
+  it('renders code blocks with hljs classes', () => {
     const html = renderMarkdown('```js\nconsole.log("hi");\n```');
-    expect(html).toContain('console.log');
+    expect(html).toContain('console');
+    expect(html).toContain('log');
     expect(html).toContain('<pre>');
+    expect(html).toContain('hljs');
+  });
+  it('syntax highlights code with language tag', () => {
+    const html = renderMarkdown('```python\ndef hello():\n    pass\n```');
+    expect(html).toContain('<span class="hljs-keyword">');
+    expect(html).toContain('def');
+  });
+  it('auto-detects language for untagged code blocks', () => {
+    const html = renderMarkdown('```\nfunction foo() { return 42; }\n```');
+    expect(html).toContain('hljs');
+  });
+  it('renders copy button on code blocks', () => {
+    const html = renderMarkdown('```js\nconst x = 1;\n```');
+    expect(html).toContain('code-copy-btn');
+    expect(html).toContain('Copy');
+  });
+  it('renders language label on code blocks', () => {
+    const html = renderMarkdown('```typescript\nconst x: number = 1;\n```');
+    expect(html).toContain('code-lang-label');
+    expect(html).toContain('typescript');
+  });
+  it('does not render language label without language tag', () => {
+    const html = renderMarkdown('```\nsome code\n```');
+    expect(html).not.toContain('code-lang-label');
+  });
+  it('does not highlight @mentions inside highlighted code blocks', () => {
+    const html = renderMarkdown('```python\n@decorator\ndef foo(): pass\n```');
+    expect(html).not.toContain('class="at-mention"');
+    expect(html).toContain('@decorator');
   });
   it('renders links', () => {
     const html = renderMarkdown('[click](https://example.com)');
@@ -85,48 +114,5 @@ describe('stripMarkdownForTTS', () => {
   });
   it('collapses multiple newlines', () => {
     expect(stripMarkdownForTTS('a\n\n\n\nb')).toBe('a\n\nb');
-  });
-  it('strips <speak> tags but keeps content inside', () => {
-    expect(stripMarkdownForTTS('<speak>Hello world</speak>')).toBe('Hello world');
-  });
-  it('strips speak tags from mixed content', () => {
-    expect(stripMarkdownForTTS('<speak>Summary.</speak>\n\nFull details here.')).toBe('Summary.\n\nFull details here.');
-  });
-  it('does not leave the literal word "speak" from tags', () => {
-    const result = stripMarkdownForTTS('<speak>Quick answer</speak>\n\nLong answer.');
-    expect(result).not.toMatch(/\bspeak\b/i);
-  });
-});
-
-describe('extractSpeakContent', () => {
-  it('extracts content between speak tags', () => {
-    expect(extractSpeakContent('<speak>Hello world</speak>')).toBe('Hello world');
-  });
-  it('extracts from multi-line text', () => {
-    expect(extractSpeakContent('<speak>Summary.</speak>\n\nMore.')).toBe('Summary.');
-  });
-  it('returns null when no speak tag', () => {
-    expect(extractSpeakContent('No speak tag')).toBeNull();
-  });
-  it('trims whitespace', () => {
-    expect(extractSpeakContent('<speak>  trimmed  </speak>')).toBe('trimmed');
-  });
-});
-
-describe('stripSpeakTag', () => {
-  it('removes speak tags and trims end', () => {
-    // stripSpeakTag uses trimEnd(), so leading newlines from removal are preserved
-    const result = stripSpeakTag('<speak>Summary.</speak>\n\nDetails here.');
-    expect(result.trim()).toBe('Details here.');
-  });
-  it('returns speak content when entire text is in speak tags', () => {
-    expect(stripSpeakTag('<speak>Only spoken text</speak>')).toBe('Only spoken text');
-  });
-  it('returns text unchanged when no speak tags', () => {
-    expect(stripSpeakTag('Regular text')).toBe('Regular text');
-  });
-  it('removes multiple speak tags', () => {
-    const result = stripSpeakTag('<speak>One.</speak> Middle <speak>Two.</speak>');
-    expect(result.trim()).toBe('Middle');
   });
 });

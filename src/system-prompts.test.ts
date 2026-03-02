@@ -1,11 +1,11 @@
 /**
  * System prompt builders — tests for host daemon prompt, browser extension
- * prompt, short mode prompt, and ensureSpeakTag heuristic.
+ * prompt, short mode prompt, and extractAndStripSpeak.
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildHostSystemPrompt, buildBrowserExtSystemPrompt, ensureSpeakTag, SHORT_MODE_PROMPT } from './system-prompts.js';
+import { buildHostSystemPrompt, buildBrowserExtSystemPrompt, extractAndStripSpeak, SHORT_MODE_PROMPT } from './system-prompts.js';
 
 function mockHostClient(opts: {
   connected?: boolean;
@@ -86,51 +86,68 @@ describe('SHORT_MODE_PROMPT', () => {
   });
 });
 
-describe('ensureSpeakTag', () => {
-  it('returns text unchanged when shortMode is false', () => {
-    assert.equal(ensureSpeakTag('Hello world.', false), 'Hello world.');
+describe('extractAndStripSpeak', () => {
+  it('returns content unchanged and spokenText null when shortMode is false', () => {
+    const result = extractAndStripSpeak('Hello world.', false);
+    assert.equal(result.content, 'Hello world.');
+    assert.equal(result.spokenText, null);
   });
 
-  it('returns text unchanged when it already has <speak> tag', () => {
+  it('extracts spokenText and strips tags from content', () => {
     const text = '<speak>Already spoken.</speak>\nMore details.';
-    assert.equal(ensureSpeakTag(text, true), text);
+    const result = extractAndStripSpeak(text, true);
+    assert.equal(result.spokenText, 'Already spoken.');
+    assert.equal(result.content, 'More details.');
   });
 
-  it('synthesizes speak tag from first sentence only', () => {
+  it('returns speak content as both content and spokenText when entire text is in speak tags', () => {
+    const text = '<speak>Only this.</speak>';
+    const result = extractAndStripSpeak(text, true);
+    assert.equal(result.spokenText, 'Only this.');
+    assert.equal(result.content, 'Only this.');
+  });
+
+  it('synthesizes spokenText from first sentence when no speak tag', () => {
     const text = 'First sentence. Second sentence. Third sentence.';
-    const result = ensureSpeakTag(text, true);
-    assert.ok(result.startsWith('<speak>'));
-    assert.ok(result.includes('First sentence.'));
-    assert.ok(!result.slice(0, result.indexOf('</speak>')).includes('Second sentence.'));
-    assert.ok(result.includes('</speak>'));
-    assert.ok(result.includes(text));
+    const result = extractAndStripSpeak(text, true);
+    assert.equal(result.content, text);
+    assert.ok(result.spokenText !== null);
+    assert.ok(result.spokenText!.includes('First sentence.'));
+    assert.ok(!result.spokenText!.includes('Second sentence.'));
   });
 
   it('falls back to first 100 chars when no sentence boundary', () => {
     const text = 'A very long response with no period or exclamation mark';
-    const result = ensureSpeakTag(text, true);
-    assert.ok(result.startsWith('<speak>'));
-    assert.ok(result.includes('</speak>'));
+    const result = extractAndStripSpeak(text, true);
+    assert.ok(result.spokenText !== null);
+    assert.ok(result.spokenText!.length > 0);
   });
 
   it('strips code blocks before extracting sentences', () => {
     const text = '```\ncode block\n```\nFirst sentence. Second sentence.';
-    const result = ensureSpeakTag(text, true);
-    assert.ok(result.includes('First sentence.'));
+    const result = extractAndStripSpeak(text, true);
+    assert.ok(result.spokenText !== null);
+    assert.ok(result.spokenText!.includes('First sentence.'));
   });
 
   it('handles exclamation and question marks as boundaries', () => {
     const text = 'Great news! Everything works. More details here.';
-    const result = ensureSpeakTag(text, true);
-    assert.ok(result.includes('<speak>'));
-    assert.ok(result.includes('Great news!'));
-    // Only the first sentence should be in the speak block
-    assert.ok(!result.slice(0, result.indexOf('</speak>')).includes('Everything works.'));
+    const result = extractAndStripSpeak(text, true);
+    assert.ok(result.spokenText !== null);
+    assert.ok(result.spokenText!.includes('Great news!'));
+    assert.ok(!result.spokenText!.includes('Everything works.'));
   });
 
-  it('returns original text when summary is empty after stripping', () => {
+  it('returns null spokenText when summary is empty after stripping code', () => {
     const text = '```\nonly code\n```';
-    const result = ensureSpeakTag(text, true);
-    assert.equal(result, text);
+    const result = extractAndStripSpeak(text, true);
+    assert.equal(result.content, text);
+    assert.equal(result.spokenText, null);
+  });
+
+  it('strips partial unclosed <speak> tag at end of streaming text', () => {
+    const text = 'Some response text<speak>partial content';
+    const result = extractAndStripSpeak(text, true);
+    assert.ok(!result.content.includes('<speak>'));
   });
 });

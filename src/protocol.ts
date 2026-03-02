@@ -60,6 +60,7 @@ export interface DisplayMessage {
   elapsed?: number | undefined;
   cancelled?: boolean;
   attachments?: DisplayAttachment[];
+  spokenText?: string;
 }
 
 /** Record of a tool result that was summarized to save context tokens. */
@@ -146,6 +147,7 @@ export interface ServerState {
 export type ServerEvent =
   | { type: 'connected'; state: ServerState }
   | { type: 'text'; content: string }
+  | { type: 'speak'; content: string }
   | { type: 'thinking'; content: string }
   | { type: 'tool_start'; name: string; input: string; summary: string; model?: string; thinking?: string }
   | { type: 'tool_output'; content: string }

@@ -124,6 +124,11 @@ export function useWebSocket(): void {
           break;
         }
 
+        case 'speak': {
+          chat().setStreamSpokenText(event.content);
+          break;
+        }
+
         case 'thinking': {
           const { streaming } = chat();
           if (!streaming.isThinking && streaming.active) {

@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import type { DisplayMessage } from '../types';
-import { renderMarkdown, extractSpeakContent, stripSpeakTag } from '../lib/markdown';
+import { renderMarkdown } from '../lib/markdown';
 import { useVoiceStore } from '../stores/voice';
 import { useTTS } from '../hooks/useTTS';
 import { TraceBlock } from './TraceBlock';
@@ -107,11 +107,10 @@ function MessageAttachments({ attachments }: { attachments: NonNullable<DisplayM
 export const Message = React.memo(function Message({ message }: Props) {
   const rendered = useMemo(() => {
     if (message.role === 'system') return null;
-    return renderMarkdown(stripSpeakTag(message.content));
+    return renderMarkdown(message.content);
   }, [message.content, message.role]);
 
-  const speakContent = message.role === 'assistant' ? extractSpeakContent(message.content) : null;
-  const ttsText = speakContent ?? message.content;
+  const ttsText = message.spokenText ?? message.content;
 
   return (
     <div className={`message ${message.role}${message.cancelled ? ' cancelled' : ''}`}>
@@ -129,9 +128,9 @@ export const Message = React.memo(function Message({ message }: Props) {
           <span className="elapsed">{message.elapsed.toFixed(1)}s</span>
         )}
         {message.role === 'assistant' && <TTSButton text={ttsText} messageId={message.id} />}
-        {message.role === 'assistant' && <CopyButton text={stripSpeakTag(message.content)} />}
+        {message.role === 'assistant' && <CopyButton text={message.content} />}
         {message.role === 'assistant' && <RatingWidget messageId={message.id} />}
-        {speakContent && <SpeakPreview content={speakContent} />}
+        {message.spokenText && <SpeakPreview content={message.spokenText} />}
       </div>
       {message.attachments && message.attachments.length > 0 && (
         <MessageAttachments attachments={message.attachments} />

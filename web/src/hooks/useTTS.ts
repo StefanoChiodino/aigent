@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { useVoiceStore } from '../stores/voice';
 import { isDemo } from '../demo/useDemoMode';
-import { stripMarkdownForTTS, extractSpeakContent } from '../lib/markdown';
+import { stripMarkdownForTTS } from '../lib/markdown';
 import { useChatStore } from '../stores/chat';
 
 /** Apply the user's chosen speaker device to an HTMLAudioElement (if supported). */
@@ -165,33 +165,21 @@ export function useTTS(): TTSControls {
     if (!getAutoSpeak()) return;
     // Never talk over the user — suppress TTS while mic is active
     if (useVoiceStore.getState().micState !== 'idle') return;
-    const streamText = useChatStore.getState().streaming.text;
 
-    // Concise mode: responses wrap the TTS summary in <speak>...</speak>.
-    // Speak only that block (once), then ignore the rest of the stream.
-    if (streamText.includes('<speak>')) {
-      const speakContent = extractSpeakContent(streamText);
-      if (!speakContent) {
-        // <speak> opened but </speak> not yet arrived — wait for it.
-        return;
-      }
+    const { text: streamText, spokenText } = useChatStore.getState().streaming;
+
+    // Short mode: server sends spokenText via a separate 'speak' event.
+    // Speak it once, then suppress all further TTS for this turn.
+    if (spokenText) {
       if (!useVoiceStore.getState().speakBlockSpoken) {
         useVoiceStore.getState().setSpeakBlockSpoken(true);
         useVoiceStore.getState().setTtsSpeakingId(TTS_STREAMING_ID);
-        // Advance the pointer past the closing </speak> tag so we never
-        // re-process this region, then speak the extracted content.
-        const closeTag = '</speak>';
-        const closeIdx = streamText.indexOf(closeTag);
-        ttsStreamLastLen.current = closeIdx + closeTag.length;
-        enqueueChunk(speakContent);
+        enqueueChunk(spokenText);
       }
-      // Don't speak the markdown body that follows the <speak> block.
       return;
     }
 
-    // If the <speak> block was already spoken this turn, suppress all further
-    // TTS. This handles post-tool-use text: startToolBlock clears streaming.text
-    // so the <speak> tag is no longer present, but we already spoke the summary.
+    // If the speak block was already spoken this turn, suppress all further TTS.
     if (useVoiceStore.getState().speakBlockSpoken) return;
 
     const unspoken = streamText.slice(ttsStreamLastLen.current);
@@ -224,9 +212,7 @@ export function useTTS(): TTSControls {
     // Set the speaking ID so only the active message's button shows stop state.
     useVoiceStore.getState().setTtsSpeakingId(speakingId ?? null);
 
-    // Short mode: if the message has a <speak> block, speak only that content.
-    const speakContent = extractSpeakContent(text);
-    const stripped = stripMarkdownForTTS(speakContent ?? text);
+    const stripped = stripMarkdownForTTS(text);
 
     // Demo mode: use browser SpeechSynthesis
     if (isDemo()) {

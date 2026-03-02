@@ -33,7 +33,7 @@ import {
   buildBrowserExtSystemPrompt as _buildBrowserExtSystemPrompt,
   SHORT_MODE_PROMPT,
   EPISODE_LOGGING_PROMPT,
-  ensureSpeakTag as _ensureSpeakTag,
+  extractAndStripSpeak as _extractAndStripSpeak,
 } from './system-prompts.js';
 import { handleCommand as _handleCommand, setThinking, setEffort, setShort, setModel, type CommandContext } from './commands.js';
 
@@ -621,12 +621,18 @@ async function processAgentTurn(
     }
   }
 
+  let speakSent = false; // one-time flag: send speak event only once per turn
   try {
     const response = await agent.chat(userContent, {
       signal: controller.signal,
       onText: (text) => {
         if (controller.signal.aborted) return;
-        broadcast({ type: 'text', content: _ensureSpeakTag(text, currentShort) });
+        const { content, spokenText } = _extractAndStripSpeak(text, currentShort);
+        broadcast({ type: 'text', content });
+        if (spokenText && !speakSent) {
+          speakSent = true;
+          broadcast({ type: 'speak', content: spokenText });
+        }
       },
       onThinking: (text) => {
         if (controller.signal.aborted) return;
@@ -742,13 +748,14 @@ async function processAgentTurn(
     if (!controller.signal.aborted) {
       const elapsed = (Date.now() - startTime) / 1000;
       log.info('Agent turn complete', { elapsed, messages: messages.length });
-      const finalContent = _ensureSpeakTag(response, currentShort);
+      const { content: finalContent, spokenText: finalSpoken } = _extractAndStripSpeak(response, currentShort);
       const assistantMsg: DisplayMessage = {
         id: generateMsgId(),
         role: 'assistant',
         content: finalContent,
         timestamp: new Date().toISOString(),
         elapsed,
+        ...(finalSpoken ? { spokenText: finalSpoken } : {}),
       };
       messages.push(assistantMsg);
       broadcast({ type: 'message', message: assistantMsg });

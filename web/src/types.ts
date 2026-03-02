@@ -53,6 +53,7 @@ export interface DisplayMessage {
   cancelled?: boolean;
   traces?: TraceEntry[];
   attachments?: DisplayAttachment[];
+  spokenText?: string;
 }
 
 export interface BackgroundTaskInfo {
@@ -127,6 +128,7 @@ export interface CommandSegment {
 export type ServerEvent =
   | { type: 'connected'; state: ServerState }
   | { type: 'text'; content: string }
+  | { type: 'speak'; content: string }
   | { type: 'thinking'; content: string }
   | { type: 'tool_start'; name: string; input: string; summary: string; model?: string; thinking?: string }
   | { type: 'tool_output'; content: string }

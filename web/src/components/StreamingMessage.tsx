@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { useChatStore } from '../stores/chat';
 import { useVoiceStore } from '../stores/voice';
 import { useTTS, TTS_STREAMING_ID } from '../hooks/useTTS';
-import { stripSpeakTag, extractSpeakContent, renderMarkdown } from '../lib/markdown';
+import { renderMarkdown } from '../lib/markdown';
 import { TraceBlock } from './TraceBlock';
 import { SpeakPreview } from './SpeakPreview';
 import { RatingWidget } from './RatingWidget';
@@ -23,6 +23,7 @@ function activityLabel(
 
 export const StreamingMessage = React.memo(function StreamingMessage() {
   const text = useChatStore(s => s.streaming.text);
+  const spokenText = useChatStore(s => s.streaming.spokenText);
   const traces = useChatStore(s => s.streaming.traces);
   const isThinking = useChatStore(s => s.streaming.isThinking);
   const isSpeaking = useVoiceStore(s => s.ttsSpeakingId === TTS_STREAMING_ID);
@@ -32,10 +33,8 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
     stopAll();
   };
 
-  const displayText = stripSpeakTag(text);
-  const speakContent = extractSpeakContent(text);
-  const activity = !displayText ? activityLabel(isThinking, traces) : null;
-  const rendered = useMemo(() => displayText ? renderMarkdown(displayText) : '', [displayText]);
+  const activity = !text ? activityLabel(isThinking, traces) : null;
+  const rendered = useMemo(() => text ? renderMarkdown(text) : '', [text]);
 
   return (
     <div className="message assistant streaming">
@@ -49,7 +48,7 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
             dangerouslySetInnerHTML={{ __html: STOP_ICON }}
           />
         )}
-        {speakContent && <SpeakPreview content={speakContent} streaming />}
+        {spokenText && <SpeakPreview content={spokenText} streaming />}
         <RatingWidget messageId={STREAMING_MESSAGE_ID} />
       </div>
       {traces.length > 0 && (
@@ -62,7 +61,7 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
         </div>
       )}
       <div className="message-content">
-        {displayText ? (
+        {text ? (
           <div dangerouslySetInnerHTML={{ __html: rendered }} />
         ) : (
           <span className="streaming-activity">{activity}</span>

@@ -5,6 +5,7 @@ import type { DisplayMessage, TokenUsage, BackgroundTaskInfo, TraceEntry, Classi
 interface StreamingState {
   active: boolean;
   text: string;
+  spokenText: string | null;
   isThinking: boolean;
   thinkingText: string;
   currentToolOutput: string;
@@ -35,6 +36,7 @@ interface ChatState {
   /** Atomically append final message and end stream in one state update. */
   finishStream: (msg: DisplayMessage, traces?: TraceEntry[]) => void;
   setStreamText: (text: string) => void;
+  setStreamSpokenText: (text: string | null) => void;
 
   startThinkingBlock: () => void;
   appendThinkingText: (text: string) => void;
@@ -51,7 +53,7 @@ let traceIdCounter = 0;
 
 const INITIAL_USAGE: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const INITIAL_STREAMING: StreamingState = {
-  active: false, text: '', isThinking: false, thinkingText: '',
+  active: false, text: '', spokenText: null, isThinking: false, thinkingText: '',
   currentToolOutput: '', currentToolImages: [], traces: [], turnStartCtx: 0,
 };
 
@@ -103,6 +105,7 @@ export const useChatStore = create<ChatState>()(
         streaming: { ...s.streaming, active: false, isThinking: false },
       })),
       setStreamText: (text) => set(s => ({ streaming: { ...s.streaming, text } })),
+      setStreamSpokenText: (text) => set(s => ({ streaming: { ...s.streaming, spokenText: text } })),
 
       startThinkingBlock: () => set(s => {
         const id = `trace-${++traceIdCounter}`;
@@ -177,6 +180,21 @@ export const useChatStore = create<ChatState>()(
     {
       name: 'aigent-chat',
       partialize: (s) => ({ messages: s.messages, usage: s.usage, taskHistory: s.taskHistory }),
+      onRehydrateStorage: () => (state) => {
+        // Migrate old messages that have <speak> tags baked into content.
+        // Extract spokenText and strip tags so the UI never sees them.
+        if (!state) return;
+        for (const msg of state.messages) {
+          if (msg.role === 'assistant' && !msg.spokenText && msg.content.includes('<speak>')) {
+            const m = msg.content.match(/<speak>([\s\S]*?)<\/speak>/);
+            if (m) {
+              msg.spokenText = m[1]!.trim();
+              const stripped = msg.content.replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
+              msg.content = stripped || msg.spokenText;
+            }
+          }
+        }
+      },
     }
   )
 );
