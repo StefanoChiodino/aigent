@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Parakeet STT server — wraps nvidia/parakeet-tdt-0.6b-v2 behind a simple HTTP API.
+"""LEGACY — Parakeet STT server.  The default STT backend is now sherpa-onnx
+(see stt/server.mjs).  This file is kept for users who already have NeMo
+installed and prefer the Parakeet model.  Start with: make stt-legacy
+
+Parakeet STT server — wraps nvidia/parakeet-tdt-0.6b-v2 behind a simple HTTP API.
 
 Usage:
     python stt/main.py [options]
@@ -322,8 +326,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Parakeet STT server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--model", default="nvidia/parakeet-tdt-0.6b-v2",
-                        help="NeMo model name or local .nemo path")
+    parser.add_argument("--model", default="nvidia/parakeet-tdt_ctc-110m",
+                        help="NeMo model name or local .nemo path (default: parakeet-tdt_ctc-110m; "
+                             "larger: nvidia/parakeet-tdt-0.6b-v2)")
     parser.add_argument("--device", default="auto",
                         help="cuda | mps | cpu | auto (default: auto-detect)")
     parser.add_argument("--idle-timeout", type=int,

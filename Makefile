@@ -1,4 +1,4 @@
-.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots screenshots-diff clean stt stt-setup tts tts-setup demo-audio kill-ports plugin plugin-dev plugin-typecheck build-release recover
+.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots screenshots-diff clean stt stt-setup stt-legacy tts tts-setup demo-audio kill-ports plugin plugin-dev plugin-typecheck build-release recover
 
 # --- Development ---
 
@@ -21,7 +21,7 @@ dev: kill-ports
 		"npx tsx src/gatekeeper.tsx --headless $(ARGS)" \
 		"npx vite dev --config web/vite.config.ts" \
 		"$(TTS_PYTHON) tts/main.py" \
-		"$(STT_PYTHON) stt/main.py --eager" \
+		"node stt/server.mjs --eager" \
 		"cd aigent-extension && npm run dev"
 
 # Server only (no frontend rebuild)
@@ -125,23 +125,25 @@ kill-ports:
 		fi; \
 	done
 
-# --- STT (Parakeet speech-to-text sidecar) ---
+# --- STT (sherpa-onnx Zipformer speech-to-text sidecar) ---
 
+# Install sherpa-onnx-node and download the Zipformer English model (run once)
+stt-setup:
+	cd stt && npm install && bash download-model.sh
+
+# Start the STT server (run make stt-setup first)
+stt:
+	node stt/server.mjs $(ARGS)
+
+# Legacy Parakeet STT (requires Python + NeMo — see stt/main.py)
 STT_VENV   := stt/.venv
 STT_PYTHON := $(STT_VENV)/bin/python
 
-# Create the venv and install Parakeet dependencies (run once)
-stt-setup:
-	python3 -m venv $(STT_VENV)
-	$(STT_PYTHON) -m pip install --upgrade pip
-	$(STT_PYTHON) -m pip install -r stt/requirements.txt
-
-# Start the STT server (run make stt-setup first)
-stt: $(STT_PYTHON)
+stt-legacy: $(STT_PYTHON)
 	$(STT_PYTHON) stt/main.py $(ARGS)
 
 $(STT_PYTHON):
-	@echo "STT environment not set up. Run: make stt-setup"
+	@echo "Legacy STT (Parakeet) not set up. Run: python3 -m venv stt/.venv && stt/.venv/bin/pip install -r stt/requirements.txt"
 	@exit 1
 
 # --- TTS (edge-tts Microsoft neural text-to-speech sidecar) ---

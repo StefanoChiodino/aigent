@@ -3,6 +3,8 @@ dist/
 .env
 workspace/
 stt/.venv/
+stt/node_modules/
+stt/sherpa-onnx-*/
 tts/.venv/
 settings.json
 *.test-backup

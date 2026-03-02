@@ -80,7 +80,7 @@ aigent               # launch — open http://localhost:3141
 - Creating `~/.config/aigent/` (config + API key) and `~/.local/share/aigent/workspace/` (memory)
 - Entering your `ANTHROPIC_API_KEY` (stored in `~/.config/aigent/.env`, permissions `600`)
 - Setting up TTS (edge-tts, Microsoft neural TTS) — requires Python 3
-- Optionally installing STT (NVIDIA Parakeet, requires CUDA GPU and ~2 GB download)
+- Optionally installing STT (sherpa-onnx Zipformer, ~70 MB download, no GPU required)
 - Building the Chrome extension and printing load instructions
 
 After init, just run `aigent` — no extra flags needed.
@@ -375,7 +375,7 @@ AIGENT_TOOLS_ALLOWLIST=exec,read_file  # comma-separated list of tools to enable
 AIGENT_STT_URL=http://127.0.0.1:8765   # STT service endpoint
 AIGENT_TTS_URL=http://127.0.0.1:8766   # TTS service endpoint
 AIGENT_STT_ENERGY_THRESHOLD=0.01       # RMS gate: audio quieter than this is discarded before transcription (0 = off)
-AIGENT_STT_IDLE_TIMEOUT=0              # unload Parakeet model after N seconds idle (0 = never)
+AIGENT_STT_IDLE_TIMEOUT=0              # unload STT model after N seconds idle (0 = never)
 ```
 
 ### TTS / STT setup
@@ -384,14 +384,16 @@ AIGENT_STT_IDLE_TIMEOUT=0              # unload Parakeet model after N seconds i
 make tts-setup   # install edge-tts (Microsoft TTS, no API key needed)
 make tts         # start the TTS server on port 8766
 
-# STT uses NVIDIA Parakeet via local Python service
-make stt-setup   # create venv and install dependencies (run once)
+# STT uses sherpa-onnx Zipformer — Node.js native addon, no Python or GPU required
+make stt-setup   # install sherpa-onnx-node and download the model (~70 MB)
 make stt         # start the STT server on port 8765
 ```
 
 TTS and STT URLs are configurable in the settings panel or via `AIGENT_TTS_URL` / `AIGENT_STT_URL`.
 
-**STT energy gate** — Parakeet can hallucinate words ("yeah", "okay") from silence or background noise. The energy gate measures the RMS volume of each audio clip before sending it to the model; clips below the threshold are discarded immediately. The default (0.01) works well in a quiet room. If you still get spurious transcriptions, raise it in **Settings → Microphone → STT energy threshold** — changes take effect immediately without restarting the STT service. The STT log shows the RMS alongside each transcript to help you calibrate: `[0.43s]  rms=0.0312  'yeah'`.
+**STT energy gate** — the STT model can hallucinate words ("yeah", "okay") from silence or background noise. The energy gate measures the RMS volume of each audio clip before sending it to the model; clips below the threshold are discarded immediately. The default (0.01) works well in a quiet room. If you still get spurious transcriptions, raise it in **Settings → Microphone → STT energy threshold** — changes take effect immediately without restarting the STT service. The STT log shows the RMS alongside each transcript to help you calibrate: `[0.43s]  rms=0.0312  'yeah'`.
+
+**Legacy Parakeet STT** — the previous NVIDIA Parakeet backend (Python/NeMo) is still available at `stt/main.py`. Use `make stt-legacy` to run it if you already have NeMo installed and prefer the Parakeet model.
 
 ### MCP (Model Context Protocol)
 

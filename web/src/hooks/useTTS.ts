@@ -3,6 +3,7 @@ import { useVoiceStore } from '../stores/voice';
 import { isDemo } from '../demo/useDemoMode';
 import { stripMarkdownForTTS } from '../lib/markdown';
 import { useChatStore } from '../stores/chat';
+import { useUIStore } from '../stores/ui';
 
 /** Apply the user's chosen speaker device to an HTMLAudioElement (if supported). */
 async function applySinkId(audio: HTMLAudioElement): Promise<void> {
@@ -130,16 +131,8 @@ export function useTTS(): TTSControls {
     const stripped = stripMarkdownForTTS(text);
     if (!stripped.trim()) return;
 
-    // Demo mode: use browser SpeechSynthesis (no server needed)
-    if (isDemo()) {
-      const utterance = new SpeechSynthesisUtterance(stripped);
-      utterance.rate = 1 + getRatePct() / 100;
-      utterance.onstart = () => useVoiceStore.getState().setTtsPlaying(true);
-      utterance.onend = () => { useVoiceStore.getState().setTtsPlaying(false); useVoiceStore.getState().setTtsSpeakingId(null); };
-      utterance.onerror = () => { useVoiceStore.getState().setTtsPlaying(false); useVoiceStore.getState().setTtsSpeakingId(null); };
-      speechSynthesis.speak(utterance);
-      return;
-    }
+    // Demo mode: DemoPlaybackEngine handles all audio — skip here to avoid double playback.
+    if (isDemo()) return;
 
     const ratePct = getRatePct();
     const rateStr = ratePct >= 0 ? `+${ratePct}%` : `${ratePct}%`;
@@ -182,6 +175,11 @@ export function useTTS(): TTSControls {
     // If the speak block was already spoken this turn, suppress all further TTS.
     if (useVoiceStore.getState().speakBlockSpoken) return;
 
+    // Short mode: don't speak body text before the speak summary arrives.
+    // Without this guard, the text event (which arrives before the speak event)
+    // would trigger the normal-mode path and speak body text prematurely.
+    if (useUIStore.getState().shortMode && !spokenText) return;
+
     const unspoken = streamText.slice(ttsStreamLastLen.current);
     if (!unspoken) return;
 
@@ -214,16 +212,8 @@ export function useTTS(): TTSControls {
 
     const stripped = stripMarkdownForTTS(text);
 
-    // Demo mode: use browser SpeechSynthesis
-    if (isDemo()) {
-      const utterance = new SpeechSynthesisUtterance(stripped);
-      utterance.rate = 1 + getRatePct() / 100;
-      utterance.onstart = () => useVoiceStore.getState().setTtsPlaying(true);
-      utterance.onend = () => { useVoiceStore.getState().setTtsPlaying(false); useVoiceStore.getState().setTtsSpeakingId(null); onDone?.(); };
-      utterance.onerror = () => { useVoiceStore.getState().setTtsPlaying(false); useVoiceStore.getState().setTtsSpeakingId(null); onDone?.(); };
-      speechSynthesis.speak(utterance);
-      return;
-    }
+    // Demo mode: DemoPlaybackEngine handles all audio — skip here to avoid double playback.
+    if (isDemo()) { onDone?.(); return; }
 
     // Split text into sentence chunks so the first sentence starts playing
     // immediately while the rest synthesize in the background.

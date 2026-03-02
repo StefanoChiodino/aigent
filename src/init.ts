@@ -208,40 +208,41 @@ export async function runInit(workspaceArg?: string): Promise<void> {
   print('');
 
   // ── 6. STT setup ────────────────────────────────────────────────────────────
-  print(`${bold('6.')} STT (speech-to-text) — NVIDIA Parakeet`);
-  print(`   ${dim('Note: requires CUDA / NVIDIA GPU for real-time transcription')}`);
+  print(`${bold('6.')} STT (speech-to-text) — sherpa-onnx Zipformer`);
+  print(`   ${dim('No Python or GPU required — runs on CPU via native Node.js addon')}`);
 
   const sttCandidates = [
     join(__dirname, '..', 'stt'),
     join(__dirname, '..', '..', 'stt'),
   ];
-  const sttDir = sttCandidates.find((d) => existsSync(join(d, 'requirements.txt')));
+  const sttDir = sttCandidates.find((d) => existsSync(join(d, 'package.json')));
 
   if (!sttDir) {
     print(`   ${yellow('⚠')} STT source not found in package — skipping`);
-  } else if (!commandExists('python3')) {
-    print(`   ${yellow('⚠')} python3 not found — skipping (STT is optional)`);
   } else {
     const rl2 = createInterface({ input: process.stdin, output: process.stdout });
-    const answer = (await ask(rl2, `   Install STT? This downloads ~2 GB of ML model weights [y/N]: `)).trim().toLowerCase();
+    const answer = (await ask(rl2, `   Install STT? Downloads ~70 MB model [y/N]: `)).trim().toLowerCase();
     rl2.close();
     if (answer === 'y' || answer === 'yes') {
-      const venv = join(sttDir, '.venv');
-      if (existsSync(venv)) {
-        print(`   ${dim('·')} STT venv already exists — skipping`);
+      const nodeModules = join(sttDir, 'node_modules');
+      if (existsSync(nodeModules)) {
+        print(`   ${dim('·')} STT dependencies already installed`);
       } else {
-        const r1 = spawnSync('python3', ['-m', 'venv', venv], { stdio: 'inherit' });
+        const r1 = spawnSync('npm', ['install'], { cwd: sttDir, stdio: 'inherit' });
         if (r1.status !== 0) {
-          print(`   ${red('✗')} Failed to create STT venv`);
+          print(`   ${red('✗')} Failed to install STT dependencies`);
         } else {
-          const pip = join(venv, 'bin', 'pip');
-          const req = join(sttDir, 'requirements.txt');
-          const r2 = spawnSync(pip, ['install', '-r', req], { stdio: 'inherit' });
-          if (r2.status !== 0) {
-            print(`   ${red('✗')} Failed to install STT dependencies`);
-          } else {
-            print(`   ${green('✓')} STT ready`);
-          }
+          print(`   ${green('✓')} STT dependencies installed`);
+        }
+      }
+      // Download model if not present
+      const downloadScript = join(sttDir, 'download-model.sh');
+      if (existsSync(downloadScript)) {
+        const r2 = spawnSync('bash', [downloadScript], { cwd: sttDir, stdio: 'inherit' });
+        if (r2.status !== 0) {
+          print(`   ${red('✗')} Failed to download STT model`);
+        } else {
+          print(`   ${green('✓')} STT ready`);
         }
       }
     } else {

@@ -1,0 +1,8 @@
+{
+  "name": "aigent-stt",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "sherpa-onnx-node": "^1.12.28"
+  }
+}
