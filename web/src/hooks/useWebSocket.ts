@@ -85,32 +85,14 @@ export function useWebSocket(): void {
           ui().setModelName(event.state.model);
           ui().setAvailableModels(event.state.availableModels ?? []);
           ui().setAvailableTools(event.state.availableTools ?? []);
+          if (event.state.contextWindow) ui().setContextWindow(event.state.contextWindow);
 
-          // Apply browser-persisted settings if they differ from server state.
-          // The browser's settings store (localStorage) is the source of truth for
-          // these because the user last changed them from this browser.
-          // Only override the server when there's an explicitly saved value (i.e. the
-          // key exists in localStorage) — schema defaults must NOT override server
-          // state, since the server may have been configured via env vars or autosave.
-          {
-            const cs = settings().clientSettings;
-            if ('AIGENT_MODEL' in cs && typeof cs['AIGENT_MODEL'] === 'string' && cs['AIGENT_MODEL'] !== event.state.model) {
-              ui().setModelName(cs['AIGENT_MODEL']);
-              send({ type: 'set_model', model: cs['AIGENT_MODEL'] });
-            }
-            if ('AIGENT_SHORT' in cs && typeof cs['AIGENT_SHORT'] === 'boolean' && cs['AIGENT_SHORT'] !== (event.state.short ?? false)) {
-              ui().setShortMode(cs['AIGENT_SHORT']);
-              send({ type: 'set_short', enabled: cs['AIGENT_SHORT'] });
-            }
-            if ('AIGENT_THINKING' in cs && typeof cs['AIGENT_THINKING'] === 'string' && cs['AIGENT_THINKING'] !== event.state.thinking) {
-              ui().setThinkingLevel(cs['AIGENT_THINKING']);
-              if (cs['AIGENT_THINKING'] === 'off') {
-                send({ type: 'set_thinking', enabled: false });
-              } else {
-                send({ type: 'set_effort', level: cs['AIGENT_THINKING'] });
-              }
-            }
-          }
+          // Server is authoritative for runtime state. Sync localStorage from
+          // server on connect so all browsers agree. User changes flow:
+          // browser click → send command → server applies → broadcasts state → all browsers update.
+          settings().setClientSetting('AIGENT_SHORT', event.state.short ?? false);
+          settings().setClientSetting('AIGENT_THINKING', event.state.thinking);
+          settings().setClientSetting('AIGENT_MODEL', event.state.model);
           break;
         }
 
@@ -271,6 +253,7 @@ export function useWebSocket(): void {
             settings().setClientSetting('AIGENT_SHORT', event.short);
           }
           if (event.availableModels) ui().setAvailableModels(event.availableModels);
+          if (event.contextWindow) ui().setContextWindow(event.contextWindow);
           break;
 
         case 'host_state':
