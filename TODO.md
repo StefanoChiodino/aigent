@@ -4,7 +4,7 @@
 
 When the text comes streaming down the first part of the text that is actually the short answer displays and then as soon as it finishes it is wiped and then replaced by the full answer. That is quite jarring and should stop.
 
-add syntax highlighting in the chat for code blocks
+~~add syntax highlighting in the chat for code blocks~~ done
 
 ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile but it seems a bit redundant 
 
@@ -12,9 +12,9 @@ ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile bu
 
 ## Active Bugs
 
-The left panel now has horizontal scroll! Cringe!
+~~The left panel now has horizontal scroll! Cringe!~~ fixed — added `overflow-x: hidden` to `#sidebar-panel`
 
-cancelling a message shouldn't cancell all the queue!!!
+- [x] ~~cancelling a message shouldn't cancel all the queue~~ — Fixed: `handleCancel()` now sets a `queueCancelled` flag that breaks the `processQueue` while loop, pausing the queue instead of immediately draining it. Queue chips are preserved and resume when the user sends a new message.
 
 - [x] **Short mode TTS says "speak" literally** — Fixed: `stripMarkdownForTTS` now strips `<speak>` tags, and `speakText` extracts speak content before sending to TTS.
 

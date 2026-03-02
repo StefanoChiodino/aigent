@@ -75,6 +75,43 @@ test.describe('@fast Cancel button', () => {
     await expectHidden(page.locator('#cancel'));
   });
 
+  test('cancel preserves queued messages (queue chips survive cancel)', async () => {
+    const page = getPage();
+    // Agent is busy, two messages are queued
+    await injectEvent({ type: 'loading', isLoading: true });
+    await injectEvent({
+      type: 'queue_update',
+      queue: [
+        { id: 1, displayText: 'queued msg A' },
+        { id: 2, displayText: 'queued msg B' },
+      ],
+    });
+    await expect(page.locator('#queue-chips')).toBeVisible({ timeout: 3_000 });
+    expect(await page.locator('.queue-chip').count()).toBe(2);
+
+    // User clicks cancel
+    await page.locator('#cancel').click();
+
+    // Server responds: cancel current turn, preserve queue (the fix)
+    await injectEvent({ type: 'loading', isLoading: false });
+    await injectEvent({
+      type: 'queue_update',
+      queue: [
+        { id: 1, displayText: 'queued msg A' },
+        { id: 2, displayText: 'queued msg B' },
+      ],
+    });
+
+    // Queue chips must still be visible after cancel
+    await expect(page.locator('#queue-chips')).toBeVisible({ timeout: 3_000 });
+    expect(await page.locator('.queue-chip').count()).toBe(2);
+    await expect(page.locator('.queue-chip-text').first()).toHaveText('queued msg A');
+    await expect(page.locator('.queue-chip-text').last()).toHaveText('queued msg B');
+
+    // Cleanup
+    await injectEvent({ type: 'queue_update', queue: [] });
+  });
+
   test('cancel button click while loading sends cancel message', async () => {
     const page = getPage();
 

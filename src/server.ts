@@ -1091,6 +1091,7 @@ function handleCommand(cmd: string): boolean {
 interface QueuedMessage { id: number; content: string | UserContent; displayText?: string; displayAttachments?: DisplayAttachment[]; thinkingOverride?: ThinkingLevel | undefined; reqId?: string }
 const messageQueue: QueuedMessage[] = [];
 let processingQueue = false;
+let queueCancelled = false;
 let queueIdCounter = 0;
 
 function broadcastQueueUpdate(): void {
@@ -1137,6 +1138,12 @@ async function processQueue(): Promise<void> {
     const next = messageQueue.shift();
     broadcastQueueUpdate();
     if (next) await processMessage(next);
+    // If the user cancelled the current turn, stop draining the queue
+    // so they can review / edit / dismiss remaining items.
+    if (queueCancelled) {
+      queueCancelled = false;
+      break;
+    }
   }
 
   processingQueue = false;
@@ -1156,17 +1163,16 @@ function handleCancel(): void {
     abortController.abort();
     abortController = null;
     // Preserve queued messages — only cancel the current turn, not the queue.
+    // Signal the processQueue loop to stop after the current message so the
+    // user can review / edit / dismiss remaining items.
     isLoading = false;
+    queueCancelled = true;
 
     taskQueue.cancelAll();
     broadcast({ type: 'text', content: '' });
     broadcast({ type: 'loading', isLoading: false });
     addSystemMessage('Cancelled.');
-
-    // Resume draining the queue if there are pending messages
-    if (messageQueue.length > 0) {
-      queueMicrotask(() => void processQueue());
-    }
+    broadcastQueueUpdate();
   }
 }
 
