@@ -631,7 +631,7 @@ export const DEMO_SCENARIO: DemoScenario = {
         inputTokens: 12400,
         outputTokens: 3200,
         cost: 0.027,
-        delivery: 'user-pull',
+        delivery: 'agent-review',
         result: 'Generated `openapi.yaml` with 8 endpoints:\n\n| Method | Path | Description |\n|--------|------|-------------|\n| GET | /health | Health check |\n| GET | /api/v1/users | List users |\n| POST | /api/v1/users | Create user |\n| GET | /api/v1/users/:id | Get user |\n| PUT | /api/v1/users/:id | Update user |\n| DELETE | /api/v1/users/:id | Delete user |\n| GET | /api/v1/search | Search |\n| POST | /api/v1/auth/login | Login |\n\nSpec written to `docs/openapi.yaml`.',
       },
     }),
