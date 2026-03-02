@@ -146,12 +146,14 @@ describe('reflection: provider call', () => {
     assert.ok(userMsg.content.includes('Build failed'), 'prompt should include friction');
   });
 
-  it('uses Haiku model', async () => {
+  it('uses cheap model from env (or empty default)', async () => {
     appendEpisodes(6);
     const { provider, calls } = mockProvider(EMPTY_RESPONSE);
     await runReflection(provider, tmpDir);
 
-    assert.equal(calls[0]!.options.model, 'claude-haiku-4-5-20251001');
+    // getCheapModel() returns AIGENT_CHEAP_MODEL ?? AIGENT_MODEL ?? ''
+    const expected = process.env['AIGENT_CHEAP_MODEL'] ?? process.env['AIGENT_MODEL'] ?? '';
+    assert.equal(calls[0]!.options.model, expected);
   });
 
   it('includes existing MEMORY.md in prompt', async () => {
@@ -305,7 +307,8 @@ describe('reflection: audit log', () => {
     const record = JSON.parse(line) as { episodesAnalyzed: number; patternsFound: number; model: string };
     assert.equal(record.episodesAnalyzed, 6);
     assert.equal(record.patternsFound, 1);
-    assert.equal(record.model, 'claude-haiku-4-5-20251001');
+    const expectedModel = process.env['AIGENT_CHEAP_MODEL'] ?? process.env['AIGENT_MODEL'] ?? '';
+    assert.equal(record.model, expectedModel);
   });
 });
 
