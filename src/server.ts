@@ -586,20 +586,6 @@ async function processAgentTurn(
     ? parseImagesInMessage(content)
     : content;
 
-  // Compress images parsed from file paths
-  if (Array.isArray(userContent)) {
-    try {
-      const { compressImage } = await import('./image-compress.js');
-      for (let i = 0; i < userContent.length; i++) {
-        const p = userContent[i]!;
-        if (p.type === 'image') {
-          const compressed = await compressImage(p.data, p.mediaType);
-          userContent[i] = { ...p, data: compressed.data, mediaType: compressed.mediaType };
-        }
-      }
-    } catch { /* compression unavailable — use originals */ }
-  }
-
   // Proactive episode retrieval — surface relevant past experience before the agent responds.
   // Best-effort, non-blocking. Only fires for real user messages > 20 chars.
   if (!isTaskResult && typeof userContent === 'string' && userContent.length > 20) {

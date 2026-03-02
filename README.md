@@ -310,19 +310,6 @@ Key settings groups:
 - **Daily logs** — by default only an index of log files is included in the prompt; the agent reads specific logs on demand via `read_file`. Set `AIGENT_FULL_LOGS=1` to include recent logs in full.
 - **`search_memory`** — keyword search across all past daily logs at zero LLM cost
 
-### Token optimization
-
-Multiple layers keep context window usage efficient:
-
-- **Tool result summarization** — large tool outputs are automatically summarized by Haiku. Full output is saved to `/tmp/aigent/tool-results/` and the agent spawns cheap sub-agents to analyze it on demand, keeping the main context lean. Configurable via Settings → Context.
-- **Image compression** — images are downscaled to 1568px max (Anthropic's useful resolution limit) and converted to JPEG where possible. Screenshots go from 1-5MB PNG to 50-200KB JPEG.
-- **OCR text extraction** — when `tesseract` is installed, text is extracted from screenshots and included as a text block (~100-200 tokens) alongside the compressed image (~1,600 tokens). Install: `apt install tesseract-ocr`.
-- **Head+tail truncation** — when outputs are truncated, 70% head and 20% tail are preserved (error messages and results tend to be at the end).
-- **Dynamic tool filtering** — only tools whose prerequisites are met (browser extension connected, host daemon running, display available) are sent per API call.
-- **Trimmed tool descriptions** — verbose tool docs live in the cached system prompt; tool definitions carry only essential descriptions.
-
-> Full design: [`docs/design-token-optimization.md`](docs/design-token-optimization.md)
-
 The continuous learning system (episodes, semantic retrieval, reflection, feedback) is described in [How it learns](#how-it-learns) above.
 
 ### Profiles and sessions
