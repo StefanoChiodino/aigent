@@ -102,6 +102,26 @@ describe('QueueChips component', () => {
     expect(handles).toHaveLength(2);
   });
 
+  it('clicking chip text calls onPullBack with text and id', () => {
+    const onPullBack = vi.fn();
+    useUIStore.setState({
+      queuedMessages: [{ id: 7, displayText: 'Edit me' }],
+    });
+    render(<QueueChips onPullBack={onPullBack} />);
+    const textSpan = screen.getByTitle('Click to edit');
+    fireEvent.click(textSpan);
+    expect(onPullBack).toHaveBeenCalledWith('Edit me', 7);
+  });
+
+  it('clicking chip text without onPullBack does not throw', () => {
+    useUIStore.setState({
+      queuedMessages: [{ id: 7, displayText: 'Edit me' }],
+    });
+    render(<QueueChips />);
+    const textSpan = screen.getByTitle('Click to edit');
+    expect(() => fireEvent.click(textSpan)).not.toThrow();
+  });
+
   it('drop sends reorder_queue with new ID order', () => {
     useUIStore.setState({
       queuedMessages: [

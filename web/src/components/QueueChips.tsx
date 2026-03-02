@@ -2,7 +2,11 @@ import React, { useCallback, useRef, useState } from 'react';
 import { useConnectionStore } from '../stores/connection';
 import { useUIStore } from '../stores/ui';
 
-export const QueueChips = React.memo(function QueueChips() {
+interface QueueChipsProps {
+  onPullBack?: (text: string, id: number) => void;
+}
+
+export const QueueChips = React.memo(function QueueChips({ onPullBack }: QueueChipsProps) {
   const queuedMessages = useUIStore(s => s.queuedMessages);
   const send = useConnectionStore(s => s.send);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -63,7 +67,11 @@ export const QueueChips = React.memo(function QueueChips() {
           onDrop={e => onDrop(e, idx)}
         >
           <span className="queue-chip-handle" title="Drag to reorder">⠿</span>
-          <span className="queue-chip-text">{msg.displayText}</span>
+          <span
+            className="queue-chip-text"
+            title="Click to edit"
+            onClick={() => onPullBack?.(msg.displayText, msg.id)}
+          >{msg.displayText}</span>
           <button
             className="queue-chip-remove"
             onClick={() => send({ type: 'cancel_queued', id: msg.id })}

@@ -371,6 +371,16 @@ export function InputArea() {
     send, abortMic, clearAttachments, startMic, setCtxInspectorOpen,
   ]);
 
+  // Pull a queued message back into the input box for editing.
+  // Guard: only works when the input is empty so we don't silently discard a draft.
+  const handlePullBack = useCallback((text: string, id: number) => {
+    if (inputValue.trim()) return; // input box has content — ignore
+    setInputValue(text);
+    broadcastSync({ type: 'input-text', text });
+    send({ type: 'cancel_queued', id });
+    setTimeout(() => inputRef.current?.focus(), 0);
+  }, [inputValue, send]);
+
   // Demo mode: allow playback engine to control input via custom DOM events
   useEffect(() => {
     if (!isDemo()) return;
@@ -782,7 +792,7 @@ export function InputArea() {
       <div id="error-bar" className={errorMsg ? '' : 'hidden'}>{errorMsg}</div>
 
       <AttachmentPreview />
-      <QueueChips />
+      <QueueChips onPullBack={handlePullBack} />
 
       <CommandPalette
         text={inputValue}

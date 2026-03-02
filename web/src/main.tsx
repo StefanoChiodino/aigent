@@ -16,6 +16,7 @@ import { useUIStore } from './stores/ui';
 import { useVoiceStore } from './stores/voice';
 import { useConnectionStore } from './stores/connection';
 import { useSettingsStore } from './stores/settings';
+import 'highlight.js/styles/atom-one-dark.css';
 import '../style.css';
 
 // Expose test reset hook so Playwright shared-page helper can clear Zustand state

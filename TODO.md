@@ -8,6 +8,8 @@ When the text comes streaming down the first part of the text that is actually t
 
 ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile but it seems a bit redundant 
 
+would be nice if when making lists in the response it added numbers by itself. Same for numbered and unnumbered lists, as soon as it detects a list. Just like google docs.
+
 ~~I should be able to pull items back from the queue to my text box~~ done
 
 ## Active Bugs

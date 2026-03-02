@@ -941,6 +941,56 @@ html, body {
   font-size: inherit;
 }
 
+/* Override highlight.js theme background to match our code blocks */
+.message-content pre code.hljs {
+  background: none;
+  padding: 0;
+}
+
+/* Language label on code blocks */
+.message-content pre .code-lang-label {
+  position: absolute;
+  top: 6px;
+  right: 40px;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Copy button on code blocks */
+.message-content pre .code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.message-content pre:hover .code-copy-btn {
+  opacity: 1;
+}
+
+.message-content pre .code-copy-btn:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.message-content pre .code-copy-btn.copied {
+  color: var(--success, #4caf50);
+  opacity: 1;
+}
+
 .message-content ul, .message-content ol {
   padding-left: 22px;
   margin: 6px 0;
@@ -2576,6 +2626,14 @@ html, body {
   white-space: normal;
   word-break: break-word;
   flex: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+}
+.queue-chip-text:hover {
+  background: var(--accent-soft);
+  color: var(--text-primary);
 }
 
 .queue-chip-remove {
@@ -5172,6 +5230,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 
 #sidebar-panel {
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
