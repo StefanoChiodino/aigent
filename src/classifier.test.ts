@@ -13,6 +13,7 @@ import {
   initClassifier,
   parseClassifierResponse,
   _resetForTest,
+  _backdateCacheEntryForTest,
 } from './classifier.js';
 
 afterEach(() => {
@@ -251,6 +252,42 @@ describe('cache behavior', () => {
     await classifyCommand('ls', { cwd: '/tmp' });
 
     assert.equal(callCount, 2);
+  });
+
+  it('re-calls API after TTL expires', async () => {
+    let callCount = 0;
+    _resetForTest(fakeClient(() => {
+      callCount++;
+      return Promise.resolve(fakeTextResponse('{"action":"allow","reason":"ok"}'));
+    }));
+
+    // First call — populates cache
+    const r1 = await classifyCommand('ls -la');
+    assert.equal(r1.action, 'allow');
+    assert.equal(callCount, 1);
+
+    // Backdate the cache entry so it appears stale
+    _backdateCacheEntryForTest('ls -la');
+
+    // Second call — cache entry is expired, should call API again
+    const r2 = await classifyCommand('ls -la');
+    assert.equal(r2.action, 'allow');
+    assert.equal(callCount, 2, 'API should be called again after TTL expiry');
+  });
+
+  it('serves from cache when entry is still within TTL', async () => {
+    let callCount = 0;
+    _resetForTest(fakeClient(() => {
+      callCount++;
+      return Promise.resolve(fakeTextResponse('{"action":"allow","reason":"ok"}'));
+    }));
+
+    await classifyCommand('git status');
+    // Backdate by less than TTL (1 minute old — still valid)
+    _backdateCacheEntryForTest('git status', undefined, 60_000);
+
+    await classifyCommand('git status');
+    assert.equal(callCount, 1, 'API should NOT be called — entry still within TTL');
   });
 });
 

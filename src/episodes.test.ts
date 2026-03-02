@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import {
   appendEpisode, queryEpisodes, autoLogEpisode, generateEpisodeId,
   markSessionLogged, wasSessionLogged, inferDomain, _resetForTest,
+  getEpisodesPath,
   type Episode, type AutoEpisodeContext,
 } from './episodes.js';
 
@@ -459,5 +460,57 @@ describe('generateEpisodeId', () => {
   it('contains a random suffix after underscore', () => {
     const id = generateEpisodeId();
     assert.match(id, /_[a-z0-9]+$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Concurrent appends
+// ---------------------------------------------------------------------------
+
+describe('concurrent episode appends', () => {
+  it('all episodes appear when appended concurrently', async () => {
+    const N = 20;
+    const episodes = Array.from({ length: N }, (_, i) =>
+      makeEpisode({ id: `ep_${String(i).padStart(3, '0')}`, task: `Task ${i}` }),
+    );
+
+    // Fire all appends synchronously (appendEpisode is sync)
+    for (const ep of episodes) {
+      appendEpisode(tmpDir, ep);
+    }
+
+    const raw = readFileSync(getEpisodesPath(tmpDir), 'utf-8').trim().split('\n');
+    assert.equal(raw.length, N, `Expected ${N} lines, got ${raw.length}`);
+
+    // Every episode ID must appear exactly once
+    const written = raw.map((line) => (JSON.parse(line) as Episode).id);
+    for (const ep of episodes) {
+      assert.ok(written.includes(ep.id), `Episode ${ep.id} missing from file`);
+    }
+  });
+
+  it('no line is malformed when many episodes are appended', () => {
+    const N = 50;
+    for (let i = 0; i < N; i++) {
+      appendEpisode(tmpDir, makeEpisode({ task: `Task ${i}` }));
+    }
+
+    const lines = readFileSync(getEpisodesPath(tmpDir), 'utf-8').trim().split('\n');
+    assert.equal(lines.length, N);
+    for (const line of lines) {
+      // Each line must be valid JSON with at least an id field
+      const ep = JSON.parse(line) as Episode;
+      assert.ok(typeof ep.id === 'string' && ep.id.length > 0, `Malformed episode line: ${line}`);
+    }
+  });
+
+  it('episodes appended after a query are included in subsequent queries', () => {
+    appendEpisode(tmpDir, makeEpisode({ id: 'ep_first', domain: 'coding' }));
+    const before = queryEpisodes(tmpDir, { domain: 'coding' });
+    assert.equal(before.length, 1);
+
+    appendEpisode(tmpDir, makeEpisode({ id: 'ep_second', domain: 'coding' }));
+    const after = queryEpisodes(tmpDir, { domain: 'coding' });
+    assert.equal(after.length, 2);
   });
 });

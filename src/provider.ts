@@ -375,6 +375,7 @@ export class OpenAIProvider implements Provider {
       messages: openaiMessages,
       ...(filteredTools.length > 0 ? { tools: filteredTools } : {}),
       stream: true,
+      stream_options: { include_usage: true },
     });
 
     let currentText = '';
@@ -586,4 +587,30 @@ export function detectProvider(): ProviderType {
   if (fileConfig.baseURL) return 'openai';
 
   return 'anthropic';
+}
+
+// ---------------------------------------------------------------------------
+// Test-only exports for message conversion logic
+// ---------------------------------------------------------------------------
+
+/** @internal Test-only: expose AnthropicProvider.convertMessages as a plain function. */
+export function _convertMessagesForAnthropicTest(
+  messages: ProviderMessage[],
+  isOAuth = false,
+): Anthropic.MessageParam[] {
+  // We use `as any` here because convertMessages is private — this is only for tests.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const p = new AnthropicProvider('test-key') as unknown as { isOAuth: boolean; convertMessages(m: ProviderMessage[]): Anthropic.MessageParam[] };
+  p.isOAuth = isOAuth;
+  return p.convertMessages(messages);
+}
+
+/** @internal Test-only: expose OpenAIProvider.convertMessages as a plain function. */
+export function _convertMessagesForOpenAITest(
+  systemPrompt: string,
+  messages: ProviderMessage[],
+): unknown[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const p = new OpenAIProvider('test-key') as unknown as { convertMessages(s: string, m: ProviderMessage[]): unknown[] };
+  return p.convertMessages(systemPrompt, messages);
 }

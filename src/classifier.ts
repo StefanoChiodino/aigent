@@ -86,6 +86,15 @@ export function _resetForTest(fakeClient?: OpenAI | null): void {
   fileAccessCache.clear();
 }
 
+/** Test-only: backdating a cache entry's timestamp so TTL expiration can be tested. */
+export function _backdateCacheEntryForTest(command: string, cwd?: string, ageMs = CACHE_TTL_MS + 1): void {
+  const key = cacheKey(command, cwd);
+  const entry = cache.get(key);
+  if (entry) {
+    entry.ts = Date.now() - ageMs;
+  }
+}
+
 function cacheKey(command: string, cwd?: string): string {
   return `${cwd ?? '.'}::${command}`;
 }

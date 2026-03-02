@@ -229,14 +229,13 @@ test.describe('@fast Sidebar controls', () => {
     const firstStar = allModelRows.first().locator('.sb-model-star');
     await firstStar.click();
 
-    // Favourites section label should now appear
-    const labels = page.locator('#sb-model-picker .sb-model-section-label');
-    const labelsText = await labels.allInnerTexts();
-    expect(labelsText.some(t => t.includes('Favourites'))).toBe(true);
+    // Favourites section label should now appear — wait for React to re-render
+    const favsLabel = page.locator('#sb-model-picker .sb-model-section-label', { hasText: 'Favourites' });
+    await expect(favsLabel).toBeVisible({ timeout: 3_000 });
 
     // Unstar to clean up (re-open picker first if it closed)
-    const isOpen = !(await page.locator('#sb-model-picker').getAttribute('class'))?.includes('hidden');
-    if (!isOpen) await page.locator('#sb-model-btn').click();
+    const pickerClass = await page.locator('#sb-model-picker').getAttribute('class');
+    if (pickerClass?.includes('hidden')) await page.locator('#sb-model-btn').click();
     const starredStar = page.locator('#sb-model-picker .sb-model-star.starred').first();
     if (await starredStar.count() > 0) await starredStar.click();
   });

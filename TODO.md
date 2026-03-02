@@ -118,3 +118,21 @@ Build commands:
   rm -rf web/dist && npx vite build --outDir dist web/  — rebuild web UI
   cd aigent-extension && npm run build                   — rebuild extension
 ```
+
+---
+
+## Reflection-Suggested
+
+- [ ] **API error handling framework** — Implement centralized error handling for 400 (token limits), 402 (credits), 429 (overloaded) errors with automatic retries and user notifications
+- [ ] **GitHub Pages deployment automation** — Add pre-commit hook to verify commits are pushed before deploying, or implement automatic push+deploy workflow
+- [ ] **Context-aware task dispatch** — Build logic to automatically choose dispatch_task vs spawn_agent based on task complexity and whether result is needed immediately
+- [ ] API error handling framework — Implement centralized error handling for 400 (token limits), 402 (insufficient credits), 429 (overloaded) errors with automatic retries and user notifications
+- [ ] GitHub Pages deployment automation — Add pre-commit hook to verify commits are pushed before deploying, or implement automatic push+deploy workflow
+- [ ] Context-aware task dispatch — Build logic to automatically choose dispatch_task vs spawn_agent based on task complexity and whether result is needed immediately
+- [ ] Model ID validation — Add validation for model identifiers before API calls to prevent 400 errors from invalid model IDs
+- [ ] Permission timeout handling — Implement retry logic for request_config_write and host_edit_file approvals that time out at 120s
+- [ ] Build verification — Always run make check before committing web/src changes to prevent broken deployments
+- [ ] Deployment verification — Check if commits are pushed to origin before investigating code bugs when deployed site is broken
+- [ ] Context-aware compaction — Don't wait for 70% context usage; if conversation has grown large (40-50k+ tokens) and useful context can be synthesized, self-compact proactively
+- [ ] Message sync monitoring — Add monitoring for uiMessages vs agentMessages sync issues when user reports 'messages being lost'
+- [ ] Project naming in reports — Always name the project explicitly when reporting background task results to disambiguate when user has multiple threads running

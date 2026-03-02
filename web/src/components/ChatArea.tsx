@@ -29,7 +29,7 @@ export function ChatArea() {
     if (!userScrolledUp.current) {
       endRef.current?.scrollIntoView({ behavior: 'instant' });
     }
-  });
+  }, [messages.length, streamingActive, traceCount]);
 
   // Group consecutive system messages
   const grouped: Array<{ type: 'system-group'; items: typeof messages } | { type: 'single'; msg: typeof messages[0] }> = [];
