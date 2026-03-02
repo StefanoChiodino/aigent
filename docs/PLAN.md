@@ -78,6 +78,8 @@ Server process (spawned directly, no Docker)
 - [x] Auto-save/restore conversation across server restarts
 - [x] Polling-based file watcher (works in bind mounts)
 - [x] Debounced file watcher (2s settle time — safe for multi-file self-edits)
+- [x] Graceful restart — file watcher defers restart until agent finishes current turn
+- [x] Auto-watch opt-in — `--watch` removed from default dev targets, `/reload` is the default
 
 ### Provider Abstraction
 - [x] Provider interface in src/provider.ts

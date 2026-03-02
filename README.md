@@ -578,47 +578,32 @@ Sensitive paths (`~/.ssh`, `~/.gnupg`, `~/.aws`, `/proc`, `/sys`, credential fil
 
 ## Self-modification
 
-The agent's source files live directly on your filesystem. Edits persist immediately. The file watcher ([worker.ts](src/worker.ts)) polls `src/` every second and, after a 2s debounce, runs `tsc --noEmit` before restarting the server.
+The agent can read and modify its own source code. Edits persist immediately on the host filesystem. After editing, the agent triggers `/reload` to apply changes — typecheck runs first (`tsc --noEmit`), and the server only restarts if the code compiles cleanly.
 
 ```
 You:   Add a tool that runs Python snippets and returns stdout
-Agent: [reads tools.ts, implements PythonTool, adds to registry, runs tsc, commits]
+Agent: [reads tools.ts, implements PythonTool, adds to registry, /reload, commits]
 ```
 
-### Self-mod safety
+**Graceful restart** — if the agent edits source while processing a response (self-modification mid-turn), the restart is deferred until the current turn completes. The user always gets their response; the reload happens automatically afterward.
 
-**Typecheck gate** — the server never restarts on bad code. If `tsc --noEmit` fails, the running server is left untouched and the error is logged to `/tmp/aigent-server.log`. The agent sees the failure and can fix it before the change takes effect.
+**Typecheck gate** — the server never restarts on bad code. If `tsc --noEmit` fails, the running server is left untouched and the error is logged. The agent sees the failure and can fix it.
 
-**Three-tier gate** — `exec` calls the agent makes during self-modification (e.g. `git commit`, `npx tsc`) go through the same command safety pipeline as any other command.
+**Three-tier safety** — all `exec` calls during self-modification go through the same command safety pipeline as any other command.
 
-**Rollback** — the source is a normal git repo, so you can always revert agent edits:
+**Rollback** — revert any agent edit with git:
 
 ```bash
 git diff src/               # see what the agent changed
 git checkout src/<file>     # revert a specific file
-git checkout src/           # revert all of src/
+make recover                # auto-bisect to last working commit
 ```
 
-To trigger a clean restart after reverting: use the `/restart` slash command in the chat.
+**Policy:** The agent may autonomously edit files in `src/` and `web/src/`. Changes to workspace config (SOUL.md, AGENTS.md, etc.) require user approval via diff review.
 
-### Auto-recovery
+Auto-watch (file watcher that reloads on every save) is available opt-in with `make dev-ts ARGS="--watch"`. The default dev workflow uses explicit `/reload` for full control.
 
-If the agent breaks itself (code changes that fail `make check`), run:
-
-```bash
-make recover
-```
-
-This saves the broken state to a branch (`broken/YYYYMMDD-HHMMSS`), walks back through git history running `make check` on each commit, and resets your branch to the last passing one. By default it tries 20 commits back; pass a number for more: `./scripts/recover.sh 50`.
-
-After recovery, inspect what broke:
-
-```bash
-git diff HEAD..broken/20260301-231500   # compare working vs broken
-git log HEAD..broken/20260301-231500    # see the bad commits
-```
-
-**Policy:** The agent may autonomously edit files in `src/` and `web/src/` as part of self-improvement. Changes to `workspace/config/` (SOUL.md, AGENTS.md, USER.md, IDENTITY.md, TOOLS.md) go through the `request_config_write` tool — you see a diff and approve or reject before anything is written.
+> Full design: [`docs/self-modification.md`](docs/self-modification.md)
 
 ---
 
