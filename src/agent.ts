@@ -30,9 +30,9 @@ analysis, code review, anything slow. Dispatch multiple tasks at once for parall
 that need to be reflected in your next steps.
 
 **Match model + thinking to the task — this is how you control cost:**
-- Simple search/read/summarize → "cheap" + thinking off
-- Moderate analysis, code changes, structured work → "standard" + thinking off or low
-- Complex reasoning, architecture, multi-step planning → "expensive" + thinking low, medium, or high as needed
+- Simple search/read/summarize → "flash" + thinking off
+- Moderate analysis, code changes, structured work → "pro" + thinking off or low
+- Complex reasoning, architecture, multi-step planning → "ultra" + thinking low, medium, or high as needed
 Always specify both model and thinking explicitly.
 
 Never default to "I'll just do it myself" for multi-step work. The right move is almost always:
@@ -504,7 +504,10 @@ export class Agent {
   /** Resolve a cost-tier alias or family name to a real model ID. */
   private resolveModelAlias(nameOrId: string): string {
     const key = nameOrId.toLowerCase();
-    const tierMap: Record<string, string> = { cheap: 'haiku', standard: 'sonnet', expensive: 'opus' };
+    const tierMap: Record<string, string> = {
+      flash: 'haiku', pro: 'sonnet', ultra: 'opus',
+      cheap: 'haiku', standard: 'sonnet', expensive: 'opus',
+    };
     const family = tierMap[key] ?? key;
     const families = ['haiku', 'sonnet', 'opus'] as const;
     const matched = families.find((f) => family === f || family.includes(f));
@@ -514,7 +517,10 @@ export class Agent {
       sonnet: 'claude-sonnet-4-6',
       opus: 'claude-opus-4-6',
     };
-    return defaults[matched];
+    const hardcoded = defaults[matched];
+    // Only use Anthropic hardcoded IDs when on Anthropic; otherwise fall back to active model
+    if (!this.model || this.model.startsWith('claude-')) return hardcoded;
+    return this.model;
   }
 
   private async executeSpawnAgent(input: Record<string, unknown>): Promise<string> {

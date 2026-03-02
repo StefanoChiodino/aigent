@@ -82,8 +82,10 @@ export const handlers: HandlerMap = {
     }
     ui().setModelName(event.state.model);
     ui().setAvailableModels(event.state.availableModels ?? []);
+    ui().setModelsWithoutThinking(event.state.modelsWithoutThinking ?? []);
     ui().setAvailableTools(event.state.availableTools ?? []);
     if (event.state.contextWindow) ui().setContextWindow(event.state.contextWindow);
+    if (event.state.modelTiers) ui().setModelTiers(event.state.modelTiers);
 
     // Server is authoritative for runtime state.
     settings().setClientSetting('AIGENT_SHORT', event.state.short ?? false);
@@ -234,7 +236,9 @@ export const handlers: HandlerMap = {
       settings().setClientSetting('AIGENT_SHORT', event.short);
     }
     if (event.availableModels) ui().setAvailableModels(event.availableModels);
+    if (event.modelsWithoutThinking) ui().setModelsWithoutThinking(event.modelsWithoutThinking);
     if (event.contextWindow) ui().setContextWindow(event.contextWindow);
+    if (event.modelTiers) ui().setModelTiers(event.modelTiers);
   },
 
   host_state(event, { ui }) {

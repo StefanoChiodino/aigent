@@ -18,6 +18,8 @@ interface UIState {
   extensionPath: string;
   modelName: string;
   availableModels: string[];
+  modelsWithoutThinking: string[];
+  modelTiers: { flash: string; pro: string; ultra: string };
   availableTools: string[];
   contextWindow: number;
   shortMode: boolean;
@@ -47,6 +49,8 @@ interface UIState {
   setExtensionPath: (v: string) => void;
   setModelName: (name: string) => void;
   setAvailableModels: (models: string[]) => void;
+  setModelsWithoutThinking: (models: string[]) => void;
+  setModelTiers: (tiers: { flash: string; pro: string; ultra: string }) => void;
   setAvailableTools: (tools: string[]) => void;
   setContextWindow: (n: number) => void;
   setShortMode: (on: boolean) => void;
@@ -77,6 +81,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   extensionPath: '',
   modelName: '',
   availableModels: [],
+  modelsWithoutThinking: [],
+  modelTiers: { flash: '', pro: '', ultra: '' },
   availableTools: [],
   contextWindow: 200_000,
   shortMode: false,
@@ -157,6 +163,8 @@ export const useUIStore = create<UIState>((set, get) => ({
   setExtensionPath: (v) => set({ extensionPath: v }),
   setModelName: (name) => set({ modelName: name }),
   setAvailableModels: (models) => set({ availableModels: models }),
+  setModelsWithoutThinking: (models) => set({ modelsWithoutThinking: models }),
+  setModelTiers: (tiers) => set({ modelTiers: tiers }),
   setAvailableTools: (tools) => set({ availableTools: tools }),
   setContextWindow: (n) => set({ contextWindow: n }),
   setShortMode: (on) => set({ shortMode: on }),

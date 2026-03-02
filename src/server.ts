@@ -903,18 +903,37 @@ function buildBackgroundToolSet(allTools: ProviderToolDef[], capabilities: Set<s
  */
 
 /**
- * Resolve a cost-tier alias or Anthropic family name to a real model ID.
- *   cheap      → haiku  (fast, low-cost: search, summarize, simple reads)
- *   standard   → sonnet (balanced: analysis, code, moderate reasoning)
- *   expensive  → opus   (most capable: complex reasoning, architecture)
+ * Resolve a cost-tier alias or family name to a real model ID.
+ *   flash      → haiku  (fast, low-cost: search, summarize, simple reads)
+ *   pro        → sonnet (balanced: analysis, code, moderate reasoning)
+ *   ultra      → opus   (most capable: complex reasoning, architecture)
+ * Deprecated aliases (backwards-compat): cheap → flash, standard → pro, expensive → ultra.
  * Also accepts bare family names ("haiku", "sonnet", "opus") for backwards compat.
- * Searches AVAILABLE_MODELS for the best match; falls back to hardcoded defaults.
+ * Searches AVAILABLE_MODELS for the best match; falls back to the active model when no
+ * provider-specific match is found (avoids hard-coding Anthropic model IDs for other providers).
  */
 function resolveModelAlias(nameOrId: string): string {
   const key = nameOrId.toLowerCase();
 
-  // Cost-tier aliases → family
-  const tierMap: Record<string, string> = { cheap: 'haiku', standard: 'sonnet', expensive: 'opus' };
+  // Per-tier env overrides take priority when the caller used a tier alias
+  const tierEnvOverrides: Record<string, string | undefined> = {
+    flash: process.env['AIGENT_FLASH_MODEL'],
+    pro: process.env['AIGENT_PRO_MODEL'],
+    ultra: process.env['AIGENT_ULTRA_MODEL'],
+    // backwards-compat aliases map to the same overrides
+    cheap: process.env['AIGENT_FLASH_MODEL'] ?? process.env['AIGENT_CHEAP_MODEL'],
+    standard: process.env['AIGENT_PRO_MODEL'],
+    expensive: process.env['AIGENT_ULTRA_MODEL'],
+  };
+  if (key in tierEnvOverrides && tierEnvOverrides[key]) {
+    return tierEnvOverrides[key]!;
+  }
+
+  // Cost-tier aliases → family (new names + backwards-compat old names)
+  const tierMap: Record<string, string> = {
+    flash: 'haiku', pro: 'sonnet', ultra: 'opus',
+    cheap: 'haiku', standard: 'sonnet', expensive: 'opus',
+  };
   const family = tierMap[key] ?? key;
 
   const families = ['haiku', 'sonnet', 'opus'] as const;
@@ -928,13 +947,18 @@ function resolveModelAlias(nameOrId: string): string {
     return candidates.reduce((best, m) => (m.length > best.length ? m : best));
   }
 
-  // Hardcoded fallbacks
+  // Hardcoded Anthropic fallbacks — only used when we're talking to Anthropic
   const defaults: Record<typeof families[number], string> = {
     haiku: 'claude-haiku-4-5-20251001',
     sonnet: 'claude-sonnet-4-6',
     opus: 'claude-opus-4-6',
   };
-  return defaults[matched];
+  const hardcoded = defaults[matched];
+  // If the active model looks like an Anthropic model, the hardcoded default is fine.
+  // Otherwise (OpenAI-compatible provider), fall back to the active model rather than
+  // returning a Claude model ID that doesn't exist on the provider.
+  if (!model || model.startsWith('claude-')) return hardcoded;
+  return model;
 }
 
 function dispatchBackgroundTask(input: {
@@ -955,7 +979,7 @@ function dispatchBackgroundTask(input: {
   // Fire and forget — run the sub-agent in the background
   const runTask = async () => {
     try {
-      const taskModel = resolveModelAlias(input.model ?? process.env['AIGENT_CHEAP_MODEL'] ?? 'haiku');
+      const taskModel = resolveModelAlias(input.model ?? process.env['AIGENT_FLASH_MODEL'] ?? process.env['AIGENT_CHEAP_MODEL'] ?? 'flash');
       taskQueue.setModel(taskId, taskModel);
       const taskThinking: ThinkingLevel = input.thinking ?? 'off';
       const maxIter = Math.min(input.max_iterations ?? 25, 50);
@@ -1112,6 +1136,14 @@ function addSystemMessage(content: string): void {
   broadcast({ type: 'system', content });
 }
 
+function getModelTiers(): { flash: string; pro: string; ultra: string } {
+  return {
+    flash: resolveModelAlias('flash'),
+    pro: resolveModelAlias('pro'),
+    ultra: resolveModelAlias('ultra'),
+  };
+}
+
 function getState(): ServerState {
   return {
     messages,
@@ -1133,6 +1165,7 @@ function getState(): ServerState {
     })),
     ...(currentStreamingTraces.length > 0 ? { streamingTraces: currentStreamingTraces } : {}),
     contextWindow: getContextWindow(model),
+    modelTiers: getModelTiers(),
   };
 }
 

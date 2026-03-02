@@ -138,6 +138,8 @@ export function Sidebar() {
   const extensionPath = useUIStore(s => s.extensionPath);
   const modelName = useUIStore(s => s.modelName);
   const availableModels = useUIStore(s => s.availableModels);
+  const modelsWithoutThinking = useUIStore(s => s.modelsWithoutThinking);
+  const modelTiers = useUIStore(s => s.modelTiers);
   const thinkingLevel = useUIStore(s => s.thinkingLevel);
   const lastEffortLevel = useUIStore(s => s.lastEffortLevel);
   const shortMode = useUIStore(s => s.shortMode);
@@ -148,6 +150,7 @@ export function Sidebar() {
   const setModelPickerOpen = useUIStore(s => s.setModelPickerOpen);
 
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
+  const getClientSetting = useSettingsStore(s => s.getClientSetting);
   const multilineEnter = useSettingsStore(s => s.getClientSetting('AIGENT_MULTILINE_ENTER')) === true;
 
   const ttsAutoSpeak = useVoiceStore(s => s.ttsAutoSpeak);
@@ -179,6 +182,26 @@ export function Sidebar() {
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const [modelFilter, setModelFilter] = useState('');
   const [extGuideOpen, setExtGuideOpen] = useState(false);
+
+  // Favourites: persisted as a JSON array in client settings
+  const favRaw = getClientSetting('model_favorites');
+  const favorites: string[] = (() => {
+    try { return JSON.parse(String(favRaw || '[]')) as string[]; } catch { return []; }
+  })();
+  const toggleFavorite = (mid: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = favorites.includes(mid)
+      ? favorites.filter(f => f !== mid)
+      : [...favorites, mid];
+    setClientSetting('model_favorites', JSON.stringify(next));
+  };
+
+  // Tier aliases → resolved IDs for display
+  const tierIds = {
+    Flash: modelTiers.flash,
+    Pro: modelTiers.pro,
+    Ultra: modelTiers.ultra,
+  };
   const extGuideRef = useRef<HTMLDivElement>(null);
 
   // Close extension setup guide on click-outside
@@ -234,7 +257,7 @@ export function Sidebar() {
             className={`sb-model-btn${modelPickerOpen ? ' open' : ''}`}
             onClick={e => { e.stopPropagation(); setModelPickerOpen(!modelPickerOpen); if (modelPickerOpen) setModelFilter(''); }}
           >
-            <span id="sb-model-value">{modelName ? modelDisplayName(modelName) : '--'}</span>
+            <span id="sb-model-value" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelName ? modelDisplayName(modelName) : '--'}</span>
             <span className="sb-model-chevron">▾</span>
           </button>
           <div id="sb-model-picker" className={`sb-model-picker${modelPickerOpen ? '' : ' hidden'}`}>
@@ -251,11 +274,79 @@ export function Sidebar() {
                 />
               </div>
             )}
+
+            {/* Pinned tier shortcuts */}
+            {!modelFilter && (
+              <div className="sb-model-section-label">Tiers</div>
+            )}
+            {Object.entries(tierIds)
+              .filter(([tierName, resolvedId]) =>
+                !modelFilter ||
+                tierName.toLowerCase().includes(modelFilter.toLowerCase()) ||
+                (resolvedId && resolvedId.toLowerCase().includes(modelFilter.toLowerCase()))
+              )
+              .map(([tierName, resolvedId]) => {
+                const tierAlias = tierName.toLowerCase();
+                const isActive = modelName === resolvedId;
+                return (
+                  <button
+                    key={tierAlias}
+                    className={`sb-model-option sb-model-tier${isActive ? ' active' : ''}`}
+                    title={resolvedId || tierAlias}
+                    onClick={() => {
+                      send({ type: 'set_model', model: tierAlias });
+                      if (resolvedId) setClientSetting('AIGENT_MODEL', resolvedId);
+                      setModelPickerOpen(false);
+                      setModelFilter('');
+                    }}
+                  >
+                    <span className="sb-tier-name">{tierName}</span>
+                    {resolvedId && (
+                      <span className="sb-tier-model">{modelDisplayName(resolvedId)}</span>
+                    )}
+                  </button>
+                );
+              })}
+
+            {/* Favourites */}
+            {favorites.length > 0 && !modelFilter && (
+              <div className="sb-model-section-label">Favourites</div>
+            )}
+            {favorites
+              .filter(mid => !modelFilter || mid.toLowerCase().includes(modelFilter.toLowerCase()))
+              .map((mid: string) => (
+                <div
+                  key={`fav-${mid}`}
+                  className={`sb-model-option sb-model-fav${mid === modelName ? ' active' : ''}`}
+                  title={mid}
+                  onClick={() => {
+                    if (mid !== modelName) {
+                      send({ type: 'set_model', model: mid });
+                      setClientSetting('AIGENT_MODEL', mid);
+                    }
+                    setModelPickerOpen(false);
+                    setModelFilter('');
+                  }}
+                >
+                  <span className="sb-model-fav-name">{modelDisplayName(mid)}</span>
+                  <span
+                    className="sb-model-star starred"
+                    title="Remove from favourites"
+                    onClick={e => toggleFavorite(mid, e)}
+                  >★</span>
+                </div>
+              ))}
+
+            {/* All models */}
+            {!modelFilter && availableModels.some(m => !favorites.includes(m)) && (
+              <div className="sb-model-section-label">All models</div>
+            )}
             <div className="sb-model-list">
               {availableModels
+                .filter(mid => !favorites.includes(mid))
                 .filter(mid => !modelFilter || mid.toLowerCase().includes(modelFilter.toLowerCase()))
                 .map((mid: string) => (
-                  <button
+                  <div
                     key={mid}
                     className={`sb-model-option${mid === modelName ? ' active' : ''}`}
                     title={mid}
@@ -268,8 +359,13 @@ export function Sidebar() {
                       setModelFilter('');
                     }}
                   >
-                    {modelDisplayName(mid)}
-                  </button>
+                    <span className="sb-model-name">{modelDisplayName(mid)}</span>
+                    <span
+                      className={`sb-model-star${favorites.includes(mid) ? ' starred' : ''}`}
+                      title={favorites.includes(mid) ? 'Remove from favourites' : 'Add to favourites'}
+                      onClick={e => toggleFavorite(mid, e)}
+                    >★</span>
+                  </div>
                 ))}
               {modelFilter && !availableModels.some(m => m === modelFilter) && (
                 <button
@@ -292,8 +388,8 @@ export function Sidebar() {
         <div className="sidebar-section">
           <div className="sidebar-label">Reasoning</div>
           {(() => {
-            // Only Opus models support extended thinking
-            const supportsThinking = !!modelName && /opus/i.test(modelName);
+            // Disable thinking only if the server has confirmed this model doesn't support it
+            const supportsThinking = !modelName || !modelsWithoutThinking.includes(modelName);
             return <>
           <div className="sb-reasoning-controls">
             <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Extended thinking</span>
@@ -301,7 +397,7 @@ export function Sidebar() {
               id="sb-reasoning-toggle"
               className={`sb-toggle${reasoningOn ? ' on' : ''}${!supportsThinking ? ' disabled' : ''}`}
               disabled={!supportsThinking}
-              title={!supportsThinking ? 'Reasoning requires an Opus model' : undefined}
+              title={!supportsThinking ? 'This model does not support extended thinking' : undefined}
               onClick={() => {
                 const nextOff = reasoningOn;
                 send({ type: 'set_thinking', enabled: !nextOff });
@@ -313,7 +409,7 @@ export function Sidebar() {
           </div>
           {!supportsThinking && (
             <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
-              Requires Opus model
+              Model does not support thinking
             </div>
           )}
           <div id="sb-effort-pills" className={`sb-pills${!reasoningOn || !supportsThinking ? ' disabled' : ''}`} style={{ marginTop: 6 }}>

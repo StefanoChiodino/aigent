@@ -160,8 +160,8 @@ const spawnAgentTool: ToolDef = {
     properties: {
       task: { type: 'string', description: 'Clear description of what the sub-agent should do. Be specific.' },
       context: { type: 'string', description: 'Optional context to provide (e.g. relevant file paths, decisions made, constraints)' },
-      model: { type: 'string', description: 'Model tier: "cheap" (fast/simple search, summarize), "standard" (analysis, code), "expensive" (complex reasoning, architecture). Full model IDs also accepted. Default: same as parent.' },
-      thinking: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking level. Specify explicitly — "off" for cheap tasks, "low"/"medium" for standard, "high"/"max" for expensive. Defaults to off.' },
+      model: { type: 'string', description: 'Model tier: "flash" (fast/simple search, summarize), "pro" (analysis, code), "ultra" (complex reasoning, architecture). Full model IDs also accepted. Default: same as parent.' },
+      thinking: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking level. Specify explicitly — "off" for flash tasks, "low"/"medium" for pro, "high"/"max" for ultra. Defaults to off.' },
       max_iterations: { type: 'number', description: 'Maximum tool-use iterations (default: 15, max: 25)' },
     },
     required: ['task'],
@@ -179,8 +179,8 @@ const dispatchTaskTool: ToolDef = {
     properties: {
       task: { type: 'string', description: 'Clear description of what the background agent should do.' },
       context: { type: 'string', description: 'Optional context (relevant file paths, decisions, constraints)' },
-      model: { type: 'string', description: 'Model tier: "cheap" (fast/simple search, summarize), "standard" (analysis, code), "expensive" (complex reasoning, architecture). Full model IDs also accepted. Default: cheap.' },
-      thinking: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking level. Specify explicitly — "off" for cheap tasks, "low"/"medium" for standard, "high"/"max" for expensive. Defaults to off.' },
+      model: { type: 'string', description: 'Model tier: "flash" (fast/simple search, summarize), "pro" (analysis, code), "ultra" (complex reasoning, architecture). Full model IDs also accepted. Default: flash.' },
+      thinking: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking level. Specify explicitly — "off" for flash tasks, "low"/"medium" for pro, "high"/"max" for ultra. Defaults to off.' },
       max_iterations: { type: 'number', description: 'Maximum tool-use iterations (default: 25, max: 50)' },
       capabilities: {
         type: 'array', items: { type: 'string', enum: ['net_ro', 'net_rw', 'fs_write'] },
@@ -385,7 +385,7 @@ const switchModelTool: ToolDef = {
   name: 'switch_model',
   description:
     'Switch AI model mid-conversation. Upgrade for complex tasks, downgrade for simple ones. ' +
-    'Takes effect immediately. Only Opus supports extended thinking.',
+    'Takes effect immediately. Extended thinking support depends on the model.',
   input_schema: {
     type: 'object' as const,
     properties: {
