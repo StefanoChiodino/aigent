@@ -767,6 +767,27 @@ async function processAgentTurn(
     if (!controller.signal.aborted) {
       const e = err as { status?: number; message?: string };
       let errorMsg = e.message ?? 'Unknown error';
+      // The Anthropic SDK sometimes puts a raw JSON API response in e.message — try to parse it.
+      try {
+        const parsed = JSON.parse(errorMsg) as { error?: { type?: string; message?: string } };
+        if (parsed?.error?.type) {
+          const apiType = parsed.error.type;
+          const apiMsg = parsed.error.message ?? apiType;
+          if (apiType === 'overloaded_error') {
+            errorMsg = 'Anthropic API is overloaded. Please wait a moment and try again.';
+          } else if (apiType === 'rate_limit_error') {
+            errorMsg = 'Rate limited. Wait a moment and try again.';
+          } else if (apiType === 'authentication_error') {
+            errorMsg = 'Authentication failed. Check your ANTHROPIC_API_KEY.';
+          } else if (apiType === 'invalid_request_error') {
+            errorMsg = `Invalid request: ${apiMsg}`;
+          } else {
+            errorMsg = apiMsg;
+          }
+        }
+      } catch {
+        // Not JSON — use the message as-is
+      }
       if (e.status === 401) errorMsg = 'Authentication failed. Check ANTHROPIC_API_KEY.';
       if (e.status === 429) errorMsg = 'Rate limited. Wait a moment.';
       broadcast({ type: 'error', message: errorMsg });

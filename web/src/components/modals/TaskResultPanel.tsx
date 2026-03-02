@@ -53,7 +53,11 @@ export function TaskResultPanel() {
     });
   }
 
-  if (!task) return null;
+  if (!task) return (
+    <div className="task-result-backdrop hidden">
+      <div id="task-result-panel" className="task-result-panel hidden" />
+    </div>
+  );
 
   return (
     <div className="task-result-backdrop" onClick={e => { if (e.target === e.currentTarget) close(); }}>

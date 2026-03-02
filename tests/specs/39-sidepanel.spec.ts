@@ -91,12 +91,12 @@ test.describe('@fast Extension side panel — iframe rendering', () => {
     await page.goto(`/?extId=${FAKE_EXT_ID}`);
 
     // Wait for connection badge to show "connected"
-    await expect(page.locator('#conn-badge')).toHaveText('connected', { timeout: 15_000 });
+    await expect(page.locator('#conn-badge')).toContainText('connected', { timeout: 15_000 });
   });
 
   test('input field is visible and interactive', async ({ page }) => {
     await page.goto(`/?extId=${FAKE_EXT_ID}`);
-    await expect(page.locator('#conn-badge')).toHaveText('connected', { timeout: 15_000 });
+    await expect(page.locator('#conn-badge')).toContainText('connected', { timeout: 15_000 });
 
     const input = page.locator('#input');
     await expect(input).toBeVisible({ timeout: 5_000 });

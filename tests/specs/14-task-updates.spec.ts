@@ -31,6 +31,8 @@ test.describe('@fast Task Updates', () => {
 
   test('task badge shows count for running tasks', async () => {
     const page = getPage();
+    // Complete previously accumulated task from prior test
+    await injectEvent({ type: 'task_update', task: { id: 't1', description: 'Analyze codebase', status: 'completed', startedAt: NOW, completedAt: NOW } });
     await injectEvent({
       type: 'task_update',
       task: { id: 't2', description: 'Task A', status: 'running', startedAt: NOW },
@@ -40,6 +42,8 @@ test.describe('@fast Task Updates', () => {
 
   test('task badge hides when task completes', async () => {
     const page = getPage();
+    // Complete previously accumulated running tasks
+    await injectEvent({ type: 'task_update', task: { id: 't2', description: 'Task A', status: 'completed', startedAt: NOW, completedAt: NOW } });
     await injectEvent({
       type: 'task_update',
       task: { id: 't3', description: 'Quick task', status: 'running', startedAt: NOW },
@@ -119,6 +123,10 @@ test.describe('@fast Task Updates', () => {
 
   test('multiple simultaneous running tasks show correct badge count', async () => {
     const page = getPage();
+    // Complete previously accumulated running tasks
+    for (const id of ['t4', 't5', 't8']) {
+      await injectEvent({ type: 'task_update', task: { id, description: id, status: 'completed', startedAt: NOW, completedAt: NOW } });
+    }
     await injectEvent({
       type: 'task_update',
       task: { id: 't9a', description: 'Task A', status: 'running', startedAt: NOW },
@@ -174,6 +182,14 @@ test.describe('@fast Task Updates', () => {
 
   test('task result panel Defer button hides the panel', async () => {
     const page = getPage();
+    // Close any previously open result panel first
+    const panel = page.locator('#task-result-panel');
+    const prevVisible = await panel.evaluate(el => !el.classList.contains('hidden')).catch(() => false);
+    if (prevVisible) {
+      await panel.locator('.task-result-defer').click();
+      await expect(panel).toHaveClass(/\bhidden\b/, { timeout: 2_000 });
+    }
+
     await injectEvent({
       type: 'task_update',
       task: {
@@ -188,7 +204,6 @@ test.describe('@fast Task Updates', () => {
     });
 
     // The WS handler auto-opens the result panel
-    const panel = page.locator('#task-result-panel');
     await expect(panel).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
 
     await panel.locator('.task-result-defer').click();

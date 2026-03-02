@@ -816,7 +816,11 @@ export function InputArea() {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div id="error-bar" className={errorMsg ? '' : 'hidden'}>{errorMsg}</div>
+      <div id="error-bar" className={errorMsg ? '' : 'hidden'}>
+        <span id="error-bar-icon">⚠</span>
+        <span id="error-bar-msg">{errorMsg}</span>
+        <button id="error-bar-dismiss" onClick={() => setError(null)} title="Dismiss">✕</button>
+      </div>
 
       <AttachmentPreview />
       <QueueChips onPullBack={handlePullBack} />

@@ -111,9 +111,10 @@ test.describe('@fast Browser Phase 3c — connection indicator', () => {
 
   test('extension indicator not shown by default', async () => {
     const page = getPage();
-    // The Browser cap item should not be visible initially
+    // Browser cap item is always visible but has cap-ext-off class when not connected
     const browserCap = page.locator('#sb-caps-list .cap-item', { hasText: 'Browser' });
-    await expect(browserCap).toHaveCount(0);
+    await expect(browserCap).toBeVisible({ timeout: 3_000 });
+    await expect(browserCap).toHaveClass(/cap-ext-off/);
   });
 
   test('extension indicator appears after host_state extensionConnected', async () => {
@@ -124,6 +125,7 @@ test.describe('@fast Browser Phase 3c — connection indicator', () => {
     });
     const browserCap = page.locator('#sb-caps-list .cap-item', { hasText: 'Browser' });
     await expect(browserCap).toBeVisible({ timeout: 3_000 });
+    await expect(browserCap).not.toHaveClass(/cap-ext-off/, { timeout: 3_000 });
     await expect(browserCap.locator('.cap-grant')).toHaveText('on');
   });
 
@@ -137,11 +139,12 @@ test.describe('@fast Browser Phase 3c — connection indicator', () => {
     const browserCap = page.locator('#sb-caps-list .cap-item', { hasText: 'Browser' });
     await expect(browserCap).toBeVisible({ timeout: 3_000 });
 
-    // Then disconnect
+    // Then disconnect — item stays visible but shows off state
     await injectEvent({
       type: 'host_state',
       extensionConnected: false,
     });
-    await expect(browserCap).toHaveCount(0, { timeout: 3_000 });
+    await expect(browserCap).toHaveClass(/cap-ext-off/, { timeout: 3_000 });
+    await expect(browserCap.locator('.cap-grant')).toHaveText('off');
   });
 });

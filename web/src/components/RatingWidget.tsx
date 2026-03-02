@@ -41,8 +41,15 @@ export const RatingWidget = React.memo(function RatingWidget({ messageId }: Prop
       if (permOverlay && permOverlay.contains(target)) return;
       setOpen(false);
     }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
+    }
     document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
   }, [open]);
 
   const handleSubmit = useCallback(() => {

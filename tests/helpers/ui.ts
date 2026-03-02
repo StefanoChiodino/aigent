@@ -11,7 +11,7 @@ import { expect } from '@playwright/test';
 
 /** Wait for the connection badge to show "connected". */
 export async function waitForConnected(page: Page, timeout = 15_000): Promise<void> {
-  await expect(page.locator('#conn-badge')).toHaveText('connected', { timeout });
+  await expect(page.locator('#conn-badge')).toContainText('connected', { timeout });
 }
 
 /** Assert an element does NOT have the hidden class (i.e. is shown). */

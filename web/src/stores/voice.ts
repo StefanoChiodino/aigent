@@ -72,7 +72,6 @@ export const useVoiceStore = create<VoiceState>()(
       partialize: (s) => ({
         ttsAutoSpeak: s.ttsAutoSpeak,
         ttsRatePct: s.ttsRatePct,
-        micSticky: s.micSticky,
         micDeviceId: s.micDeviceId,
         micDeviceLabel: s.micDeviceLabel,
         speakerDeviceId: s.speakerDeviceId,

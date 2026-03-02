@@ -62,9 +62,11 @@ describe('TaskResultPanel', () => {
     cleanup();
   });
 
-  it('renders nothing when taskResultTask is null', () => {
+  it('renders hidden placeholder when taskResultTask is null', () => {
     render(<TaskResultPanel />);
-    expect(document.getElementById('task-result-panel')).toBeNull();
+    const panel = document.getElementById('task-result-panel');
+    expect(panel).not.toBeNull();
+    expect(panel!.classList.contains('hidden')).toBe(true);
   });
 
   it('shows task description as title', async () => {
@@ -235,7 +237,9 @@ describe('TaskResultPanel', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     });
     expect(useUIStore.getState().taskResultTask).toBeNull();
-    expect(document.getElementById('task-result-panel')).toBeNull();
+    const panelAfterEsc = document.getElementById('task-result-panel');
+    expect(panelAfterEsc).not.toBeNull();
+    expect(panelAfterEsc!.classList.contains('hidden')).toBe(true);
   });
 
   it('closes on backdrop click', async () => {

@@ -208,7 +208,7 @@ export async function runInit(workspaceArg?: string): Promise<void> {
   print('');
 
   // ── 6. STT setup ────────────────────────────────────────────────────────────
-  print(`${bold('6.')} STT (speech-to-text) — sherpa-onnx Zipformer`);
+  print(`${bold('6.')} STT (speech-to-text) — sherpa-onnx Whisper tiny.en`);
   print(`   ${dim('No Python or GPU required — runs on CPU via native Node.js addon')}`);
 
   const sttCandidates = [
@@ -221,7 +221,7 @@ export async function runInit(workspaceArg?: string): Promise<void> {
     print(`   ${yellow('⚠')} STT source not found in package — skipping`);
   } else {
     const rl2 = createInterface({ input: process.stdin, output: process.stdout });
-    const answer = (await ask(rl2, `   Install STT? Downloads ~400 MB model [y/N]: `)).trim().toLowerCase();
+    const answer = (await ask(rl2, `   Install STT? Downloads ~117 MB model [y/N]: `)).trim().toLowerCase();
     rl2.close();
     if (answer === 'y' || answer === 'yes') {
       const nodeModules = join(sttDir, 'node_modules');

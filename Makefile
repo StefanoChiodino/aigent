@@ -125,9 +125,9 @@ kill-ports:
 		fi; \
 	done
 
-# --- STT (sherpa-onnx Zipformer speech-to-text sidecar) ---
+# --- STT (sherpa-onnx Whisper speech-to-text sidecar) ---
 
-# Install sherpa-onnx-node and download the Zipformer English model (run once)
+# Install sherpa-onnx-node and download the Whisper tiny.en model (run once)
 stt-setup:
 	cd stt && npm install && bash download-model.sh
 

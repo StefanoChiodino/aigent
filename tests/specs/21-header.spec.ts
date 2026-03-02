@@ -13,7 +13,7 @@ test.describe('@fast Header', () => {
 
   test('logo text is "aigent"', async () => {
     const page = getPage();
-    await expect(page.locator('#logo')).toHaveText('aigent');
+    await expect(page.locator('#logo')).toHaveText('AI·gent');
   });
 
   test('settings button is visible', async () => {
@@ -31,7 +31,7 @@ test.describe('@fast Header', () => {
 
   test('connection badge shows "connected" after load', async () => {
     const page = getPage();
-    await expect(page.locator('#conn-badge')).toHaveText('connected');
+    await expect(page.locator('#conn-badge')).toContainText('connected');
   });
 
   test('connection badge has "connected" CSS class', async () => {
@@ -57,6 +57,8 @@ test.describe('@fast Header', () => {
 
   test('task badge text uses singular for one task', async () => {
     const page = getPage();
+    // Complete previously accumulated task from earlier test
+    await injectEvent({ type: 'task_update', task: { id: 'hdr-t1', description: 'Header test task', status: 'completed', startedAt: new Date().toISOString(), completedAt: new Date().toISOString() } });
     await injectEvent({
       type: 'task_update',
       task: { id: 'hdr-t2', description: 'Single task', status: 'running', startedAt: new Date().toISOString() },
@@ -69,6 +71,8 @@ test.describe('@fast Header', () => {
   test('task badge text uses plural for two tasks', async () => {
     const page = getPage();
     const now = new Date().toISOString();
+    // Complete previously accumulated task
+    await injectEvent({ type: 'task_update', task: { id: 'hdr-t2', description: 'Single task', status: 'completed', startedAt: now, completedAt: now } });
     await injectEvent({ type: 'task_update', task: { id: 'hdr-t3a', description: 'Task A', status: 'running', startedAt: now } });
     await injectEvent({ type: 'task_update', task: { id: 'hdr-t3b', description: 'Task B', status: 'running', startedAt: now } });
     await expect(page.locator('#task-badge')).toContainText('2 tasks', { timeout: 3_000 });

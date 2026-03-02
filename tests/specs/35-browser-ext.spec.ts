@@ -93,10 +93,16 @@ test.describe('@fast Browser Extension — sidebar capabilities', () => {
   test('setup guide closes on "Got it" button', async () => {
     const page = getPage();
     await injectEvent({ type: 'host_state', extensionConnected: false, extensionPath: '/test/path' });
+    // Close guide if already open from previous test (toggle behavior)
+    const guide = page.locator('.ext-setup-guide');
+    if (await guide.isVisible().catch(() => false)) {
+      await page.locator('.ext-setup-close').click();
+      await expect(guide).not.toBeVisible({ timeout: 1_000 });
+    }
     await page.locator('#sb-caps-list .cap-item-clickable').click();
-    await expect(page.locator('.ext-setup-guide')).toBeVisible({ timeout: 2_000 });
+    await expect(guide).toBeVisible({ timeout: 2_000 });
     await page.locator('.ext-setup-close').click();
-    await expect(page.locator('.ext-setup-guide')).not.toBeVisible();
+    await expect(guide).not.toBeVisible();
   });
 
   test('setup guide does not appear when extension is connected', async () => {

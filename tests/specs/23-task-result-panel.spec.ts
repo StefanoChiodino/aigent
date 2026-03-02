@@ -24,10 +24,7 @@ test.describe('@fast Task Result Panel', () => {
       type: 'task_update',
       task: { id, description, status: 'completed', startedAt: NOW, completedAt: NOW, delivery: 'user-pull', result },
     });
-    const item = page.locator('#sb-tasks-list .task-item-pull', { hasText: description });
-    await expect(item).toBeVisible({ timeout: 3_000 });
-    // Use force:true — the sidebar panel's overflow-y:auto can intercept pointer events
-    await item.click({ force: true });
+    // The panel auto-opens for user-pull completed tasks (useWebSocket handler)
     await expect(page.locator('#task-result-panel')).not.toHaveClass(/\bhidden\b/, { timeout: 3_000 });
   }
 
@@ -136,11 +133,8 @@ test.describe('@fast Task Result Panel', () => {
       type: 'task_update',
       task: { id: 'trp-8b', description: 'Second task', status: 'completed', startedAt: NOW, completedAt: NOW, delivery: 'user-pull', result: 'Second result.' },
     });
-    const secondItem = page.locator('#sb-tasks-list .task-item-pull', { hasText: 'Second task' });
-    await expect(secondItem).toBeVisible({ timeout: 3_000 });
-    await secondItem.click({ force: true });
-
-    await expect(page.locator('.task-result-title')).toHaveText('Second task', { timeout: 2_000 });
+    // Second user-pull task auto-opens the panel
+    await expect(page.locator('.task-result-title')).toHaveText('Second task', { timeout: 3_000 });
     await expect(page.locator('.task-result-body')).toContainText('Second result.');
   });
 
