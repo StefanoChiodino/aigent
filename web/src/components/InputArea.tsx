@@ -614,6 +614,33 @@ export function InputArea() {
         submitMessage();
         return;
       }
+      // Auto-list continuation: if current line starts with a list marker, continue it
+      if (!isSend && !isThinkingOverride) {
+        const ta = inputRef.current;
+        const caret = ta?.selectionStart ?? inputValue.length;
+        const lineStart = inputValue.lastIndexOf('\n', caret - 1) + 1;
+        const line = inputValue.slice(lineStart, caret);
+        const listMatch = line.match(/^(\s*)([-*])\s+(.*)$/) ?? line.match(/^(\s*)(\d+)\.\s+(.*)$/);
+        if (listMatch) {
+          e.preventDefault();
+          const indent = listMatch[1]!;
+          const marker = listMatch[2]!;
+          const content = listMatch[3]!;
+          if (!content) {
+            // Empty list item — exit list by removing the prefix
+            const newVal = inputValue.slice(0, lineStart) + inputValue.slice(caret);
+            setInputValue(newVal);
+            pendingCaretRef.current = lineStart;
+          } else {
+            const nextMarker = /^\d+$/.test(marker) ? String(parseInt(marker) + 1) + '.' : marker + ' ';
+            const prefix = indent + nextMarker + (nextMarker.endsWith('.') ? ' ' : '');
+            const newVal = inputValue.slice(0, caret) + '\n' + prefix + inputValue.slice(caret);
+            setInputValue(newVal);
+            pendingCaretRef.current = caret + 1 + prefix.length;
+          }
+          return;
+        }
+      }
       // Otherwise: let the browser insert the newline (Shift+Enter in normal, plain Enter in multiline)
     }
     const bindings = getActiveBindings();

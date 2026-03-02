@@ -398,6 +398,26 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(1000),
 
     // ════════════════════════════════════════════════════════════════════════
+    //  PHASE 3.5: Auto-list continuation — type a list, Enter continues it
+    // ════════════════════════════════════════════════════════════════════════
+
+    { action: 'label', text: 'List auto-continue', id: 'list-continuation' },
+    wait(1500),
+    { action: 'type_input', text: '1. Read config file', charDelayMs: 50 },
+    wait(300),
+    { action: 'type_input', text: '1. Read config file\n2. ', charDelayMs: 0 },
+    wait(200),
+    { action: 'type_input', text: '1. Read config file\n2. Search for routes', charDelayMs: 50 },
+    wait(300),
+    { action: 'type_input', text: '1. Read config file\n2. Search for routes\n3. ', charDelayMs: 0 },
+    wait(200),
+    { action: 'type_input', text: '1. Read config file\n2. Search for routes\n3. Add health endpoint', charDelayMs: 50 },
+    wait(1500),
+    // Clear for next phase
+    { action: 'type_input', text: '', charDelayMs: 0 },
+    wait(500),
+
+    // ════════════════════════════════════════════════════════════════════════
     //  PHASE 4: Second exchange — tests, rate limiting, exec, fetch, task
     //  (Markdown-rich input showcases live syntax highlighting)
     // ════════════════════════════════════════════════════════════════════════

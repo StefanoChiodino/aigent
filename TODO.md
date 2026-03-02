@@ -12,6 +12,10 @@ would be nice if when making lists in the response it added numbers by itself. S
 
 ~~I should be able to pull items back from the queue to my text box~~ done
 
+Sounds and browser notifications should be more customizible. Not really in the actual sound, but more like which sound plays: e.g. play on finish, notification on finish, same for asking for permissions, etc
+
+the aigent just spawn a synchronous agent and I can hear popups sounds but can't see the popups, I believe that we recently fixed an issue where I was being asked for permissions where not needed. I bet that now it's still happening, it's just that the popup is not showing, and that's why I can hear the sound
+
 ## Active Bugs
 
 ~~The left panel now has horizontal scroll! Cringe!~~ fixed — added `overflow-x: hidden` to `#sidebar-panel`
