@@ -40,8 +40,15 @@ the aigent just spawn a synchronous agent and I can hear popups sounds but can't
 
 ## Token / Cost Optimisation
 
+- [x] **Tool result summarization** — enabled by default (blocklist mode). Haiku summarizes large tool outputs; full output saved to `/tmp/aigent/tool-results/` for sub-agent retrieval. See `docs/design-token-optimization.md`.
+- [x] **Head+tail truncation** — when truncating, keeps 70% head + 20% tail instead of head-only. Error messages and final results at the tail are no longer lost.
+- [x] **Full output persistence** — truncated tool outputs always saved to disk with retrieval path, even when summarization is disabled.
+- [x] **Image compression** — `sharp` downscales to 1568px max, converts PNG screenshots to JPEG. Integrated at all image entry points.
+- [x] **OCR text extraction** — tesseract CLI extracts text from screenshots; OCR text prepended as a text block alongside compressed image. Install: `apt install tesseract-ocr`.
+- [x] **Tool description trimming** — verbose descriptions moved to cached system prompt. browser_ext ~500→~60 tokens, spawn_agent/dispatch_task ~250-300→~60-80 tokens.
+- [x] **Dynamic tool filtering** — tools filtered per API call based on active capabilities (browser, host, display). Tools without prerequisites are omitted.
+- [x] **Sub-agent retrieval pattern** — system prompt guides agent to use cheap Haiku sub-agents for analyzing full tool outputs instead of pulling them into main context.
 - [ ] **Proactive compaction** — Don't wait for 70% context usage or user-triggered `/reset`. If the conversation has grown large (e.g. 40-50k+ tokens) and the useful context can be synthesized into a compact summary, the agent should self-compact. Heuristics: long idle stretches, topic shifts, completed tasks with no follow-up. Saves significant cost on conversations that drift past usefulness.
-- [ ] **Tool description audit** — trim descriptions in `src/tools/defs.ts` longer than ~100 tokens. Many tool descriptions are verbose and waste context window on every turn.
 - [ ] **Prompt cache warm-up on startup** — send a minimal no-op message to pre-warm the Anthropic prompt cache. First real message would then hit the cache instead of paying full input cost.
 - [ ] **Compaction prompt refinement** — ensure summaries preserve file paths, bug IDs, code references. Current compaction sometimes loses specific details. See `src/compact.ts` COMPACT_PROMPT.
 - [ ] **Anthropic subscription usage tracking** — display monthly usage stats from Anthropic's billing API. Local cumulative tracking exists in `src/usage-tracking.ts`; this is about pulling from the Anthropic side.

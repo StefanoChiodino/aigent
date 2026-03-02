@@ -63,6 +63,13 @@ Server process (spawned directly, no Docker)
 - [x] Thinking indicator (reasoning... vs waiting...)
 - [x] Automatic retry on transient errors (429, 5xx, network) with exponential backoff
 - [x] Image input support (file paths → base64, /image command, auto-detect in messages)
+- [x] Tool result summarization (Haiku, blocklist mode, full output to disk + sub-agent retrieval)
+- [x] Head+tail truncation (70% head + 20% tail, full output persisted)
+- [x] Image compression (sharp, 1568px max, PNG→JPEG for screenshots)
+- [x] OCR text extraction (tesseract CLI, prepended as text block)
+- [x] Tool description trimming (verbose docs → cached system prompt)
+- [x] Dynamic tool filtering (per-call, capability-based)
+- [x] Sub-agent retrieval pattern (system prompt guidance for analyzing summarized outputs)
 
 ### Workspace & Memory
 - [x] AGENTS.md, SOUL.md, USER.md, MEMORY.md, TOOLS.md loaded into system prompt
