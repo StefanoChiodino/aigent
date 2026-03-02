@@ -221,7 +221,7 @@ export async function runInit(workspaceArg?: string): Promise<void> {
     print(`   ${yellow('⚠')} STT source not found in package — skipping`);
   } else {
     const rl2 = createInterface({ input: process.stdin, output: process.stdout });
-    const answer = (await ask(rl2, `   Install STT? Downloads ~70 MB model [y/N]: `)).trim().toLowerCase();
+    const answer = (await ask(rl2, `   Install STT? Downloads ~400 MB model [y/N]: `)).trim().toLowerCase();
     rl2.close();
     if (answer === 'y' || answer === 'yes') {
       const nodeModules = join(sttDir, 'node_modules');

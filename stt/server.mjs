@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sherpa-onnx STT server — wraps Zipformer (English) behind a simple HTTP API.
+ * sherpa-onnx STT server — wraps Whisper or Zipformer behind a simple HTTP API.
  *
  * Usage:
  *     node stt/server.mjs [options]
@@ -22,7 +22,7 @@
 
 import { createServer } from 'node:http';
 import { existsSync, readdirSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import sherpa_onnx from 'sherpa-onnx-node';
@@ -55,17 +55,85 @@ let energyThreshold = parseFloat(args['energy-threshold']);
 function findModelDir() {
   if (args['model-dir']) return resolve(args['model-dir']);
   // Look for any sherpa-onnx-* directory inside stt/
+  // Prefer whisper models over zipformer (better punctuation and real-world accuracy)
   const candidates = readdirSync(__dirname)
-    .filter(d => d.startsWith('sherpa-onnx-') && existsSync(join(__dirname, d, 'tokens.txt')))
-    .sort();
+    .filter(d => d.startsWith('sherpa-onnx-') && existsSync(join(__dirname, d)))
+    .sort((a, b) => {
+      const aWhisper = a.includes('whisper') ? 0 : 1;
+      const bWhisper = b.includes('whisper') ? 0 : 1;
+      return aWhisper - bWhisper || a.localeCompare(b);
+    });
   if (candidates.length > 0) return join(__dirname, candidates[0]);
   throw new Error(
     'No model found. Run: bash stt/download-model.sh\n' +
-    'Or specify --model-dir /path/to/sherpa-onnx-zipformer-en-2023-06-26'
+    'Or specify --model-dir /path/to/model'
   );
 }
 
 const MODEL_DIR = findModelDir();
+
+/**
+ * Detect model type from directory contents and build the recognizer config.
+ */
+function detectModelConfig() {
+  const dirName = basename(MODEL_DIR);
+  const files = readdirSync(MODEL_DIR);
+
+  // Whisper model: has *-encoder.*.onnx and *-decoder.*.onnx
+  const encoderFile = files.find(f => f.includes('encoder') && f.endsWith('.onnx'));
+  const decoderFile = files.find(f => f.includes('decoder') && f.endsWith('.onnx'));
+  const tokensFile = files.find(f => f.endsWith('-tokens.txt')) || files.find(f => f === 'tokens.txt');
+
+  if (!tokensFile) throw new Error(`No tokens file found in ${MODEL_DIR}`);
+
+  if (dirName.includes('whisper') && encoderFile && decoderFile) {
+    // Prefer int8 if available
+    const int8Encoder = files.find(f => f.includes('encoder') && f.includes('int8') && f.endsWith('.onnx'));
+    const int8Decoder = files.find(f => f.includes('decoder') && f.includes('int8') && f.endsWith('.onnx'));
+    return {
+      type: 'whisper',
+      config: {
+        featConfig: { sampleRate: 16000, featureDim: 80 },
+        modelConfig: {
+          whisper: {
+            encoder: join(MODEL_DIR, int8Encoder || encoderFile),
+            decoder: join(MODEL_DIR, int8Decoder || decoderFile),
+          },
+          tokens: join(MODEL_DIR, tokensFile),
+          numThreads: NUM_THREADS,
+          provider: 'cpu',
+          debug: 0,
+        },
+      },
+    };
+  }
+
+  // Zipformer transducer: has encoder, decoder, joiner
+  const joinerFile = files.find(f => f.includes('joiner') && f.endsWith('.onnx'));
+  if (encoderFile && decoderFile && joinerFile) {
+    const int8Encoder = files.find(f => f.includes('encoder') && f.includes('int8') && f.endsWith('.onnx'));
+    const int8Joiner = files.find(f => f.includes('joiner') && f.includes('int8') && f.endsWith('.onnx'));
+    return {
+      type: 'zipformer',
+      config: {
+        featConfig: { sampleRate: 16000, featureDim: 80 },
+        modelConfig: {
+          transducer: {
+            encoder: join(MODEL_DIR, int8Encoder || encoderFile),
+            decoder: join(MODEL_DIR, decoderFile),
+            joiner: join(MODEL_DIR, int8Joiner || joinerFile),
+          },
+          tokens: join(MODEL_DIR, tokensFile),
+          numThreads: NUM_THREADS,
+          provider: 'cpu',
+          debug: 0,
+        },
+      },
+    };
+  }
+
+  throw new Error(`Cannot detect model type in ${MODEL_DIR}. Found files: ${files.join(', ')}`);
+}
 
 // ── WAV parsing & energy gate ───────────────────────────────
 
@@ -135,11 +203,15 @@ function computeRms(samples) {
   return Math.sqrt(sum / samples.length);
 }
 
-// ── Filler word cleanup ─────────────────────────────────────
+// ── Transcript cleanup ───────────────────────────────────────
 
 const FILLER_RE = /\b(um+|uh+|hmm+|hm+|mm-hmm|mhm+|mm+|ah+|er|erm|oh+)\b[,.]?/gi;
 
+// Whisper special tokens and non-speech descriptors that should be stripped.
+const WHISPER_NOISE_RE = /\[BLANK_AUDIO\]|\(buzzing\)|\(music\)|\(silence\)|\(noise\)|\(static\)|\(clicking\)|\(coughing\)|\(sighing\)/gi;
+
 function clean(text) {
+  text = text.replace(WHISPER_NOISE_RE, '');
   text = text.replace(FILLER_RE, ' ');
   text = text.replace(/ {2,}/g, ' ').trim();
   text = text.replace(/^[,.\s]+/, '');
@@ -149,29 +221,17 @@ function clean(text) {
 // ── Model lifecycle ─────────────────────────────────────────
 
 let recognizer = null;
+let modelType = null;
 let unloadTimer = null;
 
 function loadModel() {
   console.log(`Loading model from ${MODEL_DIR} (${NUM_THREADS} threads)...`);
   const t0 = Date.now();
 
-  const config = {
-    featConfig: { sampleRate: 16000, featureDim: 80 },
-    modelConfig: {
-      transducer: {
-        encoder: join(MODEL_DIR, 'encoder-epoch-99-avg-1.int8.onnx'),
-        decoder: join(MODEL_DIR, 'decoder-epoch-99-avg-1.onnx'),
-        joiner:  join(MODEL_DIR, 'joiner-epoch-99-avg-1.int8.onnx'),
-      },
-      tokens: join(MODEL_DIR, 'tokens.txt'),
-      numThreads: NUM_THREADS,
-      provider: 'cpu',
-      debug: 0,
-    },
-  };
-
-  recognizer = new sherpa_onnx.OfflineRecognizer(config);
-  console.log(`Model ready in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  const detected = detectModelConfig();
+  modelType = detected.type;
+  recognizer = new sherpa_onnx.OfflineRecognizer(detected.config);
+  console.log(`Model type: ${modelType}  Ready in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }
 
 function unloadModel() {
@@ -179,6 +239,7 @@ function unloadModel() {
   if (recognizer) {
     console.log('Unloading model (idle timeout)...');
     recognizer = null;
+    modelType = null;
   }
 }
 
@@ -223,6 +284,7 @@ const server = createServer(async (req, res) => {
     jsonResponse(res, 200, {
       status: 'ok',
       model_loaded: recognizer !== null,
+      model_type: modelType,
       threads: NUM_THREADS,
       model_dir: MODEL_DIR,
     });
@@ -295,9 +357,12 @@ const server = createServer(async (req, res) => {
       const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
 
       let text = (result.text ?? '').trim();
-      // Zipformer outputs ALL CAPS (LibriSpeech convention) — lowercase for chat input.
-      // Capitalize the first letter of each sentence.
-      text = text.toLowerCase().replace(/(^|[.!?]\s+)([a-z])/g, (_, pre, c) => pre + c.toUpperCase());
+
+      // Zipformer outputs ALL CAPS without punctuation — normalize to sentence case.
+      // Whisper outputs properly cased+punctuated text — leave it alone.
+      if (modelType === 'zipformer') {
+        text = text.toLowerCase().replace(/(^|[.!?]\s+)([a-z])/g, (_, pre, c) => pre + c.toUpperCase());
+      }
       text = clean(text);
 
       const rmsStr = rms >= 0 ? `  rms=${rms.toFixed(4)}` : '';

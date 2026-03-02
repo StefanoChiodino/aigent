@@ -80,7 +80,7 @@ aigent               # launch — open http://localhost:3141
 - Creating `~/.config/aigent/` (config + API key) and `~/.local/share/aigent/workspace/` (memory)
 - Entering your `ANTHROPIC_API_KEY` (stored in `~/.config/aigent/.env`, permissions `600`)
 - Setting up TTS (edge-tts, Microsoft neural TTS) — requires Python 3
-- Optionally installing STT (sherpa-onnx Zipformer, ~70 MB download, no GPU required)
+- Optionally installing STT (sherpa-onnx Whisper, ~400 MB download, no GPU required)
 - Building the Chrome extension and printing load instructions
 
 After init, just run `aigent` — no extra flags needed.
@@ -384,8 +384,8 @@ AIGENT_STT_IDLE_TIMEOUT=0              # unload STT model after N seconds idle (
 make tts-setup   # install edge-tts (Microsoft TTS, no API key needed)
 make tts         # start the TTS server on port 8766
 
-# STT uses sherpa-onnx Zipformer — Node.js native addon, no Python or GPU required
-make stt-setup   # install sherpa-onnx-node and download the model (~70 MB)
+# STT uses sherpa-onnx Whisper — Node.js native addon, no Python or GPU required
+make stt-setup   # install sherpa-onnx-node and download the model (~400 MB)
 make stt         # start the STT server on port 8765
 ```
 
