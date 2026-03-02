@@ -1,18 +1,21 @@
 /**
  * 26 — Microphone text accumulation across window boundaries.
  *
- * When the audio buffer exceeds the 12-second Whisper window
- * (MIC_WINDOW_SAMPLES = 16 kHz * 12 s = 192 000 samples), the hook
- * commits the last successful transcription into a base-text buffer,
- * clears the audio samples, and starts a fresh window.  Subsequent
- * transcriptions are prepended with the committed base text so the
- * user never loses earlier speech.
+ * Text is committed to base in two ways:
+ * 1. Silence-based commit — when VAD detects a speech pause, the next
+ *    STT response commits the transcription and clears the audio buffer.
+ * 2. Fallback window cap — when the audio buffer exceeds the 8-second
+ *    window (MIC_WINDOW_SAMPLES = 16 kHz * 8 s = 128 000 samples), the
+ *    hook commits the last transcription regardless of VAD state.
+ *
+ * Subsequent transcriptions are prepended with the committed base text
+ * so the user never loses earlier speech.
  */
 
 import { test, expect } from '@playwright/test';
 import { useSharedPage } from '../helpers/shared-page.js';
 import { dismissPermModal } from '../helpers/ui.js';
-import { installMicMock, fireLoudFrames, FRAMES_TO_EXCEED_WINDOW } from '../helpers/mic-mock.js';
+import { installMicMock, fireLoudFrames, fireSilentFrames, FRAMES_TO_EXCEED_WINDOW } from '../helpers/mic-mock.js';
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -219,5 +222,121 @@ test.describe('@mic Mic text accumulation across window boundaries', () => {
 
     // Should show only the new text — no leftover base from the first recording
     await expect(input).toHaveValue('fresh start', { timeout: 5000 });
+  });
+
+  // ── Silence-based commit ────────────────────────────────────────────────────
+
+  test('silence commit: text accumulates across a natural speech pause', async () => {
+    const page = getPage();
+    await installMicMock(page);
+
+    let sttText = 'hello world';
+    await page.route('**/stt', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ text: sttText }),
+      });
+    });
+
+    const mic = page.locator('#mic');
+    const input = page.locator('#input');
+
+    await mic.click();
+    await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3000 });
+
+    // Phase 1: speak — get transcription
+    await fireLoudFrames(page, 10);
+    await expect(input).toHaveValue('hello world', { timeout: 5000 });
+
+    // Silence pause — trigger VAD silence transition (needs enough silent
+    // frames so Date.now() - lastSpeechTime > silenceTailMs, default 500ms)
+    await fireSilentFrames(page, 5);
+    await page.waitForTimeout(600);
+    await fireSilentFrames(page, 5);
+
+    // Wait for the next live chunk to fire and commit
+    await page.waitForTimeout(2000);
+
+    // Phase 2: new speech after the pause
+    sttText = 'how are you';
+    await fireLoudFrames(page, 10);
+
+    // Should show committed base + new transcription
+    await expect(input).toHaveValue('hello world how are you', { timeout: 5000 });
+  });
+
+  test('silence commit: speech resuming before commit cancels the pending commit', async () => {
+    const page = getPage();
+    await installMicMock(page);
+
+    let sttText = 'continuous speech';
+    await page.route('**/stt', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ text: sttText }),
+      });
+    });
+
+    const mic = page.locator('#mic');
+    const input = page.locator('#input');
+
+    await mic.click();
+    await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3000 });
+
+    // Get initial transcription
+    await fireLoudFrames(page, 10);
+    await expect(input).toHaveValue('continuous speech', { timeout: 5000 });
+
+    // Brief silence — trigger pendingSilenceCommit
+    await fireSilentFrames(page, 5);
+    await page.waitForTimeout(600);
+    await fireSilentFrames(page, 5);
+
+    // Resume speaking BEFORE the next STT response — should cancel the commit
+    await fireLoudFrames(page, 10);
+
+    // Wait for STT to respond
+    await page.waitForTimeout(2000);
+
+    // Text should still be from same window (no commit happened), not doubled
+    await expect(input).toHaveValue('continuous speech', { timeout: 5000 });
+  });
+
+  test('silence commit: stopping mic after commit preserves base text', async () => {
+    const page = getPage();
+    await installMicMock(page);
+
+    await page.route('**/stt', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ text: 'committed text' }),
+      });
+    });
+
+    const mic = page.locator('#mic');
+    const input = page.locator('#input');
+
+    await mic.click();
+    await expect(mic).toHaveClass(/\brecording\b/, { timeout: 3000 });
+
+    // Get transcription
+    await fireLoudFrames(page, 10);
+    await expect(input).toHaveValue('committed text', { timeout: 5000 });
+
+    // Silence → triggers commit
+    await fireSilentFrames(page, 5);
+    await page.waitForTimeout(600);
+    await fireSilentFrames(page, 5);
+    await page.waitForTimeout(2000);
+
+    // Stop mic — samples may be empty after commit
+    await page.keyboard.press('Control+Backquote');
+    await expect(mic).not.toHaveClass(/\brecording\b/, { timeout: 5000 });
+
+    // Committed base text must be preserved
+    await expect(input).toHaveValue('committed text', { timeout: 3000 });
   });
 });

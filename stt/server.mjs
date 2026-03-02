@@ -36,7 +36,7 @@ const { values: args } = parseArgs({
     host:              { type: 'string',  default: '127.0.0.1' },
     port:              { type: 'string',  default: process.env.AIGENT_STT_PORT ?? '8765' },
     'model-dir':       { type: 'string',  default: '' },
-    'num-threads':     { type: 'string',  default: '2' },
+    'num-threads':     { type: 'string',  default: '4' },
     'idle-timeout':    { type: 'string',  default: process.env.AIGENT_STT_IDLE_TIMEOUT ?? '0' },
     'energy-threshold':{ type: 'string',  default: process.env.AIGENT_STT_ENERGY_THRESHOLD ?? '0.01' },
     eager:             { type: 'boolean', default: false },

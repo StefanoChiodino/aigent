@@ -176,9 +176,17 @@ export async function startRecordingWithText(page: Page, text: string) {
   await expect(page.locator('#input')).toHaveValue(text, { timeout: 5000 });
 }
 
+/** Fire `n` silent audio frames (RMS 0) in the browser mock. */
+export async function fireSilentFrames(page: Page, n: number) {
+  await page.evaluate((count) => {
+    const mock = (window as unknown as { __micMock: { fireAudioFrame: (rms: number) => void } }).__micMock;
+    for (let i = 0; i < count; i++) mock.fireAudioFrame(0);
+  }, n);
+}
+
 /**
  * Number of loud mock audio frames needed to exceed MIC_WINDOW_SAMPLES.
  * Each frame is 4 096 samples at 16 kHz.
- * 48 * 4 096 = 196 608 > 192 000.
+ * 32 * 4 096 = 131 072 > 128 000 (8 s * 16 000).
  */
-export const FRAMES_TO_EXCEED_WINDOW = 48;
+export const FRAMES_TO_EXCEED_WINDOW = 32;

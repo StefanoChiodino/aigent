@@ -406,6 +406,8 @@ TTS and STT URLs are configurable in the settings panel or via `AIGENT_TTS_URL` 
 
 **STT energy gate** — the STT model can hallucinate words ("yeah", "okay") from silence or background noise. The energy gate measures the RMS volume of each audio clip before sending it to the model; clips below the threshold are discarded immediately. The default (0.01) works well in a quiet room. If you still get spurious transcriptions, raise it in **Settings → Microphone → STT energy threshold** — changes take effect immediately without restarting the STT service. The STT log shows the RMS alongside each transcript to help you calibrate: `[0.43s]  rms=0.0312  'yeah'`.
 
+**Silence-based chunking** — Whisper runs on CPU and inference time grows with audio length. To keep live transcription responsive, the client commits text at natural speech pauses instead of accumulating unbounded audio. When the VAD detects silence (configurable via **Settings → Microphone → Silence tail**), the current transcription is locked in as base text and the audio buffer resets. Each Whisper call processes only the speech since the last pause (typically 2–5 seconds), keeping inference fast and bounded. A fallback cap at 8 seconds handles continuous speech with no pauses. Requests are serialized (one in-flight at a time) to prevent CPU pile-up.
+
 **Legacy Parakeet STT** — the previous NVIDIA Parakeet backend (Python/NeMo) is still available at `stt/main.py`. Use `make stt-legacy` to run it if you already have NeMo installed and prefer the Parakeet model.
 
 ### MCP (Model Context Protocol)

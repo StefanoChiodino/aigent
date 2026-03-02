@@ -15,8 +15,9 @@ export interface MicControls {
   micRecording: boolean;
 }
 
-// Max samples to send per live chunk (12 s at 16 kHz — more context improves Parakeet accuracy)
-const MIC_WINDOW_SAMPLES = 16000 * 12;
+// Max samples to send per live chunk (8 s at 16 kHz — fallback cap for continuous speech
+// with no pauses; silence-based commit normally keeps windows much shorter)
+const MIC_WINDOW_SAMPLES = 16000 * 8;
 
 export function useMic(onTranscript: (text: string, windowCapped: boolean) => void): MicControls {
   const micAudioCtx = useRef<AudioContext | null>(null);
@@ -35,6 +36,8 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
   const vadSpeaking = useRef(false);
   const micLastSpeechTime = useRef(0);
   const micLiveAbortCtrls = useRef<AbortController[]>([]);
+  const pendingSilenceCommit = useRef(false);
+  const isFetching = useRef(false);
 
   const getSetting = useSettingsStore.getState().getClientSetting;
 
@@ -51,11 +54,11 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
 
   const sendLiveChunk = useCallback(async (): Promise<void> => {
     if (micSamples.current.length === 0) return;
+    if (isFetching.current) return; // serialize — skip if previous request still in flight
 
     // Check if audio exceeds the window. If so, commit the last good
     // transcription into micBaseText, clear samples, and start a fresh
-    // window. This prevents old text from being lost when Parakeet only
-    // sees the trailing 12 s.
+    // window. Fallback for continuous speech with no pauses.
     let totalLen = 0;
     for (const s of micSamples.current) totalLen += s.length;
     if (totalLen > MIC_WINDOW_SAMPLES) {
@@ -89,6 +92,7 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     // Don't toggle micState to 'transcribing' during live chunks — that causes
     // the mic button to flicker between the stop icon and spinner every 1.2s.
     // The 'transcribing' state is only used for the final transcription in stopMic.
+    isFetching.current = true;
     try {
       const resp = await fetch('/stt', {
         method: 'POST',
@@ -102,10 +106,27 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
         if (text) {
           micLastText.current = text;
           micDisplayedSeq.current = seq;
-          onTranscript(micBaseText.current ? micBaseText.current + ' ' + text : text, false);
+
+          // Silence-based commit: when VAD detected a pause and we now
+          // have a response covering the audio up to that pause, commit
+          // the transcription and start a fresh audio window.
+          if (pendingSilenceCommit.current) {
+            pendingSilenceCommit.current = false;
+            micBaseText.current = micBaseText.current
+              ? micBaseText.current + ' ' + text
+              : text;
+            micSamples.current = [];
+            micLastText.current = '';
+            micReqSeq.current = 0;
+            micDisplayedSeq.current = 0;
+            onTranscript(micBaseText.current, false);
+          } else {
+            onTranscript(micBaseText.current ? micBaseText.current + ' ' + text : text, false);
+          }
         }
       }
     } catch { /* aborted */ } finally {
+      isFetching.current = false;
       clearTimeout(liveTimeout);
       micLiveAbortCtrls.current = micLiveAbortCtrls.current.filter(c => c !== ctrl);
     }
@@ -166,6 +187,8 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
       vadSpeaking.current = false;
       micLastSpeechTime.current = 0;
       micLiveAbortCtrls.current = [];
+      pendingSilenceCommit.current = false;
+      isFetching.current = false;
 
       const source = ctx.createMediaStreamSource(stream);
       micSource.current = source;
@@ -188,6 +211,8 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
 
         if (rms > silenceThresh) {
           micLastSpeechTime.current = Date.now();
+          // Speech resumed — cancel any pending silence commit
+          pendingSilenceCommit.current = false;
           // Cancel any pending auto-send timer when speech resumes
           if (micSilenceTimer.current !== null) {
             clearTimeout(micSilenceTimer.current);
@@ -211,6 +236,9 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
           if (vadSpeaking.current && Date.now() - micLastSpeechTime.current > silenceTail) {
             vadSpeaking.current = false;
             setVadActive(false);
+            // Natural speech pause — schedule a commit on the next STT response
+            // so the audio window resets and inference stays fast.
+            pendingSilenceCommit.current = true;
           }
           // Auto-send on silence: in sticky mode, schedule a submit after the
           // configured silence duration. Only arm the timer once (when null).
@@ -292,6 +320,8 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     if (micSilenceTimer.current) { clearTimeout(micSilenceTimer.current); micSilenceTimer.current = null; }
     if (micIdleTimer.current) { clearTimeout(micIdleTimer.current); micIdleTimer.current = null; }
     for (const c of micLiveAbortCtrls.current) c.abort();
+    pendingSilenceCommit.current = false;
+    isFetching.current = false;
     micLiveAbortCtrls.current = [];
 
     setMicState('transcribing');
@@ -351,6 +381,8 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     // Abort in-flight STT requests
     for (const c of micLiveAbortCtrls.current) c.abort();
     micLiveAbortCtrls.current = [];
+    pendingSilenceCommit.current = false;
+    isFetching.current = false;
   }, []);
 
   /** Adopt new base text during recording (e.g. user typed or pasted).
@@ -363,6 +395,8 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     micDisplayedSeq.current = ++micReqSeq.current;
     for (const c of micLiveAbortCtrls.current) c.abort();
     micLiveAbortCtrls.current = [];
+    pendingSilenceCommit.current = false;
+    isFetching.current = false;
   }, []);
 
   const abortMic = useCallback((): void => {
@@ -381,6 +415,8 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     micAudioCtx.current = null;
     micSamples.current = [];
     vadSpeaking.current = false;
+    pendingSilenceCommit.current = false;
+    isFetching.current = false;
     setMicState('idle');
     setVadActive(false);
   }, [setMicState, setVadActive]);
