@@ -53,15 +53,21 @@ import { injectEvent, AigentWsClient } from '../helpers/ws-client.js';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+let msgCounter = 0;
+function nextMsgId() { return `rating-test-${Date.now()}-${++msgCounter}`; }
+
 async function injectAssistantMessage(content = 'Test response for rating.') {
+  const id = nextMsgId();
   await injectEvent({
     type: 'message',
     message: {
+      id,
       role: 'assistant',
       content,
       timestamp: new Date().toISOString(),
     },
   });
+  return id;
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
@@ -337,10 +343,11 @@ test.describe('@fast Rating widget', () => {
 
   test('message_rating carries correct messageId', async () => {
     const page = getPage();
+    const id = nextMsgId();
     const ts = new Date().toISOString();
     await injectEvent({
       type: 'message',
-      message: { role: 'assistant', content: 'Specific message', timestamp: ts },
+      message: { id, role: 'assistant', content: 'Specific message', timestamp: ts },
     });
 
     const client = new AigentWsClient();

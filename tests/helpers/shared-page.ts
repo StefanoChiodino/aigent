@@ -20,6 +20,15 @@ export function useSharedPage(): () => Page {
 
   test.beforeAll(async ({ browser }) => {
     page = await browser.newPage();
+    // Clear persisted localStorage BEFORE any page JS runs so stale user
+    // settings (e.g. AIGENT_MODEL from a previous browsing session) don't
+    // override the test server's defaults on the first WebSocket connection.
+    // addInitScript runs before Zustand hydrates from localStorage.
+    await page.addInitScript(() => {
+      localStorage.removeItem('aigent-client-settings');
+      localStorage.removeItem('aigent-chat');
+      localStorage.removeItem('aigent-voice');
+    });
     await page.goto('/');
     await waitForConnected(page);
   });

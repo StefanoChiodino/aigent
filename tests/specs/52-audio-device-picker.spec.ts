@@ -255,9 +255,11 @@ test.describe('@fast Audio device picker', () => {
   test('stale device ID is reset to default when device not found', async () => {
     const page = getPage();
 
-    // Set a device ID that won't match any enumerated device
+    // Set a device ID that won't match any enumerated device.
+    // Use setMicDevice to also clear the label — otherwise a label leftover
+    // from a previous test causes the DevicePicker to re-match by label.
     await page.evaluate(() => {
-      (window as any).__zustand_voice.getState().setMicDeviceId('stale-device-id');
+      (window as any).__zustand_voice.getState().setMicDevice('stale-device-id', '');
     });
 
     await enableVoiceServices(page);

@@ -10,26 +10,26 @@ test.describe('@fast Disconnected state', () => {
   test('reconnect banner is visible when WebSocket is blocked', async ({ page }) => {
     // Block the WebSocket so the app stays in connecting/reconnecting indefinitely
     await page.routeWebSocket(/ws:\/\/localhost/, ws => ws.close());
-    await page.goto('http://localhost:3141');
+    await page.goto('/');
     await expect(page.locator('#reconnect-banner')).toBeVisible({ timeout: 5_000 });
   });
 
   test('reconnect banner is gone once connected', async ({ page }) => {
-    await page.goto('http://localhost:3141');
+    await page.goto('/');
     await waitForConnected(page);
     await expect(page.locator('#reconnect-banner')).not.toBeAttached();
   });
 
   test('body gets data-disconnected when WebSocket is blocked', async ({ page }) => {
     await page.routeWebSocket(/ws:\/\/localhost/, ws => ws.close());
-    await page.goto('http://localhost:3141');
+    await page.goto('/');
     await expect(page.locator('#reconnect-banner')).toBeVisible({ timeout: 5_000 });
     const hasAttr = await page.evaluate(() => document.body.hasAttribute('data-disconnected'));
     expect(hasAttr).toBe(true);
   });
 
   test('data-disconnected is removed once connected', async ({ page }) => {
-    await page.goto('http://localhost:3141');
+    await page.goto('/');
     await waitForConnected(page);
     await page.waitForFunction(() => !document.body.hasAttribute('data-disconnected'), { timeout: 5_000 });
     const hasAttr = await page.evaluate(() => document.body.hasAttribute('data-disconnected'));

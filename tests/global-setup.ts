@@ -39,6 +39,13 @@ export default async function globalSetup() {
   if (existsSync(SETTINGS)) {
     copyFileSync(SETTINGS, SETTINGS_BACKUP);
     copyFileSync(SETTINGS, TEST_SETTINGS);
+    // Strip AIGENT_MODEL from test settings so the user's model preference
+    // doesn't leak into tests (e.g. disabling reasoning toggle for non-Opus models).
+    try {
+      const testSettings = JSON.parse(readFileSync(TEST_SETTINGS, 'utf-8'));
+      delete testSettings['AIGENT_MODEL'];
+      writeFileSync(TEST_SETTINGS, JSON.stringify(testSettings, null, 2) + '\n');
+    } catch { /* leave as-is if parse fails */ }
     console.log(`[test-setup] Copied settings.json → ${TEST_SETTINGS} (real file untouched)`);
   } else {
     writeFileSync(TEST_SETTINGS, '{}');
@@ -74,6 +81,9 @@ export default async function globalSetup() {
         AIGENT_TEST_MODE: '1',
         AIGENT_SOCKET_DIR: '/tmp/aigent-test2',
         AIGENT_SETTINGS_PATH: TEST_SETTINGS,
+        // Force Opus model so reasoning toggle and effort pills are enabled.
+        // The user's .env may have a non-Opus model which disables these controls.
+        AIGENT_MODEL: 'claude-opus-4-6',
       },
       stdio: ['ignore', logFd, logFd],
       detached: false,

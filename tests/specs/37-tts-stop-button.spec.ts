@@ -46,11 +46,11 @@ test.describe('@fast TTS stop button scope', () => {
     // Inject two completed assistant messages with distinct timestamps
     await injectEvent({
       type: 'message',
-      message: { role: 'assistant', content: 'First response.', timestamp: ts1 },
+      message: { id: ts1, role: 'assistant', content: 'First response.', timestamp: ts1 },
     });
     await injectEvent({
       type: 'message',
-      message: { role: 'assistant', content: 'Second response.', timestamp: ts2 },
+      message: { id: ts2, role: 'assistant', content: 'Second response.', timestamp: ts2 },
     });
 
     const msgs = page.locator('.message.assistant:not(.streaming)');
@@ -136,7 +136,7 @@ test.describe('@fast TTS stop button scope', () => {
     const ts = '2025-01-01T00:00:05.000Z';
     await injectEvent({
       type: 'message',
-      message: { role: 'assistant', content: 'Older response.', timestamp: ts },
+      message: { id: ts, role: 'assistant', content: 'Older response.', timestamp: ts },
     });
 
     const completedMsg = page.locator('.message.assistant:not(.streaming)').last();
