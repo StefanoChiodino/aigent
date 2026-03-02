@@ -10,6 +10,17 @@ interface ModelPricing {
   cacheWrite: number;
 }
 
+/** Live pricing injected at runtime from the provider's model list API. */
+const LIVE_PRICING = new Map<string, ModelPricing>();
+
+/**
+ * Register pricing for a model reported by the provider API.
+ * Takes precedence over the static table below.
+ */
+export function registerModelPricing(id: string, pricing: ModelPricing): void {
+  LIVE_PRICING.set(id, pricing);
+}
+
 // Prices as of early 2026 — update as needed
 const PRICING: Record<string, ModelPricing> = {
   // Anthropic — cache read = 10% of input, cache write = 125% of input
@@ -35,10 +46,13 @@ const FAMILY_MAP: [string, string][] = [
 ];
 
 /**
- * Find pricing for a model. Tries exact match, then prefix/contains match.
+ * Find pricing for a model. Checks live provider prices first, then static table.
  */
 function findPricing(model: string): ModelPricing | null {
-  // Exact match
+  // Live prices from provider API take precedence
+  if (LIVE_PRICING.has(model)) return LIVE_PRICING.get(model)!;
+
+  // Exact match in static table
   if (PRICING[model]) return PRICING[model]!;
 
   // Prefix match (e.g. "claude-opus-4-6" matches full key)

@@ -52,7 +52,9 @@ interface ReflectionRecord {
 // Constants
 // ---------------------------------------------------------------------------
 
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+function getCheapModel(): string {
+  return process.env['AIGENT_CHEAP_MODEL'] ?? process.env['AIGENT_MODEL'] ?? '';
+}
 const MIN_EPISODES = 5;
 const REFLECTIONS_FILE = 'reflections.ndjson';
 
@@ -180,7 +182,7 @@ export async function runReflection(
       SYSTEM_PROMPT,
       [{ role: 'user', content: prompt }],
       [],
-      { model: HAIKU_MODEL, maxTokens: 2048, thinking: 'off' },
+      { model: getCheapModel(), maxTokens: 2048, thinking: 'off' },
     );
 
     // Parse response
@@ -237,7 +239,7 @@ export async function runReflection(
         patternsFound: output.patterns.length,
         memoryLessons: output.memoryLessons,
         todoItems: output.todoItems,
-        model: HAIKU_MODEL,
+        model: getCheapModel(),
       };
       appendFileSync(join(workspacePath, REFLECTIONS_FILE), JSON.stringify(record) + '\n', 'utf-8');
     } catch { /* non-critical */ }

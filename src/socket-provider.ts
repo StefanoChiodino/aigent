@@ -127,6 +127,16 @@ export class SocketProvider implements Provider {
   }
 
   private handleEvent(event: LLMEvent): void {
+    // Handle models_list separately — it uses pendingModels, not pending
+    if (event.type === 'models_list') {
+      const pm = this.pendingModels.get(event.id);
+      if (pm) {
+        this.pendingModels.delete(event.id);
+        pm.resolve(event.models);
+      }
+      return;
+    }
+
     const p = this.pending.get(event.id);
     if (!p) return;
 
@@ -149,14 +159,6 @@ export class SocketProvider implements Provider {
           ...(event.code !== undefined ? { code: event.code } : {}),
         });
         p.reject(err);
-        break;
-      }
-      case 'models_list': {
-        const pm = this.pendingModels.get(event.id);
-        if (pm) {
-          this.pendingModels.delete(event.id);
-          pm.resolve(event.models);
-        }
         break;
       }
     }

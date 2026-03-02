@@ -30,9 +30,10 @@ analysis, code review, anything slow. Dispatch multiple tasks at once for parall
 that need to be reflected in your next steps.
 
 **Match model + thinking to the task — this is how you control cost:**
-- Simple search/read/summarize → Haiku + thinking off (cheapest)
-- Moderate analysis, straightforward code changes → Sonnet + thinking low
-- Complex reasoning, architecture decisions → Opus + thinking high (most capable)
+- Simple search/read/summarize → "cheap" + thinking off
+- Moderate analysis, code changes, structured work → "standard" + thinking off or low
+- Complex reasoning, architecture, multi-step planning → "expensive" + thinking low, medium, or high as needed
+Always specify both model and thinking explicitly.
 
 Never default to "I'll just do it myself" for multi-step work. The right move is almost always:
 think about what's parallelizable, dispatch those parts, handle the synthesis yourself.
@@ -117,6 +118,8 @@ export interface ChatCallbacks {
   onDispatchTask?: (input: Record<string, unknown>) => string; // returns task ID
   onModelSwitch?: (model: string, reason?: string) => void;
   onToolComplete?: (info: { tool: string; input: string; ms: string; ok: boolean }) => void;
+  /** Called when a model rejects a thinking request — caller should remember this and disable thinking for that model. */
+  onThinkingUnsupported?: (model: string) => void;
   signal?: AbortSignal;
 }
 
@@ -154,7 +157,7 @@ export class Agent {
       this.provider = createProvider(providerType);
       this.isOAuth = providerType === 'anthropic' && (this.provider as AnthropicProvider).isOAuthToken;
     }
-    this.model = options.model ?? process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6';
+    this.model = options.model ?? process.env['AIGENT_MODEL'] ?? '';
     this.maxTokens = options.maxTokens ?? 16384;
     this.thinking = options.thinking ?? (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
     this.mcpManager = options.mcpManager ?? null;
@@ -456,6 +459,32 @@ export class Agent {
         // Don't retry aborts
         if (e.name === 'AbortError' || callbacks?.signal?.aborted) throw err;
 
+        // If thinking was on and the API rejected it as unsupported, retry without thinking.
+        // This happens when a model doesn't support extended thinking — 400 with a message
+        // referencing "thinking" or "output_config". We remember it so future calls skip it.
+        if (this.thinking !== 'off' && e.status === 400) {
+          const msg = (e.message ?? '').toLowerCase();
+          if (msg.includes('thinking') || msg.includes('output_config') || msg.includes('reasoning')) {
+            log.warn('Model does not support thinking — retrying without', { model: this.model });
+            callbacks?.onThinkingUnsupported?.(this.model);
+            const savedThinking = this.thinking;
+            this.thinking = 'off';
+            try {
+              const signal = callbacks?.signal;
+              return await this.provider.sendMessage(
+                this.systemPromptParts,
+                this.messages,
+                this.getActiveTools(),
+                { model: this.model, maxTokens: this.maxTokens, thinking: 'off', ...(signal ? { signal } : {}) },
+                { onText: callbacks?.onText, onThinking: callbacks?.onThinking },
+              );
+            } finally {
+              // Restore so the agent knows its setting changed externally
+              this.thinking = savedThinking;
+            }
+          }
+        }
+
         const status = e.status ?? 0;
         const isTransient = status === 429 || status === 500 || status === 502 || status === 503 || status === 529
           || e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.code === 'ENOTFOUND';
@@ -472,22 +501,31 @@ export class Agent {
     throw new Error('unreachable');
   }
 
-  /** Derive an appropriate thinking level from a model name. */
-  private thinkingForModel(model: string): ThinkingLevel {
-    if (model.includes('haiku')) return 'off';
-    if (model.includes('sonnet')) return 'low';
-    return 'high'; // opus or unknown — default high
+  /** Resolve a cost-tier alias or family name to a real model ID. */
+  private resolveModelAlias(nameOrId: string): string {
+    const key = nameOrId.toLowerCase();
+    const tierMap: Record<string, string> = { cheap: 'haiku', standard: 'sonnet', expensive: 'opus' };
+    const family = tierMap[key] ?? key;
+    const families = ['haiku', 'sonnet', 'opus'] as const;
+    const matched = families.find((f) => family === f || family.includes(f));
+    if (!matched) return nameOrId;
+    const defaults: Record<typeof families[number], string> = {
+      haiku: 'claude-haiku-4-5-20251001',
+      sonnet: 'claude-sonnet-4-6',
+      opus: 'claude-opus-4-6',
+    };
+    return defaults[matched];
   }
 
   private async executeSpawnAgent(input: Record<string, unknown>): Promise<string> {
     const task = String(input['task'] ?? '');
     const context = input['context'] ? String(input['context']) : '';
-    const requestedModel = input['model'] ? String(input['model']) : this.model;
+    const requestedModel = this.resolveModelAlias(input['model'] ? String(input['model']) : this.model);
     const maxIter = Math.min(Number(input['max_iterations'] ?? 15), 25);
     // Thinking: explicit override > model-derived default (never inherit blindly from parent)
-    const requestedThinking = input['thinking']
+    const requestedThinking: ThinkingLevel = input['thinking']
       ? (String(input['thinking']) as ThinkingLevel)
-      : this.thinkingForModel(requestedModel);
+      : 'off';
 
     if (!task) return 'Error: task is required';
 
@@ -602,6 +640,11 @@ export class Agent {
   }
 
   private getContextWindow(): number {
+    const env = process.env['AIGENT_CONTEXT_WINDOW'];
+    if (env) {
+      const n = parseInt(env, 10);
+      if (!isNaN(n) && n > 0) return n;
+    }
     return 200_000;
   }
 
@@ -667,7 +710,7 @@ export class Agent {
     return {
       enabled: false,
       thresholdTokens: 500,
-      model: 'claude-haiku-4-5-20251001',
+      model: process.env['AIGENT_CHEAP_MODEL'] ?? process.env['AIGENT_MODEL'] ?? '',
       shouldSummarizeTool: (_name: string) => false,
     };
   }
@@ -705,7 +748,7 @@ export class Agent {
       return {
         enabled: c['summarizeLargeResults'] === true,
         thresholdTokens: typeof c['summarizeThresholdTokens'] === 'number' ? c['summarizeThresholdTokens'] : 500,
-        model: typeof c['summarizeModel'] === 'string' ? c['summarizeModel'] : 'claude-haiku-4-5-20251001',
+        model: typeof c['summarizeModel'] === 'string' ? c['summarizeModel'] : (process.env['AIGENT_CHEAP_MODEL'] ?? process.env['AIGENT_MODEL'] ?? ''),
         shouldSummarizeTool,
       };
     } catch { return this._defaultSummarizeConfig(); }

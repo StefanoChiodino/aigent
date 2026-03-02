@@ -17,7 +17,7 @@ import { generateSessionId, autoSaveSession, autoLoadSession } from './profiles.
 import type { ProviderMessage, UserContent, TextContent, ImageContent, DocumentContent, ImageMediaType, ToolResult } from './provider.js';
 import type { ClientCommand, ServerEvent, DisplayMessage, DisplayAttachment, ServerState, TokenUsage, StreamingTrace } from './protocol.js';
 import { SOCKET_PATH } from './protocol.js';
-import { computeCost } from './pricing.js';
+import { computeCost, registerModelPricing } from './pricing.js';
 import { distillToMemory } from './compact.js';
 import { loadMCP, type MCPManager } from './mcp.js';
 import { createLogger } from './logger.js';
@@ -45,13 +45,25 @@ function generateMsgId(): string {
   return 'msg_' + randomBytes(8).toString('hex');
 }
 
-// Default model list — used until the provider reports its own list.
-// Ordered most capable → fastest/cheapest.
-let AVAILABLE_MODELS = [
-  'claude-opus-4-6',
-  'claude-sonnet-4-6',
-  'claude-haiku-4-5-20251001',
-];
+// Default model list — seeded from env, overwritten once the provider responds.
+// No hardcoded fallback — AIGENT_MODEL must be set.
+const _envModel = process.env['AIGENT_MODEL'];
+let AVAILABLE_MODELS: string[] = _envModel ? [_envModel] : [];
+
+// Context window sizes reported by the provider for each model id.
+const modelContextWindows = new Map<string, number>();
+
+// Models that returned a "thinking not supported" error — thinking is silently
+// skipped for these. Persists for the lifetime of the server process.
+const modelsWithoutThinking = new Set<string>();
+
+/** Return the context window for the active model.
+ *  Priority: AIGENT_CONTEXT_WINDOW env override → provider-reported → 200k default. */
+function getContextWindow(modelId: string): number {
+  const envOverride = process.env['AIGENT_CONTEXT_WINDOW'];
+  if (envOverride) { const n = parseInt(envOverride, 10); if (!isNaN(n) && n > 0) return n; }
+  return modelContextWindows.get(modelId) ?? 200_000;
+}
 
 // --- State ---
 
@@ -696,7 +708,27 @@ async function processAgentTurn(
         broadcast({ type: 'tool_end' });
       },
       onUsage: (u) => {
-        usage = { ...u, cost: computeCost(model, u) };
+        // Compute delta since last call to attribute tokens to the correct model
+        const prev = usage;
+        const deltaIn = u.input - prev.input;
+        const deltaOut = u.output - prev.output;
+        const deltaCR = u.cacheRead - prev.cacheRead;
+        const deltaCW = u.cacheWrite - prev.cacheWrite;
+
+        const deltaCost = computeCost(model, { input: deltaIn, output: deltaOut, cacheRead: deltaCR, cacheWrite: deltaCW });
+        const totalCost = (prev.cost ?? 0) + deltaCost;
+
+        const byModel: Record<string, import('./protocol.js').ModelUsage> = { ...(prev.byModel ?? {}) };
+        const bucket = byModel[model] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+        byModel[model] = {
+          input: bucket.input + deltaIn,
+          output: bucket.output + deltaOut,
+          cacheRead: bucket.cacheRead + deltaCR,
+          cacheWrite: bucket.cacheWrite + deltaCW,
+          cost: bucket.cost + deltaCost,
+        };
+
+        usage = { ...u, cost: totalCost, byModel };
         broadcast({ type: 'usage', usage });
       },
       onCompact: (summary) => {
@@ -734,8 +766,15 @@ async function processAgentTurn(
         model = newModel;
         agent.currentModel = newModel;
         addSystemMessage(reason ? `Model switched to ${newModel}: ${reason}` : `Model switched to ${newModel}`);
-        broadcast({ type: 'state', model: newModel });
+        broadcast({ type: 'state', model: newModel, contextWindow: getContextWindow(newModel) });
         doAutoSave();
+      },
+      onThinkingUnsupported: (m) => {
+        if (!modelsWithoutThinking.has(m)) {
+          modelsWithoutThinking.add(m);
+          log.info('Model does not support thinking — remembered for this session', { model: m });
+          broadcast({ type: 'state', modelsWithoutThinking: [...modelsWithoutThinking] });
+        }
       },
       onToolComplete: (info) => {
         appendToolLog(join(workspacePath, 'memory'), info, getReqId());
@@ -862,10 +901,40 @@ function buildBackgroundToolSet(allTools: ProviderToolDef[], capabilities: Set<s
  * Background agents are capability-restricted by default (read-only, no network).
  * The caller can grant additional capabilities via the `capabilities` field.
  */
-function thinkingForModel(m: string): ThinkingLevel {
-  if (m.includes('haiku')) return 'off';
-  if (m.includes('sonnet')) return 'low';
-  return 'high';
+
+/**
+ * Resolve a cost-tier alias or Anthropic family name to a real model ID.
+ *   cheap      → haiku  (fast, low-cost: search, summarize, simple reads)
+ *   standard   → sonnet (balanced: analysis, code, moderate reasoning)
+ *   expensive  → opus   (most capable: complex reasoning, architecture)
+ * Also accepts bare family names ("haiku", "sonnet", "opus") for backwards compat.
+ * Searches AVAILABLE_MODELS for the best match; falls back to hardcoded defaults.
+ */
+function resolveModelAlias(nameOrId: string): string {
+  const key = nameOrId.toLowerCase();
+
+  // Cost-tier aliases → family
+  const tierMap: Record<string, string> = { cheap: 'haiku', standard: 'sonnet', expensive: 'opus' };
+  const family = tierMap[key] ?? key;
+
+  const families = ['haiku', 'sonnet', 'opus'] as const;
+  const matched = families.find((f) => family === f || family.includes(f));
+  if (!matched) return nameOrId; // already a full model ID or unknown — pass through
+
+  // Find the best (latest, most specific) match in the live model list
+  const candidates = AVAILABLE_MODELS.filter((m) => m.toLowerCase().includes(matched));
+  if (candidates.length > 0) {
+    // Prefer versioned IDs (longer) over generic aliases
+    return candidates.reduce((best, m) => (m.length > best.length ? m : best));
+  }
+
+  // Hardcoded fallbacks
+  const defaults: Record<typeof families[number], string> = {
+    haiku: 'claude-haiku-4-5-20251001',
+    sonnet: 'claude-sonnet-4-6',
+    opus: 'claude-opus-4-6',
+  };
+  return defaults[matched];
 }
 
 function dispatchBackgroundTask(input: {
@@ -886,9 +955,9 @@ function dispatchBackgroundTask(input: {
   // Fire and forget — run the sub-agent in the background
   const runTask = async () => {
     try {
-      const taskModel = input.model ?? model;
+      const taskModel = resolveModelAlias(input.model ?? process.env['AIGENT_CHEAP_MODEL'] ?? 'haiku');
       taskQueue.setModel(taskId, taskModel);
-      const taskThinking: ThinkingLevel = input.thinking ?? thinkingForModel(taskModel);
+      const taskThinking: ThinkingLevel = input.thinking ?? 'off';
       const maxIter = Math.min(input.max_iterations ?? 25, 50);
       const capabilities = new Set(input.capabilities ?? []);
 
@@ -982,11 +1051,21 @@ function dispatchBackgroundTask(input: {
       // Compute cost for this task and roll it into the global session usage
       const taskUsageRaw = { input: taskInputTokens, output: taskOutputTokens, cacheRead: 0, cacheWrite: 0 };
       const taskCost = computeCost(taskModel, taskUsageRaw);
+      const taskByModel: Record<string, import('./protocol.js').ModelUsage> = { ...(usage.byModel ?? {}) };
+      const taskBucket = taskByModel[taskModel] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+      taskByModel[taskModel] = {
+        input: taskBucket.input + taskInputTokens,
+        output: taskBucket.output + taskOutputTokens,
+        cacheRead: taskBucket.cacheRead,
+        cacheWrite: taskBucket.cacheWrite,
+        cost: taskBucket.cost + taskCost,
+      };
       usage = {
         ...usage,
         input: usage.input + taskInputTokens,
         output: usage.output + taskOutputTokens,
         cost: (usage.cost ?? 0) + taskCost,
+        byModel: taskByModel,
       };
       broadcast({ type: 'usage', usage });
 
@@ -1043,6 +1122,7 @@ function getState(): ServerState {
     sessionId: currentSessionId,
     model,
     availableModels: AVAILABLE_MODELS,
+    modelsWithoutThinking: modelsWithoutThinking.size > 0 ? [...modelsWithoutThinking] : undefined,
     availableTools: getToolDefinitions(false).map((t) => t.name),
     isLoading,
     tasks: taskQueue.getInfos(),
@@ -1052,6 +1132,7 @@ function getState(): ServerState {
       displayText: m.displayText ?? (typeof m.content === 'string' ? m.content : '[attachment]'),
     })),
     ...(currentStreamingTraces.length > 0 ? { streamingTraces: currentStreamingTraces } : {}),
+    contextWindow: getContextWindow(model),
   };
 }
 
@@ -1092,6 +1173,7 @@ function getCommandContext(): CommandContext {
     get isLoading() { return isLoading; },
     get workspacePath() { return workspacePath; },
     get availableModels() { return AVAILABLE_MODELS; },
+    getContextWindow,
     get toolsUsed() { return [...new Set(sessionToolsUsed)]; },
     get sessionStartedAt() { return sessionStartedAt; },
     get ratings() { return getRatingScores(); },
@@ -1559,8 +1641,9 @@ function restoreSession(): boolean {
     }
     log.info('Thinking restored', { current: currentThinking, savedEffort: savedEffortLevel });
   }
-  // Restore model so it persists across restarts
-  if (saved.model && AVAILABLE_MODELS.includes(saved.model)) {
+  // Restore model so it persists across restarts.
+  // Skip if AIGENT_MODEL env is explicitly set — the env var always wins over the saved session.
+  if (saved.model && !process.env['AIGENT_MODEL']) {
     model = saved.model;
     agent.currentModel = saved.model;
     log.info('Model restored', { model });
@@ -1577,7 +1660,7 @@ function restoreSession(): boolean {
 
 // --- Main ---
 
-model = process.env['AIGENT_MODEL'] ?? 'claude-opus-4-6';
+model = process.env['AIGENT_MODEL'] ?? '';
 currentThinking = (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
 workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
 
@@ -1695,8 +1778,14 @@ async function initAgent(): Promise<void> {
         const models = await provider.listModels();
         if (models && models.length > 0) {
           AVAILABLE_MODELS = models.map((m) => m.id);
+          // Store context window sizes and live pricing reported by the provider
+          for (const m of models) {
+            if (m.contextLength) modelContextWindows.set(m.id, m.contextLength);
+            if (m.pricing) registerModelPricing(m.id, m.pricing);
+          }
           log.info('Model list updated from API', { count: AVAILABLE_MODELS.length });
-          broadcast({ type: 'state', availableModels: AVAILABLE_MODELS });
+          // Broadcast updated model list and the context window for the active model
+          broadcast({ type: 'state', availableModels: AVAILABLE_MODELS, contextWindow: getContextWindow(model) });
         }
       }
     } catch (err: unknown) {
@@ -1803,7 +1892,7 @@ async function shutdown(skipDistill = false): Promise<void> {
   // Save conversation state FIRST — this is synchronous and fast.
   // Must run before distillToMemory (which makes an API call) to ensure
   // state is preserved even if docker SIGKILL arrives during distillation.
-  saveLifetimeUsage(workspacePath, usage);
+  saveLifetimeUsage(workspacePath, usage, sessionStartedAt);
   doAutoSave();
 
   if (skipDistill) {

@@ -1,16 +1,16 @@
 /**
- * Tier 3 — Haiku command classifier.
+ * Tier 3 — cheap-model command classifier.
  *
  * For commands that pass Tier 1 (static deny) and Tier 2 (static allow/deny)
  * without a verdict, this cheap LLM call classifies intent.
  *
- * - Model: claude-haiku-4-5-20251001 (~200ms, ~$0.001/call)
- * - LRU cache: 200 entries, 5-min TTL
+ * - Model: AIGENT_CHEAP_MODEL env var (falls back to AIGENT_MODEL)
+ * - Uses OpenAI-compatible API (works with Anthropic, OpenRouter, Ollama, etc.)
+ * - LRU cache: 200 entries, 30-min TTL
  * - Fails open to { action: 'ask' } on any error
  */
 
-import Anthropic from '@anthropic-ai/sdk';
-import { createClient } from './auth.js';
+import OpenAI from 'openai';
 import { createLogger } from './logger.js';
 
 const log = createLogger('classifier');
@@ -28,7 +28,10 @@ interface CacheEntry {
 
 const CACHE_MAX = 200;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-const MODEL = 'claude-haiku-4-5-20251001';
+
+function getModel(): string {
+  return process.env['AIGENT_CHEAP_MODEL'] ?? process.env['AIGENT_MODEL'] ?? '';
+}
 
 const SYSTEM_PROMPT = `You are a security classifier for an AI coding agent. Evaluate the shell command below.
 
@@ -62,21 +65,23 @@ When you classify as "allow" or "ask", optionally suggest 1-3 glob patterns:
 {"action":"...","reason":"...","suggested_patterns":["pattern1"]}
 Rules: "*" matches anything. Suggest "<exe> *" for simple commands. Never suggest just "*". Never suggest patterns for destructive commands.`;
 
-let anthropicClient: Anthropic | null = null;
+let openaiClient: OpenAI | null = null;
 const cache = new Map<string, CacheEntry>();
 
-export function initClassifier(apiKey: string): void {
-  const { client } = createClient(apiKey);
-  anthropicClient = client;
+export function initClassifier(apiKey: string, baseURL?: string): void {
+  openaiClient = new OpenAI({
+    apiKey: apiKey || 'not-needed',
+    baseURL: baseURL ?? undefined,
+  });
 }
 
 export function isClassifierAvailable(): boolean {
-  return anthropicClient !== null;
+  return openaiClient !== null;
 }
 
 /** Test-only: inject a fake client and clear all caches. */
-export function _resetForTest(fakeClient?: Anthropic | null): void {
-  anthropicClient = fakeClient ?? null;
+export function _resetForTest(fakeClient?: OpenAI | null): void {
+  openaiClient = fakeClient ?? null;
   cache.clear();
   fileAccessCache.clear();
 }
@@ -104,7 +109,7 @@ export async function classifyCommand(
     return cached.result;
   }
 
-  if (!anthropicClient) {
+  if (!openaiClient) {
     return { action: 'ask', reason: 'Classifier not initialized' };
   }
 
@@ -116,17 +121,16 @@ export async function classifyCommand(
       userMessage += `\n\nRecent conversation context:\n${context.recentContext}`;
     }
 
-    const response = await anthropicClient.messages.create({
-      model: MODEL,
+    const response = await openaiClient.chat.completions.create({
+      model: getModel(),
       max_tokens: 256,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userMessage },
+      ],
     });
 
-    const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map(b => b.text)
-      .join('');
+    const text = response.choices[0]?.message?.content ?? '';
 
     const result = parseClassifierResponse(text);
 
@@ -194,7 +198,7 @@ export async function classifyFileAccess(
     return cached.result;
   }
 
-  if (!anthropicClient) {
+  if (!openaiClient) {
     return { action: 'ask', reason: 'Classifier not initialized' };
   }
 
@@ -205,17 +209,16 @@ export async function classifyFileAccess(
       userMessage += `\n\nRecent conversation context:\n${context.recentContext}`;
     }
 
-    const response = await anthropicClient.messages.create({
-      model: MODEL,
+    const response = await openaiClient.chat.completions.create({
+      model: getModel(),
       max_tokens: 256,
-      system: FILE_ACCESS_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userMessage }],
+      messages: [
+        { role: 'system', content: FILE_ACCESS_SYSTEM_PROMPT },
+        { role: 'user', content: userMessage },
+      ],
     });
 
-    const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map(b => b.text)
-      .join('');
+    const text = response.choices[0]?.message?.content ?? '';
 
     const result = parseClassifierResponse(text);
     fileAccessCache.set(key, { result, ts: Date.now() });

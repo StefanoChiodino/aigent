@@ -112,7 +112,9 @@ export async function startWebServer(
   // In test mode (no container), seed cachedState with defaults so the browser
   // gets a valid connected event and the sidebar populates immediately.
   const TEST_MODE = process.env['AIGENT_TEST_MODE'] === '1';
-  const DEFAULT_MODELS = ['claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'];
+  const _mainModel = process.env['AIGENT_MODEL'];
+  const _cheapModel = process.env['AIGENT_CHEAP_MODEL'];
+  const DEFAULT_MODELS = [...new Set([_mainModel, _cheapModel].filter((m): m is string => !!m))];
   let cachedState: ServerState | null = TEST_MODE
     ? {
         messages: [],
@@ -128,6 +130,7 @@ export async function startWebServer(
         tasks: [],
         pendingResults: 0,
         queue: [],
+        contextWindow: (() => { const e = process.env['AIGENT_CONTEXT_WINDOW']; if (e) { const n = parseInt(e, 10); if (!isNaN(n) && n > 0) return n; } return 200_000; })(),
       }
     : null;
   client.on('connected', (state) => { cachedState = state; });
@@ -698,6 +701,14 @@ export async function startWebServer(
             browser_perm_deny: JSON.stringify(perms.deny),
           };
         }
+        // Inject env-derived model values so the settings panel shows what's active.
+        // These are sourced from process.env (via .env) and may not be in settings.json.
+        if (process.env['AIGENT_MODEL'] && !('AIGENT_MODEL' in merged)) {
+          merged = { ...merged, AIGENT_MODEL: process.env['AIGENT_MODEL'] };
+        }
+        if (process.env['AIGENT_CHEAP_MODEL'] && !('AIGENT_CHEAP_MODEL' in merged)) {
+          merged = { ...merged, AIGENT_CHEAP_MODEL: process.env['AIGENT_CHEAP_MODEL'] };
+        }
         // Flatten nested tools config into tools_* keys for the settings panel
         const toolsCfg = (settings as Record<string, unknown>)['tools'] as Record<string, unknown> | undefined;
         if (toolsCfg) {
@@ -705,7 +716,7 @@ export async function startWebServer(
             ...merged,
             tools_summarizeLargeResults: toolsCfg['summarizeLargeResults'] === true,
             tools_summarizeThresholdTokens: typeof toolsCfg['summarizeThresholdTokens'] === 'number' ? toolsCfg['summarizeThresholdTokens'] : 500,
-            tools_summarizeModel: typeof toolsCfg['summarizeModel'] === 'string' ? toolsCfg['summarizeModel'] : 'claude-haiku-4-5-20251001',
+            tools_summarizeModel: typeof toolsCfg['summarizeModel'] === 'string' ? toolsCfg['summarizeModel'] : (process.env['AIGENT_CHEAP_MODEL'] ?? process.env['AIGENT_MODEL'] ?? ''),
             tools_summarizeMode: typeof toolsCfg['summarizeMode'] === 'string' ? toolsCfg['summarizeMode'] : 'allowlist',
             tools_summarizeTools: JSON.stringify(Array.isArray(toolsCfg['summarizeTools']) ? toolsCfg['summarizeTools'] : ['exec', 'fetch']),
           };
@@ -1002,6 +1013,8 @@ export async function startWebServer(
             break;
           case 'message_rating':
             client.send(cmd);
+            // Echo to all WS clients so test harness can observe it
+            if (process.env['AIGENT_TEST_MODE'] === '1') broadcastToClients(cmd as unknown as ServerEvent);
             break;
           case 'browser_error': {
             const level = cmd.level === 'warn' ? 'warn' : 'error';

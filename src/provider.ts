@@ -74,6 +74,10 @@ export type UserContent = string | (TextContent | ImageContent | DocumentContent
 export interface ModelInfo {
   id: string;
   displayName: string;
+  /** Context window size in tokens, if provided by the API. */
+  contextLength?: number;
+  /** Pricing in USD per million tokens, if provided by the API. */
+  pricing?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 }
 
 export interface Provider {
@@ -141,8 +145,10 @@ export class AnthropicProvider implements Provider {
       messages: anthropicMessages,
     };
 
-    // Adaptive thinking for Opus 4.6+
-    if (options.thinking !== 'off' && (options.model.includes('opus-4-6') || options.model.includes('opus-4.6'))) {
+    // Request extended thinking if the caller asked for it.
+    // Not all models support this — if the API rejects it, the caller should
+    // catch the error, retry without thinking, and remember the model doesn't support it.
+    if (options.thinking !== 'off') {
       params['thinking'] = { type: 'adaptive' };
       params['output_config'] = { effort: options.thinking };
     }
@@ -500,7 +506,30 @@ export class OpenAIProvider implements Provider {
   async listModels(): Promise<ModelInfo[] | null> {
     try {
       const response = await this.client.models.list();
-      return response.data.map((m) => ({ id: m.id, displayName: m.id }));
+      return response.data.map((m) => {
+        // OpenRouter (and some other providers) include context_length and pricing
+        const raw = m as unknown as {
+          context_length?: number;
+          pricing?: { prompt?: string; completion?: string; cache_read?: string; cache_write?: string };
+        };
+        const info: ModelInfo = { id: m.id, displayName: m.id };
+        if (typeof raw.context_length === 'number' && raw.context_length > 0) {
+          info.contextLength = raw.context_length;
+        }
+        if (raw.pricing) {
+          const toPerMillion = (s?: string) => (s ? parseFloat(s) * 1_000_000 : 0);
+          const input = toPerMillion(raw.pricing.prompt);
+          const output = toPerMillion(raw.pricing.completion);
+          // Only register if non-zero (some free models have "0" pricing which is valid)
+          info.pricing = {
+            input,
+            output,
+            cacheRead: toPerMillion(raw.pricing.cache_read),
+            cacheWrite: toPerMillion(raw.pricing.cache_write),
+          };
+        }
+        return info;
+      });
     } catch {
       return null;
     }
@@ -537,7 +566,7 @@ export function createProvider(type: ProviderType): Provider {
 
   const apiKey = process.env['ANTHROPIC_API_KEY'] ?? '';
   if (!apiKey) {
-    throw new Error('No API key. Set ANTHROPIC_API_KEY or configure ~/.config/aigent/provider.json');
+    throw new Error('No API key. Set ANTHROPIC_API_KEY (Anthropic) or OPENAI_API_KEY (OpenAI/OpenRouter) or configure ~/.config/aigent/provider.json');
   }
   return new AnthropicProvider(apiKey);
 }

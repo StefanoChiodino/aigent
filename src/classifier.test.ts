@@ -5,7 +5,7 @@
 
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import type Anthropic from '@anthropic-ai/sdk';
+import type OpenAI from 'openai';
 
 import {
   classifyCommand,
@@ -139,12 +139,12 @@ describe('isClassifierAvailable', () => {
 // Helper: create a fake Anthropic client for testing
 // ---------------------------------------------------------------------------
 
-function fakeClient(createFn: (...args: unknown[]) => Promise<unknown>): Anthropic {
-  return { messages: { create: createFn } } as unknown as Anthropic;
+function fakeClient(createFn: (...args: unknown[]) => Promise<unknown>): OpenAI {
+  return { chat: { completions: { create: createFn } } } as unknown as OpenAI;
 }
 
 function fakeTextResponse(text: string) {
-  return { content: [{ type: 'text' as const, text }] };
+  return { choices: [{ message: { content: text } }] };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,9 +185,9 @@ describe('classifyCommand with fake client', () => {
     assert.ok(result.reason.includes('parse'));
   });
 
-  it('returns ask on empty content array', async () => {
+  it('returns ask on empty choices', async () => {
     _resetForTest(fakeClient(() =>
-      Promise.resolve({ content: [] }),
+      Promise.resolve({ choices: [] }),
     ));
 
     const result = await classifyCommand('ls');

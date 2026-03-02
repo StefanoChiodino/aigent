@@ -160,8 +160,8 @@ const spawnAgentTool: ToolDef = {
     properties: {
       task: { type: 'string', description: 'Clear description of what the sub-agent should do. Be specific.' },
       context: { type: 'string', description: 'Optional context to provide (e.g. relevant file paths, decisions made, constraints)' },
-      model: { type: 'string', description: 'Model to use. Haiku for simple tasks, Sonnet for moderate, Opus for complex. Default: same as parent.' },
-      thinking: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking level. Defaults to model-appropriate level: off (Haiku), low (Sonnet), high (Opus).' },
+      model: { type: 'string', description: 'Model tier: "cheap" (fast/simple search, summarize), "standard" (analysis, code), "expensive" (complex reasoning, architecture). Full model IDs also accepted. Default: same as parent.' },
+      thinking: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking level. Specify explicitly — "off" for cheap tasks, "low"/"medium" for standard, "high"/"max" for expensive. Defaults to off.' },
       max_iterations: { type: 'number', description: 'Maximum tool-use iterations (default: 15, max: 25)' },
     },
     required: ['task'],
@@ -179,8 +179,8 @@ const dispatchTaskTool: ToolDef = {
     properties: {
       task: { type: 'string', description: 'Clear description of what the background agent should do.' },
       context: { type: 'string', description: 'Optional context (relevant file paths, decisions, constraints)' },
-      model: { type: 'string', description: 'Model to use. Haiku for simple tasks, Sonnet for moderate, Opus for complex. Default: same as parent.' },
-      thinking: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking level. Defaults to model-appropriate level: off (Haiku), low (Sonnet), high (Opus).' },
+      model: { type: 'string', description: 'Model tier: "cheap" (fast/simple search, summarize), "standard" (analysis, code), "expensive" (complex reasoning, architecture). Full model IDs also accepted. Default: cheap.' },
+      thinking: { type: 'string', enum: ['off', 'low', 'medium', 'high', 'max'], description: 'Thinking level. Specify explicitly — "off" for cheap tasks, "low"/"medium" for standard, "high"/"max" for expensive. Defaults to off.' },
       max_iterations: { type: 'number', description: 'Maximum tool-use iterations (default: 25, max: 50)' },
       capabilities: {
         type: 'array', items: { type: 'string', enum: ['net_ro', 'net_rw', 'fs_write'] },
@@ -389,7 +389,7 @@ const switchModelTool: ToolDef = {
   input_schema: {
     type: 'object' as const,
     properties: {
-      model: { type: 'string', description: 'Exact model ID to switch to (e.g. claude-opus-4-6)' },
+      model: { type: 'string', description: 'Exact model ID to switch to (e.g. google/gemini-2.0-flash or claude-opus-4-6)' },
       reason: { type: 'string', description: 'Why you are switching models. Shown to the user.' },
     },
     required: ['model'],

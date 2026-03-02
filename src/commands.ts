@@ -46,6 +46,7 @@ export interface CommandContext {
   get isLoading(): boolean;
   get workspacePath(): string;
   get availableModels(): string[];
+  getContextWindow(modelId: string): number;
   get toolsUsed(): string[];
   get sessionStartedAt(): string;
   get ratings(): Record<string, number>;
@@ -116,7 +117,7 @@ export function setModel(model: string, ctx: CommandContext): { ok: boolean; mes
   }
   ctx.model = model;
   ctx.agent.currentModel = model;
-  ctx.broadcast({ type: 'state', model: ctx.model });
+  ctx.broadcast({ type: 'state', model: ctx.model, contextWindow: ctx.getContextWindow(model) });
   ctx.doAutoSave();
   return { ok: true };
 }

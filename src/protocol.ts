@@ -5,6 +5,14 @@
 
 import type { ThinkingLevel } from './agent.js';
 
+export interface ModelUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+}
+
 export interface TokenUsage {
   input: number;
   output: number;
@@ -12,6 +20,8 @@ export interface TokenUsage {
   cacheWrite: number;
   cost?: number; // Estimated cost in USD (informational, even for subscription users)
   contextTokens?: number; // Latest API call's input tokens = actual context window fill
+  /** Per-model breakdown. Keys are model IDs, values are cumulative usage for that model. */
+  byModel?: Record<string, ModelUsage>;
 }
 
 // --- Client → Server ---
@@ -135,11 +145,14 @@ export interface ServerState {
   sessionId: string;
   model: string;
   availableModels: string[];
+  /** Models that have returned a "thinking not supported" error this session. Empty when all models support thinking. */
+  modelsWithoutThinking?: string[] | undefined;
   availableTools: string[];
   isLoading: boolean;
   tasks: BackgroundTaskInfo[];
   pendingResults: number;
   queue: QueuedMessageInfo[];
+  contextWindow?: number;
   /** Tool traces accumulated during the current streaming turn (for refresh recovery). */
   streamingTraces?: StreamingTrace[];
 }
@@ -158,7 +171,7 @@ export type ServerEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
-  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string; short?: boolean; availableModels?: string[] }
+  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string; short?: boolean; availableModels?: string[]; contextWindow?: number; modelsWithoutThinking?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'edit_file_request'; id: string; path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
