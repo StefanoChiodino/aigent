@@ -921,6 +921,12 @@ export function InputArea() {
             ].filter(Boolean).join(' ')}
             title={micState === 'recording' ? 'Stop mic' : 'Start mic'}
             onClick={() => {
+              if (isDemo()) {
+                // Demo mode: toggle visual state without accessing real mic hardware
+                const vs = useVoiceStore.getState();
+                vs.setMicState(vs.micState === 'idle' ? 'recording' : 'idle');
+                return;
+              }
               if (micState === 'recording') { setMicSticky(false); void stopMic(); }
               else void startMic(false, inputRef.current?.value ?? '');
               inputRef.current?.focus();
