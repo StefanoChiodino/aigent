@@ -93,6 +93,7 @@ export interface ServerState {
   /** Tool traces accumulated during the current streaming turn (for refresh recovery). */
   streamingTraces?: ToolTrace[];
   contextWindow?: number;
+  modelTiers?: { flash: string; pro: string; ultra: string };
 }
 
 export interface ToolSummaryRecord {
@@ -140,7 +141,7 @@ export type ServerEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
-  | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string; short?: boolean; availableModels?: string[]; contextWindow?: number }
+  | { type: 'state'; thinking?: string; profile?: string; sessionId?: string; model?: string; short?: boolean; availableModels?: string[]; contextWindow?: number; modelTiers?: { flash: string; pro: string; ultra: string } }
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'patch_request'; id: string; diff: string; reason: string }

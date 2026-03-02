@@ -706,6 +706,15 @@ export async function startWebServer(
         if (process.env['AIGENT_MODEL'] && !('AIGENT_MODEL' in merged)) {
           merged = { ...merged, AIGENT_MODEL: process.env['AIGENT_MODEL'] };
         }
+        if (process.env['AIGENT_FLASH_MODEL'] && !('AIGENT_FLASH_MODEL' in merged)) {
+          merged = { ...merged, AIGENT_FLASH_MODEL: process.env['AIGENT_FLASH_MODEL'] };
+        }
+        if (process.env['AIGENT_PRO_MODEL'] && !('AIGENT_PRO_MODEL' in merged)) {
+          merged = { ...merged, AIGENT_PRO_MODEL: process.env['AIGENT_PRO_MODEL'] };
+        }
+        if (process.env['AIGENT_ULTRA_MODEL'] && !('AIGENT_ULTRA_MODEL' in merged)) {
+          merged = { ...merged, AIGENT_ULTRA_MODEL: process.env['AIGENT_ULTRA_MODEL'] };
+        }
         if (process.env['AIGENT_CHEAP_MODEL'] && !('AIGENT_CHEAP_MODEL' in merged)) {
           merged = { ...merged, AIGENT_CHEAP_MODEL: process.env['AIGENT_CHEAP_MODEL'] };
         }

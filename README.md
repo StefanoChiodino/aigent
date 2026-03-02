@@ -201,7 +201,17 @@ Settings persist across reloads. The agent applies thinking heuristics automatic
 
 ### Model picker
 
-Choose any available model from the sidebar dropdown. The list is fetched live from the Anthropic API and falls back to a hardcoded default. Selection persists across restarts.
+Choose any model from the sidebar dropdown. The list is fetched live from the provider API. Three named tiers are always pinned at the top:
+
+| Tier | Default family | Use for |
+|------|---------------|---------|
+| **Flash** | Haiku | Fast, cheap: search, summarize, classify |
+| **Pro** | Sonnet | Balanced: analysis, code, moderate reasoning |
+| **Ultra** | Opus | Most capable: complex reasoning, architecture |
+
+Each tier can be remapped to any model in **Settings → Model**. The agent uses tier names (`flash`, `pro`, `ultra`) when spawning tasks — `dispatch_task` defaults to `flash`, and the system prompt guides the agent to match tier to task complexity.
+
+**Favourites** — click the ★ star next to any model to pin it to a Favourites section at the top of the picker. Stars are shared between the sidebar picker and the settings model-pickers.
 
 The agent can also switch its own model mid-conversation via the `switch_model` tool — upgrading for complex tasks, downgrading for cheap ones.
 
@@ -275,7 +285,7 @@ Key settings groups:
 | Group | Settings |
 |-------|----------|
 | **Provider** | Provider (auto-detect / Anthropic / OpenAI), API keys (stored in `.env`), OpenAI base URL |
-| **Model** | Default model, default reasoning level, speak: short |
+| **Model** | Default model, Flash/Pro/Ultra tier models, default reasoning level, speak: short |
 | **Tools** | Disable all tools, tool allowlist |
 | **Prompt** | Slim prompt (omit MEMORY.md), full session logs |
 | **Services** | Web UI port, STT URL, TTS URL |
@@ -361,6 +371,9 @@ ANTHROPIC_API_KEY=sk-ant-...      # or use OAT token
 OPENAI_API_KEY=sk-...             # for OpenAI provider
 AIGENT_PROVIDER=anthropic         # anthropic | openai (auto-detected if omitted)
 AIGENT_MODEL=my-model-id          # default model
+AIGENT_FLASH_MODEL=...            # Flash tier override (default: Haiku family)
+AIGENT_PRO_MODEL=...              # Pro tier override (default: Sonnet family)
+AIGENT_ULTRA_MODEL=...            # Ultra tier override (default: Opus family)
 AIGENT_THINKING=medium            # off | low | medium | high | max
 AIGENT_SHORT=1                    # start in short/voice mode
 AIGENT_WEB_PORT=3141              # web UI port

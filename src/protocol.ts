@@ -153,6 +153,8 @@ export interface ServerState {
   pendingResults: number;
   queue: QueuedMessageInfo[];
   contextWindow?: number;
+  /** Resolved model IDs for each named tier (flash, pro, ultra). */
+  modelTiers?: { flash: string; pro: string; ultra: string };
   /** Tool traces accumulated during the current streaming turn (for refresh recovery). */
   streamingTraces?: StreamingTrace[];
 }

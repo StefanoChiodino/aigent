@@ -1759,8 +1759,17 @@ html, body {
   cursor: pointer;
   transition: all var(--transition);
   width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   text-align: left;
   margin-top: 4px;
+}
+#sb-model-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .sb-model-btn:hover,
@@ -1827,7 +1836,8 @@ html, body {
 }
 
 .sb-model-option {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
   padding: 7px 10px;
   background: transparent;
@@ -1847,6 +1857,81 @@ html, body {
 .sb-model-option.active {
   color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* Section labels inside the model picker (Tiers / Favourites / All models) */
+.sb-model-section-label {
+  padding: 5px 10px 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted, var(--text-secondary));
+  opacity: 0.6;
+  border-top: 1px solid var(--border);
+  pointer-events: none;
+}
+.sb-model-section-label:first-child {
+  border-top: none;
+}
+
+/* Tier entries: two-line layout with tier name + resolved model */
+.sb-model-tier {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 1px;
+  padding: 6px 10px !important;
+}
+.sb-tier-name {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+}
+.sb-model-tier:hover .sb-tier-name,
+.sb-model-tier.active .sb-tier-name {
+  color: inherit;
+}
+.sb-tier-model {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+/* Model rows with star button */
+.sb-model-option {
+  display: flex !important;
+  align-items: center !important;
+}
+.sb-model-name,
+.sb-model-fav-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Star toggle */
+.sb-model-star {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px 0 6px;
+  cursor: pointer;
+  opacity: 0.2;
+  transition: opacity var(--transition), color var(--transition);
+  user-select: none;
+}
+.sb-model-option:hover .sb-model-star {
+  opacity: 0.55;
+}
+.sb-model-star:hover {
+  opacity: 1 !important;
+  color: var(--accent);
+}
+.sb-model-star.starred {
+  opacity: 1 !important;
+  color: var(--accent);
 }
 
 /* ── Sidebar TTS controls ────────────────────────────────── */
@@ -2055,6 +2140,8 @@ html, body {
   align-items: center;
   gap: 5px;
   width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   padding: 3px 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2105,7 +2192,8 @@ html, body {
 }
 
 .sb-model-option {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
   padding: 6px 10px;
   background: none;
@@ -5297,7 +5385,8 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 }
 
 .settings-model-option {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
   background: transparent;
   border: none;
@@ -5306,9 +5395,7 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   padding: 6px 10px;
   text-align: left;
   cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  box-sizing: border-box;
 }
 
 .settings-model-option:hover {

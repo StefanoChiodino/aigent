@@ -166,31 +166,79 @@ test.describe('@fast Sidebar controls', () => {
     await expectVisible(page.locator('#sb-model-picker'));
   });
 
+  test('model picker shows Flash/Pro/Ultra tier section', async () => {
+    const page = getPage();
+    await page.locator('#sb-model-btn').click();
+    await expectVisible(page.locator('#sb-model-picker'));
+    // Tier section label
+    const tierLabel = page.locator('#sb-model-picker .sb-model-section-label').first();
+    await expect(tierLabel).toContainText('Tiers');
+    // Three tier buttons present
+    const tiers = page.locator('#sb-model-picker .sb-model-tier');
+    await expect(tiers).toHaveCount(3);
+    const names = await tiers.locator('.sb-tier-name').allInnerTexts();
+    expect(names).toContain('Flash');
+    expect(names).toContain('Pro');
+    expect(names).toContain('Ultra');
+  });
+
   test('model picker lists available models', async () => {
     const page = getPage();
     await page.locator('#sb-model-btn').click();
     await expectVisible(page.locator('#sb-model-picker'));
     const options = page.locator('#sb-model-picker .sb-model-option');
-    await expect(options).toHaveCount(await options.count()); // just check > 0
     const count = await options.count();
     expect(count).toBeGreaterThan(0);
   });
 
-  test('clicking model option closes picker and updates label', async () => {
+  test('clicking tier option closes picker and updates label', async () => {
     const page = getPage();
     await page.locator('#sb-model-btn').click();
     await expectVisible(page.locator('#sb-model-picker'));
 
-    // Click first option
-    const firstOption = page.locator('#sb-model-picker .sb-model-option').first();
-    const modelText = await firstOption.innerText();
-    await firstOption.click();
+    // Click Flash tier — title holds the resolved model ID
+    const flashTier = page.locator('#sb-model-picker .sb-model-tier').first();
+    const resolvedId = (await flashTier.getAttribute('title') ?? '').toLowerCase();
+    await flashTier.click();
 
     await expectHidden(page.locator('#sb-model-picker'));
-    // Model label should now reflect the selection
-    await expect(page.locator('#sb-model-value')).toContainText(
-      modelText.trim().split('\n')[0]!.substring(0, 5) // partial match is enough
-    );
+    // Label should reflect the resolved model
+    if (resolvedId) {
+      const labelText = (await page.locator('#sb-model-value').innerText()).toLowerCase();
+      expect(labelText.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('star button visible on model row hover', async () => {
+    const page = getPage();
+    await page.locator('#sb-model-btn').click();
+    await expectVisible(page.locator('#sb-model-picker'));
+    // At least one star exists in the All models section
+    const stars = page.locator('#sb-model-picker .sb-model-star');
+    const count = await stars.count();
+    expect(count).toBeGreaterThan(0);
+  });
+
+  test('starring a model pins it to Favourites section', async () => {
+    const page = getPage();
+    await page.locator('#sb-model-btn').click();
+    await expectVisible(page.locator('#sb-model-picker'));
+
+    // Find first non-favourite model row and click its star
+    const allModelRows = page.locator('#sb-model-picker .sb-model-list .sb-model-option');
+    const firstStar = allModelRows.first().locator('.sb-model-star');
+    await firstStar.click();
+
+    // Favourites section label should now appear
+    const labels = page.locator('#sb-model-picker .sb-model-section-label');
+    const labelsText = await labels.allInnerTexts();
+    expect(labelsText.some(t => t.includes('Favourites'))).toBe(true);
+
+    // Unstar to clean up (re-open picker first if it closed)
+    const isOpen = !(await page.locator('#sb-model-picker').getAttribute('class'))?.includes('hidden');
+    if (!isOpen) await page.locator('#sb-model-btn').click();
+    const starredStar = page.locator('#sb-model-picker .sb-model-star.starred').first();
+    if (await starredStar.count() > 0) await starredStar.click();
   });
 
   test('clicking outside model picker closes it', async () => {

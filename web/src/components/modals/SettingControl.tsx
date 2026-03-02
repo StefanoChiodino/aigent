@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type { SettingDef } from '../../lib/settings-schema';
 import { KeyCaptureButton } from '../KeyCaptureButton';
+import { useUIStore } from '../../stores/ui';
+import { useSettingsStore } from '../../stores/settings';
+
+function modelDisplayName(id: string): string {
+  const m = id.match(/^claude-([a-z]+)-(\d+)-(\d+)(?:-\d{8})?$/);
+  if (m) {
+    const family = m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1);
+    return `${family} ${m[2]}.${m[3]}`;
+  }
+  return id.replace(/^claude-/, '').replace(/-\d{8,}$/, '');
+}
 
 interface SettingControlProps {
   def: SettingDef;
@@ -80,6 +91,22 @@ function ModelPickerControl({ value, onChange, availableModels, placeholder }: {
   const [filter, setFilter] = useState('');
   const ref = useRef<HTMLDivElement>(null);
 
+  const modelTiers = useUIStore(s => s.modelTiers);
+  const getClientSetting = useSettingsStore(s => s.getClientSetting);
+  const setClientSetting = useSettingsStore(s => s.setClientSetting);
+
+  const favRaw = getClientSetting('model_favorites');
+  const favorites: string[] = (() => {
+    try { return JSON.parse(String(favRaw || '[]')) as string[]; } catch { return []; }
+  })();
+  const toggleFavorite = (mid: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = favorites.includes(mid) ? favorites.filter(f => f !== mid) : [...favorites, mid];
+    setClientSetting('model_favorites', JSON.stringify(next));
+  };
+
+  const tierIds = { Flash: modelTiers.flash, Pro: modelTiers.pro, Ultra: modelTiers.ultra };
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -89,8 +116,9 @@ function ModelPickerControl({ value, onChange, availableModels, placeholder }: {
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  const filtered = availableModels.filter(m => !filter || m.toLowerCase().includes(filter.toLowerCase()));
   const showCustom = filter.trim() && !availableModels.some(m => m === filter.trim());
+
+  const select = (mid: string) => { onChange(mid); setOpen(false); setFilter(''); };
 
   return (
     <div className="settings-model-picker" ref={ref}>
@@ -104,7 +132,7 @@ function ModelPickerControl({ value, onChange, availableModels, placeholder }: {
         />
         {availableModels.length > 0 && (
           <button
-            className="settings-model-picker-btn"
+            className={`settings-model-picker-btn${open ? ' open' : ''}`}
             onClick={() => { setOpen(!open); setFilter(''); }}
             title="Pick from available models"
           >▾</button>
@@ -121,19 +149,70 @@ function ModelPickerControl({ value, onChange, availableModels, placeholder }: {
             autoFocus
             onClick={e => e.stopPropagation()}
           />
-          <div className="settings-model-list">
-            {filtered.map(m => (
+
+          {/* Tiers */}
+          {!filter && <div className="sb-model-section-label">Tiers</div>}
+          {Object.entries(tierIds)
+            .filter(([tierName, resolvedId]) =>
+              !filter ||
+              tierName.toLowerCase().includes(filter.toLowerCase()) ||
+              (resolvedId && resolvedId.toLowerCase().includes(filter.toLowerCase()))
+            )
+            .map(([tierName, resolvedId]) => (
               <button
-                key={m}
-                className={`settings-model-option${m === value ? ' active' : ''}`}
-                title={m}
-                onClick={() => { onChange(m); setOpen(false); setFilter(''); }}
-              >{m}</button>
+                key={tierName}
+                className={`settings-model-option sb-model-tier${resolvedId === value ? ' active' : ''}`}
+                title={resolvedId || tierName}
+                onClick={() => resolvedId && select(resolvedId)}
+              >
+                <span className="sb-tier-name">{tierName}</span>
+                {resolvedId && <span className="sb-tier-model">{modelDisplayName(resolvedId)}</span>}
+              </button>
             ))}
+
+          {/* Favourites */}
+          {favorites.length > 0 && !filter && <div className="sb-model-section-label">Favourites</div>}
+          {favorites
+            .filter(m => !filter || m.toLowerCase().includes(filter.toLowerCase()))
+            .map(m => (
+              <div
+                key={`fav-${m}`}
+                className={`settings-model-option${m === value ? ' active' : ''}`}
+                onClick={() => select(m)}
+                title={m}
+              >
+                <span className="sb-model-name">{modelDisplayName(m)}</span>
+                <span className="sb-model-star starred" title="Remove from favourites" onClick={e => toggleFavorite(m, e)}>★</span>
+              </div>
+            ))}
+
+          {/* All models */}
+          {!filter && availableModels.some(m => !favorites.includes(m)) && (
+            <div className="sb-model-section-label">All models</div>
+          )}
+          <div className="settings-model-list">
+            {availableModels
+              .filter(m => !favorites.includes(m))
+              .filter(m => !filter || m.toLowerCase().includes(filter.toLowerCase()))
+              .map(m => (
+                <div
+                  key={m}
+                  className={`settings-model-option${m === value ? ' active' : ''}`}
+                  title={m}
+                  onClick={() => select(m)}
+                >
+                  <span className="sb-model-name">{modelDisplayName(m)}</span>
+                  <span
+                    className={`sb-model-star${favorites.includes(m) ? ' starred' : ''}`}
+                    title={favorites.includes(m) ? 'Remove from favourites' : 'Add to favourites'}
+                    onClick={e => toggleFavorite(m, e)}
+                  >★</span>
+                </div>
+              ))}
             {showCustom && (
               <button
                 className="settings-model-option settings-model-custom"
-                onClick={() => { onChange(filter.trim()); setOpen(false); setFilter(''); }}
+                onClick={() => select(filter.trim())}
               >Use &ldquo;{filter.trim()}&rdquo;</button>
             )}
           </div>

@@ -295,7 +295,10 @@ export function Sidebar() {
                     title={resolvedId || tierAlias}
                     onClick={() => {
                       send({ type: 'set_model', model: tierAlias });
-                      if (resolvedId) setClientSetting('AIGENT_MODEL', resolvedId);
+                      if (resolvedId) {
+                        setClientSetting('AIGENT_MODEL', resolvedId);
+                        useUIStore.getState().setModelName(resolvedId);
+                      }
                       setModelPickerOpen(false);
                       setModelFilter('');
                     }}
@@ -323,6 +326,7 @@ export function Sidebar() {
                     if (mid !== modelName) {
                       send({ type: 'set_model', model: mid });
                       setClientSetting('AIGENT_MODEL', mid);
+                      useUIStore.getState().setModelName(mid);
                     }
                     setModelPickerOpen(false);
                     setModelFilter('');
@@ -354,6 +358,7 @@ export function Sidebar() {
                       if (mid !== modelName) {
                         send({ type: 'set_model', model: mid });
                         setClientSetting('AIGENT_MODEL', mid);
+                        useUIStore.getState().setModelName(mid);
                       }
                       setModelPickerOpen(false);
                       setModelFilter('');
