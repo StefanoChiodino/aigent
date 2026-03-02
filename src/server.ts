@@ -1586,6 +1586,15 @@ let hostClient: HostClient | null = null;
 // Updated by the extensionBridge event emitter (wired in initAgent).
 let browserExtConnected = false;
 
+/** Sync active capabilities to the agent for dynamic tool filtering. */
+function syncCapabilities(): void {
+  const caps = new Set<string>();
+  if (browserExtConnected) caps.add('browser');
+  if (hostClient) caps.add('host');
+  if (process.env['DISPLAY']) caps.add('display');
+  agent?.setCapabilities(caps);
+}
+
 function buildExtraSystemPrompt(): string {
   let extra = _buildHostSystemPrompt(hostClient);
   extra += _buildBrowserExtSystemPrompt(browserExtConnected);
@@ -1623,12 +1632,14 @@ async function initAgent(): Promise<void> {
       browserExtConnected = true;
       log.info('Browser extension connected — updating system prompt');
       agent?.setExtraSystemPrompt(buildExtraSystemPrompt());
+      syncCapabilities();
       addSystemMessage('Browser extension connected. `browser_ext` tool is now available.');
     });
     extensionBridge.on('disconnected', () => {
       browserExtConnected = false;
       log.info('Browser extension disconnected — updating system prompt');
       agent?.setExtraSystemPrompt(buildExtraSystemPrompt());
+      syncCapabilities();
       addSystemMessage('Browser extension disconnected.');
     });
     // Sync initial state in case extension was already connected before agent init
@@ -1666,6 +1677,7 @@ async function initAgent(): Promise<void> {
     ...(proxyProvider ? { provider: proxyProvider } : {}),
     extraSystemPrompt: buildExtraSystemPrompt(),
   });
+  syncCapabilities();
 
   // Fetch available models from the provider (non-blocking — falls back to defaults)
   void (async () => {
