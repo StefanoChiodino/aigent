@@ -224,7 +224,9 @@ export function useTTS(): TTSControls {
     // Set the speaking ID so only the active message's button shows stop state.
     useVoiceStore.getState().setTtsSpeakingId(speakingId ?? null);
 
-    const stripped = stripMarkdownForTTS(text);
+    // Short mode: if the message has a <speak> block, speak only that content.
+    const speakContent = extractSpeakContent(text);
+    const stripped = stripMarkdownForTTS(speakContent ?? text);
 
     // Demo mode: use browser SpeechSynthesis
     if (isDemo()) {

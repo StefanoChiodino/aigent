@@ -1,6 +1,40 @@
-import { marked } from 'marked';
+import { Marked } from 'marked';
+import { markedHighlight } from 'marked-highlight';
+import hljs from 'highlight.js/lib/common';
 
-marked.setOptions({ breaks: true, gfm: true });
+const marked = new Marked(
+  { breaks: true, gfm: true },
+  markedHighlight({
+    emptyLangClass: 'hljs',
+    langPrefix: 'hljs language-',
+    highlight(code, lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        return hljs.highlight(code, { language: lang }).value;
+      }
+      return hljs.highlightAuto(code).value;
+    },
+  }),
+);
+
+// Custom renderer: language label + copy-to-clipboard button on code blocks
+marked.use({
+  renderer: {
+    code({ text, lang }: { text: string; lang?: string }) {
+      const langClass = lang ? `hljs language-${lang}` : 'hljs';
+      const langLabel = lang
+        ? `<span class="code-lang-label">${lang}</span>`
+        : '';
+      const copyBtn =
+        '<button class="code-copy-btn" onclick="' +
+        "(function(b){var c=b.closest('pre').querySelector('code');" +
+        "navigator.clipboard.writeText(c.textContent||'');" +
+        "b.textContent='Copied!';b.classList.add('copied');" +
+        "setTimeout(function(){b.textContent='Copy';b.classList.remove('copied')},1500)" +
+        '})(this)" type="button">Copy</button>';
+      return `<pre>${langLabel}${copyBtn}<code class="${langClass}">${text}</code></pre>\n`;
+    },
+  },
+});
 
 export function escapeHtml(s: string): string {
   const div = document.createElement('div');
@@ -33,6 +67,9 @@ export function renderMarkdown(text: string): string {
 }
 
 export function stripMarkdownForTTS(text: string): string {
+  // Strip <speak>...</speak> tags but keep the content inside them.
+  // This prevents TTS from literally reading the word "speak".
+  text = text.replace(/<\/?speak>/g, '');
   text = text.replace(/```[\s\S]*?```/g, ' code block. ');
   text = text.replace(/`([^`]+)`/g, '$1');
   text = text.replace(/^#+\s+/gm, '');

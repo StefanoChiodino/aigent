@@ -86,6 +86,16 @@ describe('stripMarkdownForTTS', () => {
   it('collapses multiple newlines', () => {
     expect(stripMarkdownForTTS('a\n\n\n\nb')).toBe('a\n\nb');
   });
+  it('strips <speak> tags but keeps content inside', () => {
+    expect(stripMarkdownForTTS('<speak>Hello world</speak>')).toBe('Hello world');
+  });
+  it('strips speak tags from mixed content', () => {
+    expect(stripMarkdownForTTS('<speak>Summary.</speak>\n\nFull details here.')).toBe('Summary.\n\nFull details here.');
+  });
+  it('does not leave the literal word "speak" from tags', () => {
+    const result = stripMarkdownForTTS('<speak>Quick answer</speak>\n\nLong answer.');
+    expect(result).not.toMatch(/\bspeak\b/i);
+  });
 });
 
 describe('extractSpeakContent', () => {
