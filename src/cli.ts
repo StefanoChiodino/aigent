@@ -28,7 +28,7 @@ Usage:
   aigent [options]               Start the agent
 
 Options (passed to gatekeeper):
-  --model <model>        Model to use (default: claude-opus-4-6)
+  --model <model>        Model to use (default: from AIGENT_MODEL env var)
   --thinking <level>     Thinking level: off, low, medium, high, max
   --headless             Web UI only, no terminal interface
   --provider <type>      LLM provider: anthropic (default) or openai

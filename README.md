@@ -20,7 +20,7 @@ The continuous learning system runs automatically on every session. Five systems
 
 3. **Semantic retrieval** — local neural embeddings (all-MiniLM-L6-v2) index every episode. Before each agent turn, the system searches for relevant past experience (similarity > 0.4, top 3 results) and surfaces it as context. The agent sees its own past lessons before responding — no manual lookup needed.
 
-4. **Reflection agent** — at shutdown and `/reset`, Haiku analyzes the last 50 episodes to find recurring patterns: friction that keeps happening, success patterns worth reinforcing, low-rated episodes, and cost anomalies. Insights are appended to `MEMORY.md` (which feeds the system prompt next session) and improvement suggestions go to `TODO.md`.
+4. **Reflection agent** — at shutdown and `/reset`, a cheap flash-tier model analyzes the last 50 episodes to find recurring patterns: friction that keeps happening, success patterns worth reinforcing, low-rated episodes, and cost anomalies. Insights are appended to `MEMORY.md` (which feeds the system prompt next session) and improvement suggestions go to `TODO.md`.
 
 5. **Memory distillation** — on `/reset` or session end, the agent rewrites `MEMORY.md` from the day's logs. The reflection agent runs after, appending cross-session insights to a separate section.
 
@@ -50,7 +50,7 @@ The result: the agent genuinely gets better over time without any explicit inter
 Host process: Gatekeeper (gatekeeper.tsx)
 ├── Web UI server  ←→  Browser
 ├── LLM proxy  (API keys never reach the agent process)
-├── Three-tier command safety (Tier 1: hard deny, Tier 2: static allow/deny, Tier 3: Haiku classifier)
+├── Three-tier command safety (Tier 1: hard deny, Tier 2: static allow/deny, Tier 3: LLM classifier)
 ├── Permission broker  (file access, fetch, MCP tools)
 └── Audit log  →  /tmp/aigent-audit.log
       ↕  NDJSON / Unix socket  (/tmp/aigent/worker.sock)
@@ -88,7 +88,7 @@ After init, just run `aigent` — no extra flags needed.
 ```bash
 aigent --workspace ~/myproject    # custom workspace
 aigent --headless                 # web UI only (no TUI)
-aigent --model claude-opus-4-6   # override model
+aigent --model my-model-id       # override model
 ```
 
 ---
@@ -213,7 +213,7 @@ Dispatched via the `dispatch_task` tool. Shown in the sidebar with:
 - Context usage (tokens) and model used for each task
 - Checkmark / ✗ on completion or failure
 
-Background tasks can use cheaper models (e.g. Haiku for read-only work) to keep costs down. Multiple tasks run in parallel; completed results are injected into the conversation when the agent is next idle.
+Background tasks can use cheaper models (e.g. a flash-tier model for read-only work) to keep costs down. Multiple tasks run in parallel; completed results are injected into the conversation when the agent is next idle.
 
 Tasks with `delivery: user-pull` pop up a result panel when completed. The panel renders the result as markdown. Two actions are available:
 
@@ -360,7 +360,7 @@ The continuous learning system (episodes, semantic retrieval, reflection, feedba
 ANTHROPIC_API_KEY=sk-ant-...      # or use OAT token
 OPENAI_API_KEY=sk-...             # for OpenAI provider
 AIGENT_PROVIDER=anthropic         # anthropic | openai (auto-detected if omitted)
-AIGENT_MODEL=claude-opus-4-6      # default model
+AIGENT_MODEL=my-model-id          # default model
 AIGENT_THINKING=medium            # off | low | medium | high | max
 AIGENT_SHORT=1                    # start in short/voice mode
 AIGENT_WEB_PORT=3141              # web UI port
@@ -513,7 +513,7 @@ Every `exec` call from the agent goes through three gates before it runs:
 |------|-------------|-----------|
 | **Tier 1 — Hard deny** | Blocks permanently dangerous patterns: shell injection (`$()`, backticks, `eval`, `source`, `bash -c`), credential paths (`~/.ssh`, `~/.aws`, `~/.gnupg`), destructive operations (`rm -rf /`, `mkfs`), privilege escalation (`sudo`, `su`), exfiltration (`curl \| bash`) | No — hardcoded, cannot be overridden |
 | **Tier 2 — Static allow/deny** | Glob-based patterns from `settings.json`. ~40 safe defaults (git reads, ls, grep, npm test, make). You can extend with `--always` / `--always-deny` flags | Yes — user-configurable |
-| **Tier 3 — Haiku classifier** | LLM-based evaluation of ambiguous commands. Returns `allow`, `block`, or `ask`. Cached (LRU 200, 30-min TTL). Fail-safe: on API error, defers to user | Fallback to user prompt |
+| **Tier 3 — LLM classifier** | LLM-based evaluation of ambiguous commands. Returns `allow`, `block`, or `ask`. Cached (LRU 200, 30-min TTL). Fail-safe: on API error, defers to user | Fallback to user prompt |
 
 Commands that pass Tiers 1 & 2 but aren't in the allow list go to Tier 3. If Tier 3 returns `ask`, you see a prompt: `/approve-exec <id>` or `/deny-exec <id>`. Adding `--always` promotes to the static allow list.
 

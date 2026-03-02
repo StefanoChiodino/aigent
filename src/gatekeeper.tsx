@@ -4,7 +4,7 @@
  *
  * Responsibilities:
  *   - Server process lifecycle (start, stop, restart)
- *   - Three-tier command safety (static deny → static allow → Haiku classifier)
+ *   - Three-tier command safety (static deny → static allow → LLM classifier)
  *   - LLM proxy (API keys never enter the server process)
  *   - Web UI bridge (WebSocket ↔ Unix socket)
  *   - OS bridge (clipboard, audio, etc.)
@@ -251,7 +251,7 @@ function parseArgs(): GatekeeperArgs {
 Usage: aigent [options]
 
 Options:
-  --model <model>        Model to use (default: claude-opus-4-6)
+  --model <model>        Model to use (default: from AIGENT_MODEL env var)
   --thinking <level>     Thinking level: off, low, medium, high, max
   --headless             Web UI only, no terminal interface
   --watch                Watch src/ for changes, auto-restart server (preserves gatekeeper)

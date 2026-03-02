@@ -81,9 +81,7 @@ export default async function globalSetup() {
         AIGENT_TEST_MODE: '1',
         AIGENT_SOCKET_DIR: '/tmp/aigent-test2',
         AIGENT_SETTINGS_PATH: TEST_SETTINGS,
-        // Force Opus model so reasoning toggle and effort pills are enabled.
-        // The user's .env may have a non-Opus model which disables these controls.
-        AIGENT_MODEL: 'claude-opus-4-6',
+        // Use whatever model is configured — reasoning toggle is no longer gated on model name.
       },
       stdio: ['ignore', logFd, logFd],
       detached: false,

@@ -63,7 +63,7 @@ test.describe('@fast Connection & initial UI state', () => {
     const page = getPage();
     const modelValue = page.locator('#sb-model-value');
     await expect(modelValue).not.toHaveText('--', { timeout: 5_000 });
-    await expect(modelValue).toContainText(/opus|sonnet|haiku/i);
+    await expect(modelValue).not.toHaveText('--');
   });
 
   test('cost element exists and has a dollar-formatted value', async () => {

@@ -7,7 +7,7 @@
 
 ```
 Host (gatekeeper.tsx)
-  ├── Safety Engine (three-tier: static deny → static allow → Haiku classifier)
+  ├── Safety Engine (three-tier: static deny → static allow → LLM classifier)
   ├── LLM Proxy (holds API keys)
   ├── Web UI Bridge (HTTP + WebSocket)
   ├── Permission Engine (exec, fetch, file edit, browser actions)
@@ -58,7 +58,7 @@ Server process (spawned directly, no Docker)
 
 ### Agent
 - [x] Streaming API responses (tokens appear live)
-- [x] Extended thinking (Opus 4.6 adaptive, /reasoning + /effort commands)
+- [x] Extended thinking (adaptive, /reasoning + /effort commands)
 - [x] Context compaction at 70% usage
 - [x] Thinking indicator (reasoning... vs waiting...)
 - [x] Automatic retry on transient errors (429, 5xx, network) with exponential backoff
@@ -114,7 +114,7 @@ Server process (spawned directly, no Docker)
 - [x] Removed Docker dependency — agent runs directly on host
 - [x] Tier 1: Static deny — shell injection ($(), backticks), credential paths, system destruction, privilege escalation, exfiltration patterns
 - [x] Tier 2: Static allow/deny from settings.json — glob-based exec_permissions with ~40 default safe patterns
-- [x] Tier 3: Haiku classifier — LLM-based command evaluation for ambiguous commands, cached, ~$0.001/call
+- [x] Tier 3: LLM classifier — LLM-based command evaluation for ambiguous commands, cached, ~$0.001/call
 - [x] src/safety.ts: sanitizedEnv(), validateFetchUrl(), checkCommandSafety(), checkTier1Deny(), checkExecPermission()
 - [x] Env sanitization applied to exec, grep, glob, fetch, MCP servers
 - [x] SSRF protection: private IPs, localhost, metadata endpoints blocked
@@ -160,13 +160,13 @@ Server process (spawned directly, no Docker)
 
 ### Continuous Learning (primary track — see `docs/design-continuous-learning.md`)
 - [x] Episode logging — `src/episodes.ts`, NDJSON storage, `log_episode` + `query_episodes` tools, auto-log on reset/shutdown
-- [x] Reflection agent — `src/reflection.ts`: Haiku-powered pattern mining at shutdown/reset, appends to MEMORY.md + TODO.md, NDJSON audit log
+- [x] Reflection agent — `src/reflection.ts`: flash-model pattern mining at shutdown/reset, appends to MEMORY.md + TODO.md, NDJSON audit log
 - [ ] Self-review (deferred) — optional workflow pattern; agent reviews its own work via browser extension + episode history. Two-instance self-play harness deemed over-engineered
 - [x] Feedback collection — UI rating widget (1-5 dots), compaction-triggered episode boundaries, automated friction signals, LLM-driven episode logging via system prompt
 - [x] Semantic episode retrieval — local neural embeddings (all-MiniLM-L6-v2), `search_episodes` tool, proactive retrieval, auto-indexing
 
 ### Memory System
-- [ ] Haiku-filtered retrieval — when keyword results are noisy, Haiku filters to relevant chunks
+- [ ] Flash-filtered retrieval — when keyword results are noisy, a flash-tier model filters to relevant chunks
 - [ ] RAG with local embeddings — if/when logs span 6+ months (may be subsumed by episode retrieval)
 
 ### Web UI

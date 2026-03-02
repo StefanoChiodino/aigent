@@ -18,7 +18,7 @@ a direct tension:
 
 The naive solution (dump everything into the prompt) breaks down quickly. In this
 project, 3 days of session logs reached ~40,000 tokens (~$0.60 per session start
-on Opus 4.6), with most of it being tool call outputs and repetitive entries.
+on a capable model), with most of it being tool call outputs and repetitive entries.
 
 ---
 
@@ -83,7 +83,7 @@ Daily log gets a minimal timestamp marker.
 
 ## Cost Analysis
 
-Prices as of early 2026 (Opus 4.6: $15/M input, $75/M output):
+Approximate costs (varies by provider and model):
 
 | Scenario | Tokens | Cost per session |
 |---|---|---|
@@ -91,7 +91,7 @@ Prices as of early 2026 (Opus 4.6: $15/M input, $75/M output):
 | Current: MEMORY.md + index | ~4,000 | ~$0.06 startup cost |
 | distillToMemory() call (on reset) | ~5,000 in + ~1,000 out | ~$0.15 one-time |
 | Keyword memory search (future) | 0 LLM tokens | Free |
-| Haiku-filtered memory retrieval (future) | ~5,000 in + ~300 out | ~$0.005/query |
+| Flash-filtered memory retrieval (future) | ~5,000 in + ~300 out | ~$0.005/query |
 
 **Key insight:** Output tokens are ~5× more expensive than input tokens on Anthropic.
 This means:
@@ -120,16 +120,16 @@ Implementation:
 - No embeddings, no vector store, no infrastructure — just file reads
 - Good enough for most queries when logs have natural-language headings
 
-### Phase 3 — Haiku-filtered retrieval (when logs get large)
+### Phase 3 — Flash-filtered retrieval (when logs get large)
 When keyword search returns too much noise (e.g. 6 months of logs), add a
-filter step: send matching sections to Haiku ($1/M input) to extract only
-what's relevant to the query. Haiku returns a 200-token digest.
+filter step: send matching sections to a flash-tier model to extract only
+what's relevant to the query. Returns a 200-token digest.
 
-Cost at scale: ~5,000 tokens × $1/M = $0.005 per retrieval query. Negligible.
+Cost at scale: negligible at flash-tier pricing.
 
 Implementation:
-- `search_memory` tool calls Haiku internally when result set > threshold
-- Uses the project's existing provider abstraction, forces `haiku` model
+- `search_memory` tool calls the flash model internally when result set > threshold
+- Uses the project's existing provider abstraction, forces `flash` tier
 - Result injected into context as a retrieved memory block
 
 ### Phase 4 — RAG with embeddings (if/when needed)
@@ -144,7 +144,7 @@ Options to evaluate at that point:
 - Anthropic voyage embeddings: $0.02/M tokens (tiny)
 - Store: SQLite with sqlite-vec extension (zero infrastructure)
 
-Not worth building now — keyword search + Haiku filtering will cover the
+Not worth building now — keyword search + flash filtering will cover the
 next 12+ months of use.
 
 ---
@@ -162,7 +162,7 @@ next 12+ months of use.
    a summary.
 
 4. **Use cheap models for retrieval, expensive models for reasoning.**
-   Haiku for scanning/filtering logs. Opus for the actual conversation.
+   Flash-tier for scanning/filtering logs. Ultra-tier for the actual conversation.
    The agent already supports model switching mid-task via `switch_model`.
 
 5. **MEMORY.md is the single source of truth for persistent knowledge.**
