@@ -767,8 +767,9 @@ export class AnsiTUI {
     if (cost > 0) parts.push(cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`);
     const ctxUsed = this.usage.contextTokens ?? 0;
     if (ctxUsed > 0) {
-      const pct = Math.round((ctxUsed / 200_000) * 100);
-      parts.push(`${ctxBar(ctxUsed, 200_000, 8)} ${fmtTok(ctxUsed)}/200k (${pct}%)`);
+      const ctxWin = (() => { const e = process.env['AIGENT_CONTEXT_WINDOW']; if (e) { const n = parseInt(e, 10); if (!isNaN(n) && n > 0) return n; } return 200_000; })();
+      const pct = Math.round((ctxUsed / ctxWin) * 100);
+      parts.push(`${ctxBar(ctxUsed, ctxWin, 8)} ${fmtTok(ctxUsed)}/${fmtTok(ctxWin)} (${pct}%)`);
     }
     const rs = parts.join(' \u2502 ');
     const fill = Math.max(0, cols - 4 - rs.length);

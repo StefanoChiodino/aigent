@@ -95,7 +95,11 @@ export const RatingWidget = React.memo(function RatingWidget({ messageId }: Prop
                 key={v}
                 className={`rating-dot${v <= displayScore ? ' active' : ''}`}
                 title={`${v}/5`}
-                onClick={() => setPendingScore(v === pendingScore ? 0 : v)}
+                onClick={() => {
+                  const next = v === pendingScore ? 0 : v;
+                  setPendingScore(next);
+                  if (next === 0) setHoverScore(0);
+                }}
                 onMouseEnter={() => setHoverScore(v)}
                 onMouseLeave={() => setHoverScore(0)}
               >★</button>

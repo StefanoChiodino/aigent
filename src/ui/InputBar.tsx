@@ -118,7 +118,7 @@ export function InputBar({
   const cost = usage?.cost ?? 0;
   if (cost > 0) statusParts.push(cost < 0.01 ? `$${cost.toFixed(3)}` : `$${cost.toFixed(2)}`);
   const contextUsed = usage?.contextTokens ?? 0;
-  const contextWindow = 200_000;
+  const contextWindow = (() => { const e = process.env['AIGENT_CONTEXT_WINDOW']; if (e) { const n = parseInt(e, 10); if (!isNaN(n) && n > 0) return n; } return 200_000; })();
   if (contextUsed > 0) {
     const pct = Math.round((contextUsed / contextWindow) * 100);
     statusParts.push(`${contextBar(contextUsed, contextWindow, 8)} ${formatTokens(contextUsed)}/${formatTokens(contextWindow)} (${pct}%)`);

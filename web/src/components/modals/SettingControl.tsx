@@ -6,6 +6,7 @@ interface SettingControlProps {
   def: SettingDef;
   value: boolean | number | string;
   onChange: (v: boolean | number | string) => void;
+  availableModels?: string[];
 }
 
 function StringListTextarea({ value, onChange }: { value: boolean | number | string; onChange: (v: string) => void }) {
@@ -69,7 +70,80 @@ function StringListTextarea({ value, onChange }: { value: boolean | number | str
   );
 }
 
-export function SettingControl({ def, value, onChange }: SettingControlProps) {
+function ModelPickerControl({ value, onChange, availableModels, placeholder }: {
+  value: string;
+  onChange: (v: string) => void;
+  availableModels: string[];
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const filtered = availableModels.filter(m => !filter || m.toLowerCase().includes(filter.toLowerCase()));
+  const showCustom = filter.trim() && !availableModels.some(m => m === filter.trim());
+
+  return (
+    <div className="settings-model-picker" ref={ref}>
+      <div className="settings-model-picker-row">
+        <input
+          type="text"
+          className="settings-text"
+          value={value}
+          placeholder={placeholder}
+          onChange={e => onChange(e.target.value)}
+        />
+        {availableModels.length > 0 && (
+          <button
+            className="settings-model-picker-btn"
+            onClick={() => { setOpen(!open); setFilter(''); }}
+            title="Pick from available models"
+          >▾</button>
+        )}
+      </div>
+      {open && (
+        <div className="settings-model-dropdown">
+          <input
+            type="text"
+            className="settings-model-search"
+            placeholder="Filter models…"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            autoFocus
+            onClick={e => e.stopPropagation()}
+          />
+          <div className="settings-model-list">
+            {filtered.map(m => (
+              <button
+                key={m}
+                className={`settings-model-option${m === value ? ' active' : ''}`}
+                title={m}
+                onClick={() => { onChange(m); setOpen(false); setFilter(''); }}
+              >{m}</button>
+            ))}
+            {showCustom && (
+              <button
+                className="settings-model-option settings-model-custom"
+                onClick={() => { onChange(filter.trim()); setOpen(false); setFilter(''); }}
+              >Use &ldquo;{filter.trim()}&rdquo;</button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SettingControl({ def, value, onChange, availableModels = [] }: SettingControlProps) {
   switch (def.type) {
     case 'toggle':
       return (
@@ -172,6 +246,9 @@ export function SettingControl({ def, value, onChange }: SettingControlProps) {
 
     case 'string-list':
       return <StringListTextarea value={value} onChange={onChange} />;
+
+    case 'model-picker':
+      return <ModelPickerControl value={String(value)} onChange={onChange} availableModels={availableModels} placeholder={def.placeholder} />;
 
     default:
       return (

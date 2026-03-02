@@ -161,9 +161,10 @@ export function Sidebar() {
   const setMicDevice = useVoiceStore(s => s.setMicDevice);
   const setSpeakerDevice = useVoiceStore(s => s.setSpeakerDevice);
 
+  const contextWindow = useUIStore(s => s.contextWindow);
   const ctxUsed = usage.contextTokens ?? 0;
   const cost = usage.cost ?? 0;
-  const ctxPct = ctxUsed > 0 ? Math.min(100, Math.round((ctxUsed / 200_000) * 100)) : 0;
+  const ctxPct = ctxUsed > 0 ? Math.min(100, Math.round((ctxUsed / contextWindow) * 100)) : 0;
   const ctxColor = ctxPct > 80 ? 'var(--error)' : ctxPct > 60 ? 'var(--warning)' : 'var(--accent)';
   const tokStr = ctxUsed >= 1_000_000
     ? (ctxUsed / 1_000_000).toFixed(1) + 'M'
@@ -176,6 +177,7 @@ export function Sidebar() {
   const effortLevels = ['low', 'medium', 'high', 'max'];
 
   const modelPickerRef = useRef<HTMLDivElement>(null);
+  const [modelFilter, setModelFilter] = useState('');
   const [extGuideOpen, setExtGuideOpen] = useState(false);
   const extGuideRef = useRef<HTMLDivElement>(null);
 
@@ -230,28 +232,59 @@ export function Sidebar() {
           <button
             id="sb-model-btn"
             className={`sb-model-btn${modelPickerOpen ? ' open' : ''}`}
-            onClick={e => { e.stopPropagation(); setModelPickerOpen(!modelPickerOpen); }}
+            onClick={e => { e.stopPropagation(); setModelPickerOpen(!modelPickerOpen); if (modelPickerOpen) setModelFilter(''); }}
           >
             <span id="sb-model-value">{modelName ? modelDisplayName(modelName) : '--'}</span>
             <span className="sb-model-chevron">▾</span>
           </button>
           <div id="sb-model-picker" className={`sb-model-picker${modelPickerOpen ? '' : ' hidden'}`}>
-            {availableModels.map((mid: string) => (
-              <button
-                key={mid}
-                className={`sb-model-option${mid === modelName ? ' active' : ''}`}
-                title={mid}
-                onClick={() => {
-                  if (mid !== modelName) {
-                    send({ type: 'set_model', model: mid });
-                    setClientSetting('AIGENT_MODEL', mid);
-                  }
-                  setModelPickerOpen(false);
-                }}
-              >
-                {modelDisplayName(mid)}
-              </button>
-            ))}
+            {availableModels.length > 5 && (
+              <div className="sb-model-search">
+                <input
+                  type="text"
+                  className="sb-model-search-input"
+                  placeholder="Filter models…"
+                  value={modelFilter}
+                  onChange={e => setModelFilter(e.target.value)}
+                  onClick={e => e.stopPropagation()}
+                  autoFocus
+                />
+              </div>
+            )}
+            <div className="sb-model-list">
+              {availableModels
+                .filter(mid => !modelFilter || mid.toLowerCase().includes(modelFilter.toLowerCase()))
+                .map((mid: string) => (
+                  <button
+                    key={mid}
+                    className={`sb-model-option${mid === modelName ? ' active' : ''}`}
+                    title={mid}
+                    onClick={() => {
+                      if (mid !== modelName) {
+                        send({ type: 'set_model', model: mid });
+                        setClientSetting('AIGENT_MODEL', mid);
+                      }
+                      setModelPickerOpen(false);
+                      setModelFilter('');
+                    }}
+                  >
+                    {modelDisplayName(mid)}
+                  </button>
+                ))}
+              {modelFilter && !availableModels.some(m => m === modelFilter) && (
+                <button
+                  className="sb-model-option sb-model-custom"
+                  onClick={() => {
+                    send({ type: 'set_model', model: modelFilter });
+                    setClientSetting('AIGENT_MODEL', modelFilter);
+                    setModelPickerOpen(false);
+                    setModelFilter('');
+                  }}
+                >
+                  Use &ldquo;{modelFilter}&rdquo;
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

@@ -5,7 +5,7 @@ import type { ContextBreakdown, ToolSummaryRecord } from '../../types';
 
 const COLORS = ['#7c6ef0', '#40b080', '#e0a040', '#58a6ff'];
 const LABELS = ['System prompt', 'Workspace', 'Tool definitions', 'Messages'];
-const CONTEXT_WINDOW = 200_000;
+const CONTEXT_WINDOW_DEFAULT = 200_000;
 const MAX_VISIBLE_MESSAGES = 20;
 
 function fmtTok(n: number): string {
@@ -156,9 +156,9 @@ function MessageRow({ idx, msg, maxTokens }: { idx: number; msg: MsgEntry; maxTo
   );
 }
 
-function InspectorBody({ bd }: { bd: ContextBreakdown }) {
+function InspectorBody({ bd, contextWindow }: { bd: ContextBreakdown; contextWindow: number }) {
   const total = bd.total || 1;
-  const windowPct = Math.round((bd.total / CONTEXT_WINDOW) * 100);
+  const windowPct = Math.round((bd.total / contextWindow) * 100);
 
   const segments = [bd.systemBase, bd.workspaceContext, bd.toolDefs, bd.messagesTotal];
   const contents = [bd.systemBaseContent, bd.workspaceContent, bd.toolDefsContent, undefined];
@@ -172,7 +172,7 @@ function InspectorBody({ bd }: { bd: ContextBreakdown }) {
   return (
     <>
       <div className="ctx-inspector-summary" id="ctx-inspector-summary">
-        <strong>~{fmtTok(bd.total)}</strong> tokens estimated — {windowPct}% of 200k window
+        <strong>~{fmtTok(bd.total)}</strong> tokens estimated — {windowPct}% of {fmtTok(contextWindow)} window
         {bd.totalSummarySavedTokens && bd.toolSummariesCount ? (
           <> · saved <strong>~{fmtTok(bd.totalSummarySavedTokens)}</strong> via {bd.toolSummariesCount} summarization{bd.toolSummariesCount > 1 ? 's' : ''}</>
         ) : null}
@@ -224,6 +224,7 @@ export function ContextInspector() {
   const ctxInspectorOpen = useUIStore(s => s.ctxInspectorOpen);
   const setCtxInspectorOpen = useUIStore(s => s.setCtxInspectorOpen);
   const contextBreakdown = useUIStore(s => s.contextBreakdown);
+  const contextWindow = useUIStore(s => s.contextWindow) || CONTEXT_WINDOW_DEFAULT;
   const send = useConnectionStore(s => s.send);
   const [retries, setRetries] = useState(0);
   const MAX_RETRIES = 3;
@@ -281,7 +282,7 @@ export function ContextInspector() {
         </div>
         <div id="ctx-inspector-body">
           {contextBreakdown
-            ? <InspectorBody bd={contextBreakdown} />
+            ? <InspectorBody bd={contextBreakdown} contextWindow={contextWindow} />
             : timedOut
               ? <div id="ctx-inspector-error" style={{ color: 'var(--error)' }}>
                   Failed to load context data. The server may be unavailable.

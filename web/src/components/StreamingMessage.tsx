@@ -5,8 +5,6 @@ import { useTTS, TTS_STREAMING_ID } from '../hooks/useTTS';
 import { renderMarkdown } from '../lib/markdown';
 import { TraceBlock } from './TraceBlock';
 import { SpeakPreview } from './SpeakPreview';
-import { RatingWidget } from './RatingWidget';
-
 export const STREAMING_MESSAGE_ID = '__streaming__';
 
 const STOP_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>`;
@@ -49,7 +47,6 @@ export const StreamingMessage = React.memo(function StreamingMessage() {
           />
         )}
         {spokenText && <SpeakPreview content={spokenText} streaming />}
-        <RatingWidget messageId={STREAMING_MESSAGE_ID} />
       </div>
       {traces.length > 0 && (
         <div className="message-traces">

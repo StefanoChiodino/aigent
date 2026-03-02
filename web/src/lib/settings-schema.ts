@@ -33,7 +33,7 @@ export const COMMANDS: CommandDef[] = [
   { name: '/reject-patch',   desc: 'Reject patch request' },
 ];
 
-export type SettingType = 'toggle' | 'slider' | 'number' | 'text' | 'select' | 'password' | 'string-list';
+export type SettingType = 'toggle' | 'slider' | 'number' | 'text' | 'select' | 'password' | 'string-list' | 'model-picker';
 
 export interface SettingDef {
   key: string;
@@ -103,9 +103,19 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     label: 'Default model',
     desc: 'Model used at startup. Can be changed live from the sidebar.',
     group: 'Model',
-    type: 'text',
-    default: 'claude-opus-4-6',
-    placeholder: 'claude-opus-4-6',
+    type: 'model-picker',
+    default: '',
+    placeholder: 'e.g. claude-opus-4-6 or google/gemini-2.0-flash',
+    scope: 'client',
+  },
+  {
+    key: 'AIGENT_CHEAP_MODEL',
+    label: 'Cheap model',
+    desc: 'Used for classifier, reflection, and summarization. Falls back to Default model if unset.',
+    group: 'Model',
+    type: 'model-picker',
+    default: '',
+    placeholder: 'e.g. claude-haiku-4-5-20251001 or google/gemini-flash-lite',
     scope: 'client',
   },
   {
@@ -382,8 +392,8 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     desc: 'Model used for summarization.',
     group: 'Context',
     type: 'text',
-    default: 'claude-haiku-4-5-20251001',
-    placeholder: 'claude-haiku-4-5-20251001',
+    default: '',
+    placeholder: 'e.g. claude-haiku-4-5-20251001 or google/gemini-flash-lite',
     scope: 'client',
   },
   {

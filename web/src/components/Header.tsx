@@ -47,6 +47,7 @@ export function Header() {
 
   const modelName = useUIStore(s => s.modelName);
   const availableModels = useUIStore(s => s.availableModels);
+  const contextWindow = useUIStore(s => s.contextWindow);
   const modelPickerOpen = useUIStore(s => s.modelPickerOpen);
   const setModelPickerOpen = useUIStore(s => s.setModelPickerOpen);
   const thinkingLevel = useUIStore(s => s.thinkingLevel);
@@ -83,7 +84,7 @@ export function Header() {
   const running = tasks.filter(t => t.status === 'running').length;
   const cost = usage.cost ?? 0;
   const ctxUsed = usage.contextTokens ?? 0;
-  const ctxPct = Math.min(100, Math.round((ctxUsed / 200_000) * 100));
+  const ctxPct = Math.min(100, Math.round((ctxUsed / contextWindow) * 100));
   const ctxColor = ctxPct > 80 ? 'var(--error)' : ctxPct > 60 ? 'var(--warning)' : 'var(--accent)';
 
   const reasoningOn = thinkingLevel !== 'off';

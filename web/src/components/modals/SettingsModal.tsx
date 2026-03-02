@@ -10,6 +10,7 @@ export function SettingsModal() {
   const settingsOpen = useUIStore(s => s.settingsOpen);
   const setSettingsOpen = useUIStore(s => s.setSettingsOpen);
   const availableTools = useUIStore(s => s.availableTools);
+  const availableModels = useUIStore(s => s.availableModels);
   const clientSettings = useSettingsStore(s => s.clientSettings);
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
   const serverSettings = useSettingsStore(s => s.serverSettings);
@@ -60,6 +61,11 @@ export function SettingsModal() {
   function handleChange(def: SettingDef, value: boolean | number | string) {
     if (def.scope === 'client') {
       setClientSetting(def.key, value);
+      // Keep the active model in sync: when the user picks a model in settings,
+      // also tell the server so the sidebar updates immediately.
+      if (def.key === 'AIGENT_MODEL' && typeof value === 'string' && value) {
+        send({ type: 'set_model', model: value });
+      }
       showToast();
     } else {
       setServerSettingPending(def.key, value);
@@ -160,6 +166,7 @@ export function SettingsModal() {
                               def={def}
                               value={value}
                               onChange={v => handleChange(def, v)}
+                              availableModels={availableModels}
                             />
                           </div>
                         </div>
@@ -193,6 +200,7 @@ export function SettingsModal() {
                             def={def}
                             value={value}
                             onChange={v => handleChange(def, v)}
+                            availableModels={availableModels}
                           />
                         </div>
                       </div>

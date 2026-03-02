@@ -19,6 +19,7 @@ interface UIState {
   modelName: string;
   availableModels: string[];
   availableTools: string[];
+  contextWindow: number;
   shortMode: boolean;
   thinkingLevel: string;
   lastEffortLevel: string;
@@ -47,6 +48,7 @@ interface UIState {
   setModelName: (name: string) => void;
   setAvailableModels: (models: string[]) => void;
   setAvailableTools: (tools: string[]) => void;
+  setContextWindow: (n: number) => void;
   setShortMode: (on: boolean) => void;
   setThinkingLevel: (level: string) => void;
   setContextBreakdown: (bd: ContextBreakdown | null) => void;
@@ -76,6 +78,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   modelName: '',
   availableModels: [],
   availableTools: [],
+  contextWindow: 200_000,
   shortMode: false,
   thinkingLevel: 'high',
   lastEffortLevel: 'high',
@@ -155,6 +158,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setModelName: (name) => set({ modelName: name }),
   setAvailableModels: (models) => set({ availableModels: models }),
   setAvailableTools: (tools) => set({ availableTools: tools }),
+  setContextWindow: (n) => set({ contextWindow: n }),
   setShortMode: (on) => set({ shortMode: on }),
   setThinkingLevel: (level) => set(s => ({
     thinkingLevel: level,

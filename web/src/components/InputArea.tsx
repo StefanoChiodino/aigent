@@ -720,6 +720,13 @@ export function InputArea() {
     setInputValue(newVal);
     setPaletteSelected(0);
     if (!item.argHint) {
+      // Handle /context locally — ContextInspector sends the request via its own effect
+      if (newVal === '/context') {
+        setCtxInspectorOpen(true);
+        setInputValue('');
+        inputRef.current?.focus();
+        return;
+      }
       // Send directly with the completed value to avoid stale-closure issue
       // (submitMessage captures the pre-completion inputValue)
       if (!send({ type: 'message', content: newVal })) {
