@@ -398,32 +398,25 @@ export const DEMO_SCENARIO: DemoScenario = {
     wait(1000),
 
     // ════════════════════════════════════════════════════════════════════════
-    //  PHASE 3.5: Auto-list continuation — type a list, Enter continues it
-    // ════════════════════════════════════════════════════════════════════════
-
-    { action: 'label', text: 'List auto-continue', id: 'list-continuation' },
-    wait(1500),
-    { action: 'type_input', text: '1. Read config file', charDelayMs: 50 },
-    wait(300),
-    { action: 'type_input', text: '1. Read config file\n2. ', charDelayMs: 0 },
-    wait(200),
-    { action: 'type_input', text: '1. Read config file\n2. Search for routes', charDelayMs: 50 },
-    wait(300),
-    { action: 'type_input', text: '1. Read config file\n2. Search for routes\n3. ', charDelayMs: 0 },
-    wait(200),
-    { action: 'type_input', text: '1. Read config file\n2. Search for routes\n3. Add health endpoint', charDelayMs: 50 },
-    wait(1500),
-    // Clear for next phase
-    { action: 'type_input', text: '', charDelayMs: 0 },
-    wait(500),
-
-    // ════════════════════════════════════════════════════════════════════════
     //  PHASE 4: Second exchange — tests, rate limiting, exec, fetch, task
-    //  (Markdown-rich input showcases live syntax highlighting)
+    //  (Numbered list showcases auto-list continuation + markdown syntax)
     // ════════════════════════════════════════════════════════════════════════
 
     { action: 'label', text: 'Markdown input', id: 'second-message' },
-    { action: 'type_input', text: 'Now **write tests** for it and add `express-rate-limit`. Check /src/server.ts and install the package if needed.', charDelayMs: 35 },
+    // Type opening line + first list marker
+    { action: 'type_input', text: 'Now improve the server:\n1. ', charDelayMs: 35 },
+    // First list item
+    { action: 'type_input', text: 'Now improve the server:\n1. Write unit tests for `/health`', charDelayMs: 50 },
+    // Auto-continuation: 2. pops in
+    { action: 'type_input', text: 'Now improve the server:\n1. Write unit tests for `/health`\n2. ', charDelayMs: 0 },
+    wait(150),
+    // Second list item
+    { action: 'type_input', text: 'Now improve the server:\n1. Write unit tests for `/health`\n2. Add `express-rate-limit` middleware', charDelayMs: 50 },
+    // Auto-continuation: 3. pops in
+    { action: 'type_input', text: 'Now improve the server:\n1. Write unit tests for `/health`\n2. Add `express-rate-limit` middleware\n3. ', charDelayMs: 0 },
+    wait(150),
+    // Third list item
+    { action: 'type_input', text: 'Now improve the server:\n1. Write unit tests for `/health`\n2. Add `express-rate-limit` middleware\n3. Check `/src/server.ts` for any issues', charDelayMs: 50 },
     wait(600),
     { action: 'submit_input' },
 
@@ -431,7 +424,7 @@ export const DEMO_SCENARIO: DemoScenario = {
       type: 'message',
       message: {
         role: 'user',
-        content: 'Now **write tests** for it and add `express-rate-limit`. Check /src/server.ts and install the package if needed.',
+        content: 'Now improve the server:\n1. Write unit tests for `/health`\n2. Add `express-rate-limit` middleware\n3. Check `/src/server.ts` for any issues',
         timestamp: new Date().toISOString(),
       },
     }),
@@ -789,31 +782,20 @@ export const DEMO_SCENARIO: DemoScenario = {
     //  PHASE 5.5: Background themes showcase
     // ════════════════════════════════════════════════════════════════════════
 
-    { action: 'label', text: 'Theme: Matrix', id: 'themes' },
+    { action: 'label', text: 'Themes', id: 'themes' },
     wait(1000),
     { action: 'set_theme', theme: 'matrix' },
-    wait(4000),
+    wait(5000),
 
-    { action: 'label', text: 'Theme: Spectrum' },
-    { action: 'set_theme', theme: 'spectrum' },
-    wait(4000),
+    { action: 'set_theme', theme: 'neuron' },
+    wait(5000),
 
-    { action: 'label', text: 'Theme: Milkdrop' },
-    { action: 'set_theme', theme: 'milkdrop' },
-    wait(4000),
-
-    { action: 'label', text: 'Theme: Circular Spectrum' },
-    { action: 'set_theme', theme: 'circular' },
-    wait(4000),
-
-    { action: 'label', text: 'Theme: Ember' },
-    { action: 'set_theme', theme: 'ember' },
-    wait(4000),
+    { action: 'set_theme', theme: 'lavalamp' },
+    wait(5000),
 
     // Back to default
-    { action: 'label', text: 'Theme: Aurora' },
     { action: 'set_theme', theme: 'aurora' },
-    wait(2000),
+    wait(1000),
 
     // ════════════════════════════════════════════════════════════════════════
     //  PHASE 5.75: Browser automation — run_script + navigate
@@ -1063,8 +1045,10 @@ export const DEMO_SCENARIO: DemoScenario = {
     { action: 'type_input', text: '@~/projects/myapp/pkg', charDelayMs: 80 },
     wait(2000),
 
-    // Simulate STT: TTS speaks with an alternate voice, mic animates, text "transcribed"
+    // Simulate STT: click the mic button, TTS speaks with alternate voice, text "transcribed"
     { action: 'label', text: 'Voice input (STT)', id: 'voice-input' },
+    { action: 'click', selector: '#mic' },
+    wait(400),
     { action: 'tts_to_stt', text: 'Does the endpoint look right?', src: './demo/user-input.mp3' },
     wait(400),
 
