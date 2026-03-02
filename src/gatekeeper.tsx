@@ -112,20 +112,38 @@ let pendingRestartTimeout: ReturnType<typeof setTimeout> | null = null;
 // macOS: uses caffeinate
 // Falls back silently if none available.
 
-type WakeLockBackend = 'wsl-powershell' | 'systemd-inhibit' | 'caffeinate' | 'none';
+type WakeLockBackend = 'wsl-powershell' | 'win32-powershell' | 'systemd-inhibit' | 'caffeinate' | 'none';
 
 function detectWakeLockBackend(): WakeLockBackend {
+  // Native Windows (Node running on Win32, not in WSL)
+  if (process.platform === 'win32') return 'win32-powershell';
+
+  // WSL2: check for Microsoft kernel signature
   const isWSL = existsSync('/proc/version') &&
     readFileSync('/proc/version', 'utf-8').toLowerCase().includes('microsoft');
   if (isWSL) {
     const psPath = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
     if (existsSync(psPath)) return 'wsl-powershell';
-    return 'none';
+    // WSL2 with systemd enabled (Windows 11 22H2+) — fall through to systemd check below
   }
+
   if (process.platform === 'darwin') return 'caffeinate';
+
+  // Linux: prefer systemd-inhibit (works on all systemd desktops and WSL2+systemd)
   try { execSync('which systemd-inhibit', { stdio: 'ignore' }); return 'systemd-inhibit'; } catch {}
+
   return 'none';
 }
+
+// PowerShell script shared between wsl-powershell and win32-powershell backends.
+// Sets ES_CONTINUOUS | ES_SYSTEM_REQUIRED via SetThreadExecutionState, then loops
+// forever until the process is killed. All stdio is 'ignore' to avoid cross-process
+// pipe issues (a WSL2↔Windows pipe on stdin can SIGKILL the Node process on close).
+const PS_WAKE_SCRIPT = `
+Add-Type -Namespace Win32 -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);'
+[Win32.Power]::SetThreadExecutionState([uint32]::Parse('80000001','HexNumber')) | Out-Null
+while ($true) { Start-Sleep -Seconds 60 }
+`;
 
 const WAKE_LOCK_BACKEND = detectWakeLockBackend();
 let wakeLockProcess: ChildProcess | null = null;
@@ -137,20 +155,19 @@ function acquireWakeLock(): void {
   try {
     if (WAKE_LOCK_BACKEND === 'wsl-powershell') {
       const ps = '/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
-      // Spawn a PS process that sets ES_CONTINUOUS|ES_SYSTEM_REQUIRED on its own thread,
-      // then blocks reading stdin. Killing the process clears the flag automatically.
-      wakeLockProcess = spawn(ps, ['-NoProfile', '-NonInteractive', '-Command', `
-Add-Type -Namespace Win32 -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);'
-[Win32.Power]::SetThreadExecutionState([uint32]::Parse('80000001','HexNumber')) | Out-Null
-[Console]::In.ReadLine() | Out-Null
-`], { stdio: ['pipe', 'ignore', 'ignore'] });
+      wakeLockProcess = spawn(ps, ['-NoProfile', '-NonInteractive', '-Command', PS_WAKE_SCRIPT], { stdio: 'ignore' });
+    } else if (WAKE_LOCK_BACKEND === 'win32-powershell') {
+      // Native Windows: powershell.exe is on PATH
+      wakeLockProcess = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', PS_WAKE_SCRIPT], { stdio: 'ignore' });
     } else if (WAKE_LOCK_BACKEND === 'systemd-inhibit') {
-      // systemd-inhibit --mode=block keeps the lock while the child process lives
+      // systemd-inhibit --mode=block holds the inhibitor lock while the child lives.
+      // 'sleep infinity' avoids the 24-hour limit of 'sleep 86400'.
       wakeLockProcess = spawn('systemd-inhibit', [
         '--what=idle:sleep', '--who=aigent', '--why=Agent is working', '--mode=block',
-        'sleep', '86400',
+        'sleep', 'infinity',
       ], { stdio: 'ignore' });
     } else if (WAKE_LOCK_BACKEND === 'caffeinate') {
+      // macOS: -d = display sleep, -i = idle sleep, -s = system sleep
       wakeLockProcess = spawn('caffeinate', ['-dis'], { stdio: 'ignore' });
     }
 

@@ -181,6 +181,31 @@ A prompt-injected agent could attempt to exfiltrate data via `curl` or `fetch`. 
 
 ---
 
+## Sleep Inhibitor (Wake Lock)
+
+While the agent is processing a request (`loading` state), the gatekeeper acquires a system sleep inhibitor to prevent the OS from sleeping or dimming the display mid-response. It is released as soon as the agent becomes idle.
+
+### Backend selection
+
+| Platform | Detection | Backend |
+|---|---|---|
+| **macOS** | `process.platform === 'darwin'` | `caffeinate -dis` (blocks display + idle sleep) |
+| **Linux (systemd)** | `which systemd-inhibit` succeeds | `systemd-inhibit --mode=block sleep infinity` |
+| **WSL2** | `/proc/version` contains "microsoft" + `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe` exists | PowerShell `SetThreadExecutionState(ES_CONTINUOUS \| ES_SYSTEM_REQUIRED)` |
+| **WSL2 without PowerShell** | systemd-inhibit available (WSL2 + systemd, Windows 11 22H2+) | `systemd-inhibit` as above |
+| **Native Windows** | `process.platform === 'win32'` | `powershell.exe SetThreadExecutionState` (same script, `powershell.exe` on PATH) |
+| **Other** | nothing matched | No inhibitor — silent no-op |
+
+### WSL2 implementation note
+
+The PowerShell backend uses `stdio: 'ignore'` on all streams. An earlier version used `stdio: ['pipe', 'ignore', 'ignore']` and blocked on `[Console]::In.ReadLine()` to keep the process alive. The cross-WSL2 stdin pipe (WSL ↔ Windows interop) would send SIGKILL to the Node gatekeeper process when the Windows side of the pipe closed unexpectedly (e.g. on PowerShell crash or Windows resource pressure). The fix replaces the stdin-blocking strategy with an infinite `Start-Sleep` loop, eliminating the pipe entirely.
+
+### Linux note
+
+`sleep infinity` is used instead of `sleep 86400` to avoid the 24-hour hard limit silently expiring during long sessions.
+
+---
+
 ## Communication Protocol
 
 NDJSON over Unix socket at `/tmp/aigent/worker.sock`.
