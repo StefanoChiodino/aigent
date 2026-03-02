@@ -269,6 +269,10 @@ export class Agent {
         toolCalls: response.toolCalls.length > 0 ? response.toolCalls : undefined,
       });
 
+      // Free base64 image data from older messages — the API has already seen them.
+      // Keeps memory flat instead of growing with each screenshot.
+      this.stripOldImageData();
+
       // No tool calls — return text
       if (response.toolCalls.length === 0) {
         this.thinking = savedThinking; // restore thinking level
@@ -611,6 +615,7 @@ export class Agent {
 
       if (summary) {
         this.messages = compacted;
+        this.seenImageHashes.clear();
         log.info('Compacted', { messagesBefore: before, messagesAfter: this.messages.length });
         callbacks?.onCompact?.(summary);
       }
@@ -620,6 +625,26 @@ export class Agent {
       await this.compactPromise;
     } finally {
       this.compactPromise = null;
+    }
+  }
+
+  /**
+   * Strip base64 image data from all tool_result messages in history.
+   * Images have already been sent to the API — keeping the data in memory
+   * just causes unbounded growth (each screenshot is ~133KB base64).
+   * Mutates in-place for efficiency.
+   */
+  private stripOldImageData(): void {
+    for (const msg of this.messages) {
+      if (msg.role !== 'tool_result') continue;
+      for (const r of msg.results) {
+        if (typeof r.content === 'string') continue;
+        for (let i = 0; i < r.content.length; i++) {
+          if (r.content[i]!.type === 'image') {
+            r.content[i] = { type: 'text', text: '[image previously sent to model]' };
+          }
+        }
+      }
     }
   }
 
@@ -827,6 +852,11 @@ export class Agent {
       fullOutputPath,
       summary,
     });
+    // Cap summaries map to prevent unbounded growth
+    if (this.toolSummaries.size > 50) {
+      const oldest = this.toolSummaries.keys().next().value;
+      if (oldest) this.toolSummaries.delete(oldest);
+    }
 
     log.info('Tool result summarized', { toolName, originalTokens, summarizedTokens, saved: originalTokens - summarizedTokens });
     return summarizedContent;

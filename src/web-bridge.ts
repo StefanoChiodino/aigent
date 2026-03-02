@@ -102,7 +102,7 @@ export async function startWebServer(
   port?: number,
   options?: { autoHandledExecIds?: Set<string>; getExecPermissions?: () => ExecPermissions; autoHandledFetchIds?: Set<string>; getFetchPermissions?: () => FetchPermissions; autoHandledBrowserWriteIds?: Set<string>; getBrowserPermissions?: () => BrowserPermissions; pendingBrowserWriteApprovals?: Map<string, { action: string; domain?: string; requiredTier: 'read' | 'write' | 'script' }>; classifierDecisions?: Map<string, ClassifierDecision>; autoHandledFileAccessIds?: Set<string>; autoHandledMcpIds?: Set<string>; onSettingsChanged?: () => void; extSecret?: string; setPiPOpen?: (open: boolean) => void; resolvePiPSuggestion?: (id: string, action: 'float' | 'skip') => void },
 ): Promise<{ port: number }> {
-  const { autoHandledExecIds, getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledFileAccessIds, autoHandledMcpIds, onSettingsChanged, extSecret, setPiPOpen, resolvePiPSuggestion } = options ?? {};
+  const { getExecPermissions, autoHandledFetchIds, getFetchPermissions, autoHandledBrowserWriteIds, getBrowserPermissions, pendingBrowserWriteApprovals, classifierDecisions, autoHandledMcpIds, onSettingsChanged, extSecret, setPiPOpen, resolvePiPSuggestion } = options ?? {};
   const listenPort = port ?? (Number(process.env['AIGENT_WEB_PORT']) || 3141);
 
   // Cache the latest server state so new connections get immediate state.
@@ -207,7 +207,7 @@ export async function startWebServer(
     // Mark the last running trace as done
     const next = [...bridgeTraces];
     for (let i = next.length - 1; i >= 0; i--) {
-      if (next[i]!.running) { next[i] = { ...next[i]!, running: false }; break; }
+      if (next[i]!.running) { const { images: _discarded, ...rest } = next[i]!; next[i] = { ...rest, running: false }; break; }
     }
     bridgeTraces = next;
     if (cachedState) cachedState = { ...cachedState, streamingTraces: bridgeTraces };
@@ -742,19 +742,10 @@ export async function startWebServer(
         send({ type: 'edit_file_request', id, path, edits, reason }),
       patch_request: (id: string, diff: string, reason: string) =>
         send({ type: 'patch_request', id, diff, reason }),
-      exec_request: (id: string, command: string) => {
-        // If gatekeeper already handled this, broadcast the decision instead of prompting
-        if (autoHandledExecIds?.has(id)) {
-          autoHandledExecIds.delete(id);
-          const decision = classifierDecisions?.get(id);
-          if (decision) {
-            classifierDecisions?.delete(id);
-            send({ type: 'classifier_decision', tier: decision.tier, action: decision.action, reason: decision.reason });
-          }
-          return;
-        }
-        send({ type: 'exec_request', id, command, segments: parseCommandPipeline(command) });
-      },
+      // exec_request is handled via gatekeeper-first architecture: the gatekeeper emits
+      // 'ui_exec_prompt' only for requests that genuinely need user input, avoiding the
+      // race condition where this per-connection handler forwarded to the UI before the
+      // async Tier 3 classifier had a chance to auto-handle the request.
       fetch_request: (id: string, url: string, method?: string) => {
         // If gatekeeper already handled this, broadcast the decision instead of prompting
         if (autoHandledFetchIds?.has(id)) {
@@ -827,19 +818,8 @@ export async function startWebServer(
           ...(domain ? { alwaysScriptCmd: `/approve-browser-write ${id} --always-script` } : {}),
         });
       },
-      file_access_request: (id: string, path: string, operation: 'read' | 'write', reason: string) => {
-        // If gatekeeper auto-handled (e.g. auto-allowed reads), broadcast decision
-        if (autoHandledFileAccessIds?.has(id)) {
-          autoHandledFileAccessIds.delete(id);
-          const decision = classifierDecisions?.get(id);
-          if (decision) {
-            classifierDecisions?.delete(id);
-            send({ type: 'classifier_decision', tier: decision.tier, action: decision.action, reason: decision.reason });
-          }
-          return;
-        }
-        send({ type: 'file_access_request', id, path, operation, reason });
-      },
+      // file_access_request is handled via gatekeeper-first architecture: the gatekeeper
+      // emits 'ui_file_access_prompt' only for requests that genuinely need user input.
       fetch_size_request: (id: string, url: string, requestedBytes: number, defaultBytes: number) =>
         send({ type: 'fetch_size_request', id, url, requestedBytes, defaultBytes }),
       mcp_tool_request: (id: string, server: string, tool: string, params: string) => {
@@ -1062,6 +1042,41 @@ export async function startWebServer(
   // update), it emits 'perm_dismissed' with the list of IDs to remove from the UI queue.
   client.on('perm_dismissed', (ids: string[]) => {
     const payload = JSON.stringify({ type: 'perm_dismissed', ids });
+    for (const ws of wss.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
+  });
+
+  // --- Gatekeeper-first permission forwarding ---
+  // The gatekeeper processes exec_request and file_access_request through its three-tier
+  // safety pipeline. Only requests that genuinely need user input are emitted here.
+  // This eliminates the race condition where per-connection handlers forwarded requests
+  // to the UI before the async Tier 3 classifier had a chance to auto-handle them,
+  // causing phantom permission sounds with invisible modals.
+
+  client.on('ui_exec_prompt', (id: string, command: string, _classifierReason?: string, _suggestedPatterns?: string[]) => {
+    const payload = JSON.stringify({
+      type: 'exec_request',
+      id,
+      command,
+      segments: parseCommandPipeline(command),
+    });
+    for (const ws of wss.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
+  });
+
+  client.on('ui_file_access_prompt', (id: string, path: string, operation: string, reason: string, _classifierReason?: string) => {
+    const payload = JSON.stringify({ type: 'file_access_request', id, path, operation, reason });
+    for (const ws of wss.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(payload);
+    }
+  });
+
+  // Broadcast classifier decisions from the gatekeeper (for auto-handled requests).
+  // The UI uses these to show tier badges on tool call blocks.
+  client.on('classifier_decision_broadcast', (decision: { tier: number; action: string; reason: string }) => {
+    const payload = JSON.stringify({ type: 'classifier_decision', tier: decision.tier, action: decision.action, reason: decision.reason });
     for (const ws of wss.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }

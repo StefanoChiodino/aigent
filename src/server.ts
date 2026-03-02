@@ -699,10 +699,11 @@ async function processAgentTurn(
       },
       onToolEnd: () => {
         if (controller.signal.aborted) return;
-        // Mark the last running trace as done
+        // Mark the last running trace as done and free image data (already sent to browser via tool_images)
         for (let i = currentStreamingTraces.length - 1; i >= 0; i--) {
           if (currentStreamingTraces[i]!.running) {
-            currentStreamingTraces[i] = { ...currentStreamingTraces[i]!, running: false };
+            const { images: _discarded, ...rest } = currentStreamingTraces[i]!;
+            currentStreamingTraces[i] = { ...rest, running: false };
             break;
           }
         }
