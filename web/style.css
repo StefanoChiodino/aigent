@@ -477,6 +477,38 @@ html, body {
   opacity: 0.4;
 }
 
+/* Reconnecting banner */
+#reconnect-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 7px 16px;
+  background: rgba(220, 100, 30, 0.18);
+  border-bottom: 1px solid rgba(220, 100, 30, 0.4);
+  color: var(--warning, #e07830);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  z-index: 200;
+  backdrop-filter: blur(6px);
+}
+
+.reconnect-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(220, 100, 30, 0.3);
+  border-top-color: var(--warning, #e07830);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Wrapper makes the whole meter + hint clickable */
 #ctx-meter-wrap {
   display: flex;
@@ -1077,6 +1109,7 @@ html, body {
 }
 
 #sb-tasks-section {
+  flex: 1;
   overflow: hidden;
   scrollbar-width: thin;
 }
@@ -2075,13 +2108,41 @@ html, body {
 }
 
 #error-bar {
-  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 12px;
   margin-bottom: 6px;
   background: var(--error-bg);
   border: 1px solid rgba(224, 85, 85, 0.2);
   border-radius: var(--radius-sm);
   color: var(--error);
   font-size: 13px;
+}
+
+#error-bar-icon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+#error-bar-msg {
+  flex: 1;
+}
+
+#error-bar-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--error);
+  opacity: 0.6;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+#error-bar-dismiss:hover {
+  opacity: 1;
 }
 
 #input-row {
@@ -3940,6 +4001,20 @@ html, body {
 body[data-working] .bokeh {
   /* working: vivid glow */
   opacity: 0.55;
+}
+
+/* Disconnected: dim and freeze the aurora background */
+body[data-disconnected] .bokeh {
+  opacity: 0.08;
+  transition: opacity 1s ease;
+}
+body[data-disconnected] .bokeh span {
+  animation-play-state: paused;
+}
+/* Also dim canvas-based theme backgrounds when disconnected */
+body[data-disconnected] canvas {
+  opacity: 0.15;
+  transition: opacity 1s ease;
 }
 
 .bokeh span {

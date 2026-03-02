@@ -6,6 +6,7 @@ import { DemoScrubber } from '../demo/DemoScrubber';
 import { useUIStore } from '../stores/ui';
 import { useChatStore } from '../stores/chat';
 import { useSettingsStore } from '../stores/settings';
+import { useConnectionStore } from '../stores/connection';
 import { useTTS } from '../hooks/useTTS';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { Header } from './Header';
@@ -61,6 +62,7 @@ export function App() {
   }, []);
 
   const isLoading = useUIStore(s => s.isLoading);
+  const connStatus = useConnectionStore(s => s.status);
   const theme = useSettingsStore(s => s.getClientSetting('AIGENT_THEME')) as string || 'aurora';
   const rotateMins = useSettingsStore(s => s.getClientSetting('AIGENT_THEME_ROTATE_MINS')) as number || 0;
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
@@ -90,6 +92,15 @@ export function App() {
   useEffect(() => {
     document.body.setAttribute('data-theme', theme);
   }, [theme]);
+
+  // Sync disconnected state for CSS (freezes background animations)
+  useEffect(() => {
+    if (connStatus !== 'connected') {
+      document.body.setAttribute('data-disconnected', '');
+    } else {
+      document.body.removeAttribute('data-disconnected');
+    }
+  }, [connStatus]);
 
   return (
     <div id="app">

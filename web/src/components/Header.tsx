@@ -160,7 +160,7 @@ export function Header() {
               </ol>
             </div>
           )}</span>
-          {running > 0 && <span id="task-badge" className="badge" title={`${running} running task${running > 1 ? 's' : ''}`} onClick={() => useUIStore.getState().setTasksInspectorOpen(true)} style={{ cursor: 'pointer' }}>⚡{running}</span>}
+          <span id="task-badge" className={`badge${running > 0 ? '' : ' hidden'}`} title={running > 0 ? `${running} running task${running > 1 ? 's' : ''}` : ''} onClick={() => useUIStore.getState().setTasksInspectorOpen(true)} style={{ cursor: 'pointer' }}>⚡ {running} task{running !== 1 ? 's' : ''}</span>
         </div>
         <div id="header-right">
           {cost > 0 && (
@@ -436,6 +436,12 @@ export function Header() {
           </button>
         </div>
       </header>
+      {status !== 'connected' && (
+        <div id="reconnect-banner" role="status" aria-live="polite">
+          <span className="reconnect-spinner" aria-hidden="true" />
+          <span>{status === 'connecting' ? 'Connecting to server…' : 'Connection lost — reconnecting…'}</span>
+        </div>
+      )}
     </div>
   );
 }

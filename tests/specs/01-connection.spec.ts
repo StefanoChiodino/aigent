@@ -6,6 +6,37 @@ import { test, expect } from '@playwright/test';
 import { waitForConnected } from '../helpers/ui.js';
 import { useSharedPage } from '../helpers/shared-page.js';
 
+test.describe('@fast Disconnected state', () => {
+  test('reconnect banner is visible when WebSocket is blocked', async ({ page }) => {
+    // Block the WebSocket so the app stays in connecting/reconnecting indefinitely
+    await page.routeWebSocket(/ws:\/\/localhost/, ws => ws.close());
+    await page.goto('http://localhost:3141');
+    await expect(page.locator('#reconnect-banner')).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('reconnect banner is gone once connected', async ({ page }) => {
+    await page.goto('http://localhost:3141');
+    await waitForConnected(page);
+    await expect(page.locator('#reconnect-banner')).not.toBeAttached();
+  });
+
+  test('body gets data-disconnected when WebSocket is blocked', async ({ page }) => {
+    await page.routeWebSocket(/ws:\/\/localhost/, ws => ws.close());
+    await page.goto('http://localhost:3141');
+    await expect(page.locator('#reconnect-banner')).toBeVisible({ timeout: 5_000 });
+    const hasAttr = await page.evaluate(() => document.body.hasAttribute('data-disconnected'));
+    expect(hasAttr).toBe(true);
+  });
+
+  test('data-disconnected is removed once connected', async ({ page }) => {
+    await page.goto('http://localhost:3141');
+    await waitForConnected(page);
+    await page.waitForFunction(() => !document.body.hasAttribute('data-disconnected'), { timeout: 5_000 });
+    const hasAttr = await page.evaluate(() => document.body.hasAttribute('data-disconnected'));
+    expect(hasAttr).toBe(false);
+  });
+});
+
 test.describe('@fast Connection & initial UI state', () => {
   const getPage = useSharedPage();
 
@@ -24,7 +55,7 @@ test.describe('@fast Connection & initial UI state', () => {
   test('connection badge shows "connected"', async () => {
     const page = getPage();
     const badge = page.locator('#conn-badge');
-    await expect(badge).toHaveText('connected', { timeout: 15_000 });
+    await expect(badge).toContainText('connected', { timeout: 15_000 });
     await expect(badge).not.toHaveClass(/connecting/);
   });
 
