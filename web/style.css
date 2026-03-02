@@ -1095,6 +1095,10 @@ html, body {
   flex-direction: column;
   border-right: 1px solid var(--border-subtle);
   align-self: stretch;
+  /* Establish a stacking context so tooltips that overflow into the chat area
+     render above #main-col (which comes later in DOM order). */
+  position: relative;
+  z-index: 1;
 }
 
 #sidebar-spacer {
@@ -5527,7 +5531,10 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
 
 #sidebar-panel {
   overflow-y: auto;
-  overflow-x: hidden;
+  /* Use clip instead of hidden: prevents horizontal scrollbar without creating
+     a scroll container, so position:absolute tooltips (.sb-help::after) can
+     overflow the sidebar into the chat area and remain visible. */
+  overflow-x: clip;
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
