@@ -101,6 +101,9 @@ let serverProcess: ChildProcess | null = null;
 let gatekeeperArgs: GatekeeperArgs;
 let client: InstanceType<typeof import('./client.js').AgentClient> | null = null;
 let isRestarting = false;
+let agentBusy = false;
+let pendingRestart = false;
+let pendingRestartTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // --- Sleep inhibitor ---
 // Prevents the OS from sleeping while the agent is working.
@@ -361,6 +364,10 @@ function startServerProcess(): void {
 }
 
 async function restartServer(): Promise<void> {
+  // Clear any deferred restart — we're restarting now
+  pendingRestart = false;
+  if (pendingRestartTimeout) { clearTimeout(pendingRestartTimeout); pendingRestartTimeout = null; }
+
   if (isRestarting) {
     log.info('restartServer: already restarting — skipping');
     return;
@@ -485,9 +492,26 @@ function startFileWatcher(): void {
         }
       }
 
-      // Restart server (which also restarts web-bridge serving new static files)
-      log.info('Restarting server');
-      void restartServer();
+      // Restart server — defer if the agent is mid-turn to avoid killing a response
+      if (agentBusy) {
+        if (!pendingRestart) {
+          pendingRestart = true;
+          log.info('Agent busy — deferring restart until idle');
+          injectSystemMessage('Source changed. Restart deferred until agent finishes current turn.');
+          pendingRestartTimeout = setTimeout(() => {
+            if (pendingRestart) {
+              pendingRestart = false;
+              pendingRestartTimeout = null;
+              log.warn('Deferred restart timeout — forcing restart');
+              injectSystemMessage('Deferred restart timeout (120s). Restarting now.');
+              void restartServer();
+            }
+          }, 120_000);
+        }
+      } else {
+        log.info('Restarting server');
+        void restartServer();
+      }
     }, 2000);
   }, 1000);
 }
@@ -646,20 +670,36 @@ async function handleGatekeeperCommand(input: string): Promise<void> {
           return;
         }
 
-        // Step 3: Restart server
-        ttyLog('Restarting server…');
-        injectSystemMessage('Build complete. Restarting server…');
-        log.info('/reload: restarting server');
-        try {
-          await restartServer();
-          ttyLog('Server reloaded ✓');
-          injectSystemMessage('Server reloaded.');
-          log.info('/reload: restart complete');
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          ttyLog(`Server restart FAILED ✗ — ${msg}`);
-          injectSystemMessage(`Server reload failed: ${msg}`);
-          log.error('/reload: restart failed', { error: msg });
+        // Step 3: Restart server — defer if agent is mid-turn
+        if (agentBusy) {
+          ttyLog('Agent busy — restart deferred until current turn completes');
+          injectSystemMessage('Build ready. Restart deferred until agent finishes current turn.');
+          log.info('/reload: agent busy, deferring restart');
+          pendingRestart = true;
+          pendingRestartTimeout = setTimeout(() => {
+            if (pendingRestart) {
+              pendingRestart = false;
+              pendingRestartTimeout = null;
+              log.warn('/reload: deferred restart timeout — forcing restart');
+              injectSystemMessage('Deferred restart timeout (120s). Restarting now.');
+              void restartServer();
+            }
+          }, 120_000);
+        } else {
+          ttyLog('Restarting server…');
+          injectSystemMessage('Build complete. Restarting server…');
+          log.info('/reload: restarting server');
+          try {
+            await restartServer();
+            ttyLog('Server reloaded ✓');
+            injectSystemMessage('Server reloaded.');
+            log.info('/reload: restart complete');
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            ttyLog(`Server restart FAILED ✗ — ${msg}`);
+            injectSystemMessage(`Server reload failed: ${msg}`);
+            log.error('/reload: restart failed', { error: msg });
+          }
         }
       })();
       break;
@@ -2219,10 +2259,22 @@ client.on('connected', () => {
   setTimeout(() => emitHostState(), 100);
 });
 
-// Inhibit sleep while the agent is working
+// Track agent busy state + inhibit sleep while the agent is working
 client.on('loading', (isLoading: boolean) => {
-  if (isLoading) acquireWakeLock();
-  else releaseWakeLock();
+  agentBusy = isLoading;
+  if (isLoading) {
+    acquireWakeLock();
+  } else {
+    releaseWakeLock();
+    // If a file-watcher restart was deferred while the agent was busy, execute it now
+    if (pendingRestart) {
+      pendingRestart = false;
+      if (pendingRestartTimeout) { clearTimeout(pendingRestartTimeout); pendingRestartTimeout = null; }
+      log.info('Agent idle — executing deferred restart');
+      injectSystemMessage('Agent idle. Applying deferred code reload...');
+      void restartServer();
+    }
+  }
 });
 
 // Track recent conversation messages for classifier context
