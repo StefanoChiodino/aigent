@@ -174,6 +174,7 @@ export type ServerEvent =
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_ext_request'; id: string; action: string; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } }
+  | { type: 'browser_ext_cancel'; id: string }
   | { type: 'browser_write_request'; id: string; action: string; stepSummary: string; tabUrl?: string; domain?: string; requiredTier: 'read' | 'write' | 'script'; alwaysReadCmd?: string; alwaysWriteCmd?: string; alwaysScriptCmd?: string }
   | { type: 'context_menu_message'; text: string }
   | { type: 'browser_error'; level: 'warn' | 'error'; message: string; source?: string }

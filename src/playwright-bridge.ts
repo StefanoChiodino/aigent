@@ -136,7 +136,9 @@ class PlaywrightBridge {
   async request(
     action: string,
     params: Record<string, unknown> = {},
+    signal?: AbortSignal,
   ): Promise<PlaywrightResponse> {
+    if (signal?.aborted) return { ok: false, error: 'Aborted by user' };
     this.resetIdleTimer();
     try {
       switch (action) {
@@ -147,7 +149,7 @@ class PlaywrightBridge {
         case 'activate_tab': return this.activateTab(params.tabId as number);
         case 'open_tab': return await this.openTab(params.url as string);
         case 'close_tab': return await this.closeTab(params.tabId as number);
-        case 'run_script': return await this.runScript(params.tabId as number | undefined, (params.steps as unknown[]) ?? []);
+        case 'run_script': return await this.runScript(params.tabId as number | undefined, (params.steps as unknown[]) ?? [], signal);
         default:
           return { ok: false, error: `Action '${action}' is not supported in headless mode` };
       }
@@ -247,7 +249,7 @@ class PlaywrightBridge {
     return { ok: true };
   }
 
-  private async runScript(tabId: number | undefined, steps: unknown[]): Promise<PlaywrightResponse> {
+  private async runScript(tabId: number | undefined, steps: unknown[], signal?: AbortSignal): Promise<PlaywrightResponse> {
     if (steps.length === 0) return { ok: false, error: 'No steps provided' };
 
     const page = await this.getPage(tabId);
@@ -255,6 +257,9 @@ class PlaywrightBridge {
     const screenshots: Array<{ stepIndex: number; dataUrl: string }> = [];
 
     for (const rawStep of steps) {
+      if (signal?.aborted) {
+        return { ok: false, error: 'Aborted by user', stepsCompleted: completed, totalSteps: steps.length };
+      }
       const step = rawStep as Record<string, unknown>;
       try {
         if ('navigate' in step) {

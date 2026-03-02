@@ -40,6 +40,7 @@ export interface AgentClientEvents {
   screenshot_request: (id: string) => void;
   screen_share_request: (id: string) => void;
   browser_ext_request: (id: string, action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate', tabId?: number, rootSelector?: string, steps?: unknown[], url?: string) => void;
+  browser_ext_cancel: (id: string) => void;
   browser_write_request: (id: string, action: string, stepSummary: string, tabUrl?: string, autonomousCmd?: string) => void;
   browser_error: (level: 'warn' | 'error', message: string, source?: string) => void;
   host_state: (capabilities?: Record<string, string>) => void;
@@ -192,6 +193,9 @@ export class AgentClient extends EventEmitter {
         break;
       case 'browser_ext_request':
         this.emit('browser_ext_request', event.id, event.action, event.tabId, event.rootSelector, event.steps, event.url, event.clear, event.options);
+        break;
+      case 'browser_ext_cancel':
+        this.emit('browser_ext_cancel', event.id);
         break;
       case 'patch_request':
         this.emit('patch_request', event.id, event.diff, event.reason);

@@ -25,6 +25,7 @@ the aigent just spawn a synchronous agent and I can hear popups sounds but can't
 - [x] **Short mode TTS says "speak" literally** — Fixed: `stripMarkdownForTTS` now strips `<speak>` tags, and `speakText` extracts speak content before sending to TTS.
 
 - [x] **Streaming text wipe bug** — Fixed in commit `dcda5bc`. Applied `ensureSpeakTag` during streaming `onText` callback so streamed text matches the final committed message.
+- [x] **Browser ext OOM / can't-stop-on-cancel** — Fixed: propagate `browser_ext_cancel` from server through gatekeeper to ext-bridge and playwright-bridge via AbortSignal. Playwright `runScript()` now checks abort between steps. Context inspector no longer double-stringifies full base64 images (capped at 4KB preview). Screenshots compressed via `sharp` (downscale to 1568px + JPEG@80).
 - [ ] **Agent iteration limits** — Sub-agents and the main agent frequently hit tool-use iteration limits mid-task. Need to investigate: better iteration budgets, auto-continuation, task decomposition strategies, or a way for agents to self-checkpoint and resume.
 - [ ] **Mic speech truncation (parked)** — 5 code-level bugs identified (worklet flush, abort race, window-cap, energy gate, live timeout) but symptoms are intermittent and likely mic-hardware-dependent. Revisit if it recurs with the Razer mic. See MEMORY.md for full analysis.
 

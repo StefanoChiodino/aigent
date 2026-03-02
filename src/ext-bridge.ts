@@ -152,20 +152,39 @@ class ExtensionBridge extends EventEmitter {
     action: 'extract_a11y' | 'screenshot' | 'list_tabs' | 'run_script' | 'navigate' | 'activate_tab' | 'open_tab' | 'close_tab' | 'devtools_start' | 'devtools_snapshot' | 'devtools_stop',
     params: { tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } } = {},
     timeoutMs = 30_000,
+    signal?: AbortSignal,
   ): Promise<ExtResponse> {
     if (!this.ws || !this.isConnected()) {
       throw new Error('Browser extension is not connected. Install the aigent extension in Chrome and make sure the gatekeeper is running.');
     }
 
+    if (signal?.aborted) {
+      throw new Error('Aborted');
+    }
+
     const id = `ext_${++requestCounter}`;
 
     return new Promise<ExtResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const finish = (result: 'resolve' | 'reject', value: ExtResponse | Error) => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         this.pending.delete(id);
-        reject(new Error(`Browser extension request timed out after ${timeoutMs}ms`));
+        if (result === 'resolve') resolve(value as ExtResponse);
+        else reject(value as Error);
+      };
+
+      const timer = setTimeout(() => {
+        finish('reject', new Error(`Browser extension request timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
-      this.pending.set(id, { resolve, reject, timer });
+      const onAbort = () => finish('reject', new Error('Aborted'));
+      signal?.addEventListener('abort', onAbort, { once: true });
+
+      this.pending.set(id, {
+        resolve: (r) => finish('resolve', r),
+        reject: (e) => finish('reject', e),
+        timer,
+      });
 
       const msg = { type: 'ext_request', id, action, ...params };
       (this.ws as WebSocket).send(JSON.stringify(msg));

@@ -1806,6 +1806,9 @@ interface PendingBrowserWrite {
 const pendingBrowserWriteApprovals = new Map<string, PendingBrowserWrite>();
 // IDs auto-handled (grant active) before web-bridge listener fires — web-bridge skips these
 const autoHandledBrowserWriteIds = new Set<string>();
+// AbortControllers for in-flight gatekeeper-side browser requests, keyed by bext request ID.
+// Populated when a browser request starts; deleted when it resolves or is cancelled.
+const browserRequestControllers = new Map<string, AbortController>();
 
 // --- PiP state tracking ---
 let pipOpen = false;
@@ -1878,9 +1881,13 @@ function flushPendingBrowserApprovals(): void {
     if (pending.url !== undefined) params.url = pending.url;
     if (pending.clear !== undefined) params.clear = pending.clear;
     if (pending.options !== undefined) params.options = pending.options;
-    void browserRequest(pending.action, params).then((result) => {
+    const ac1 = new AbortController();
+    browserRequestControllers.set(id, ac1);
+    void browserRequest(pending.action, params, ac1.signal).then((result) => {
+      browserRequestControllers.delete(id);
       sendBrowserExtResult(id, result);
     }).catch((err: Error) => {
+      browserRequestControllers.delete(id);
       client!.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
     });
     // Dismiss from UI
@@ -1982,9 +1989,13 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
   if (pending.options !== undefined) params.options = pending.options;
 
   client!.emit('perm_dismissed', [id]);
-  browserRequest(pending.action, params).then((result) => {
+  const ac2 = new AbortController();
+  browserRequestControllers.set(id, ac2);
+  browserRequest(pending.action, params, ac2.signal).then((result) => {
+    browserRequestControllers.delete(id);
     sendBrowserExtResult(id, result);
   }).catch((err: Error) => {
+    browserRequestControllers.delete(id);
     client!.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
   });
 
@@ -1995,15 +2006,15 @@ async function handleBrowserWriteApproveReject(input: string): Promise<boolean> 
  * Route a browser action through the extension or Playwright fallback.
  * Returns a promise that resolves with the response.
  */
-async function browserRequest(action: string, params: Record<string, unknown>): Promise<{ ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; devtools?: unknown; error?: string }> {
+async function browserRequest(action: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<{ ok: boolean; treeText?: string; dataUrl?: string; tabs?: { id: number; title: string; url: string; active: boolean; windowId: number }[]; stepsCompleted?: number; totalSteps?: number; finalUrl?: string; finalTitle?: string; newTabId?: number; screenshots?: Array<{ stepIndex: number; dataUrl: string }>; devtools?: unknown; error?: string }> {
   if (extensionBridge.isConnected()) {
-    return extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params);
+    return extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params, 30_000, signal);
   }
 
   // Fallback to Playwright headless browser
   try {
     const { playwrightBridge } = await import('./playwright-bridge.js');
-    return await playwrightBridge.request(action, params);
+    return await playwrightBridge.request(action, params, signal);
   } catch (err) {
     throw new Error(
       'No browser available. Either:\n' +
@@ -2318,6 +2329,16 @@ client.on('mcp_tool_request', (id: string, server: string, tool: string, params:
   handleAgentMcpToolRequest(id, server, tool, params);
 });
 
+// Cancel an in-flight browser request when the agent aborts.
+client.on('browser_ext_cancel', (id: string) => {
+  const ac = browserRequestControllers.get(id);
+  if (ac) {
+    log.info('Cancelling in-flight browser request', { id });
+    ac.abort();
+    browserRequestControllers.delete(id);
+  }
+});
+
 // Handle browser extension requests — per-domain three-tier permission check
 client.on('browser_ext_request', (id: string, action: string, tabId?: number, rootSelector?: string, steps?: unknown[], url?: string, clear?: boolean, options?: { network?: boolean; console?: boolean; performance?: boolean }) => {
   // Classify what tier this action requires
@@ -2357,9 +2378,13 @@ client.on('browser_ext_request', (id: string, action: string, tabId?: number, ro
       if (url !== undefined) params.url = url;
       if (clear !== undefined) params.clear = clear;
       if (options !== undefined) params.options = options;
-      void browserRequest(action, params).then((result) => {
+      const ac3 = new AbortController();
+      browserRequestControllers.set(id, ac3);
+      void browserRequest(action, params, ac3.signal).then((result) => {
+        browserRequestControllers.delete(id);
         sendBrowserExtResult(id, result);
       }).catch((err: Error) => {
+        browserRequestControllers.delete(id);
         client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
       });
       return;
@@ -2389,18 +2414,26 @@ client.on('browser_ext_request', (id: string, action: string, tabId?: number, ro
       });
       client.emit('pip_suggestion', pipId);
       pipPromise.then(() => {
-        void extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params).then((result) => {
+        const ac4 = new AbortController();
+        browserRequestControllers.set(id, ac4);
+        void extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params, 30_000, ac4.signal).then((result) => {
+          browserRequestControllers.delete(id);
           sendBrowserExtResult(id, result);
         }).catch((err: Error) => {
+          browserRequestControllers.delete(id);
           client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
         });
       });
       return;
     }
 
-    void extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params).then((result) => {
+    const ac5 = new AbortController();
+    browserRequestControllers.set(id, ac5);
+    void extensionBridge.request(action as Parameters<typeof extensionBridge.request>[0], params, 30_000, ac5.signal).then((result) => {
+      browserRequestControllers.delete(id);
       sendBrowserExtResult(id, result);
     }).catch((err: Error) => {
+      browserRequestControllers.delete(id);
       client.send({ type: 'browser_ext_result', id, ok: false, error: err.message });
     });
     return;
