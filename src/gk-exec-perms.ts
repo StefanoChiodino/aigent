@@ -293,7 +293,10 @@ export async function handleExecApproveReject(ctx: PermCtx, input: string): Prom
 
     const pending = pendingExecApprovals.resolve(id, ctx);
     if (!pending) {
-      // Request was already auto-resolved — silently ignore
+      if (pendingExecApprovals.isRecentlyResolved(id)) {
+        ctx.injectSystemMessage('Already resolved (auto-approved by updated permissions).');
+        pendingExecApprovals.broadcastDismissed(ctx, [id]);
+      }
       return true;
     }
 
@@ -332,7 +335,10 @@ export async function handleExecApproveReject(ctx: PermCtx, input: string): Prom
 
     const pending = pendingExecApprovals.resolve(id, ctx);
     if (!pending) {
-      // Request was already auto-resolved — silently ignore
+      if (pendingExecApprovals.isRecentlyResolved(id)) {
+        ctx.injectSystemMessage('Already resolved (auto-approved by updated permissions).');
+        pendingExecApprovals.broadcastDismissed(ctx, [id]);
+      }
       return true;
     }
 

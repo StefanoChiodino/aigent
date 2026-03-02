@@ -150,7 +150,10 @@ export async function handleFetchApproveReject(ctx: PermCtx, input: string): Pro
 
     const pending = pendingFetchApprovals.resolve(id, ctx);
     if (!pending) {
-      // Already resolved — silently ignore
+      if (pendingFetchApprovals.isRecentlyResolved(id)) {
+        ctx.injectSystemMessage('Already resolved (auto-approved by updated permissions).');
+        pendingFetchApprovals.broadcastDismissed(ctx, [id]);
+      }
       return true;
     }
 
@@ -189,6 +192,10 @@ export async function handleFetchApproveReject(ctx: PermCtx, input: string): Pro
 
     const pending = pendingFetchApprovals.resolve(id, ctx);
     if (!pending) {
+      if (pendingFetchApprovals.isRecentlyResolved(id)) {
+        ctx.injectSystemMessage('Already resolved (auto-approved by updated permissions).');
+        pendingFetchApprovals.broadcastDismissed(ctx, [id]);
+      }
       return true;
     }
 
@@ -240,6 +247,10 @@ export function handleFetchSizeApproveReject(ctx: PermCtx, input: string): boole
 
   const pending = pendingFetchSizeApprovals.resolve(id, ctx);
   if (!pending) {
+    if (pendingFetchSizeApprovals.isRecentlyResolved(id)) {
+      ctx.injectSystemMessage('Already resolved (auto-approved by updated permissions).');
+      pendingFetchSizeApprovals.broadcastDismissed(ctx, [id]);
+    }
     return true;
   }
 

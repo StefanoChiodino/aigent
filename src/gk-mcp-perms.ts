@@ -134,7 +134,10 @@ export function handleMcpToolApproveReject(ctx: PermCtx, input: string): boolean
 
   const pending = pendingMcpToolApprovals.resolve(id, ctx);
   if (!pending) {
-    // Already resolved — silently ignore
+    if (pendingMcpToolApprovals.isRecentlyResolved(id)) {
+      ctx.injectSystemMessage('Already resolved (auto-approved by updated permissions).');
+      pendingMcpToolApprovals.broadcastDismissed(ctx, [id]);
+    }
     return true;
   }
 

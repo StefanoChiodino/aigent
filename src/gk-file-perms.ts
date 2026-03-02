@@ -212,7 +212,10 @@ export function handleFileAccessApproveReject(ctx: PermCtx, input: string): bool
 
   const pending = pendingFileAccessApprovals.resolve(id, ctx);
   if (!pending) {
-    // Already resolved — silently ignore
+    if (pendingFileAccessApprovals.isRecentlyResolved(id)) {
+      ctx.injectSystemMessage('Already resolved (auto-approved by updated permissions).');
+      pendingFileAccessApprovals.broadcastDismissed(ctx, [id]);
+    }
     return true;
   }
 
