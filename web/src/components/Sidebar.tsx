@@ -395,12 +395,14 @@ export function Sidebar() {
           {(() => {
             // Disable thinking only if the server has confirmed this model doesn't support it
             const supportsThinking = !modelName || !modelsWithoutThinking.includes(modelName);
+            // Effective on-state: if model doesn't support thinking, treat as OFF regardless of stored level
+            const isOn = reasoningOn && supportsThinking;
             return <>
           <div className="sb-reasoning-controls">
             <span style={{ fontSize: 12, color: 'var(--text-secondary)', flex: 1 }}>Extended thinking</span>
             <button
               id="sb-reasoning-toggle"
-              className={`sb-toggle${reasoningOn ? ' on' : ''}${!supportsThinking ? ' disabled' : ''}`}
+              className={`sb-toggle${isOn ? ' on' : ''}${!supportsThinking ? ' disabled' : ''}`}
               disabled={!supportsThinking}
               title={!supportsThinking ? 'This model does not support extended thinking' : undefined}
               onClick={() => {
@@ -409,7 +411,7 @@ export function Sidebar() {
                 setClientSetting('AIGENT_THINKING', nextOff ? 'off' : (lastEffortLevel || 'high'));
               }}
             >
-              {reasoningOn ? 'ON' : 'OFF'}
+              {isOn ? 'ON' : 'OFF'}
             </button>
           </div>
           {!supportsThinking && (

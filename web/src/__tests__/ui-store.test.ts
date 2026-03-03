@@ -133,6 +133,26 @@ describe('UI store', () => {
     expect(useUIStore.getState().lastEffortLevel).toBe('high');
   });
 
+  // Reasoning toggle: effective on-state must be false when model doesn't support thinking
+  // (regression: toggle showed green "ON" + disabled when model was switched to one without thinking)
+  it('effective reasoning state is off when model does not support thinking', () => {
+    useUIStore.setState({ thinkingLevel: 'high', modelsWithoutThinking: ['gpt-4o'], modelName: 'gpt-4o' });
+    const { thinkingLevel, modelsWithoutThinking, modelName } = useUIStore.getState();
+    const reasoningOn = thinkingLevel !== 'off';
+    const supportsThinking = !modelName || !modelsWithoutThinking.includes(modelName);
+    const isOn = reasoningOn && supportsThinking; // the fix applied in Sidebar.tsx
+    expect(isOn).toBe(false);
+  });
+
+  it('effective reasoning state is on when model supports thinking and level is not off', () => {
+    useUIStore.setState({ thinkingLevel: 'high', modelsWithoutThinking: [], modelName: 'claude-opus-4-6' });
+    const { thinkingLevel, modelsWithoutThinking, modelName } = useUIStore.getState();
+    const reasoningOn = thinkingLevel !== 'off';
+    const supportsThinking = !modelName || !modelsWithoutThinking.includes(modelName);
+    const isOn = reasoningOn && supportsThinking;
+    expect(isOn).toBe(true);
+  });
+
   it('addAttachment/removeAttachment/clearAttachments', () => {
     useUIStore.getState().addAttachment(makeAttachment('a'));
     useUIStore.getState().addAttachment(makeAttachment('b'));

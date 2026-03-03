@@ -2099,6 +2099,11 @@ html, body {
   background: var(--bg-hover);
 }
 
+.sb-toggle.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .sb-pills {
   display: flex;
   gap: 2px;

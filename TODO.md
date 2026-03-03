@@ -2,7 +2,7 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
-when the reasonin is disabled, it ramains on, looking as if it's not available but also on, without a way to disable it.
+~~when the reasoning is disabled, it remains on, looking as if it's not available but also on, without a way to disable it~~ fixed — when model doesn't support thinking, toggle now shows "OFF" (not green "ON") and is visually dimmed; effective `isOn = reasoningOn && supportsThinking`
 
 ~~recently we have "fixed" the short TTS, but now: 1) there is no stop button to stop the audio 2) the short version seems not short at all~~ fixed — 3 root causes: (1) ttsSpeakingId not remapped from __streaming__ to final message ID on finalization, (2) subscribe callback in App.tsx didn't trigger flushStream on spokenText changes + no short mode guard in flushStream, (3) ttsStreamLastLen not reset between turns
 
