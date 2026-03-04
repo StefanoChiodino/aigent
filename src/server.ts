@@ -625,7 +625,7 @@ async function processAgentTurn(
   // System prompt instructions get buried in long conversations; a user-turn
   // reminder is far more reliable at keeping the model concise.
   if (currentShort && !isTaskResult) {
-    const shortReminder = '\n\n[SHORT MODE — HARD LIMIT 100 WORDS. <speak>1-2 sentences</speak> first, then at most 1-3 sentences. No blockquotes, no long content, no before/after comparisons. If content is needed, use a tool.]';
+    const shortReminder = '\n\n[SHORT MODE — HARD LIMIT 100 WORDS. [speak]1-2 sentences[/speak] first, then at most 1-3 sentences. No blockquotes, no long content, no before/after comparisons. If content is needed, use a tool.]';
     if (typeof userContent === 'string') {
       userContent = userContent + shortReminder;
     } else if (Array.isArray(userContent)) {
@@ -639,7 +639,7 @@ async function processAgentTurn(
       signal: controller.signal,
       onText: (text) => {
         if (controller.signal.aborted) return;
-        const { content, spokenText } = _extractAndStripSpeak(text, currentShort);
+        const { content, spokenText } = _extractAndStripSpeak(text, currentShort, true);
         broadcast({ type: 'text', content });
         if (spokenText && !speakSent) {
           speakSent = true;
@@ -715,16 +715,18 @@ async function processAgentTurn(
         const deltaCR = u.cacheRead - prev.cacheRead;
         const deltaCW = u.cacheWrite - prev.cacheWrite;
 
-        const deltaCost = computeCost(model, { input: deltaIn, output: deltaOut, cacheRead: deltaCR, cacheWrite: deltaCW });
+        const deltaR = (u.reasoning ?? 0) - (prev.reasoning ?? 0);
+        const deltaCost = computeCost(model, { input: deltaIn, output: deltaOut, cacheRead: deltaCR, cacheWrite: deltaCW, reasoning: deltaR });
         const totalCost = (prev.cost ?? 0) + deltaCost;
 
         const byModel: Record<string, import('./protocol.js').ModelUsage> = { ...(prev.byModel ?? {}) };
-        const bucket = byModel[model] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+        const bucket = byModel[model] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0 };
         byModel[model] = {
           input: bucket.input + deltaIn,
           output: bucket.output + deltaOut,
           cacheRead: bucket.cacheRead + deltaCR,
           cacheWrite: bucket.cacheWrite + deltaCW,
+          reasoning: (bucket.reasoning ?? 0) + deltaR,
           cost: bucket.cost + deltaCost,
         };
 
@@ -1073,15 +1075,16 @@ function dispatchBackgroundTask(input: {
       if (!finalText) finalText = '[background agent hit iteration limit]';
 
       // Compute cost for this task and roll it into the global session usage
-      const taskUsageRaw = { input: taskInputTokens, output: taskOutputTokens, cacheRead: 0, cacheWrite: 0 };
+      const taskUsageRaw = { input: taskInputTokens, output: taskOutputTokens, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
       const taskCost = computeCost(taskModel, taskUsageRaw);
       const taskByModel: Record<string, import('./protocol.js').ModelUsage> = { ...(usage.byModel ?? {}) };
-      const taskBucket = taskByModel[taskModel] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+      const taskBucket = taskByModel[taskModel] ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, cost: 0 };
       taskByModel[taskModel] = {
         input: taskBucket.input + taskInputTokens,
         output: taskBucket.output + taskOutputTokens,
         cacheRead: taskBucket.cacheRead,
         cacheWrite: taskBucket.cacheWrite,
+        reasoning: taskBucket.reasoning ?? 0,
         cost: taskBucket.cost + taskCost,
       };
       usage = {

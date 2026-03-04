@@ -69,13 +69,13 @@ export const useChatStore = create<ChatState>()(
       setMessages: (msgs) => set({ messages: msgs }),
       appendMessage: (msg, traces?) => set(s => {
         let finalMsg = traces && traces.length > 0 ? { ...msg, traces } : msg;
-        // Extract <speak> tags from assistant content (server may already set spokenText,
-        // but handle inline tags for test harness and backwards compatibility)
+        // Extract [speak] or legacy <speak> tags from assistant content (server may already
+        // set spokenText, but handle inline tags for test harness and backwards compatibility)
         if (finalMsg.role === 'assistant' && !finalMsg.spokenText) {
-          const m = finalMsg.content.match(/<speak>([\s\S]*?)<\/speak>/);
+          const m = finalMsg.content.match(/\[speak\]([\s\S]*?)\[\/speak\]/) || finalMsg.content.match(/<speak>([\s\S]*?)<\/speak>/);
           if (m) {
             const spokenText = m[1]!.trim();
-            const stripped = finalMsg.content.replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
+            const stripped = finalMsg.content.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
             finalMsg = { ...finalMsg, spokenText, content: stripped || finalMsg.content };
           }
         }
@@ -114,10 +114,10 @@ export const useChatStore = create<ChatState>()(
       finishStream: (msg, traces?) => set(s => {
         let finalMsg = traces && traces.length > 0 ? { ...msg, traces } : msg;
         if (finalMsg.role === 'assistant' && !finalMsg.spokenText) {
-          const m = finalMsg.content.match(/<speak>([\s\S]*?)<\/speak>/);
+          const m = finalMsg.content.match(/\[speak\]([\s\S]*?)\[\/speak\]/) || finalMsg.content.match(/<speak>([\s\S]*?)<\/speak>/);
           if (m) {
             const spokenText = m[1]!.trim();
-            const stripped = finalMsg.content.replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
+            const stripped = finalMsg.content.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
             finalMsg = { ...finalMsg, spokenText, content: stripped || finalMsg.content };
           }
         }
@@ -127,11 +127,11 @@ export const useChatStore = create<ChatState>()(
         };
       }),
       setStreamText: (text) => set(s => {
-        // Extract <speak> tags from streaming text
-        const m = text.match(/<speak>([\s\S]*?)<\/speak>/);
+        // Extract [speak] or legacy <speak> tags from streaming text
+        const m = text.match(/\[speak\]([\s\S]*?)\[\/speak\]/) || text.match(/<speak>([\s\S]*?)<\/speak>/);
         if (m) {
           const spokenText = m[1]!.trim();
-          const stripped = text.replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
+          const stripped = text.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
           return { streaming: { ...s.streaming, text: stripped || text, spokenText: spokenText || s.streaming.spokenText } };
         }
         return { streaming: { ...s.streaming, text } };
@@ -212,15 +212,15 @@ export const useChatStore = create<ChatState>()(
       name: 'aigent-chat',
       partialize: (s) => ({ messages: s.messages, usage: s.usage, taskHistory: s.taskHistory }),
       onRehydrateStorage: () => (state) => {
-        // Migrate old messages that have <speak> tags baked into content.
+        // Migrate old messages that have speak tags baked into content.
         // Extract spokenText and strip tags so the UI never sees them.
         if (!state) return;
         for (const msg of state.messages) {
-          if (msg.role === 'assistant' && !msg.spokenText && msg.content.includes('<speak>')) {
-            const m = msg.content.match(/<speak>([\s\S]*?)<\/speak>/);
+          if (msg.role === 'assistant' && !msg.spokenText && (msg.content.includes('[speak]') || msg.content.includes('<speak>'))) {
+            const m = msg.content.match(/\[speak\]([\s\S]*?)\[\/speak\]/) || msg.content.match(/<speak>([\s\S]*?)<\/speak>/);
             if (m) {
               msg.spokenText = m[1]!.trim();
-              const stripped = msg.content.replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
+              const stripped = msg.content.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
               msg.content = stripped || msg.spokenText;
             }
           }

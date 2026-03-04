@@ -6,7 +6,7 @@
 
 ~~recently we have "fixed" the short TTS, but now: 1) there is no stop button to stop the audio 2) the short version seems not short at all~~ fixed — 3 root causes: (1) ttsSpeakingId not remapped from __streaming__ to final message ID on finalization, (2) subscribe callback in App.tsx didn't trigger flushStream on spokenText changes + no short mode guard in flushStream, (3) ttsStreamLastLen not reset between turns
 
-When the text comes streaming down the first part of the text that is actually the short answer displays and then as soon as it finishes it is wiped and then replaced by the full answer. That is quite jarring and should stop.
+~~When the text comes streaming down the first part of the text that is actually the short answer displays and then as soon as it finishes it is wiped and then replaced by the full answer. That is quite jarring and should stop.~~ fixed — during streaming, `extractAndStripSpeak` now returns empty content when only the `<speak>` block has arrived (no body text yet), so the spinner keeps showing instead of flashing the short answer; the final message still falls back to spokenText if the response is speak-only.
 
 ~~add syntax highlighting in the chat for code blocks~~ done
 

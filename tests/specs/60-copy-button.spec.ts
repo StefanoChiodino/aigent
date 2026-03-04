@@ -6,7 +6,7 @@
  *   - Copy button does NOT appear on user messages
  *   - Clicking copy writes message content to clipboard
  *   - Copy button shows "Copied!" title after clicking
- *   - <speak> tags are stripped from copied content
+ *   - [speak] tags are stripped from copied content
  */
 
 import { test, expect } from '@playwright/test';
@@ -93,7 +93,7 @@ test.describe('@fast Copy markdown button', () => {
     expect(clipboardText).toBe(content);
   });
 
-  test('copied content strips <speak> tags', async () => {
+  test('copied content strips [speak] tags', async () => {
     const page = getPage();
 
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -102,7 +102,7 @@ test.describe('@fast Copy markdown button', () => {
       type: 'message',
       message: {
         role: 'assistant',
-        content: '<speak>Spoken part.</speak>\n\nVisible body.',
+        content: '[speak]Spoken part.[/speak]\n\nVisible body.',
         timestamp: new Date().toISOString(),
       },
     });
@@ -114,7 +114,7 @@ test.describe('@fast Copy markdown button', () => {
     await msg.locator('.copy-btn').click();
 
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText());
-    expect(clipboardText).not.toContain('<speak>');
+    expect(clipboardText).not.toContain('[speak]');
     expect(clipboardText).not.toContain('Spoken part.');
     expect(clipboardText).toContain('Visible body.');
   });

@@ -2,10 +2,10 @@
  * 54 — Speak preview icon (chat bubble)
  *
  * Tests:
- *   - Completed message with <speak> tag shows the speak-preview icon on hover
- *   - Completed message without <speak> tag does not show the speak-preview icon
- *   - Streaming message with <speak> tag shows the speak-preview icon (always visible)
- *   - Streaming message without <speak> tag does not show the speak-preview icon
+ *   - Completed message with [speak] tag shows the speak-preview icon on hover
+ *   - Completed message without [speak] tag does not show the speak-preview icon
+ *   - Streaming message with [speak] tag shows the speak-preview icon (always visible)
+ *   - Streaming message without [speak] tag does not show the speak-preview icon
  *   - Speak content is stripped from the displayed message body
  *   - Speak-preview tooltip contains the speak content on hover
  *   - Speak-preview tooltip is fully visible within the viewport
@@ -18,14 +18,14 @@ import { injectEvent } from '../helpers/ws-client.js';
 test.describe('@fast Speak preview icon', () => {
   const getPage = useSharedPage();
 
-  test('completed message with <speak> tag shows speak-preview icon', async () => {
+  test('completed message with [speak] tag shows speak-preview icon', async () => {
     const page = getPage();
 
     await injectEvent({
       type: 'message',
       message: {
         role: 'assistant',
-        content: '<speak>Here is a summary.</speak>\n\nFull response body here.',
+        content: '[speak]Here is a summary.[/speak]\n\nFull response body here.',
         timestamp: new Date().toISOString(),
       },
     });
@@ -42,7 +42,7 @@ test.describe('@fast Speak preview icon', () => {
     await expect(preview).toHaveCSS('opacity', '1');
   });
 
-  test('completed message without <speak> tag has no speak-preview', async () => {
+  test('completed message without [speak] tag has no speak-preview', async () => {
     const page = getPage();
 
     await injectEvent({
@@ -59,11 +59,11 @@ test.describe('@fast Speak preview icon', () => {
     await expect(msg.locator('.speak-preview')).toHaveCount(0);
   });
 
-  test('streaming message with <speak> tag shows speak-preview icon', async () => {
+  test('streaming message with [speak] tag shows speak-preview icon', async () => {
     const page = getPage();
 
     await injectEvent({ type: 'loading', isLoading: true });
-    await injectEvent({ type: 'text', content: '<speak>Streaming summary.</speak>\n\nMore content.' });
+    await injectEvent({ type: 'text', content: '[speak]Streaming summary.[/speak]\n\nMore content.' });
 
     const streamingMsg = page.locator('.message.assistant.streaming');
     await expect(streamingMsg).toBeVisible({ timeout: 3000 });
@@ -77,7 +77,7 @@ test.describe('@fast Speak preview icon', () => {
     await injectEvent({ type: 'loading', isLoading: false });
   });
 
-  test('streaming message without <speak> tag has no speak-preview', async () => {
+  test('streaming message without [speak] tag has no speak-preview', async () => {
     const page = getPage();
 
     await injectEvent({ type: 'loading', isLoading: true });
@@ -91,14 +91,14 @@ test.describe('@fast Speak preview icon', () => {
     await injectEvent({ type: 'loading', isLoading: false });
   });
 
-  test('<speak> content is stripped from displayed message body', async () => {
+  test('[speak] content is stripped from displayed message body', async () => {
     const page = getPage();
 
     await injectEvent({
       type: 'message',
       message: {
         role: 'assistant',
-        content: '<speak>This is the spoken part.</speak>\n\nThis is the visible body.',
+        content: '[speak]This is the spoken part.[/speak]\n\nThis is the visible body.',
         timestamp: new Date().toISOString(),
       },
     });
@@ -107,7 +107,7 @@ test.describe('@fast Speak preview icon', () => {
     const body = msg.locator('.message-content');
     await expect(body).toBeVisible();
 
-    // The <speak> content should NOT appear in the rendered body
+    // The [speak] content should NOT appear in the rendered body
     const html = await body.innerHTML();
     expect(html).not.toContain('This is the spoken part.');
     expect(html).toContain('This is the visible body.');
@@ -120,7 +120,7 @@ test.describe('@fast Speak preview icon', () => {
       type: 'message',
       message: {
         role: 'assistant',
-        content: '<speak>Tooltip summary text.</speak>\n\nBody text.',
+        content: '[speak]Tooltip summary text.[/speak]\n\nBody text.',
         timestamp: new Date().toISOString(),
       },
     });
@@ -144,7 +144,7 @@ test.describe('@fast Speak preview icon', () => {
       type: 'message',
       message: {
         role: 'assistant',
-        content: '<speak>This tooltip must be fully visible.</speak>\n\nMessage body.',
+        content: '[speak]This tooltip must be fully visible.[/speak]\n\nMessage body.',
         timestamp: new Date().toISOString(),
       },
     });

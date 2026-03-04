@@ -81,54 +81,57 @@ HARD LIMIT: Your entire response (speak block + body) must be under 100 words. N
 
 FORMAT — every single response, no exceptions:
 
-<speak>One short sentence — the absolute minimum needed to convey the key point. Plain English. No markdown.</speak>
+[speak]One short sentence — the absolute minimum needed to convey the key point. Plain English. No markdown.[/speak]
 
 Optional: 1-3 sentences of additional detail. No more.
 
 EXAMPLE — user asks "what's the weather API endpoint?":
-<speak>The weather endpoint is slash api slash weather, it takes a city parameter.</speak>
+[speak]The weather endpoint is slash api slash weather, it takes a city parameter.[/speak]
 Check the routes file at src/routes/weather.ts for the full implementation.
 
 RULES:
-1. <speak>...</speak> MUST be the very first thing in every response. No thinking-out-loud before it. No preamble.
+1. [speak]...[/speak] MUST be the very first thing in every response. No thinking-out-loud before it. No preamble.
 2. The speak content must be ONE short sentence — never more. It will be read aloud. Keep it under 20 words.
-3. The <speak> block must always be shorter than the body text that follows. If the full response is already one short sentence, the <speak> block should be a brief phrase or the same sentence — never longer.
+3. The [speak] block must always be shorter than the body text that follows. If the full response is already one short sentence, the [speak] block should be a brief phrase or the same sentence — never longer.
 4. After the speak block: at most 1-3 brief sentences. If the speak block fully answers the question, stop there.
-5. When using tools, still begin your final text response with <speak>.
+5. When using tools, still begin your final text response with [speak].
 6. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.
 7. NEVER include long-form content in your response — no blockquotes, no before/after comparisons, no full paragraphs of quoted text. If the user needs to see content, write it to a file or use a tool. Your text response stays short.
 8. This applies even when showing diffs, edits, rewrites, or comparisons. Describe the change in 1 sentence; do not reproduce the content.`;
 
 export interface SpeakExtraction {
-  /** Text with <speak> tags stripped — safe for display. */
+  /** Text with [speak] tags stripped — safe for display. */
   content: string;
   /** Extracted speak content for TTS, or null if not in short mode. */
   spokenText: string | null;
 }
 
 /**
- * Extract <speak> content and strip tags from text.
+ * Extract [speak] content and strip tags from text.
+ * Also handles legacy <speak> XML tags for backwards compatibility.
  * If short mode is on but the model omitted the tag, synthesize spokenText
- * from the first sentence. The returned content never contains <speak> tags.
+ * from the first sentence. The returned content never contains speak tags.
  */
-export function extractAndStripSpeak(text: string, shortMode: boolean): SpeakExtraction {
+export function extractAndStripSpeak(text: string, shortMode: boolean, isStreaming = false): SpeakExtraction {
   if (!shortMode) return { content: text, spokenText: null };
 
-  // Extract content from <speak>...</speak> if present
-  const speakMatch = text.match(/<speak>([\s\S]*?)<\/speak>/);
+  // Extract content from [speak]...[/speak] or legacy <speak>...</speak>
+  const speakMatch = text.match(/\[speak\]([\s\S]*?)\[\/speak\]/) || text.match(/<speak>([\s\S]*?)<\/speak>/);
   if (speakMatch) {
     const spokenText = speakMatch[1]!.trim();
-    // Strip all speak tags from content
-    let content = text.replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
-    // If entire text was in <speak> tags, use speak content as display too
-    if (!content) content = spokenText;
+    // Strip all speak tags from content (both bracket and XML forms)
+    let content = text.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
+    // If entire text was in speak tags: during streaming, return empty so the spinner
+    // keeps showing until body text arrives (avoids jarring flash of short → full text).
+    // For the final message, fall back to spokenText so something is displayed.
+    if (!content && !isStreaming) content = spokenText;
     return { content, spokenText };
   }
 
-  // Strip partial (unclosed) <speak> tag at end of streaming text
-  const content = text.replace(/<speak>[^<]*$/, '').trimEnd() || text;
+  // Strip partial (unclosed) [speak] or <speak> tag at end of streaming text
+  const content = text.replace(/\[speak\][^\[]*$/, '').replace(/<speak>[^<]*$/, '').trimEnd() || text;
 
-  // No <speak> tag — synthesize spokenText from first sentence
+  // No speak tag — synthesize spokenText from first sentence
   const forExtract = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '').trim();
   const sentenceEnd = /[.!?]\s+/g;
   let end = 0;

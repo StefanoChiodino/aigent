@@ -81,7 +81,7 @@ describe('buildBrowserExtSystemPrompt', () => {
 
 describe('SHORT_MODE_PROMPT', () => {
   it('exists and includes speak tag format', () => {
-    assert.ok(SHORT_MODE_PROMPT.includes('<speak>'));
+    assert.ok(SHORT_MODE_PROMPT.includes('[speak]'));
     assert.ok(SHORT_MODE_PROMPT.includes('MANDATORY'));
   });
 });
@@ -93,18 +93,39 @@ describe('extractAndStripSpeak', () => {
     assert.equal(result.spokenText, null);
   });
 
-  it('extracts spokenText and strips tags from content', () => {
+  it('extracts spokenText and strips [speak] tags from content', () => {
+    const text = '[speak]Already spoken.[/speak]\nMore details.';
+    const result = extractAndStripSpeak(text, true);
+    assert.equal(result.spokenText, 'Already spoken.');
+    assert.equal(result.content, 'More details.');
+  });
+
+  it('extracts spokenText and strips legacy <speak> XML tags from content', () => {
     const text = '<speak>Already spoken.</speak>\nMore details.';
     const result = extractAndStripSpeak(text, true);
     assert.equal(result.spokenText, 'Already spoken.');
     assert.equal(result.content, 'More details.');
   });
 
-  it('returns speak content as both content and spokenText when entire text is in speak tags', () => {
-    const text = '<speak>Only this.</speak>';
-    const result = extractAndStripSpeak(text, true);
+  it('returns speak content as both content and spokenText when entire text is in speak tags (final message)', () => {
+    const text = '[speak]Only this.[/speak]';
+    const result = extractAndStripSpeak(text, true, false);
     assert.equal(result.spokenText, 'Only this.');
     assert.equal(result.content, 'Only this.');
+  });
+
+  it('returns empty content during streaming when only speak block has arrived (no body yet)', () => {
+    const text = '[speak]Short answer.[/speak]';
+    const result = extractAndStripSpeak(text, true, true);
+    assert.equal(result.spokenText, 'Short answer.');
+    assert.equal(result.content, '');
+  });
+
+  it('returns body content during streaming once body text follows speak block', () => {
+    const text = '[speak]Short answer.[/speak]\n\nFull detailed response here.';
+    const result = extractAndStripSpeak(text, true, true);
+    assert.equal(result.spokenText, 'Short answer.');
+    assert.equal(result.content, 'Full detailed response here.');
   });
 
   it('synthesizes spokenText from first sentence when no speak tag', () => {
@@ -145,7 +166,13 @@ describe('extractAndStripSpeak', () => {
     assert.equal(result.spokenText, null);
   });
 
-  it('strips partial unclosed <speak> tag at end of streaming text', () => {
+  it('strips partial unclosed [speak] tag at end of streaming text', () => {
+    const text = 'Some response text[speak]partial content';
+    const result = extractAndStripSpeak(text, true);
+    assert.ok(!result.content.includes('[speak]'));
+  });
+
+  it('strips partial unclosed legacy <speak> tag at end of streaming text', () => {
     const text = 'Some response text<speak>partial content';
     const result = extractAndStripSpeak(text, true);
     assert.ok(!result.content.includes('<speak>'));
