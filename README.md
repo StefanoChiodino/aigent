@@ -289,6 +289,7 @@ Key settings groups:
 | **Tools** | Disable all tools, tool allowlist |
 | **Prompt** | Slim prompt (omit MEMORY.md), full session logs |
 | **Services** | Web UI port, STT URL, TTS URL |
+| **Notifications** | Sound on permission request, sound on response complete, browser notification on permission, browser notification on response complete |
 | **Appearance** | Background theme (aurora, spectrum, oscilloscope, circular, milkdrop, circuit, matrix, constellation, topology, ember) |
 | **Microphone** | STT energy threshold (hot-reload), silence threshold, speech onset frames, silence tail, auto-send on silence, auto-send duration |
 | **Context** | Summarize large tool results, summarize threshold, summarize model, tool filter mode |

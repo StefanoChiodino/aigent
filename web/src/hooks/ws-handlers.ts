@@ -15,9 +15,30 @@ import { useRatingStore } from '../stores/rating';
 import { STREAMING_MESSAGE_ID } from '../components/StreamingMessage';
 import { parseDiffIntoFiles } from '../lib/diff';
 import { captureScreenshot, startScreenShare } from '../lib/screen';
-import { playPermissionSound } from '../lib/audio';
+import { playPermissionSound, playResponseCompleteSound } from '../lib/audio';
+import { showBrowserNotification } from '../lib/notifications';
 import { isPiPOpen, pipSupported } from './usePiP';
 import type { ServerEvent, TraceEntry } from '../types';
+
+/** Fire permission-related sound and/or browser notification if enabled. */
+function notifyPermission(settings: WsDeps['settings'], detail: string): void {
+  if (settings().getClientSetting('notify_sound_permission') !== false) {
+    playPermissionSound();
+  }
+  if (settings().getClientSetting('notify_browser_permission') === true) {
+    showBrowserNotification('Permission Required', detail);
+  }
+}
+
+/** Fire response-complete sound and/or browser notification if enabled. */
+function notifyResponseComplete(settings: WsDeps['settings']): void {
+  if (settings().getClientSetting('notify_sound_response') === true) {
+    playResponseCompleteSound();
+  }
+  if (settings().getClientSetting('notify_browser_response') === true) {
+    showBrowserNotification('Response Complete', 'The agent has finished responding.');
+  }
+}
 
 // --- Deps interface ---
 
@@ -154,13 +175,14 @@ export const handlers: HandlerMap = {
     }
   },
 
-  message(event, { chat, conn }) {
+  message(event, { chat, conn, settings }) {
     const { streaming } = chat();
     if (event.message.role === 'assistant' && streaming.active) {
       if (streaming.isThinking) chat().finalizeThinkingBlock();
       chat().finalizeToolBlock();
       const traces = chat().streaming.traces;
       chat().finishStream(event.message, traces);
+      notifyResponseComplete(settings);
       const streamingRating = useRatingStore.getState().ratings[STREAMING_MESSAGE_ID];
       if (streamingRating) {
         useRatingStore.getState().remapRating(STREAMING_MESSAGE_ID, event.message.id);
@@ -253,19 +275,20 @@ export const handlers: HandlerMap = {
     settings().mergeClientSettings(event.settings);
   },
 
-  config_write_request(event, { ui }) {
+  config_write_request(event, { ui, settings }) {
+    const detail = `File: ${event.file}\nReason: ${event.reason}`;
     ui().enqueuePermRequest({
       type: 'config_write',
       id: event.id,
       title: 'Config Write Request',
-      detail: `File: ${event.file}\nReason: ${event.reason}`,
+      detail,
       approveCmd: `/approve ${event.id}`,
       denyCmd: `/reject ${event.id}`,
     });
-    playPermissionSound();
+    notifyPermission(settings, detail);
   },
 
-  patch_request(event, { ui }) {
+  patch_request(event, { ui, settings }) {
     const diffFiles = parseDiffIntoFiles(event.diff);
     const title = diffFiles.length === 1
       ? `Patch: ${diffFiles[0]!.name}`
@@ -280,10 +303,10 @@ export const handlers: HandlerMap = {
       approveCmd: `/approve-patch ${event.id}`,
       denyCmd: `/reject-patch ${event.id}`,
     });
-    playPermissionSound();
+    notifyPermission(settings, title);
   },
 
-  exec_request(event, { ui }) {
+  exec_request(event, { ui, settings }) {
     ui().enqueuePermRequest({
       type: 'exec',
       id: event.id,
@@ -294,24 +317,25 @@ export const handlers: HandlerMap = {
       denyCmd: `/deny-exec ${event.id}`,
       alwaysAllowCmd: `/approve-exec ${event.id} --always`,
     });
-    playPermissionSound();
+    notifyPermission(settings, event.command);
   },
 
-  fetch_request(event, { ui }) {
+  fetch_request(event, { ui, settings }) {
+    const detail = `${event.method ?? 'GET'} ${event.url}`;
     ui().enqueuePermRequest({
       type: 'fetch',
       id: event.id,
       title: 'Fetch URL',
-      detail: `${event.method ?? 'GET'} ${event.url}`,
+      detail,
       approveCmd: `/approve-fetch ${event.id}`,
       denyCmd: `/deny-fetch ${event.id}`,
       alwaysAllowCmd: `/approve-fetch ${event.id} --always`,
       alwaysAllowDomainCmd: `/approve-fetch ${event.id} --always-domain`,
     });
-    playPermissionSound();
+    notifyPermission(settings, detail);
   },
 
-  file_access_request(event, { ui }) {
+  file_access_request(event, { ui, settings }) {
     ui().enqueuePermRequest({
       type: 'file_access',
       id: event.id,
@@ -323,42 +347,44 @@ export const handlers: HandlerMap = {
       alwaysAllowCmd: `/approve-file ${event.id} --always`,
       alwaysAllowDomainCmd: `/approve-file ${event.id} --always-dir`,
     });
-    playPermissionSound();
+    notifyPermission(settings, event.path);
   },
 
-  fetch_size_request(event, { ui }) {
+  fetch_size_request(event, { ui, settings }) {
     const mb = (event.requestedBytes / (1024 * 1024)).toFixed(1);
     const defaultMb = (event.defaultBytes / (1024 * 1024)).toFixed(0);
+    const detail = `${mb} MB from ${event.url}`;
     ui().enqueuePermRequest({
       type: 'fetch_size',
       id: event.id,
       title: 'Large Fetch',
-      detail: `${mb} MB from ${event.url}`,
+      detail,
       body: `Default limit is ${defaultMb} MB`,
       approveCmd: `/approve-fetchsize ${event.id}`,
       denyCmd: `/deny-fetchsize ${event.id}`,
     });
-    playPermissionSound();
+    notifyPermission(settings, detail);
   },
 
-  mcp_tool_request(event, { ui }) {
+  mcp_tool_request(event, { ui, settings }) {
     const paramsPreview = event.params.length > 200
       ? event.params.slice(0, 200) + '\n...'
       : event.params;
+    const detail = `${event.server}/${event.tool}`;
     ui().enqueuePermRequest({
       type: 'mcp_tool',
       id: event.id,
       title: 'MCP Tool',
-      detail: `${event.server}/${event.tool}`,
+      detail,
       body: paramsPreview,
       approveCmd: `/approve-mcp ${event.id}`,
       denyCmd: `/deny-mcp ${event.id}`,
       alwaysAllowCmd: `/approve-mcp ${event.id} --always`,
     });
-    playPermissionSound();
+    notifyPermission(settings, detail);
   },
 
-  browser_write_request(event, { ui }) {
+  browser_write_request(event, { ui, settings }) {
     const isDestructive = !!(event as Record<string, unknown>).destructive;
     const destructiveDetail = (event as Record<string, unknown>).destructiveDetail as string | undefined;
     const autonomousCmd = (event as Record<string, unknown>).autonomousCmd as string | undefined;
@@ -387,10 +413,10 @@ export const handlers: HandlerMap = {
       ...(event.alwaysWriteCmd ? { alwaysWriteCmd: event.alwaysWriteCmd } : {}),
       ...(event.alwaysScriptCmd ? { alwaysScriptCmd: event.alwaysScriptCmd } : {}),
     });
-    playPermissionSound();
+    notifyPermission(settings, event.stepSummary);
   },
 
-  user_question_request(event, { ui }) {
+  user_question_request(event, { ui, settings }) {
     ui().enqueuePermRequest({
       type: 'user_question',
       id: event.id,
@@ -402,7 +428,7 @@ export const handlers: HandlerMap = {
       approveCmd: '',
       denyCmd: '',
     });
-    playPermissionSound();
+    notifyPermission(settings, event.question);
   },
 
   pip_suggestion(event, { send, ui, settings }) {
@@ -419,7 +445,7 @@ export const handlers: HandlerMap = {
       approveCmd: '',
       denyCmd: '',
     });
-    playPermissionSound();
+    notifyPermission(settings, 'Agent is about to switch tabs');
   },
 
   screenshot_request(event, { send }) {

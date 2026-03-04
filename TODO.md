@@ -2,34 +2,14 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
-~~when the reasoning is disabled, it remains on, looking as if it's not available but also on, without a way to disable it~~ fixed — when model doesn't support thinking, toggle now shows "OFF" (not green "ON") and is visually dimmed; effective `isOn = reasoningOn && supportsThinking`
+ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile but it seems a bit redundant
 
-~~recently we have "fixed" the short TTS, but now: 1) there is no stop button to stop the audio 2) the short version seems not short at all~~ fixed — 3 root causes: (1) ttsSpeakingId not remapped from __streaming__ to final message ID on finalization, (2) subscribe callback in App.tsx didn't trigger flushStream on spokenText changes + no short mode guard in flushStream, (3) ttsStreamLastLen not reset between turns
-
-~~When the text comes streaming down the first part of the text that is actually the short answer displays and then as soon as it finishes it is wiped and then replaced by the full answer. That is quite jarring and should stop.~~ fixed — during streaming, `extractAndStripSpeak` now returns empty content when only the `<speak>` block has arrived (no body text yet), so the spinner keeps showing instead of flashing the short answer; the final message still falls back to spokenText if the response is speak-only.
-
-~~add syntax highlighting in the chat for code blocks~~ done
-
-ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile but it seems a bit redundant 
-
-would be nice if when making lists in the response it added numbers by itself. Same for numbered and unnumbered lists, as soon as it detects a list. Just like google docs.
-
-~~I should be able to pull items back from the queue to my text box~~ done
-
-Sounds and browser notifications should be more customizible. Not really in the actual sound, but more like which sound plays: e.g. play on finish, notification on finish, same for asking for permissions, etc
+~~Sounds and browser notifications should be more customizable. Not really in the actual sound, but more like which sound plays: e.g. play on finish, notification on finish, same for asking for permissions, etc~~ done — 4 toggles in Settings → Notifications: sound on permission (on by default, now toggleable), sound on response complete, browser notification on permission, browser notification on response complete
 
 the aigent just spawn a synchronous agent and I can hear popups sounds but can't see the popups, I believe that we recently fixed an issue where I was being asked for permissions where not needed. I bet that now it's still happening, it's just that the popup is not showing, and that's why I can hear the sound
 
 ## Active Bugs
 
-~~The left panel now has horizontal scroll! Cringe!~~ fixed — added `overflow-x: hidden` to `#sidebar-panel`
-
-- [x] ~~cancelling a message shouldn't cancel all the queue~~ — Fixed: `handleCancel()` now sets a `queueCancelled` flag that breaks the `processQueue` while loop, pausing the queue instead of immediately draining it. Queue chips are preserved and resume when the user sends a new message.
-
-- [x] **Short mode TTS says "speak" literally** — Fixed: `stripMarkdownForTTS` now strips `<speak>` tags, and `speakText` extracts speak content before sending to TTS.
-
-- [x] **Streaming text wipe bug** — Fixed in commit `dcda5bc`. Applied `ensureSpeakTag` during streaming `onText` callback so streamed text matches the final committed message.
-- [x] **Browser ext OOM / can't-stop-on-cancel** — Fixed: propagate `browser_ext_cancel` from server through gatekeeper to ext-bridge and playwright-bridge via AbortSignal. Playwright `runScript()` now checks abort between steps. Context inspector no longer double-stringifies full base64 images (capped at 4KB preview). Screenshots compressed via `sharp` (downscale to 1568px + JPEG@80).
 - [ ] **Agent iteration limits** — Sub-agents and the main agent frequently hit tool-use iteration limits mid-task. Need to investigate: better iteration budgets, auto-continuation, task decomposition strategies, or a way for agents to self-checkpoint and resume.
 - [ ] **Mic speech truncation (parked)** — 5 code-level bugs identified (worklet flush, abort race, window-cap, energy gate, live timeout) but symptoms are intermittent and likely mic-hardware-dependent. Revisit if it recurs with the Razer mic. See MEMORY.md for full analysis.
 
@@ -44,8 +24,6 @@ the aigent just spawn a synchronous agent and I can hear popups sounds but can't
 
 ## Token / Cost Optimisation
 
-- [x] **Tool description trimming** — verbose descriptions moved to cached system prompt. browser_ext ~500→~60 tokens, spawn_agent/dispatch_task ~250-300→~60-80 tokens.
-- [x] **Dynamic tool filtering** — tools filtered per API call based on active capabilities (browser, host, display). Tools without prerequisites are omitted.
 - [ ] **Tool description audit** — trim descriptions in `src/tools/defs.ts` longer than ~100 tokens. Many tool descriptions are verbose and waste context window on every turn.
 - [ ] **Proactive compaction** — Don't wait for 70% context usage or user-triggered `/reset`. If the conversation has grown large (e.g. 40-50k+ tokens) and the useful context can be synthesized into a compact summary, the agent should self-compact. Heuristics: long idle stretches, topic shifts, completed tasks with no follow-up. Saves significant cost on conversations that drift past usefulness.
 - [ ] **Prompt cache warm-up on startup** — send a minimal no-op message to pre-warm the Anthropic prompt cache. First real message would then hit the cache instead of paying full input cost.
@@ -56,7 +34,6 @@ the aigent just spawn a synchronous agent and I can hear popups sounds but can't
 
 ## UI / UX
 
-- [x] **Edit queued messages** — Click the chip text to pull the message back into the input box. Guarded: only works when input is empty. Removes the message from the queue.
 - [ ] **Undo Escape clear** — When Escape clears the input box, Ctrl+Z (or just Escape again?) should restore the previous text. Store last cleared draft and allow undo.
 - [ ] **STT → ask_user integration** — When the agent asks a question (via `ask_user`), should the STT transcript go directly into the answer input? Need to figure out UX: what happens to text already in the main input box? Options: park existing draft, append, or use a separate input context for ask_user responses.
 
@@ -126,13 +103,7 @@ Build commands:
 - [ ] **API error handling framework** — Implement centralized error handling for 400 (token limits), 402 (credits), 429 (overloaded) errors with automatic retries and user notifications
 - [ ] **GitHub Pages deployment automation** — Add pre-commit hook to verify commits are pushed before deploying, or implement automatic push+deploy workflow
 - [ ] **Context-aware task dispatch** — Build logic to automatically choose dispatch_task vs spawn_agent based on task complexity and whether result is needed immediately
-- [ ] API error handling framework — Implement centralized error handling for 400 (token limits), 402 (insufficient credits), 429 (overloaded) errors with automatic retries and user notifications
-- [ ] GitHub Pages deployment automation — Add pre-commit hook to verify commits are pushed before deploying, or implement automatic push+deploy workflow
-- [ ] Context-aware task dispatch — Build logic to automatically choose dispatch_task vs spawn_agent based on task complexity and whether result is needed immediately
-- [ ] Model ID validation — Add validation for model identifiers before API calls to prevent 400 errors from invalid model IDs
-- [ ] Permission timeout handling — Implement retry logic for request_config_write and host_edit_file approvals that time out at 120s
-- [ ] Build verification — Always run make check before committing web/src changes to prevent broken deployments
-- [ ] Deployment verification — Check if commits are pushed to origin before investigating code bugs when deployed site is broken
-- [ ] Context-aware compaction — Don't wait for 70% context usage; if conversation has grown large (40-50k+ tokens) and useful context can be synthesized, self-compact proactively
-- [ ] Message sync monitoring — Add monitoring for uiMessages vs agentMessages sync issues when user reports 'messages being lost'
-- [ ] Project naming in reports — Always name the project explicitly when reporting background task results to disambiguate when user has multiple threads running
+- [ ] **Model ID validation** — Add validation for model identifiers before API calls to prevent 400 errors from invalid model IDs
+- [ ] **Permission timeout handling** — Implement retry logic for request_config_write and host_edit_file approvals that time out at 120s
+- [ ] **Message sync monitoring** — Add monitoring for uiMessages vs agentMessages sync issues when user reports 'messages being lost'
+- [ ] **Project naming in reports** — Always name the project explicitly when reporting background task results to disambiguate when user has multiple threads running

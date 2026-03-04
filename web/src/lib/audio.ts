@@ -79,3 +79,20 @@ export function playPermissionSound(): void {
   osc.stop(now + 0.4);
   osc.onended = () => ctx.close();
 }
+
+/** Soft descending two-tone chime indicating the agent has finished responding. */
+export function playResponseCompleteSound(): void {
+  const ctx = new AudioContext();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  const now = ctx.currentTime;
+  osc.frequency.setValueAtTime(784, now);        // G5
+  osc.frequency.setValueAtTime(523, now + 0.15); // C5
+  gain.gain.setValueAtTime(0.12, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+  osc.start(now);
+  osc.stop(now + 0.35);
+  osc.onended = () => ctx.close();
+}

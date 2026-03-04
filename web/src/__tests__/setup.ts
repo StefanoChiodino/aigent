@@ -10,10 +10,14 @@ if (!navigator.mediaDevices) {
   });
 }
 
-// Notification stub
+// Notification stub — constructable so `new Notification()` works in tests
 if (typeof globalThis.Notification === 'undefined') {
-  (globalThis as Record<string, unknown>).Notification = {
-    permission: 'default',
+  const NotificationStub = function(this: unknown, _title: string, _opts?: NotificationOptions) {
+    // no-op constructor
+  } as unknown as typeof Notification;
+  Object.assign(NotificationStub, {
+    permission: 'default' as NotificationPermission,
     requestPermission: () => Promise.resolve('denied' as NotificationPermission),
-  };
+  });
+  (globalThis as Record<string, unknown>).Notification = NotificationStub;
 }
