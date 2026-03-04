@@ -10,6 +10,7 @@ export interface ModelUsage {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+  reasoning?: number;
   cost: number;
 }
 
@@ -18,6 +19,8 @@ export interface TokenUsage {
   output: number;
   cacheRead: number;
   cacheWrite: number;
+  /** Tokens used for chain-of-thought / extended reasoning (o1, o3, Claude thinking, etc.) */
+  reasoning?: number;
   cost?: number; // Estimated cost in USD (informational, even for subscription users)
   contextTokens?: number; // Latest API call's input tokens = actual context window fill
   /** Per-model breakdown. Keys are model IDs, values are cumulative usage for that model. */

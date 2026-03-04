@@ -162,3 +162,34 @@ Implemented `src/reflection.ts` — the cross-session pattern mining system. Thi
 - [x] **Empty submit restarts mic** — empty submit now restarts mic when sticky mode is on.
 - [x] **diff2html line wrapping** — diff2html code lines now use `pre-wrap` so long lines wrap instead of scrolling horizontally.
 - [x] **TTS stop button + mic interrupts TTS** — (1) per-message TTSButton and `speakText` now set global `ttsPlaying` so the cancel button shows; (2) `startMic` now calls `ttsStopAll()` to interrupt TTS when user starts speaking.
+
+---
+
+## Archived 2026-03-04
+
+### Completed (top-level)
+
+- ~~Reasoning disabled but shown as on~~ fixed — when model doesn't support thinking, toggle now shows "OFF" (not green "ON") and is visually dimmed; effective `isOn = reasoningOn && supportsThinking`
+- ~~Short TTS not stopping / not short~~ fixed — 3 root causes: (1) ttsSpeakingId not remapped from __streaming__ to final message ID on finalization, (2) subscribe callback in App.tsx didn't trigger flushStream on spokenText changes + no short mode guard in flushStream, (3) ttsStreamLastLen not reset between turns
+- ~~Streaming text wipe (short answer flash)~~ fixed — during streaming, `extractAndStripSpeak` now returns empty content when only the `<speak>` block has arrived (no body text yet), so the spinner keeps showing instead of flashing the short answer
+- ~~Syntax highlighting in chat~~ done
+- ~~Auto-list continuation in input~~ done — InputArea.tsx (lines 617-642): Enter after `1. foo` inserts `2. `, Enter after `- foo` inserts `- `, empty marker + Enter exits the list
+- ~~Pull items back from queue to text box~~ done
+
+### Active Bugs (completed)
+
+- [x] ~~Sidebar horizontal scroll~~ fixed — added `overflow-x: hidden` to `#sidebar-panel`
+- [x] ~~Cancelling a message cancels all the queue~~ — Fixed: `handleCancel()` now sets a `queueCancelled` flag that breaks the `processQueue` while loop, pausing the queue instead of immediately draining it.
+- [x] **Short mode TTS says "speak" literally** — Fixed: `stripMarkdownForTTS` now strips `<speak>` tags, and `speakText` extracts speak content before sending to TTS.
+- [x] **Streaming text wipe bug** — Fixed in commit `dcda5bc`. Applied `ensureSpeakTag` during streaming `onText` callback.
+- [x] **Browser ext OOM / can't-stop-on-cancel** — Fixed: propagate `browser_ext_cancel` from server through gatekeeper to ext-bridge and playwright-bridge via AbortSignal. Screenshots compressed via `sharp`.
+
+### Token / Cost Optimisation (completed)
+
+- [x] **Tool description trimming** — verbose descriptions moved to cached system prompt. browser_ext ~500→~60 tokens, spawn_agent/dispatch_task ~250-300→~60-80 tokens.
+- [x] **Dynamic tool filtering** — tools filtered per API call based on active capabilities (browser, host, display). Tools without prerequisites are omitted.
+
+### UI / UX (completed)
+
+- [x] **Edit queued messages** — Click the chip text to pull the message back into the input box. Guarded: only works when input is empty. Removes the message from the queue.
+- [x] **Phantom permission sounds during spawn_agent** — Investigated; gatekeeper-first architecture (exec uses `ui_exec_prompt`, file_access uses `ui_file_access_prompt`) already prevents per-connection handlers from forwarding auto-handled requests to the browser. No reproducible code path found.

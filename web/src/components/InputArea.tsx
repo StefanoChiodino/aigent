@@ -223,6 +223,8 @@ export function InputArea() {
   const lastSttValueRef = useRef('');
   /** Timer ID for hold-to-cancel (hold:Escape). Cleared on keyup/blur. */
   const holdCancelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Last draft cleared by Escape/✕ — allows undo on next Escape press. */
+  const lastClearedDraftRef = useRef('');
   const [hasMicText, setHasMicText] = useState(false);
   const [micCapped, setMicCapped] = useState(false);
 
@@ -683,6 +685,7 @@ export function InputArea() {
       } else if (inputValue) {
         // Clear the input — mirror the ✕ button logic
         e.preventDefault();
+        lastClearedDraftRef.current = inputValue;
         if (micState === 'recording') {
           clearTranscript();
           lastMicTextRef.current = '';
@@ -694,6 +697,12 @@ export function InputArea() {
         setInputValue('');
         broadcastSync({ type: 'input-clear' });
         setPaletteHidden(false);
+        inputRef.current?.focus();
+      } else if (lastClearedDraftRef.current) {
+        // Undo: restore the previously cleared draft
+        e.preventDefault();
+        setInputValue(lastClearedDraftRef.current);
+        lastClearedDraftRef.current = '';
         inputRef.current?.focus();
       }
     }
@@ -897,6 +906,7 @@ export function InputArea() {
               id="input-clear"
               title="Clear input"
               onClick={() => {
+                lastClearedDraftRef.current = inputValue;
                 if (micState === 'recording') {
                   clearTranscript();
                   lastMicTextRef.current = '';

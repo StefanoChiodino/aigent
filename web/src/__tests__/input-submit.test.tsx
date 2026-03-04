@@ -626,3 +626,128 @@ describe('InputArea multiline-enter mode', () => {
     expect((input as HTMLTextAreaElement).value).toBe('');
   });
 });
+
+// ── Undo Escape clear ──────────────────────────────────────────────────────
+
+describe('InputArea undo Escape clear', () => {
+  let ws: WebSocket;
+
+  beforeEach(() => {
+    ws = fakeWs();
+    useConnectionStore.setState({ status: 'connected', ws, reconnectAttempt: 0 });
+    useUIStore.setState({
+      isLoading: false,
+      errorMsg: null,
+      thinkingLevel: 'off',
+      permQueue: [],
+      pendingAttachments: [],
+    });
+    useVoiceStore.setState({
+      micState: 'idle',
+      vadActive: false,
+      ttsPlaying: false,
+      micSticky: false,
+    });
+    useSettingsStore.setState({ clientSettings: {} });
+    sessionStorage.removeItem('aigent-draft');
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('Escape clears the input', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'draft text' } });
+    });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    });
+
+    expect(input.value).toBe('');
+  });
+
+  it('second Escape restores the cleared draft', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'important draft' } });
+    });
+    // First Escape: clear
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    });
+    expect(input.value).toBe('');
+
+    // Second Escape: undo — restore the draft
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    });
+    expect(input.value).toBe('important draft');
+  });
+
+  it('third Escape clears again (toggle behavior)', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'toggle text' } });
+    });
+    // Escape 1: clear
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    });
+    expect(input.value).toBe('');
+
+    // Escape 2: undo
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    });
+    expect(input.value).toBe('toggle text');
+
+    // Escape 3: clear again
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    });
+    expect(input.value).toBe('');
+  });
+
+  it('✕ button clear can be undone with Escape', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'button draft' } });
+    });
+
+    // Clear via ✕ button
+    const clearBtn = document.getElementById('input-clear')!;
+    await act(async () => {
+      fireEvent.click(clearBtn);
+    });
+    expect(input.value).toBe('');
+
+    // Escape restores it
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    });
+    expect(input.value).toBe('button draft');
+  });
+
+  it('Escape on empty input with no previous draft does nothing', async () => {
+    renderInputArea();
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    expect(input.value).toBe('');
+
+    // Escape on empty — should not crash or change anything
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+    });
+    expect(input.value).toBe('');
+  });
+});

@@ -6,7 +6,7 @@ ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile bu
 
 ~~Sounds and browser notifications should be more customizable. Not really in the actual sound, but more like which sound plays: e.g. play on finish, notification on finish, same for asking for permissions, etc~~ done — 4 toggles in Settings → Notifications: sound on permission (on by default, now toggleable), sound on response complete, browser notification on permission, browser notification on response complete
 
-the aigent just spawn a synchronous agent and I can hear popups sounds but can't see the popups, I believe that we recently fixed an issue where I was being asked for permissions where not needed. I bet that now it's still happening, it's just that the popup is not showing, and that's why I can hear the sound
+~~the aigent just spawn a synchronous agent and I can hear popups sounds but can't see the popups~~ investigated — gatekeeper-first architecture already prevents phantom permission sounds for exec and file_access requests; no reproducible code path found
 
 ## Active Bugs
 
@@ -34,7 +34,7 @@ the aigent just spawn a synchronous agent and I can hear popups sounds but can't
 
 ## UI / UX
 
-- [ ] **Undo Escape clear** — When Escape clears the input box, Ctrl+Z (or just Escape again?) should restore the previous text. Store last cleared draft and allow undo.
+- [x] **Undo Escape clear** — Escape again (or Escape after ✕ button) restores the last cleared draft. Toggle behavior: Escape clears → Escape restores → Escape clears.
 - [ ] **STT → ask_user integration** — When the agent asks a question (via `ask_user`), should the STT transcript go directly into the answer input? Need to figure out UX: what happens to text already in the main input box? Options: park existing draft, append, or use a separate input context for ask_user responses.
 
 ---

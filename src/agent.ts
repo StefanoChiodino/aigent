@@ -134,7 +134,7 @@ export class Agent {
   private systemPromptParts: string[];
   private thinking: ThinkingLevel;
   private workspacePath: string;
-  private _totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  private _totalUsage: TokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
   private mcpManager: MCPManager | null;
   private extraSystemPrompt: string;
   /** Track image hashes to deduplicate identical screenshots/images in tool results. */
@@ -251,6 +251,7 @@ export class Agent {
       this._totalUsage.output += response.usage.output;
       this._totalUsage.cacheRead += response.usage.cacheRead;
       this._totalUsage.cacheWrite += response.usage.cacheWrite;
+      this._totalUsage.reasoning = (this._totalUsage.reasoning ?? 0) + (response.usage.reasoning ?? 0);
       // contextTokens = actual context window fill from latest call
       // (input + cached = total prompt tokens sent to the model)
       this._totalUsage.contextTokens =
@@ -915,7 +916,7 @@ export class Agent {
 
   reset(): void {
     this.messages = [];
-    this._totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    this._totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
     this.seenImageHashes.clear();
     this.toolSummaries.clear();
   }

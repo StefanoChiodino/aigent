@@ -24,8 +24,10 @@ export interface ToolCall {
 export interface ProviderResponse {
   text: string;
   toolCalls: ToolCall[];
-  stopReason: 'end_turn' | 'tool_use' | 'max_tokens';
+  stopReason: 'end_turn' | 'tool_use' | 'max_tokens' | 'content_filter';
   usage: TokenUsage;
+  /** Actual model that served the response (may differ from requested, e.g. OpenRouter routing). */
+  model?: string;
 }
 
 export interface ProviderToolDef {
@@ -212,6 +214,7 @@ export class AnthropicProvider implements Provider {
         output: usage.output_tokens,
         cacheRead: rawUsage['cache_read_input_tokens'] ?? 0,
         cacheWrite: rawUsage['cache_creation_input_tokens'] ?? 0,
+        reasoning: 0,
       },
     };
   }
@@ -382,17 +385,28 @@ export class OpenAIProvider implements Provider {
     const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map();
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let cacheWriteTokens = 0;
+    let reasoningTokens = 0;
+    let finishReason: string | null = null;
+    let actualModel: string | undefined;
 
     for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-      if (!delta) continue;
+      // Track the actual model used (OpenRouter may route to a different variant)
+      if (chunk.model) actualModel = chunk.model;
 
-      if (delta.content) {
+      const choice = chunk.choices[0];
+      const delta = choice?.delta;
+
+      // Capture finish_reason from the last choice chunk
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
+
+      if (delta?.content) {
         currentText += delta.content;
         callbacks?.onText?.(currentText);
       }
 
-      if (delta.tool_calls) {
+      if (delta?.tool_calls) {
         for (const tc of delta.tool_calls) {
           const existing = toolCallAccum.get(tc.index);
           if (existing) {
@@ -410,6 +424,22 @@ export class OpenAIProvider implements Provider {
       if (chunk.usage) {
         inputTokens = chunk.usage.prompt_tokens;
         outputTokens = chunk.usage.completion_tokens;
+
+        // Untyped extended fields — different providers use different shapes
+        const ext = chunk.usage as unknown as Record<string, unknown>;
+
+        // OpenAI / OpenRouter: prompt_tokens_details.cached_tokens + cache_write_tokens
+        const ptd = ext['prompt_tokens_details'] as Record<string, number> | undefined;
+        if (ptd?.['cached_tokens']) cacheReadTokens = ptd['cached_tokens'];
+        if (ptd?.['cache_write_tokens']) cacheWriteTokens = ptd['cache_write_tokens'];
+
+        // Anthropic-via-OpenRouter or other Anthropic-compatible providers
+        if (typeof ext['cache_read_input_tokens'] === 'number') cacheReadTokens = ext['cache_read_input_tokens'];
+        if (typeof ext['cache_creation_input_tokens'] === 'number') cacheWriteTokens = ext['cache_creation_input_tokens'];
+
+        // Reasoning tokens (o1, o3, DeepSeek-R1, etc.)
+        const ctd = ext['completion_tokens_details'] as Record<string, number> | undefined;
+        if (ctd?.['reasoning_tokens']) reasoningTokens = ctd['reasoning_tokens'];
       }
     }
 
@@ -426,28 +456,48 @@ export class OpenAIProvider implements Provider {
       }
     }
 
+    // Map OpenAI/OpenRouter finish_reason to our normalized stopReason
+    let stopReason: ProviderResponse['stopReason'];
+    if (finishReason === 'tool_calls') stopReason = 'tool_use';
+    else if (finishReason === 'length') stopReason = 'max_tokens';
+    else if (finishReason === 'content_filter') stopReason = 'content_filter';
+    else stopReason = 'end_turn';
+
     return {
       text: currentText,
       toolCalls,
-      stopReason: toolCalls.length > 0 ? 'tool_use' : 'end_turn',
+      stopReason,
+      ...(actualModel !== undefined ? { model: actualModel } : {}),
       usage: {
         input: inputTokens,
         output: outputTokens,
-        cacheRead: 0,
-        cacheWrite: 0,
+        cacheRead: cacheReadTokens,
+        cacheWrite: cacheWriteTokens,
+        reasoning: reasoningTokens,
       },
     };
   }
 
   private convertMessages(systemPrompt: string, messages: ProviderMessage[]): ChatCompletionMessageParam[] {
-    const result: ChatCompletionMessageParam[] = [
-      { role: 'system', content: systemPrompt },
-    ];
+    // Add cache_control to system message for providers that support explicit cache marking
+    // (Anthropic-compatible OpenAI endpoints, DeepSeek, etc.). OpenAI native ignores unknown fields.
+    const systemMsg = { role: 'system' as const, content: systemPrompt };
+    (systemMsg as unknown as Record<string, unknown>)['cache_control'] = { type: 'ephemeral' };
+    const result: ChatCompletionMessageParam[] = [systemMsg];
+
+    // Find the last user message object so we can mark it for caching
+    let lastUserMsg: ProviderMessage | undefined;
+    for (const msg of messages) {
+      if (msg.role === 'user') lastUserMsg = msg;
+    }
 
     for (const msg of messages) {
       if (msg.role === 'user') {
+        const isLastUser = msg === lastUserMsg;
         if (typeof msg.content === 'string') {
-          result.push({ role: 'user', content: msg.content });
+          const m = { role: 'user' as const, content: msg.content };
+          if (isLastUser) (m as unknown as Record<string, unknown>)['cache_control'] = { type: 'ephemeral' };
+          result.push(m);
         } else {
           // Mixed content (text + images + documents) for OpenAI vision
           const parts = msg.content.map((part) => {
@@ -462,7 +512,9 @@ export class OpenAIProvider implements Provider {
               image_url: { url: `data:${part.mediaType};base64,${part.data}` },
             };
           });
-          result.push({ role: 'user', content: parts });
+          const m = { role: 'user' as const, content: parts };
+          if (isLastUser) (m as unknown as Record<string, unknown>)['cache_control'] = { type: 'ephemeral' };
+          result.push(m);
         }
       } else if (msg.role === 'assistant') {
         const entry: ChatCompletionMessageParam = {

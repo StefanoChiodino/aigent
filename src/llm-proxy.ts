@@ -112,8 +112,10 @@ export class LLMProxy {
         : '0.0';
       log.info('LLM response', {
         id, ms, stopReason: response.stopReason,
+        ...(response.model ? { model: response.model } : {}),
         inputTokens: response.usage.input, outputTokens: response.usage.output,
         cacheRead: response.usage.cacheRead, cacheWrite: response.usage.cacheWrite,
+        ...(response.usage.reasoning ? { reasoningTokens: response.usage.reasoning } : {}),
         cacheHitRate: `${cacheHitRate}%`,
         toolCalls: response.toolCalls.length,
       });
