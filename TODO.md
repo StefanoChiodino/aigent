@@ -57,7 +57,7 @@ ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile bu
 
 ## Testing
 
-- [ ] **Integration smoke test** — headless `repl.ts`-based test: start agent, send message, assert tool call. Currently all tests are unit tests; there's no end-to-end test that starts the actual server.
+- [x] **Integration smoke test** — `make test-llm` runs a real conversation loop against a local LLM (Ollama). Auto-starts Ollama, pulls a model if needed, verifies text response + tool call round-trip. Configurable model and context window for different hardware.
 - [ ] **Compaction round-trip test** — verify compacted conversation can continue without errors. Unit tests exist in `compact.test.ts`; this is an end-to-end continuation test.
 
 ---
@@ -91,6 +91,7 @@ Background tasks:  src/tasks.ts
 
 Test commands:
   make check          — typecheck + unit tests + web tests + builds
+  make test-llm       — integration test with local LLM (Ollama, on demand)
   node --import tsx/esm --test src/reflection.test.ts  — run specific test file
 
 Build commands:

@@ -31,6 +31,7 @@ function makeCtx(overrides?: Partial<ConfigWriteContext>): ConfigWriteContext & 
     injectSystemMessage(content: string) { messages.push(content); },
     IS_TEST_MODE: true,
     REPO_DIR: tmpdir(),
+    WORKSPACE_PATH: join(tmpdir(), 'workspace'),
     resolveHostPath: (p: string) => p,
     sent,
     emitted,

@@ -183,7 +183,7 @@ export class Agent {
     }
 
     // Load workspace context — split for prompt caching (base is stable/cached, workspace is dynamic)
-    this.workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '/workspace';
+    this.workspacePath = options.workspacePath ?? process.env['AIGENT_WORKSPACE'] ?? '';
     const workspaceContext = loadWorkspaceContext(this.workspacePath);
     this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext + `\n\nCurrent model: ${this.model}`];
   }

@@ -338,9 +338,9 @@ function startServerProcess(): void {
 
   // In prod/global-install mode spawn the compiled server.js directly (no tsx).
   // In dev mode spawn server.ts via tsx (as before).
-  const defaultWorkspace = IS_DEV_MODE
-    ? resolve(REPO_DIR, 'workspace')
-    : getDefaultWorkspace();
+  // Always use XDG path — no repo-relative default.
+  // Use AIGENT_WORKSPACE or --workspace to override.
+  const defaultWorkspace = getDefaultWorkspace();
 
   let spawnCmd: string;
   let spawnArgs: string[];
@@ -787,7 +787,8 @@ function injectSystemMessage(content: string): void {
 // --- Config write & edit-file requests (delegated to gk-config-writes.ts) ---
 
 function getConfigWriteContext(): ConfigWriteContext {
-  return { client, log, injectSystemMessage, IS_TEST_MODE, REPO_DIR, resolveHostPath };
+  const WORKSPACE_PATH = process.env['AIGENT_WORKSPACE'] ?? getDefaultWorkspace();
+  return { client, log, injectSystemMessage, IS_TEST_MODE, REPO_DIR, WORKSPACE_PATH, resolveHostPath };
 }
 
 function handleConfigWriteRequest(id: string, file: string, content: string, reason: string): void {

@@ -7,7 +7,7 @@
 
 import { execSync, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { sanitizedEnv, validateFetchUrl, validateFetchUrlDns, checkCommandSafety, validateReadonlyCommand, checkSensitivePath, checkFilePermission, readFilePermissions } from '../safety.js';
 import { auditLog } from '../audit.js';
 import type { ToolContentBlock, ImageMediaType } from '../provider.js';
@@ -639,7 +639,7 @@ export async function executeTool(
     case 'search_memory': {
       const { query, days } = input as { query: string; days?: number };
       const searchDays = Math.min(days ?? 30, 365);
-      const workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
+      const workspacePath = process.env['AIGENT_WORKSPACE'] ?? '';
       const memoryDir = `${workspacePath}/memory`;
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - searchDays);
@@ -754,7 +754,7 @@ export async function executeTool(
     case 'query_episodes': {
       const { domain, outcome, tags, since, until, limit } = input as QueryEpisodesInput;
       const { queryEpisodes } = await import('../episodes.js');
-      const wsp = process.env['AIGENT_WORKSPACE'] ?? join(process.cwd(), 'workspace');
+      const wsp = process.env['AIGENT_WORKSPACE'] ?? '';
       const episodes = queryEpisodes(wsp, {
         domain, outcome, tags, since, until,
         limit: Math.min(limit ?? 20, 200),
@@ -782,7 +782,7 @@ export async function executeTool(
     case 'search_episodes': {
       const { query, limit, min_similarity } = input as { query: string; limit?: number; min_similarity?: number };
       const { searchEpisodesSemantic, hasIndex } = await import('../episode-index.js');
-      const wsp = process.env['AIGENT_WORKSPACE'] ?? join(process.cwd(), 'workspace');
+      const wsp = process.env['AIGENT_WORKSPACE'] ?? '';
       if (!hasIndex(wsp)) return 'No semantic index found. Episodes are auto-indexed when logged — log some episodes first.';
       const results = await searchEpisodesSemantic(wsp, query, {
         limit: Math.min(limit ?? 5, 20),

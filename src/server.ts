@@ -1698,7 +1698,11 @@ function restoreSession(): boolean {
 
 model = process.env['AIGENT_MODEL'] ?? '';
 currentThinking = (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
-workspacePath = process.env['AIGENT_WORKSPACE'] ?? '/workspace';
+workspacePath = process.env['AIGENT_WORKSPACE'] ?? '';
+if (!workspacePath) {
+  log.error('AIGENT_WORKSPACE not set — gatekeeper must set this before spawning the server');
+  process.exit(1);
+}
 
 let mcpManager: MCPManager | null = null;
 

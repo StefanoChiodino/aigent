@@ -65,6 +65,11 @@ test-e2e:
 test-e2e-spec:
 	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts $(SPEC) --reporter=line
 
+# Integration test with a local LLM (requires Ollama or compatible — auto-starts if needed)
+# Config: AIGENT_LLM_TEST_MODEL (default: auto), AIGENT_LLM_TEST_CONTEXT (default: 10000)
+test-llm:
+	node --import tsx/esm --test --test-timeout 300000 tests/test-llm.ts
+
 # Fast subset — inject-based tests only (~10s), great for quick feedback
 test-e2e-fast:
 	AIGENT_TEST_MODE=1 npx playwright test --config tests/playwright.config.ts --grep @fast --reporter=line

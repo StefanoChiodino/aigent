@@ -19,6 +19,7 @@ export interface ConfigWriteContext {
   injectSystemMessage(content: string): void;
   IS_TEST_MODE: boolean;
   REPO_DIR: string;
+  WORKSPACE_PATH: string;
   resolveHostPath(input: string): string;
 }
 
@@ -33,8 +34,8 @@ export function handleConfigWriteRequest(ctx: ConfigWriteContext, id: string, fi
     return;
   }
 
-  const configPath = join(ctx.REPO_DIR, 'workspace', 'config', file);
-  const fallbackPath = join(ctx.REPO_DIR, 'workspace', file);
+  const configPath = join(ctx.WORKSPACE_PATH, 'config', file);
+  const fallbackPath = join(ctx.WORKSPACE_PATH, file);
   let current = '';
   try {
     current = existsSync(configPath) ? readFileSync(configPath, 'utf-8') :
@@ -82,12 +83,12 @@ export async function handleConfigApproveReject(ctx: ConfigWriteContext, input: 
 
     pendingConfigWriteRequests.delete(id);
 
-    const configDir = join(ctx.REPO_DIR, 'workspace', 'config');
+    const configDir = join(ctx.WORKSPACE_PATH, 'config');
     mkdirSync(configDir, { recursive: true });
     const filePath = join(configDir, pending.file);
     try {
       writeFileSync(filePath, pending.content);
-      writeFileSync(join(ctx.REPO_DIR, 'workspace', pending.file), pending.content);
+      writeFileSync(join(ctx.WORKSPACE_PATH, pending.file), pending.content);
 
       ctx.log.info('Config write approved', { id, file: pending.file });
       ctx.client!.send({ type: 'config_write_response', id, ok: true, message: `${pending.file} updated` });
