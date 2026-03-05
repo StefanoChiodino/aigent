@@ -18,6 +18,9 @@ const RECENT_DAYS = 3;
 /** File content cache — keyed by path, stores content + mtime to avoid re-reading unchanged files. */
 const fileCache = new Map<string, { mtime: number; content: string }>();
 
+/** Assembled context string cache — avoids re-concatenation when no files changed. */
+let contextCache: { fingerprint: string; result: string } | null = null;
+
 function readIfExists(path: string): string | null {
   try {
     if (!existsSync(path)) return null;
@@ -80,18 +83,46 @@ function listDailyMemoryFiles(memoryDir: string): { date: string; path: string; 
  * Set AIGENT_SLIM_PROMPT=1 to also skip MEMORY.md (useful for small context windows).
  */
 export function loadWorkspaceContext(workspacePath: string): string {
-  const sections: string[] = [];
   const slimPrompt = process.env['AIGENT_SLIM_PROMPT'] === '1' || process.env['AIGENT_SLIM_PROMPT'] === 'true';
   const fullLogs = process.env['AIGENT_FULL_LOGS'] === '1' || process.env['AIGENT_FULL_LOGS'] === 'true';
 
-  // Ensure memory directory exists
+  // Build a fingerprint from all source file mtimes to detect changes
+  const mtimes: string[] = [];
+  const configDir = join(workspacePath, 'config');
   const memoryDir = join(workspacePath, 'memory');
+  try {
+    if (existsSync(configDir)) {
+      for (const f of readdirSync(configDir).filter((f) => f.endsWith('.md')).sort()) {
+        const st = statSync(join(configDir, f));
+        mtimes.push(`${f}:${st.mtimeMs}`);
+      }
+    }
+    if (!slimPrompt) {
+      for (const file of MEMORY_FILES) {
+        const p = join(workspacePath, file.name);
+        if (existsSync(p)) mtimes.push(`${file.name}:${statSync(p).mtimeMs}`);
+      }
+    }
+    if (existsSync(memoryDir)) {
+      for (const f of readdirSync(memoryDir).filter((f) => /^\d{4}-\d{2}-\d{2}\.md$/.test(f)).sort()) {
+        const st = statSync(join(memoryDir, f));
+        mtimes.push(`${f}:${st.mtimeMs}`);
+      }
+    }
+  } catch { /* stat errors are non-fatal */ }
+  const fingerprint = `${slimPrompt}:${fullLogs}:${mtimes.join(',')}`;
+  if (contextCache && contextCache.fingerprint === fingerprint) {
+    return contextCache.result;
+  }
+
+  const sections: string[] = [];
+
+  // Ensure memory directory exists
   if (!existsSync(memoryDir)) {
     mkdirSync(memoryDir, { recursive: true });
   }
 
   // Load config files (read-only instruction files) — all .md files in config/
-  const configDir = join(workspacePath, 'config');
   if (existsSync(configDir)) {
     const configFiles = readdirSync(configDir)
       .filter((f) => f.endsWith('.md'))
@@ -163,15 +194,24 @@ export function loadWorkspaceContext(workspacePath: string): string {
   log.debug('Workspace context loaded', { sections: sections.length, slimPrompt, fullLogs, totalFiles: allFiles.length });
 
   if (sections.length === 0) {
+    contextCache = { fingerprint, result: '' };
     return '';
   }
 
-  return `\n\n---\n# Workspace Context\n\nThe following files define who you are and what you know.\n\nConfig files (${configDir}/) are read-only in the sandbox. To edit them, use the\nrequest_config_write tool — the user will see a diff and approve or deny.\n\nMemory files (${workspacePath}/) are freely writable — update them as you learn.\n\n${sections.join('\n\n---\n\n')}`;
+  const result = `\n\n---\n# Workspace Context\n\nThe following files define who you are and what you know.\n\nConfig files (${configDir}/) are read-only in the sandbox. To edit them, use the\nrequest_config_write tool — the user will see a diff and approve or deny.\n\nMemory files (${workspacePath}/) are freely writable — update them as you learn.\n\n${sections.join('\n\n---\n\n')}`;
+  contextCache = { fingerprint, result };
+  return result;
 }
 
 /** Reset the file cache — for test isolation only. */
 export function _clearCacheForTest(): void {
   fileCache.clear();
+  contextCache = null;
+}
+
+/** Invalidate the assembled context cache (e.g. on /refresh). */
+export function clearContextCache(): void {
+  contextCache = null;
 }
 
 /**

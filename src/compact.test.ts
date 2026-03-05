@@ -149,4 +149,49 @@ describe('compactConversation', () => {
     assert.equal(summary, '');
     assert.deepEqual(result, messages);
   });
+
+  it('light aggressiveness keeps 4 recent turns', async () => {
+    const messages: ProviderMessage[] = [];
+    for (let i = 0; i < 8; i++) {
+      messages.push({ role: 'user', content: `question ${i}` });
+      messages.push({ role: 'assistant', content: `answer ${i}` });
+    }
+    const { messages: result, summary } = await compactConversation(
+      mockProvider(), 'test', messages, undefined, undefined, 'light',
+    );
+    assert.ok(summary.length > 0, 'should produce a summary');
+    // Light keeps 4 turns — summary(2) + 4 user + 4 assistant = 10 messages
+    // The recent section should contain the last 4 user messages (questions 4-7)
+    const userMessages = result.filter((m) => m.role === 'user' && !(m as { content: string }).content.includes('Context from earlier'));
+    assert.ok(userMessages.length >= 4, `light should keep at least 4 user turns, got ${userMessages.length}`);
+  });
+
+  it('aggressive aggressiveness keeps only 1 recent turn', async () => {
+    const messages: ProviderMessage[] = [];
+    for (let i = 0; i < 8; i++) {
+      messages.push({ role: 'user', content: `question ${i}` });
+      messages.push({ role: 'assistant', content: `answer ${i}` });
+    }
+    const { messages: result, summary } = await compactConversation(
+      mockProvider(), 'test', messages, undefined, undefined, 'aggressive',
+    );
+    assert.ok(summary.length > 0, 'should produce a summary');
+    // Aggressive keeps 1 turn — summary(2) + 1 user + 1 assistant = 4 messages
+    const userMessages = result.filter((m) => m.role === 'user' && !(m as { content: string }).content.includes('Context from earlier'));
+    assert.equal(userMessages.length, 1, 'aggressive should keep exactly 1 user turn');
+  });
+
+  it('moderate aggressiveness keeps 2 recent turns (default)', async () => {
+    const messages: ProviderMessage[] = [];
+    for (let i = 0; i < 8; i++) {
+      messages.push({ role: 'user', content: `question ${i}` });
+      messages.push({ role: 'assistant', content: `answer ${i}` });
+    }
+    const { messages: result, summary } = await compactConversation(
+      mockProvider(), 'test', messages, undefined, undefined, 'moderate',
+    );
+    assert.ok(summary.length > 0, 'should produce a summary');
+    const userMessages = result.filter((m) => m.role === 'user' && !(m as { content: string }).content.includes('Context from earlier'));
+    assert.equal(userMessages.length, 2, 'moderate should keep exactly 2 user turns');
+  });
 });

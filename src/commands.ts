@@ -10,6 +10,7 @@ import type { UserContent, ProviderMessage, Provider } from './provider.js';
 import type { ServerEvent, TokenUsage, DisplayAttachment } from './protocol.js';
 import type { TaskQueue } from './tasks.js';
 import { distillToMemory } from './compact.js';
+import { clearContextCache } from './workspace.js';
 import {
   listProfiles, getProfilePath, listSessions, saveSession,
   loadSession, generateSessionId, clearAutoSave,
@@ -189,6 +190,7 @@ const commands: CommandDef[] = [
   {
     match: '/refresh',
     execute: (_input, ctx) => {
+      clearContextCache();
       ctx.agent.reloadSystemPrompt();
       ctx.addSystemMessage('Workspace files reloaded.');
       return true;

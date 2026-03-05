@@ -142,4 +142,26 @@ describe('loadWorkspaceContext', () => {
     assert.ok(ctx.includes('Workspace Context'));
     assert.ok(ctx.includes('read-only in the sandbox'));
   });
+
+  it('returns cached result when no files changed', () => {
+    mkdirSync(join(tmpDir, 'config'), { recursive: true });
+    writeFileSync(join(tmpDir, 'config', 'AGENTS.md'), '# Instructions');
+    const first = loadWorkspaceContext(tmpDir);
+    const second = loadWorkspaceContext(tmpDir);
+    // Same reference — proves the cache was hit, not rebuilt
+    assert.equal(first, second);
+  });
+
+  it('invalidates cache when a file changes', async () => {
+    mkdirSync(join(tmpDir, 'config'), { recursive: true });
+    writeFileSync(join(tmpDir, 'config', 'AGENTS.md'), '# Original');
+    const first = loadWorkspaceContext(tmpDir);
+    assert.ok(first.includes('Original'));
+    // Wait 10ms to ensure mtime changes (some filesystems have 1ms resolution)
+    await new Promise((r) => setTimeout(r, 10));
+    writeFileSync(join(tmpDir, 'config', 'AGENTS.md'), '# Updated');
+    const second = loadWorkspaceContext(tmpDir);
+    assert.ok(second.includes('Updated'));
+    assert.ok(!second.includes('Original'));
+  });
 });

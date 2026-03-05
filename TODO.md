@@ -24,10 +24,12 @@ ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile bu
 
 ## Token / Cost Optimisation
 
-- [ ] **Tool description audit** — trim descriptions in `src/tools/defs.ts` longer than ~100 tokens. Many tool descriptions are verbose and waste context window on every turn.
+- [x] **Tool description audit** — trimmed all 24 tool descriptions to ≤100 chars each. Saved ~730 chars (~183 tokens) from tool definitions.
 - [ ] **Proactive compaction** — Don't wait for 70% context usage or user-triggered `/reset`. If the conversation has grown large (e.g. 40-50k+ tokens) and the useful context can be synthesized into a compact summary, the agent should self-compact. Heuristics: long idle stretches, topic shifts, completed tasks with no follow-up. Saves significant cost on conversations that drift past usefulness.
 - [ ] **Prompt cache warm-up on startup** — send a minimal no-op message to pre-warm the Anthropic prompt cache. First real message would then hit the cache instead of paying full input cost.
-- [ ] **Compaction prompt refinement** — ensure summaries preserve file paths, bug IDs, code references. Current compaction sometimes loses specific details. See `src/compact.ts` COMPACT_PROMPT.
+- [x] **Compaction prompt refinement** — moderate and aggressive prompts now explicitly request file paths with line numbers, function/variable names, error messages, numeric values, and tool call outcomes.
+- [x] **Adaptive compaction aggressiveness** — `compact()` now takes an aggressiveness parameter. Light at 80% (keeps 4 turns), moderate at 85% (keeps 2), aggressive on 413 (keeps 1).
+- [x] **Workspace context string caching** — `loadWorkspaceContext()` caches the assembled string and returns it immediately when no source files changed. `/refresh` invalidates the cache.
 - [ ] **Anthropic subscription usage tracking** — display monthly usage stats from Anthropic's billing API. Local cumulative tracking exists in `src/usage-tracking.ts`; this is about pulling from the Anthropic side.
 
 ---

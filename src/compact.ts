@@ -16,16 +16,27 @@ const COMPACT_PROMPT = `Summarize this entire conversation so the agent can cont
 Structure your summary in two sections:
 
 ## Key entities
-List every named entity discussed: file paths, feature names, project names, people, tools, models, chapter numbers, etc. Use proper nouns, never "the file" or "the character".
+List every named entity discussed. Be specific — use exact identifiers, not vague references:
+- File paths with line numbers when referenced (e.g. src/agent.ts:230)
+- Function, class, and variable names
+- Error messages and error codes
+- Version numbers, thresholds, numeric values
+- Feature names, project names, people, models
 
 ## Summary
-Compressed history of the conversation: decisions made, what was done, what failed, preferences expressed, files modified. Be concise for older/completed topics.
+Compressed history: decisions made, what was done (succeeded or failed), preferences expressed, files modified. Be concise for older/completed topics.
 
-End this section with a detailed paragraph about the **current active conversation** — what is being discussed right now, what the user's latest request or question is, what the agent was about to do, and any context needed to continue that thread as if the conversation never stopped. This is the most important part.`;
+End with a detailed paragraph about the **current active conversation** — what is being discussed right now, the user's latest request, what the agent was about to do, and any context needed to continue as if the conversation never stopped. This is the most important part.`;
 
 const COMPACT_PROMPT_MODERATE = COMPACT_PROMPT;
 
-const COMPACT_PROMPT_AGGRESSIVE = `Aggressively compress this conversation to essential context only. Keep: current task, key decisions, active file paths, critical errors. Drop: completed sub-tasks, exploration that led nowhere, verbose tool outputs, resolved discussions. End with a focused summary of the current active thread so the conversation can continue.`;
+const COMPACT_PROMPT_AGGRESSIVE = `Aggressively compress this conversation to essential context only.
+
+Keep: current task, key decisions, exact file paths (with line numbers), function/variable names, error messages, numeric values. Drop: completed sub-tasks, exploration that led nowhere, verbose tool outputs, resolved discussions.
+
+For each tool action, note whether it succeeded or failed — not just that it happened.
+
+End with a focused summary of the current active thread so the conversation can continue.`;
 
 /**
  * Prompt for end-of-session/reset memory distillation.

@@ -227,7 +227,7 @@ export class Agent {
       if (this._totalUsage.contextTokens) {
         const contextUsed = this._totalUsage.contextTokens;
         if (contextUsed > this.getContextWindow() * 0.80 && this.messages.length > 8) {
-          await this.compact(callbacks);
+          await this.compact(callbacks, 'light');
         }
       }
 
@@ -238,8 +238,8 @@ export class Agent {
       } catch (err: unknown) {
         const e = err as { status?: number };
         if (e.status === 413) {
-          log.warn('Request too large (413) — compacting conversation and retrying');
-          await this.compact(callbacks);
+          log.warn('Request too large (413) — compacting aggressively and retrying');
+          await this.compact(callbacks, 'aggressive');
           response = await this.sendWithRetry(callbacks);
         } else {
           throw err;
@@ -271,7 +271,7 @@ export class Agent {
         // Auto-compact check after final response
         const contextUsed = response.usage.input + response.usage.cacheRead + response.usage.cacheWrite;
         if (contextUsed > this.getContextWindow() * 0.85 && this.messages.length > 8) {
-          await this.compact(callbacks);
+          await this.compact(callbacks, 'moderate');
         }
         return response.text;
       }
@@ -411,10 +411,10 @@ export class Agent {
         { onText: callbacks?.onText, onThinking: callbacks?.onThinking },
       );
       this.messages.push({ role: 'assistant', content: handoff.text });
-      await this.compact(callbacks);
+      await this.compact(callbacks, 'moderate');
       return handoff.text;
     } catch {
-      await this.compact(callbacks);
+      await this.compact(callbacks, 'moderate');
       return '[agent hit maximum tool-use iterations]';
     }
   }
@@ -611,7 +611,7 @@ export class Agent {
     }
   }
 
-  private async compact(callbacks?: ChatCallbacks): Promise<void> {
+  private async compact(callbacks?: ChatCallbacks, aggressiveness?: 'light' | 'moderate' | 'aggressive'): Promise<void> {
     // Deduplicate concurrent compaction calls — if one is already running,
     // wait for it to finish rather than firing another LLM summarization.
     if (this.compactPromise) {
@@ -621,7 +621,7 @@ export class Agent {
     }
 
     const before = this.messages.length;
-    log.info('Compacting', { messagesBefore: before });
+    log.info('Compacting', { messagesBefore: before, aggressiveness: aggressiveness ?? 'moderate' });
 
     this.compactPromise = (async () => {
       const { messages: compacted, summary } = await compactConversation(
@@ -629,6 +629,8 @@ export class Agent {
         this.model,
         this.messages,
         this.workspacePath,
+        undefined, // keepRecentTurns — derived from aggressiveness
+        aggressiveness,
       );
 
       if (summary) {

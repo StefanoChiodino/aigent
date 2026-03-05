@@ -46,7 +46,8 @@
       "Bash(curl -s \"http://localhost:3141/assets/index-gYGSMR8D.js\" -o /dev/null -w \"Status: %{http_code}\\\\n\")",
       "Bash(*)",
       "WebSearch",
-      "WebFetch(domain:hackernoon.com)"
+      "WebFetch(domain:hackernoon.com)",
+      "WebFetch(domain:openrouter.ai)"
     ],
     "additionalDirectories": [
       "/tmp"
