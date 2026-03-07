@@ -379,6 +379,17 @@ const switchModelTool: ToolDef = {
   },
 };
 
+const compactContextTool: ToolDef = {
+  name: 'compact_context',
+  description:
+    'Compact the conversation context by summarizing old messages. Frees token budget for new work.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {},
+    required: [],
+  },
+};
+
 const searchMemoryTool: ToolDef = {
   name: 'search_memory',
   description:
@@ -517,7 +528,7 @@ export const internalTools: ToolDef[] = [
   execTool, readFileTool, writeFileTool, editFileTool, listFilesTool, grepTool,
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
   hostTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
-  searchMemoryTool, browserExtTool, askUserTool,
+  compactContextTool, searchMemoryTool, browserExtTool, askUserTool,
   logEpisodeTool, queryEpisodesTool, searchEpisodesTool,
 ];
 

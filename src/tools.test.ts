@@ -128,21 +128,22 @@ describe('fromClaudeCodeName', () => {
 // ---------------------------------------------------------------------------
 
 describe('getToolDefinitions', () => {
-  it('returns 24 tools with internal names', () => {
+  it('returns 25 tools with internal names', () => {
     const tools = getToolDefinitions(false);
-    assert.equal(tools.length, 24);
+    assert.equal(tools.length, 25);
   });
 
-  it('returns 24 tools with CC names', () => {
+  it('returns 25 tools with CC names', () => {
     const tools = getToolDefinitions(true);
-    assert.equal(tools.length, 24);
+    assert.equal(tools.length, 25);
   });
 
-  it('internal names include exec, read_file, write_file', () => {
+  it('internal names include exec, read_file, write_file, compact_context', () => {
     const names = getToolDefinitions(false).map((t) => t.name);
     assert.ok(names.includes('exec'));
     assert.ok(names.includes('read_file'));
     assert.ok(names.includes('write_file'));
+    assert.ok(names.includes('compact_context'));
   });
 
   it('CC names include Bash, Read, Write', () => {
@@ -372,6 +373,10 @@ describe('summarizeToolCall', () => {
     assert.ok(result.endsWith('...'));
     // "ask: " + 60 chars + "..."
     assert.ok(result.length <= 68);
+  });
+
+  it('compact_context: "compact context"', () => {
+    assert.equal(summarizeToolCall('compact_context', {}, false), 'compact context');
   });
 
   it('unknown tool returns raw name', () => {

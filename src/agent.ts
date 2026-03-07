@@ -78,6 +78,16 @@ When modifying your own code:
 
 You CAN and SHOULD improve yourself when you find limitations.
 
+## Context Management
+
+Your system prompt includes a live context usage line (e.g. "Context: 45% used (90k/200k tokens), 24 messages").
+Use \`compact_context\` to summarize old messages and free token budget. You decide when — consider:
+- Are older parts of the conversation stale or no longer relevant to the active task?
+- Is the context growing with large tool outputs that have been processed?
+- Would the user benefit from freeing space for a long task ahead?
+At 70%+ usage, compaction becomes important. At 80%+ it is urgent. Below 30% it is rarely needed.
+Mention what you're doing briefly when you compact (e.g. "I'll compact our context to free up space.").
+
 ## Workspace & Memory
 
 Your workspace is at /workspace/. Update MEMORY.md and daily logs as you learn things worth remembering.
@@ -268,11 +278,8 @@ export class Agent {
       // No tool calls — return text
       if (response.toolCalls.length === 0) {
         this.thinking = savedThinking; // restore thinking level
-        // Auto-compact check after final response
-        const contextUsed = response.usage.input + response.usage.cacheRead + response.usage.cacheWrite;
-        if (contextUsed > this.getContextWindow() * 0.85 && this.messages.length > 8) {
-          await this.compact(callbacks, 'moderate');
-        }
+        // The LLM owns compaction decisions via compact_context tool.
+        // Hard safety nets (pre-send 80%, 413 fallback) remain as guardrails.
         return response.text;
       }
 
@@ -303,7 +310,20 @@ export class Agent {
 
           const toolStart = performance.now();
           let result: string | ToolContentBlock[];
-          if (toolName === 'switch_model') {
+          if (toolName === 'compact_context') {
+            const contextWindow = this.getContextWindow();
+            const currentUsage = this._totalUsage.contextTokens ?? 0;
+            const pct = contextWindow > 0 ? Math.round((currentUsage / contextWindow) * 100) : 0;
+            if (this.messages.length < 4) {
+              result = 'Conversation too short to compact.';
+            } else {
+              const aggressiveness = pct >= 80 ? 'aggressive' as const : pct >= 60 ? 'moderate' as const : 'light' as const;
+              await this.compact(callbacks, aggressiveness);
+              const afterUsage = this._totalUsage.contextTokens ?? currentUsage;
+              const afterPct = contextWindow > 0 ? Math.round((afterUsage / contextWindow) * 100) : 0;
+              result = `Context compacted (${aggressiveness}). Usage: ${pct}% → ${afterPct}% (${this.messages.length} messages remaining).`;
+            }
+          } else if (toolName === 'switch_model') {
             const { model: newModel, reason } = tc.input as { model: string; reason?: string };
             const oldModel = this.model;
             this.model = newModel;
@@ -956,12 +976,23 @@ export class Agent {
 
   reloadSystemPrompt(): void {
     const workspaceContext = loadWorkspaceContext(this.workspacePath);
-    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext + `\n\nCurrent model: ${this.model}`];
+    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext + `\n\nCurrent model: ${this.model}` + this.getContextStatsLine()];
   }
 
   reloadWorkspace(workspacePath: string): void {
     const workspaceContext = loadWorkspaceContext(workspacePath);
-    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext + `\n\nCurrent model: ${this.model}`];
+    this.systemPromptParts = [BASE_SYSTEM_PROMPT + this.extraSystemPrompt, workspaceContext + `\n\nCurrent model: ${this.model}` + this.getContextStatsLine()];
+  }
+
+  /** One-line context usage summary for the system prompt. */
+  private getContextStatsLine(): string {
+    const contextWindow = this.getContextWindow();
+    const currentUsage = this._totalUsage.contextTokens ?? 0;
+    if (currentUsage === 0) return ''; // first turn — no stats yet
+    const pct = Math.round((currentUsage / contextWindow) * 100);
+    const usageK = Math.round(currentUsage / 1000);
+    const windowK = Math.round(contextWindow / 1000);
+    return `\nContext: ${pct}% used (${usageK}k/${windowK}k tokens), ${this.messages.length} messages`;
   }
 
   /** Update extra system prompt (e.g., host daemon capabilities changed). */

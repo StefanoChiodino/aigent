@@ -147,6 +147,8 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       const { query } = input as { query: string };
       return `search memory: "${query}"`;
     }
+    case 'compact_context':
+      return 'compact context';
     case 'switch_model': {
       const { model: m, reason } = input as SwitchModelInput;
       return reason ? `switch model → ${m} (${reason.slice(0, 40)})` : `switch model → ${m}`;

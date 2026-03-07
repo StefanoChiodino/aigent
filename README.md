@@ -330,7 +330,7 @@ The continuous learning system (episodes, semantic retrieval, reflection, feedba
 
 ---
 
-## Tools (26)
+## Tools (27)
 
 | Tool | Description |
 |------|-------------|
@@ -351,6 +351,7 @@ The continuous learning system (episodes, semantic retrieval, reflection, feedba
 | `dispatch_task` | Spawn a background agent — returns immediately, result injected later |
 | `spawn_agent` | Spawn a sub-agent synchronously — blocks until done |
 | `switch_model` | Change active model mid-conversation (upgrade or downgrade) |
+| `compact_context` | Proactively compact conversation context — the agent decides when based on content relevance |
 | `host` | Call host OS capabilities: clipboard, audio, notifications, open |
 | `host_edit_file` | Propose str_replace edits to a host file — user sees diff and approves |
 | `request_config_write` | Propose edits to config files (SOUL.md, AGENTS.md, etc.) — user sees diff |

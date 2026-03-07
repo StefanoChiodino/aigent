@@ -25,7 +25,7 @@ ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile bu
 ## Token / Cost Optimisation
 
 - [x] **Tool description audit** — trimmed all 24 tool descriptions to ≤100 chars each. Saved ~730 chars (~183 tokens) from tool definitions.
-- [ ] **Proactive compaction** — Don't wait for 70% context usage or user-triggered `/reset`. If the conversation has grown large (e.g. 40-50k+ tokens) and the useful context can be synthesized into a compact summary, the agent should self-compact. Heuristics: long idle stretches, topic shifts, completed tasks with no follow-up. Saves significant cost on conversations that drift past usefulness.
+- [x] **Proactive compaction** — LLM-driven: context usage stats injected into system prompt, `compact_context` tool lets the agent decide when to compact based on content relevance (not just threshold). Aggressiveness auto-scales with usage %. Post-response auto-compact at 85% removed; pre-send 80% safety net and 413 fallback retained as guardrails.
 - [ ] **Prompt cache warm-up on startup** — send a minimal no-op message to pre-warm the Anthropic prompt cache. First real message would then hit the cache instead of paying full input cost.
 - [x] **Compaction prompt refinement** — moderate and aggressive prompts now explicitly request file paths with line numbers, function/variable names, error messages, numeric values, and tool call outcomes.
 - [x] **Adaptive compaction aggressiveness** — `compact()` now takes an aggressiveness parameter. Light at 80% (keeps 4 turns), moderate at 85% (keeps 2), aggressive on 413 (keeps 1).
@@ -37,7 +37,7 @@ ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile bu
 ## UI / UX
 
 - [x] **Undo Escape clear** — Escape again (or Escape after ✕ button) restores the last cleared draft. Toggle behavior: Escape clears → Escape restores → Escape clears.
-- [ ] **STT → ask_user integration** — When the agent asks a question (via `ask_user`), should the STT transcript go directly into the answer input? Need to figure out UX: what happens to text already in the main input box? Options: park existing draft, append, or use a separate input context for ask_user responses.
+- [x] **STT → ask_user integration** — Mic button added to the QuestionForm textarea. Uses the same `useMic` hook as InputArea with identical button styling and behavior (recording/transcribing/VAD states). Typing during dictation calls `commitBase` so user edits are preserved. Mic is auto-aborted on submit/dismiss/question change.
 
 ---
 
