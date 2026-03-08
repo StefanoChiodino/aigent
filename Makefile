@@ -111,8 +111,19 @@ plugin-typecheck:
 	cd aigent-extension && npx tsc --noEmit
 
 # Full production build: TS + web UI (run before npm publish)
-build-release: build web plugin
+build-release: build web plugin vscode
 	@echo "\n✅ Release build complete. Run \`npm pack --dry-run\` to inspect the tarball."
+
+# --- VSCode Extension ---
+
+vscode:
+	cd vscode-extension && npm install && npm run compile
+
+vscode-package: vscode
+	cd vscode-extension && npx vsce package --out ../aigent-vscode.vsix
+
+vscode-dev: vscode-package
+	code --install-extension aigent-vscode.vsix --force
 
 build:
 	npx tsc

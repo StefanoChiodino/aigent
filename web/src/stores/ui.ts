@@ -16,6 +16,7 @@ interface UIState {
   sttAvailable: boolean;
   extensionConnected: boolean;
   extensionPath: string;
+  vscodeConnected: boolean;
   modelName: string;
   availableModels: string[];
   modelsWithoutThinking: string[];
@@ -47,6 +48,7 @@ interface UIState {
   setSttAvailable: (v: boolean) => void;
   setExtensionConnected: (v: boolean) => void;
   setExtensionPath: (v: string) => void;
+  setVscodeConnected: (v: boolean) => void;
   setModelName: (name: string) => void;
   setAvailableModels: (models: string[]) => void;
   setModelsWithoutThinking: (models: string[]) => void;
@@ -79,6 +81,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   sttAvailable: false,
   extensionConnected: false,
   extensionPath: '',
+  vscodeConnected: false,
   modelName: '',
   availableModels: [],
   modelsWithoutThinking: [],
@@ -161,6 +164,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   setSttAvailable: (v) => set({ sttAvailable: v }),
   setExtensionConnected: (v) => set({ extensionConnected: v }),
   setExtensionPath: (v) => set({ extensionPath: v }),
+  setVscodeConnected: (v) => set({ vscodeConnected: v }),
   setModelName: (name) => set({ modelName: name }),
   setAvailableModels: (models) => set({ availableModels: models }),
   setModelsWithoutThinking: (models) => set({ modelsWithoutThinking: models }),

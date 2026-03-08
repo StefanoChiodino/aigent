@@ -4,6 +4,7 @@ import { isDemo } from '../demo/useDemoMode';
 import { useUIStore } from '../stores/ui';
 import { useVoiceStore } from '../stores/voice';
 import { QuestionForm } from './modals/QuestionModal';
+import type { QuestionSttApi } from './modals/QuestionModal';
 import { useMic } from '../hooks/useMic';
 import { useTTS } from '../hooks/useTTS';
 import { captureScreenshot, registerScreenCapCallback, startScreenShare, stopScreenShare } from '../lib/screen';
@@ -228,19 +229,33 @@ export function InputArea() {
   const [hasMicText, setHasMicText] = useState(false);
   const [micCapped, setMicCapped] = useState(false);
 
+  // STT routing: track which textarea is the active target
+  const sttTargetRef = useRef<'input' | 'question'>('input');
+  const questionSttRef = useRef<QuestionSttApi | null>(null);
+
   const { stopAll: ttsStopAll } = useTTS();
 
   const { startMic, stopMic, abortMic, clearTranscript, commitBase } = useMic(useCallback((text: string, windowCapped: boolean) => {
-    lastMicTextRef.current = text;
-    setHasMicText(!!text);
-    setMicCapped(windowCapped);
-    setInputValue(prev => {
-      const oldStt = lastSttValueRef.current;
-      // If user appended text after the last STT value, preserve that suffix
-      const suffix = oldStt && prev.startsWith(oldStt) ? prev.slice(oldStt.length) : '';
-      lastSttValueRef.current = text;
-      return text + suffix;
-    });
+    // Route transcription to whichever textarea has focus
+    if (sttTargetRef.current === 'question' && questionSttRef.current) {
+      const api = questionSttRef.current;
+      api.set(prev => {
+        const oldStt = api.lastSttValue;
+        const suffix = oldStt && prev.startsWith(oldStt) ? prev.slice(oldStt.length) : '';
+        api.lastSttValue = text;
+        return text + suffix;
+      });
+    } else {
+      lastMicTextRef.current = text;
+      setHasMicText(!!text);
+      setMicCapped(windowCapped);
+      setInputValue(prev => {
+        const oldStt = lastSttValueRef.current;
+        const suffix = oldStt && prev.startsWith(oldStt) ? prev.slice(oldStt.length) : '';
+        lastSttValueRef.current = text;
+        return text + suffix;
+      });
+    }
   }, []));
 
   useEffect(() => {
@@ -858,7 +873,11 @@ export function InputArea() {
         onItemsChange={useCallback((items: AtItem[]) => { atItemsRef.current = items; }, [])}
       />
 
-      <QuestionForm />
+      <QuestionForm
+        micControls={{ startMic, stopMic, abortMic, clearTranscript, commitBase, micRecording: micState !== 'idle' }}
+        onSttFocus={useCallback(() => { sttTargetRef.current = 'question'; }, [])}
+        questionSttRef={questionSttRef}
+      />
 
       <div id="input-row">
         <input
@@ -898,6 +917,7 @@ export function InputArea() {
             onKeyDown={handleKeyDown}
             onKeyUp={handleKeyUp}
             onBlur={handleBlur}
+            onFocus={() => { sttTargetRef.current = 'input'; }}
             onPaste={handlePaste}
             autoFocus
           />

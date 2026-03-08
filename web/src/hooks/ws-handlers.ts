@@ -269,6 +269,7 @@ export const handlers: HandlerMap = {
     if (event.sttAvailable !== undefined) ui().setSttAvailable(event.sttAvailable);
     if (event.extensionConnected !== undefined) ui().setExtensionConnected(event.extensionConnected);
     if (event.extensionPath) ui().setExtensionPath(event.extensionPath);
+    if (event.vscodeConnected !== undefined) ui().setVscodeConnected(event.vscodeConnected);
   },
 
   client_settings(event, { settings }) {

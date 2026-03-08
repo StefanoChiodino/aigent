@@ -8,10 +8,24 @@ ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile bu
 
 ~~the aigent just spawn a synchronous agent and I can hear popups sounds but can't see the popups~~ investigated — gatekeeper-first architecture already prevents phantom permission sounds for exec and file_access requests; no reproducible code path found
 
+the model picker on the left bar shows stars but doesn't allow to favourite/unfavourite.
+
 ## Active Bugs
 
 - [ ] **Agent iteration limits** — Sub-agents and the main agent frequently hit tool-use iteration limits mid-task. Need to investigate: better iteration budgets, auto-continuation, task decomposition strategies, or a way for agents to self-checkpoint and resume.
 - [ ] **Mic speech truncation (parked)** — 5 code-level bugs identified (worklet flush, abort race, window-cap, energy gate, live timeout) but symptoms are intermittent and likely mic-hardware-dependent. Revisit if it recurs with the Razer mic. See MEMORY.md for full analysis.
+
+---
+
+## Vision Feature (Parked)
+- [ ] Wire up `onVisionUnsupported` callback in server.ts
+- [ ] Broadcast `modelsWithoutVision` in state
+- [ ] Add actual image stripping logic when retrying
+- [ ] Add unit tests
+
+## VSCode Integration
+- [ ] Explore VSCode extension possibilities
+- [ ] Implement CLI commands for VSCode extension to call
 
 ---
 
@@ -26,7 +40,6 @@ ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile bu
 
 - [x] **Tool description audit** — trimmed all 24 tool descriptions to ≤100 chars each. Saved ~730 chars (~183 tokens) from tool definitions.
 - [x] **Proactive compaction** — LLM-driven: context usage stats injected into system prompt, `compact_context` tool lets the agent decide when to compact based on content relevance (not just threshold). Aggressiveness auto-scales with usage %. Post-response auto-compact at 85% removed; pre-send 80% safety net and 413 fallback retained as guardrails.
-- [ ] **Prompt cache warm-up on startup** — send a minimal no-op message to pre-warm the Anthropic prompt cache. First real message would then hit the cache instead of paying full input cost.
 - [x] **Compaction prompt refinement** — moderate and aggressive prompts now explicitly request file paths with line numbers, function/variable names, error messages, numeric values, and tool call outcomes.
 - [x] **Adaptive compaction aggressiveness** — `compact()` now takes an aggressiveness parameter. Light at 80% (keeps 4 turns), moderate at 85% (keeps 2), aggressive on 413 (keeps 1).
 - [x] **Workspace context string caching** — `loadWorkspaceContext()` caches the assembled string and returns it immediately when no source files changed. `/refresh` invalidates the cache.
@@ -37,7 +50,7 @@ ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile bu
 ## UI / UX
 
 - [x] **Undo Escape clear** — Escape again (or Escape after ✕ button) restores the last cleared draft. Toggle behavior: Escape clears → Escape restores → Escape clears.
-- [x] **STT → ask_user integration** — Mic button added to the QuestionForm textarea. Uses the same `useMic` hook as InputArea with identical button styling and behavior (recording/transcribing/VAD states). Typing during dictation calls `commitBase` so user edits are preserved. Mic is auto-aborted on submit/dismiss/question change.
+- [x] **STT → ask_user integration** — Single `useMic` instance in InputArea with focus-based routing. Mic button on the QuestionForm textarea with identical styling (recording/transcribing/VAD states). Click the question textarea or its mic button → STT goes there; click the main input → STT routes back. Typing during dictation calls `commitBase` so user edits are preserved.
 
 ---
 

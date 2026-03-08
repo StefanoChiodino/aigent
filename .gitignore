@@ -13,3 +13,4 @@ test-results/
 tests/test-results/
 tests/playwright-report/
 tests/tests/
+aigent-vscode.vsix

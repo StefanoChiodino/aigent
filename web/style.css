@@ -1378,6 +1378,9 @@ html, body {
 #ext-badge { font-size: 12px; }
 #ext-badge.ext-on { opacity: 1; }
 #ext-badge.ext-off:has(.ext-setup-popup) { opacity: 1; }
+#vscode-badge { font-size: 12px; }
+#vscode-badge.ext-on { opacity: 1; }
+#vscode-badge.ext-off:has(.ext-setup-popup) { opacity: 1; }
 #ext-badge[data-copied]::after {
   content: 'Copied chrome://extensions';
   position: absolute;
@@ -4042,8 +4045,17 @@ html, body {
   margin-top: 2px;
 }
 
+.question-input-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
 .question-freetext {
   width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -4052,7 +4064,6 @@ html, body {
   font-family: inherit;
   font-size: 0.9rem;
   resize: vertical;
-  margin-bottom: 10px;
   box-sizing: border-box;
 }
 
@@ -4064,6 +4075,52 @@ html, body {
 .question-freetext::placeholder {
   color: var(--text-muted, var(--text-secondary));
   opacity: 0.6;
+}
+
+.question-mic {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color var(--transition), background var(--transition);
+  padding: 0;
+  margin-top: 1px;
+}
+
+.question-mic:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.question-mic.recording {
+  color: #fff;
+  background: #c0392b;
+  animation: mic-pulse 1.2s ease-in-out infinite;
+}
+
+.question-mic.recording.vad-active {
+  animation: mic-vad-pulse 0.5s ease-in-out infinite;
+}
+
+.question-mic.recording:hover {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.question-mic.transcribing {
+  color: var(--accent);
+  cursor: default;
+}
+
+.question-mic .icon-spinner {
+  animation: spin 0.8s linear infinite;
 }
 
 .question-actions {

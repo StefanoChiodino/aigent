@@ -1,0 +1,47 @@
+{
+  "name": "aigent-vscode",
+  "displayName": "aigent",
+  "description": "Connect VS Code to the aigent agent",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aigent.sendSelection",
+        "title": "Send Selection to aigent"
+      },
+      {
+        "command": "aigent.sendFile",
+        "title": "Send Active File to aigent"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "aigent.sendSelection",
+        "key": "ctrl+shift+a",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "dev": "npm run compile && code --install-extension out/aigent-vscode-0.1.0.vsix",
+    "build": "npm run compile && vsce package -o out/aigent-vscode-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0",
+    "vsce": "^2.15.0"
+  }
+}

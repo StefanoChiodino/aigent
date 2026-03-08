@@ -109,6 +109,7 @@ describe('InputArea submission', () => {
     mockAbortMic.mockReset();
     mockClearTranscript.mockReset();
     mockCommitBase.mockReset();
+    capturedOnTranscript = null;
   });
 
   afterEach(() => {

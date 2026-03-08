@@ -150,6 +150,8 @@ export interface ServerState {
   availableModels: string[];
   /** Models that have returned a "thinking not supported" error this session. Empty when all models support thinking. */
   modelsWithoutThinking?: string[] | undefined;
+  /** Models that have returned an image/vision error this session. */
+  modelsWithoutVision?: string[] | undefined;
   availableTools: string[];
   isLoading: boolean;
   tasks: BackgroundTaskInfo[];
@@ -176,7 +178,7 @@ export type ServerEvent =
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }
   | { type: 'error'; message: string }
-  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string; short?: boolean; availableModels?: string[]; contextWindow?: number; modelsWithoutThinking?: string[] }
+  | { type: 'state'; thinking?: ThinkingLevel; profile?: string; sessionId?: string; model?: string; short?: boolean; availableModels?: string[]; contextWindow?: number; modelsWithoutThinking?: string[]; modelsWithoutVision?: string[] }
   | { type: 'task_update'; task: BackgroundTaskInfo }
   | { type: 'config_write_request'; id: string; file: string; content: string; reason: string }
   | { type: 'edit_file_request'; id: string; path: string; edits: Array<{ old_str: string; new_str: string; index?: number }>; reason: string }
@@ -188,7 +190,7 @@ export type ServerEvent =
   | { type: 'mcp_tool_request'; id: string; server: string; tool: string; params: string }
   | { type: 'screenshot_request'; id: string }
   | { type: 'screen_share_request'; id: string }
-  | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean; extensionConnected?: boolean; extensionPath?: string }
+  | { type: 'host_state'; capabilities?: Record<string, { grant: string; available: boolean }>; ttsAvailable?: boolean; sttAvailable?: boolean; extensionConnected?: boolean; extensionPath?: string; vscodeConnected?: boolean }
   | { type: 'client_settings'; settings: Record<string, boolean | number | string> }
   | { type: 'context_breakdown'; breakdown: ContextBreakdown }
   | { type: 'browser_ext_request'; id: string; action: string; tabId?: number; rootSelector?: string; steps?: unknown[]; url?: string; clear?: boolean; options?: { network?: boolean; console?: boolean; performance?: boolean } }

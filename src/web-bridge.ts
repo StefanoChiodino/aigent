@@ -621,10 +621,12 @@ export async function startWebServer(
       type: 'host_state',
       extensionConnected: connected,
       extensionPath: EXTENSION_PATH_DISPLAY,
+      vscodeConnected: extensionBridge.isVscodeConnected(),
     });
   };
   extensionBridge.on('connected', () => broadcastExtensionState(true));
   extensionBridge.on('disconnected', () => broadcastExtensionState(false));
+  extensionBridge.on('vscode_connected', () => broadcastExtensionState(true));
 
   // Handle "Send to aigent" context menu events from the Chrome extension
   extensionBridge.on('context_menu', (data: { selectionText?: string; pageUrl?: string; linkUrl?: string; srcUrl?: string; tabId?: number; tabTitle?: string }) => {
@@ -642,6 +644,33 @@ export async function startWebServer(
     // Inject as a user message into the conversation
     broadcastToClients({ type: 'context_menu_message', text });
     // Also forward to the agent server as a user message
+    if (client) {
+      client.send({ type: 'message', content: text, images: [] });
+    }
+  });
+
+  // Handle VS Code context events
+  extensionBridge.on('vscode_context', (data: { event: string; filePath?: string; content?: string; selection?: { startLine: number; endLine: number; text: string }; terminalText?: string; tabs?: Array<{ path: string; name: string }> }) => {
+    let text = '';
+    
+    switch (data.event) {
+      case 'selection':
+        text = `[VS Code: Selection from ${data.filePath}]\nLines ${data.selection?.startLine}-${data.selection?.endLine}:\n\`\`\`\n${data.selection?.text}\n\`\`\``;
+        break;
+      case 'file':
+        text = `[VS Code: Active file ${data.filePath}]\n\`\`\`\n${data.content?.slice(0, 8000)}\n\`\`\``;
+        break;
+      case 'terminal':
+        text = `[VS Code: Terminal]\n${data.terminalText}`;
+        break;
+      case 'open_tabs':
+        text = `[VS Code: Open files]\n${data.tabs?.map(t => `- ${t.name}: ${t.path}`).join('\n')}`;
+        break;
+    }
+
+    if (!text) return;
+    
+    // Send to agent
     if (client) {
       client.send({ type: 'message', content: text, images: [] });
     }

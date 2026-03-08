@@ -58,8 +58,11 @@ export function Header() {
   const sttAvailable = useUIStore(s => s.sttAvailable);
   const extensionConnected = useUIStore(s => s.extensionConnected);
   const extensionPath = useUIStore(s => s.extensionPath);
+  const vscodeConnected = useUIStore(s => s.vscodeConnected);
   const [extSetupOpen, setExtSetupOpen] = useState(false);
   const extBadgeRef = useRef<HTMLSpanElement>(null);
+  const [vscodeSetupOpen, setVscodeSetupOpen] = useState(false);
+  const vscodeBadgeRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (!extSetupOpen) return;
     const handler = (e: MouseEvent) => {
@@ -70,6 +73,16 @@ export function Header() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [extSetupOpen]);
+  useEffect(() => {
+    if (!vscodeSetupOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (vscodeBadgeRef.current && !vscodeBadgeRef.current.contains(e.target as Node)) {
+        setVscodeSetupOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [vscodeSetupOpen]);
   const { setSettingsOpen, setShortcutsOpen, setCtxInspectorOpen } = useUIStore.getState();
 
   const setClientSetting = useSettingsStore(s => s.setClientSetting);
@@ -161,6 +174,32 @@ export function Header() {
               </ol>
             </div>
           )}</span>
+          <span ref={vscodeBadgeRef} id="vscode-badge" className={`conn-icon ${vscodeConnected ? 'ext-on' : 'ext-off'}`}
+                onClick={(e) => {
+                  if (!vscodeConnected) {
+                    setVscodeSetupOpen(!vscodeSetupOpen);
+                  }
+                }}
+                style={{ cursor: vscodeConnected ? 'default' : 'pointer' }}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+              <path d="M2.5 1.5L1 3l1.5 1.5L2.5 6l1-1.5L2.5 3 4.5 1.5H2.5zM6.5 1.5l-1 1.5 1 1.5-1 1.5 1 1.5V14l3.5-7L6.5 1.5z"/>
+            </svg>
+            <span className="conn-tooltip">
+              {vscodeConnected ? 'VSCode connected' : 'VSCode not connected — click for setup'}
+            </span>
+            {!vscodeConnected && vscodeSetupOpen && (
+              <div id="vscode-setup-popup" className="ext-setup-popup">
+                <strong>VSCode Extension Setup</strong>
+                <ol>
+                  <li>Open VSCode</li>
+                  <li>Go to Extensions (Ctrl+Shift+X)</li>
+                  <li>Search for <b>Aigent</b></li>
+                  <li>Click Install</li>
+                  <li>Or run the command:<br/><code>ext install Aigent.aigent-vscode</code> <span className="ext-copy-btn" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText('ext install Aigent.aigent-vscode'); const el = e.currentTarget; el.textContent = '✓'; setTimeout(() => el.textContent = '📋', 1200); }} title="Copy">📋</span></li>
+                </ol>
+              </div>
+            )}
+          </span>
           <span id="task-badge" className={`badge${running > 0 ? '' : ' hidden'}`} title={running > 0 ? `${running} running task${running > 1 ? 's' : ''}` : ''} onClick={() => useUIStore.getState().setTasksInspectorOpen(true)} style={{ cursor: 'pointer' }}>⚡ {running} task{running !== 1 ? 's' : ''}</span>
         </div>
         <div id="header-right">

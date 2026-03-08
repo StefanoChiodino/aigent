@@ -130,6 +130,8 @@ export interface ChatCallbacks {
   onToolComplete?: (info: { tool: string; input: string; ms: string; ok: boolean }) => void;
   /** Called when a model rejects a thinking request — caller should remember this and disable thinking for that model. */
   onThinkingUnsupported?: (model: string) => void;
+  /** Called when a model rejects a vision request — caller should remember this and disable images for that model. */
+  onVisionUnsupported?: (model: string) => void;
   signal?: AbortSignal;
 }
 
@@ -151,6 +153,8 @@ export class Agent {
   private seenImageHashes = new Set<string>();
   /** Active capabilities — used to dynamically filter tools per API call. */
   private capabilities = new Set<string>();
+  /** Whether the current request includes images — used to detect vision-unsupported errors. */
+  private hasImages = false;
   private compactPromise: Promise<void> | null = null;
   /** Track tool results that were summarized to save context tokens. */
   private toolSummaries = new Map<string, ToolSummaryRecord>();
@@ -502,6 +506,31 @@ export class Agent {
             } finally {
               // Restore so the agent knows its setting changed externally
               this.thinking = savedThinking;
+            }
+          }
+        }
+
+        // If vision was used and the API rejected it, retry without images.
+        // This happens when a model doesn't support vision — 400 with a message
+        // referencing "image", "vision", or "video". We remember it so future calls skip images.
+        if (this.hasImages && e.status === 400) {
+          const msg = (e.message ?? '').toLowerCase();
+          if (msg.includes('image') || msg.includes('vision') || msg.includes('video') || msg.includes('vision_content')) {
+            log.warn('Model does not support vision — retrying without images', { model: this.model });
+            callbacks?.onVisionUnsupported?.(this.model);
+            const hadImages = this.hasImages;
+            this.hasImages = false;
+            try {
+              const signal = callbacks?.signal;
+              return await this.provider.sendMessage(
+                this.systemPromptParts,
+                this.messages,
+                this.getActiveTools(),
+                { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking, ...(signal ? { signal } : {}) },
+                { onText: callbacks?.onText, onThinking: callbacks?.onThinking },
+              );
+            } finally {
+              this.hasImages = hadImages;
             }
           }
         }

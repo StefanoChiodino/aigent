@@ -61,7 +61,12 @@ interface ExtContextMenu {
   tabTitle?: string;
 }
 
-type ExtMessage = ExtHello | ExtResponse | ExtTabChanged | ExtContextMenu;
+interface VSCodeHello {
+  type: 'vscode_hello';
+  version: string;
+}
+
+type ExtMessage = ExtHello | ExtResponse | ExtTabChanged | ExtContextMenu | VSCodeHello;
 
 interface PendingRequest {
   resolve: (r: ExtResponse) => void;
@@ -75,11 +80,13 @@ class ExtensionBridge extends EventEmitter {
   private ws: WebSocket | null = null;
   private pending = new Map<string, PendingRequest>();
   private lastTabUrl = '';
+  private isVscode = false;
 
   onConnection(ws: WebSocket): void {
     if (this.ws) {
       log.warn('Extension reconnected — dropping previous connection');
       this.ws.close();
+      this.isVscode = false;
     }
 
     this.ws = ws;
@@ -97,6 +104,13 @@ class ExtensionBridge extends EventEmitter {
 
       if (msg.type === 'ext_hello') {
         log.info('Extension hello', { version: msg.version, browser: msg.browser });
+        return;
+      }
+
+      if (msg.type === 'vscode_hello') {
+        log.info('VSCode hello', { version: msg.version });
+        this.isVscode = true;
+        this.emit('vscode_connected');
         return;
       }
 
@@ -125,6 +139,7 @@ class ExtensionBridge extends EventEmitter {
     ws.on('close', () => {
       log.info('Extension disconnected');
       this.ws = null;
+      this.isVscode = false;
       // Reject any pending requests
       for (const [id, pending] of this.pending) {
         clearTimeout(pending.timer);
@@ -141,6 +156,10 @@ class ExtensionBridge extends EventEmitter {
 
   isConnected(): boolean {
     return this.ws !== null;
+  }
+
+  isVscodeConnected(): boolean {
+    return this.isVscode;
   }
 
   /** Returns the last known active tab URL (from ext_tab_changed events), or empty string. */
