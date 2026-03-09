@@ -639,8 +639,14 @@ async function processAgentTurn(
       signal: controller.signal,
       onText: (text) => {
         if (controller.signal.aborted) return;
-        const { content, spokenText } = _extractAndStripSpeak(text, currentShort, true);
-        broadcast({ type: 'text', content });
+        // Strip speak tags from streaming text to avoid showing them
+        const stripped = text.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '');
+        // Only broadcast if there's content after stripping tags
+        if (stripped.trim()) {
+          broadcast({ type: 'text', content: stripped });
+        }
+        // Also broadcast extracted spokenText for TTS
+        const { spokenText } = _extractAndStripSpeak(text, currentShort, true);
         if (spokenText && !speakSent) {
           speakSent = true;
           broadcast({ type: 'speak', content: spokenText });
@@ -790,7 +796,7 @@ async function processAgentTurn(
     if (!controller.signal.aborted) {
       const elapsed = (Date.now() - startTime) / 1000;
       log.info('Agent turn complete', { elapsed, messages: messages.length });
-      const { content: finalContent, spokenText: finalSpoken } = _extractAndStripSpeak(response, currentShort);
+      const { content: finalContent, spokenText: finalSpoken } = _extractAndStripSpeak(response, currentShort, false);
       const assistantMsg: DisplayMessage = {
         id: generateMsgId(),
         role: 'assistant',

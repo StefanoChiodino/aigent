@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import type { TextBlock, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages/messages.js';
+import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/messages/messages.js';
 import OpenAI from 'openai';
 import type { ChatCompletionMessageParam, ChatCompletionTool } from 'openai/resources/chat/completions.js';
 import { readFileSync } from 'node:fs';
@@ -187,9 +187,6 @@ export class AnthropicProvider implements Provider {
     const usage = response.usage;
     const rawUsage = usage as unknown as Record<string, number>;
 
-    const textBlocks = response.content.filter(
-      (block): block is TextBlock => block.type === 'text',
-    );
     const toolUseBlocks = response.content.filter(
       (block): block is ToolUseBlock => block.type === 'tool_use',
     );
@@ -201,8 +198,12 @@ export class AnthropicProvider implements Provider {
           ? 'max_tokens'
           : 'end_turn';
 
+    // Use accumulated streaming text (currentText) instead of textBlocks to ensure
+    // the final response matches what was streamed to the UI. This prevents truncation
+    // when the LLM response is interrupted or when there's a timing issue between
+    // streaming chunks and the final message reconstruction.
     return {
-      text: textBlocks.map((b) => b.text).join('\n'),
+      text: currentText,
       toolCalls: toolUseBlocks.map((b) => ({
         id: b.id,
         name: b.name,
@@ -382,6 +383,7 @@ export class OpenAIProvider implements Provider {
     });
 
     let currentText = '';
+    let currentReasoning = '';
     const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map();
     let inputTokens = 0;
     let outputTokens = 0;
@@ -400,6 +402,13 @@ export class OpenAIProvider implements Provider {
 
       // Capture finish_reason from the last choice chunk
       if (choice?.finish_reason) finishReason = choice.finish_reason;
+
+      // Capture reasoning content (for models like Qwen, DeepSeek that stream reasoning separately)
+      // Note: reasoning is not part of the standard OpenAI Delta type, but some models support it
+      if ((delta as any)?.reasoning) {
+        currentReasoning += (delta as any).reasoning;
+        callbacks?.onThinking?.(currentReasoning);
+      }
 
       if (delta?.content) {
         currentText += delta.content;

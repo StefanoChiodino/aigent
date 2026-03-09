@@ -104,6 +104,8 @@ class ExtensionBridge extends EventEmitter {
 
       if (msg.type === 'ext_hello') {
         log.info('Extension hello', { version: msg.version, browser: msg.browser });
+        // Acknowledge the hello message so the extension knows the connection is ready
+        ws.send(JSON.stringify({ type: 'ext_hello_ack', version: msg.version }));
         return;
       }
 

@@ -474,7 +474,7 @@ html, body {
 }
 .conn-icon.ext-off {
   color: var(--text-dim);
-  opacity: 0.4;
+  opacity: 0.85;
 }
 
 /* Reconnecting banner */
@@ -1378,9 +1378,11 @@ html, body {
 #ext-badge { font-size: 12px; }
 #ext-badge.ext-on { opacity: 1; }
 #ext-badge.ext-off:has(.ext-setup-popup) { opacity: 1; }
+#ext-badge:has(.ext-setup-popup) .conn-tooltip { display: none; }
 #vscode-badge { font-size: 12px; }
 #vscode-badge.ext-on { opacity: 1; }
 #vscode-badge.ext-off:has(.ext-setup-popup) { opacity: 1; }
+#vscode-badge:has(.ext-setup-popup) .conn-tooltip { display: none; }
 #ext-badge[data-copied]::after {
   content: 'Copied chrome://extensions';
   position: absolute;

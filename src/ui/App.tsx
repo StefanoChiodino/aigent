@@ -77,11 +77,12 @@ export function App({ client }: AppProps): React.JSX.Element {
 
     const onMessage = (dm: DisplayMessage) => {
       setMessages((prev) => [...prev, toUIMessage(dm)]);
-      // Clear streaming/thinking when assistant message arrives
+      // Clear thinking/tools when assistant message arrives, but preserve streaming
+      // for cases where the final streaming content differs from the saved message
       if (dm.role === 'assistant') {
-        setStreaming('');
         setThinkingText('');
         setActiveTools([]);
+        // Don't clear streaming here - let it be cleared by onToolEnd or manually
       }
     };
 
@@ -130,7 +131,7 @@ export function App({ client }: AppProps): React.JSX.Element {
     const onToolEnd = () => {
       setActiveTools([]);
       setToolOutput('');
-      setStreaming('');
+      // Don't clear streaming here - message content is already in messages array
     };
 
     const onTaskUpdate = (task: BackgroundTaskInfo) => {
@@ -156,12 +157,15 @@ export function App({ client }: AppProps): React.JSX.Element {
 
     const onLoading = (loading: boolean) => {
       setIsLoading(loading);
-      // Reset all streaming state on both transitions
-      setStreaming('');
-      setThinkingText('');
-      setActiveTools([]);
-      setToolOutput('');
-      setIsThinking(false);
+      // Only clear streaming when starting to load (before new response)
+      // Don't clear when stopping loading - that happens after message is sent
+      if (loading) {
+        setStreaming('');
+        setThinkingText('');
+        setActiveTools([]);
+        setToolOutput('');
+        setIsThinking(false);
+      }
     };
 
     const onError = (message: string) => {

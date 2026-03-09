@@ -191,11 +191,10 @@ export function Header() {
               <div id="vscode-setup-popup" className="ext-setup-popup">
                 <strong>VSCode Extension Setup</strong>
                 <ol>
-                  <li>Open VSCode</li>
-                  <li>Go to Extensions (Ctrl+Shift+X)</li>
-                  <li>Search for <b>Aigent</b></li>
-                  <li>Click Install</li>
-                  <li>Or run the command:<br/><code>ext install Aigent.aigent-vscode</code> <span className="ext-copy-btn" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText('ext install Aigent.aigent-vscode'); const el = e.currentTarget; el.textContent = '✓'; setTimeout(() => el.textContent = '📋', 1200); }} title="Copy">📋</span></li>
+                  <li>In VSCode, open the folder:<br/><code>aigent/vscode-extension</code></li>
+                  <li>Press <kbd>F5</kbd> (Run → Start Debugging)</li>
+                  <li>This opens a new VSCode window with the extension enabled</li>
+                  <li>Click the Aigent icon in the status bar to connect</li>
                 </ol>
               </div>
             )}

@@ -197,17 +197,26 @@ function connectWithUrl(wsUrl: string): void {
   };
 
   ws.onmessage = async (event: MessageEvent) => {
-    let msg: ExtRequest;
+    let msg: unknown;
     try {
-      msg = JSON.parse(event.data as string) as ExtRequest;
+      msg = JSON.parse(event.data as string);
     } catch {
       console.error('[aigent] Failed to parse message', event.data);
       return;
     }
 
-    if (msg.type !== 'ext_request') return;
+    // Handle hello acknowledgment from gatekeeper
+    if (msg && typeof msg === 'object' && 'type' in msg && (msg as { type: string }).type === 'ext_hello_ack') {
+      console.log('[aigent] Gatekeeper acknowledged connection');
+      return;
+    }
 
-    const response = await handleRequest(msg);
+    if (!(msg && typeof msg === 'object' && 'type' in msg && (msg as { type: string }).type === 'ext_request')) {
+      return;
+    }
+
+    const extRequest = msg as ExtRequest;
+    const response = await handleRequest(extRequest);
     send(response);
   };
 
