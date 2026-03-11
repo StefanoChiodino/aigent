@@ -585,6 +585,13 @@ export function Sidebar() {
               <div className="ext-setup-guide" role="dialog" aria-label="Browser extension setup">
                 <div className="ext-setup-header">Chrome Extension Setup</div>
                 <ol className="ext-setup-steps">
+                  <li>
+                    Build the extension:
+                    <code className="ext-copy-code">make plugin</code>
+                    <span className="ext-copy-btn" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText('make plugin'); const btn = e.currentTarget; btn.textContent = '✓'; setTimeout(() => btn.textContent = '📋', 1200); }} title="Copy">📋</span>
+                    <span className="ext-copy-code"> (or <code className="ext-copy-code">make plugin-dev</code> for watch mode)</span>
+                    <span className="ext-copy-btn" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText('make plugin-dev'); const btn = e.currentTarget; btn.textContent = '✓'; setTimeout(() => btn.textContent = '📋', 1200); }} title="Copy">📋</span>
+                  </li>
                   <li>Open <code>chrome://extensions</code> in Chrome</li>
                   <li>Enable <strong>Developer mode</strong> (top-right toggle)</li>
                   <li>Click <strong>Load unpacked</strong></li>
@@ -594,7 +601,7 @@ export function Sidebar() {
                   </li>
                 </ol>
                 <div className="ext-setup-note">
-                  The extension auto-builds with <code>make dev</code>. After loading, this badge turns green automatically.
+                  The extension also auto-builds with <code>make dev</code>. After loading, this badge turns green automatically.
                 </div>
                 <button className="ext-setup-close" onClick={() => setExtGuideOpen(false)}>Got it</button>
               </div>

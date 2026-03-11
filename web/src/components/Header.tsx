@@ -167,6 +167,13 @@ export function Header() {
             <div id="ext-setup-popup" className="ext-setup-popup">
               <strong>Extension Setup</strong>
               <ol>
+                <li>
+                  Build the extension:
+                  <code className="ext-copy-code">make plugin</code>
+                  <span className="ext-copy-btn" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText('make plugin'); const btn = e.currentTarget; btn.textContent = '✓'; setTimeout(() => btn.textContent = '📋', 1200); }} title="Copy">📋</span>
+                  <span className="ext-copy-code"> (or <code className="ext-copy-code">make plugin-dev</code> for watch mode)</span>
+                  <span className="ext-copy-btn" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText('make plugin-dev'); const btn = e.currentTarget; btn.textContent = '✓'; setTimeout(() => btn.textContent = '📋', 1200); }} title="Copy">📋</span>
+                </li>
                 <li>Copy this URL and paste in address bar:<br/><code>chrome://extensions</code> <span className="ext-copy-btn" onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText('chrome://extensions'); const el = e.currentTarget; el.textContent = '✓'; setTimeout(() => el.textContent = '📋', 1200); }} title="Copy">📋</span></li>
                 <li>Enable <b>Developer mode</b> (top-right toggle)</li>
                 <li>Click <b>Load unpacked</b></li>
