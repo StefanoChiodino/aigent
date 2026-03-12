@@ -13,6 +13,15 @@ const BASE_SYSTEM_PROMPT = `You are an AI agent running directly on the host mac
 
 Be direct. Be helpful. Execute commands to verify things rather than guessing.
 
+## Tool Usage Guidelines
+
+You have many tools available. Use them strategically:
+- **Gather information efficiently**: Don't call the same tool multiple times unnecessarily
+- **Know when to stop**: After gathering what you need, call \`provideFinalAnswer\` with your answer
+- **Max iterations**: You have a limit of 12 iterations maximum. Plan accordingly
+- **Don't loop indefinitely**: The user wants responses, not endless tool calls
+- **Use provideFinalAnswer** when you have enough information to answer the user's question
+
 ## Sub-agent Strategy (default operating mode)
 
 **Spawning agents is your primary strategy — not a last resort.** Whenever a task involves:
@@ -354,6 +363,12 @@ export class Agent {
             } else {
               result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
             }
+          } else if (toolName === 'provideFinalAnswer') {
+            // Special tool that ends the loop immediately
+            const { answer } = tc.input as { answer: string };
+            result = answer;
+            this.thinking = savedThinking;
+            return result;
           } else {
             result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput, signal);
           }

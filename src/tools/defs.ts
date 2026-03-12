@@ -522,6 +522,35 @@ const searchEpisodesTool: ToolDef = {
   },
 };
 
+const provideFinalAnswerTool: ToolDef = {
+  name: 'provideFinalAnswer',
+  description:
+    'Call this when you have gathered enough information and are ready to provide a final answer to the user. This ends the tool loop immediately.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      answer: { type: 'string', description: 'Your final answer to the user' },
+    },
+    required: ['answer'],
+  },
+};
+
+const trackProgressTool: ToolDef = {
+  name: 'trackProgress',
+  description:
+    'Call this to track your progress through a multi-step task. Helps you know when you are close to completion.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      step: { type: 'number', description: 'Current step number' },
+      totalSteps: { type: 'number', description: 'Estimated total steps' },
+      status: { type: 'string', description: 'What you are working on' },
+      notes: { type: 'string', description: 'Optional notes or context' },
+    },
+    required: ['step', 'status'],
+  },
+};
+
 // --- Tool registry ---
 
 export const internalTools: ToolDef[] = [
@@ -529,7 +558,7 @@ export const internalTools: ToolDef[] = [
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
   hostTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
   compactContextTool, searchMemoryTool, browserExtTool, askUserTool,
-  logEpisodeTool, queryEpisodesTool, searchEpisodesTool,
+  logEpisodeTool, queryEpisodesTool, searchEpisodesTool, provideFinalAnswerTool,
 ];
 
 export function getToolDefinitions(useClaudeCodeNames: boolean): ToolDef[] {

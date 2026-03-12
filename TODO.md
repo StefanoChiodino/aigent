@@ -12,7 +12,23 @@ the model picker on the left bar shows stars but doesn't allow to favourite/unfa
 
 ## Active Bugs
 
+- [x] ~~**Flawed repetition detection** — Both providers used chunk-comparison logic that missed multi-chunk loops. Fixed to use `hasRepetitionLoop()` properly in both AnthropicProvider (thinking) and OpenAIProvider (reasoning). See provider.ts for details.~~
+
 - [ ] **Agent iteration limits** — Sub-agents and the main agent frequently hit tool-use iteration limits mid-task. Need to investigate: better iteration budgets, auto-continuation, task decomposition strategies, or a way for agents to self-checkpoint and resume.
+
+  - [ ] **Error Handling & Robustness** (Priority 1):
+    - [ ] Track successful vs failed tool calls
+    - [ ] If >30% of tools fail, stop the loop and inform the user
+    - [ ] Add early termination when repeated errors occur
+    - [ ] Check if tool results make sense (e.g., file read returns error → tell user)
+    - [ ] Handle specific errors like ENOENT, permission denied
+    - [ ] Provide user-friendly error messages
+    - [ ] Log when errors occur and why, track error patterns
+  - [ ] **Progress Tracking** (Priority 2):
+    - [ ] Track step number, total steps, and current status via `trackProgress`
+    - [ ] At 8/12 iterations, warn: "Do you need the remaining 4 iterations, or should you provideFinalAnswer now?"
+    - [ ] Count successful vs failed tools and stop early if needed
+  - [ ] **Iteration Budget Warning** — At 8/12 iterations, give agent a chance to self-correct before hitting the limit
 - [ ] **Mic speech truncation (parked)** — 5 code-level bugs identified (worklet flush, abort race, window-cap, energy gate, live timeout) but symptoms are intermittent and likely mic-hardware-dependent. Revisit if it recurs with the Razer mic. See MEMORY.md for full analysis.
 
 ---

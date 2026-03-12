@@ -7,6 +7,54 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createClient, buildSystemPrompt } from './auth.js';
 import type { ThinkingLevel, TokenUsage } from './agent.js';
+import { createLogger } from './logger.js';
+
+const log = createLogger('provider');
+
+// --- Streaming safety configuration ---
+
+/** Maximum time (ms) to wait for a stream to complete. Default: 120s. */
+const STREAM_TIMEOUT_MS = parseInt(process.env['AIGENT_STREAM_TIMEOUT'] ?? '120000', 10);
+
+/** Maximum reasoning tokens before aborting (50% of maxTokens by default). */
+const MAX_REASONING_TOKENS = parseInt(process.env['AIGENT_MAX_REASONING_TOKENS'] ?? '8192', 10);
+
+/** Minimum repeated chunk size for loop detection. */
+const MIN_REPETITION_LENGTH = 50;
+
+/** Number of times the same chunk can repeat before we abort. */
+const MAX_REPETITIONS = 3;
+
+/**
+ * Detect if a string contains repetitive loops.
+ * Returns true if the same substring (>= minLength) appears >= maxReps times consecutively.
+ */
+function hasRepetitionLoop(text: string, minLength = MIN_REPETITION_LENGTH, maxReps = MAX_REPETITIONS): boolean {
+  if (text.length < minLength * maxReps) return false;
+
+  // Check for repeated patterns of various sizes
+  for (let patternLen = minLength; patternLen <= text.length / maxReps; patternLen += 20) {
+    const pattern = text.slice(-patternLen);
+    let matchCount = 1;
+    let pos = text.length - patternLen;
+
+    while (pos > patternLen && matchCount < maxReps) {
+      const previous = text.slice(pos - patternLen, pos);
+      if (previous === pattern) {
+        matchCount++;
+        pos -= patternLen;
+      } else {
+        break;
+      }
+    }
+
+    if (matchCount >= maxReps) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 // --- Unified types ---
 
@@ -170,6 +218,8 @@ export class AnthropicProvider implements Provider {
 
     let currentText = '';
     let thinkingText = '';
+    let thinkingLoopDetected = false;
+
     stream.on('text', (text) => {
       currentText += text;
       callbacks?.onText?.(currentText);
@@ -179,10 +229,38 @@ export class AnthropicProvider implements Provider {
       if (b.type === 'thinking' && b.thinking) {
         thinkingText += b.thinking;
         callbacks?.onThinking?.(thinkingText);
+
+        // Check for repetition loops in thinking using proper pattern detection
+        if (!thinkingLoopDetected && hasRepetitionLoop(thinkingText)) {
+          thinkingLoopDetected = true;
+          log.warn(`Repetition loop detected in thinking for model ${options.model} (${thinkingText.slice(-100).substring(0, 50)}...)`);
+          stream.abort();
+        }
       }
     });
 
-    const response = await stream.finalMessage();
+    // Wrap stream.finalMessage() with timeout protection
+    const streamPromise = stream.finalMessage();
+    const timeoutPromise = new Promise<Anthropic.Message>((resolve) => {
+      const timer = setTimeout(() => {
+        log.warn(`Stream timeout after ${Math.round(STREAM_TIMEOUT_MS / 1000)}s for model ${options.model}`);
+        stream.abort();
+        // Resolve with a minimal message that will be treated as incomplete
+        resolve({
+          content: [],
+          id: 'timeout',
+          model: options.model,
+          role: 'assistant',
+          stop_reason: 'max_tokens' as const,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+          },
+        } as Anthropic.Message);
+      }, STREAM_TIMEOUT_MS);
+    });
+
+    const response = await Promise.race([streamPromise, timeoutPromise]);
 
     const usage = response.usage;
     const rawUsage = usage as unknown as Record<string, number>;
@@ -393,7 +471,17 @@ export class OpenAIProvider implements Provider {
     let finishReason: string | null = null;
     let actualModel: string | undefined;
 
+    const streamStartTime = Date.now();
+    let reasoningLoopDetected = false;
+
     for await (const chunk of stream) {
+      // Check for timeout
+      if (Date.now() - streamStartTime > STREAM_TIMEOUT_MS) {
+        log.warn(`Stream timeout after ${Math.round((Date.now() - streamStartTime) / 1000)}s for model ${options.model}`);
+        finishReason = 'length'; // Treat as max_tokens
+        break;
+      }
+
       // Track the actual model used (OpenRouter may route to a different variant)
       if (chunk.model) actualModel = chunk.model;
 
@@ -408,6 +496,21 @@ export class OpenAIProvider implements Provider {
       if ((delta as any)?.reasoning) {
         currentReasoning += (delta as any).reasoning;
         callbacks?.onThinking?.(currentReasoning);
+
+        // Check for reasoning timeout (based on tokens if available, or char count as proxy)
+        if (reasoningTokens > 0 && reasoningTokens > MAX_REASONING_TOKENS) {
+          log.warn(`Reasoning tokens exceeded (${reasoningTokens}/${MAX_REASONING_TOKENS}) for model ${options.model}`);
+          finishReason = 'length';
+          break;
+        }
+
+        // Check for repetition loops in reasoning using proper pattern detection
+        if (!reasoningLoopDetected && hasRepetitionLoop(currentReasoning)) {
+          reasoningLoopDetected = true;
+          log.warn(`Repetition loop detected in reasoning for model ${options.model} (${currentReasoning.slice(-100).substring(0, 50)}...)`);
+          finishReason = 'length';
+          break;
+        }
       }
 
       if (delta?.content) {
@@ -449,6 +552,16 @@ export class OpenAIProvider implements Provider {
         // Reasoning tokens (o1, o3, DeepSeek-R1, etc.)
         const ctd = ext['completion_tokens_details'] as Record<string, number> | undefined;
         if (ctd?.['reasoning_tokens']) reasoningTokens = ctd['reasoning_tokens'];
+      }
+    }
+
+    // Post-stream cleanup: check for repetition in final text
+    if (currentText.length > MIN_REPETITION_LENGTH * MAX_REPETITIONS && !finishReason) {
+      if (hasRepetitionLoop(currentText)) {
+        log.warn(`Repetition loop detected in output for model ${options.model}`);
+        finishReason = 'length';
+        // Truncate to remove repeated garbage
+        currentText = currentText.slice(0, currentText.length - MIN_REPETITION_LENGTH);
       }
     }
 
