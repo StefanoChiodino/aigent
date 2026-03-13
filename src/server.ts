@@ -920,7 +920,12 @@ function buildBackgroundToolSet(allTools: ProviderToolDef[], capabilities: Set<s
  * Searches AVAILABLE_MODELS for the best match; falls back to the active model when no
  * provider-specific match is found (avoids hard-coding Anthropic model IDs for other providers).
  */
-function resolveModelAlias(nameOrId: string): string {
+/** Resolve tier aliases (flash/pro/ultra/cheap/standard/expensive) to actual model IDs.
+ *  Also accepts bare family names ("haiku", "sonnet", "opus") for backwards compat.
+ *  Searches AVAILABLE_MODELS for the best match; falls back to the active model when no
+ *  provider-specific match is found (avoids hard-coding Anthropic model IDs for other providers).
+ */
+export function resolveModelAlias(nameOrId: string): string {
   const key = nameOrId.toLowerCase();
 
   // Per-tier env overrides take priority when the caller used a tier alias

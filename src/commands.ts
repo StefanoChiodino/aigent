@@ -17,6 +17,7 @@ import {
 } from './profiles.js';
 import { formatLifetimeUsage } from './usage-tracking.js';
 import { readImageBase64 } from './image-support.js';
+import { resolveModelAlias } from './server.js';
 
 // ---------------------------------------------------------------------------
 // Context interface — provided by server.ts
@@ -110,12 +111,27 @@ export function setShort(enabled: boolean, ctx: CommandContext): void {
 
 /** Switch the active model. Returns result with ok status. */
 export function setModel(model: string, ctx: CommandContext): { ok: boolean; message?: string } {
+  // Resolve tier aliases (flash/pro/ultra/cheap/standard/expensive) to actual model IDs
+  // before validating against availableModels
+  const resolvedModel = resolveModelAlias(model);
+
+  if (resolvedModel !== model) {
+    // Model was a tier alias that got resolved
+    ctx.model = resolvedModel;
+    ctx.agent.currentModel = resolvedModel;
+    ctx.broadcast({ type: 'state', model: ctx.model, contextWindow: ctx.getContextWindow(resolvedModel) });
+    ctx.doAutoSave();
+    return { ok: true };
+  }
+
   if (!ctx.availableModels.includes(model)) {
     return { ok: false, message: `Unknown model: ${model}\nAvailable: ${ctx.availableModels.join(', ')}` };
   }
+
   if (model === ctx.model) {
     return { ok: true, message: `Already using: ${ctx.model}` };
   }
+
   ctx.model = model;
   ctx.agent.currentModel = model;
   ctx.broadcast({ type: 'state', model: ctx.model, contextWindow: ctx.getContextWindow(model) });
