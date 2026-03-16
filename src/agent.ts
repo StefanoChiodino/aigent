@@ -307,29 +307,57 @@ export class Agent {
       // abort or error. Without this, orphaned tool_use blocks corrupt the
       // message history and cause 400 errors on the next API call.
       const results: ToolResult[] = [];
-      try {
+
+      // Check abort before executing any tools
+      if (signal?.aborted) {
+        const errMsg = 'Aborted by user';
         for (const tc of response.toolCalls) {
-          // Check abort before each tool
-          if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+          const failedToolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
+          results.push({ id: tc.id, content: errMsg });
+          this.toolExecutionHistory.push({ tool: failedToolName, success: false, error: errMsg });
+          callbacks?.onToolComplete?.({ tool: failedToolName, input: '(not executed)', ms: '0', ok: false });
+        }
+        this.messages.push({ role: 'tool_result', results });
+        callbacks?.onToolEnd?.();
+        this.thinking = savedThinking;
+        throw new DOMException('Aborted', 'AbortError');
+      }
 
-          const inputStr = JSON.stringify(tc.input);
-          const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '\u2026' : inputStr;
-          const toolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
-          const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
-          // Extract model/thinking meta for agent spawn tools
-          let agentMeta: { model?: string; thinking?: string } | undefined;
-          if (toolName === 'spawn_agent' || toolName === 'dispatch_task') {
-            const inp = tc.input as Record<string, unknown>;
-            const meta: { model?: string; thinking?: string } = {};
-            if (typeof inp['model'] === 'string') meta.model = inp['model'];
-            if (typeof inp['thinking'] === 'string') meta.thinking = inp['thinking'];
-            if (meta.model || meta.thinking) agentMeta = meta;
-          }
-          callbacks?.onToolStart?.(tc.name, truncatedInput, summary, agentMeta);
+      // Handle provideFinalAnswer first — it must short-circuit the loop
+      const finalAnswerCall = response.toolCalls.find(tc => {
+        const toolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
+        return toolName === 'provideFinalAnswer';
+      });
+      if (finalAnswerCall) {
+        const { answer } = finalAnswerCall.input as { answer: string };
+        this.thinking = savedThinking;
+        return answer;
+      }
 
-          const toolStart = performance.now();
-          let result: string | ToolContentBlock[];
-          let toolError: string | undefined;
+      // Execute all tools in parallel. Sequential-only tools (compact_context,
+      // switch_model) are safe to run concurrently with independent tools since
+      // they only mutate agent state after their own async work completes.
+      const toolPromises = response.toolCalls.map(async (tc) => {
+        const inputStr = JSON.stringify(tc.input);
+        const truncatedInput = inputStr.length > 120 ? inputStr.slice(0, 120) + '\u2026' : inputStr;
+        const toolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
+        const summary = summarizeToolCall(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth);
+
+        let agentMeta: { model?: string; thinking?: string } | undefined;
+        if (toolName === 'spawn_agent' || toolName === 'dispatch_task') {
+          const inp = tc.input as Record<string, unknown>;
+          const meta: { model?: string; thinking?: string } = {};
+          if (typeof inp['model'] === 'string') meta.model = inp['model'];
+          if (typeof inp['thinking'] === 'string') meta.thinking = inp['thinking'];
+          if (meta.model || meta.thinking) agentMeta = meta;
+        }
+        callbacks?.onToolStart?.(tc.name, truncatedInput, summary, agentMeta);
+
+        const toolStart = performance.now();
+        let result: string | ToolContentBlock[];
+        let toolError: string | undefined;
+
+        try {
           if (toolName === 'compact_context') {
             const contextWindow = this.getContextWindow();
             const currentUsage = this._totalUsage.contextTokens ?? 0;
@@ -371,85 +399,77 @@ export class Agent {
             } else {
               result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
             }
-          } else if (toolName === 'provideFinalAnswer') {
-            // Special tool that ends the loop immediately
-            const { answer } = tc.input as { answer: string };
-            result = answer;
-            this.thinking = savedThinking;
-            return result;
           } else {
-            try {
-              result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput, signal);
-            } catch (execErr: unknown) {
-              toolError = (execErr as { message?: string }).message ?? 'Tool execution failed';
-              result = `Error: ${toolError}`;
-            }
+            result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput, signal);
           }
-          const toolMs = (performance.now() - toolStart).toFixed(0);
-          log.info('Tool executed', { tool: toolName, ms: toolMs });
-
-          // Track tool execution success/failure
-          const success = toolError === undefined;
-          this.toolExecutionHistory.push({ tool: toolName, success, ...(toolError ? { error: toolError } : {})});
-          callbacks?.onToolComplete?.({ tool: toolName, input: truncatedInput, ms: toolMs, ok: success });
-
-          // Broadcast tool result to UI: images and text for non-streaming tools.
-          if (typeof result !== 'string') {
-            // ToolContentBlock[] — extract text parts for UI, images for display
-            const texts = result.filter(b => b.type === 'text').map(b => (b as { text: string }).text);
-            const images = result.filter(b => b.type === 'image');
-            if (texts.length) callbacks?.onToolOutput?.(texts.join('\n'));
-            if (images.length) callbacks?.onToolImages?.(images.map(i => ({ mediaType: (i as { mediaType: string }).mediaType, data: (i as { data: string }).data })));
-          } else if (!['exec', 'exec_readonly'].includes(toolName)) {
-            // Non-exec string results — broadcast text (exec already streams via onOutput)
-            const preview = result.length > 2000 ? result.slice(0, 2000) + '\n\u2026 (truncated)' : result;
-            callbacks?.onToolOutput?.(preview);
-          }
-
-          // Summarize large string results (if enabled), then truncate based on context budget;
-          // deduplicate images.
-          if (typeof result === 'string') {
-            const summarized = await this.maybeSummarizeToolResult(tc.id, toolName, result);
-            const effective = summarized ?? result;
-            const maxLen = this.getToolOutputMaxChars(effective.length);
-            const truncated = effective.length > maxLen
-              ? effective.slice(0, maxLen) + `\n\n... [truncated, ${effective.length} bytes total]`
-              : effective;
-            results.push({ id: tc.id, content: truncated });
-          } else {
-            results.push({ id: tc.id, content: this.deduplicateImages(result) });
-          }
+        } catch (execErr: unknown) {
+          const e = execErr as { message?: string; name?: string };
+          toolError = e.name === 'AbortError' ? 'Aborted by user' : (e.message ?? 'Tool execution failed');
+          result = `Error: ${toolError}`;
         }
-      } catch (toolErr: unknown) {
-        // Fill in error results for any tools that didn't execute, so the
-        // message history stays valid (every tool_use needs a tool_result).
-        const executedIds = new Set(results.map((r) => r.id));
-        for (const tc of response.toolCalls) {
-          if (!executedIds.has(tc.id)) {
-            const e = toolErr as { message?: string; name?: string };
-            const errMsg = e.name === 'AbortError' ? 'Aborted by user' : (e.message ?? 'Tool execution failed');
-            results.push({ id: tc.id, content: errMsg });
-            const failedToolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
-            // Track failed tool in history
-            this.toolExecutionHistory.push({ tool: failedToolName, success: false, error: errMsg });
-            callbacks?.onToolComplete?.({ tool: failedToolName, input: '(not executed)', ms: '0', ok: false });
-          }
+
+        const toolMs = (performance.now() - toolStart).toFixed(0);
+        log.info('Tool executed', { tool: toolName, ms: toolMs });
+
+        const success = toolError === undefined;
+        this.toolExecutionHistory.push({ tool: toolName, success, ...(toolError ? { error: toolError } : {}) });
+        callbacks?.onToolComplete?.({ tool: toolName, input: truncatedInput, ms: toolMs, ok: success });
+
+        // Broadcast tool result to UI: images and text for non-streaming tools.
+        if (typeof result !== 'string') {
+          const texts = result.filter(b => b.type === 'text').map(b => (b as { text: string }).text);
+          const images = result.filter(b => b.type === 'image');
+          if (texts.length) callbacks?.onToolOutput?.(texts.join('\n'));
+          if (images.length) callbacks?.onToolImages?.(images.map(i => ({ mediaType: (i as { mediaType: string }).mediaType, data: (i as { data: string }).data })));
+        } else if (!['exec', 'exec_readonly'].includes(toolName)) {
+          const preview = result.length > 2000 ? result.slice(0, 2000) + '\n\u2026 (truncated)' : result;
+          callbacks?.onToolOutput?.(preview);
         }
-        // Push tool results before re-throwing so history stays consistent
-        this.messages.push({ role: 'tool_result', results });
-        callbacks?.onToolEnd?.();
-        // Re-throw aborts so the caller can handle cancellation
-        if ((toolErr as { name?: string }).name === 'AbortError' || signal?.aborted) {
-          this.thinking = savedThinking;
-          throw toolErr;
+
+        // Summarize large string results (if enabled), then truncate based on context budget;
+        // deduplicate images.
+        let toolResult: ToolResult;
+        if (typeof result === 'string') {
+          const summarized = await this.maybeSummarizeToolResult(tc.id, toolName, result);
+          const effective = summarized ?? result;
+          const maxLen = this.getToolOutputMaxChars(effective.length);
+          const truncated = effective.length > maxLen
+            ? effective.slice(0, maxLen) + `\n\n... [truncated, ${effective.length} bytes total]`
+            : effective;
+          toolResult = { id: tc.id, content: truncated };
+        } else {
+          toolResult = { id: tc.id, content: this.deduplicateImages(result) };
         }
-        // For non-abort errors, continue the loop so the model sees the error
-        log.warn('Tool execution error (continuing)', { error: (toolErr as { message?: string }).message });
-        continue;
+
+        return toolResult;
+      });
+
+      // Wait for all tools to complete; preserve original order for message history
+      const settled = await Promise.allSettled(toolPromises);
+      let hasAbort = false;
+      for (let i = 0; i < settled.length; i++) {
+        const outcome = settled[i]!;
+        if (outcome.status === 'fulfilled') {
+          results.push(outcome.value);
+        } else {
+          const e = outcome.reason as { message?: string; name?: string };
+          if (e.name === 'AbortError') hasAbort = true;
+          const errMsg = e.name === 'AbortError' ? 'Aborted by user' : (e.message ?? 'Tool execution failed');
+          const tc = response.toolCalls[i]!;
+          const failedToolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
+          results.push({ id: tc.id, content: errMsg });
+          this.toolExecutionHistory.push({ tool: failedToolName, success: false, error: errMsg });
+          callbacks?.onToolComplete?.({ tool: failedToolName, input: '(not executed)', ms: '0', ok: false });
+        }
       }
 
-      callbacks?.onToolEnd?.();
       this.messages.push({ role: 'tool_result', results });
+      callbacks?.onToolEnd?.();
+
+      if (hasAbort) {
+        this.thinking = savedThinking;
+        throw new DOMException('Aborted', 'AbortError');
+      }
 
       // Check error rate and terminate early if needed
       const errorCheck = this.checkErrorRate();
