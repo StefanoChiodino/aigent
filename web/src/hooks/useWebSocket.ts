@@ -39,7 +39,7 @@ export function useWebSocket(): void {
 
     function connect(): void {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      // In dev mode (Vite on :5173), connect directly to the backend
+      // In dev mode (Vite on :5173), connect directly to the server's WebSocket port
       // to avoid Vite proxy errors during tsx-watch restarts.
       const wsHost = import.meta.env.DEV ? 'localhost:3141' : location.host;
       const ws = isDemo()
