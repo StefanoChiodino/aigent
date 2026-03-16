@@ -36,6 +36,7 @@ import {
   extractAndStripSpeak as _extractAndStripSpeak,
 } from './system-prompts.js';
 import { handleCommand as _handleCommand, setThinking, setEffort, setShort, setModel, type CommandContext } from './commands.js';
+import { readSettingsSync } from './settings-file.js';
 
 const log = createLogger('server');
 
@@ -1512,9 +1513,16 @@ function handleClient(socket: Socket): void {
           case 'set_short':
             setShort(cmd.enabled, getCommandContext());
             break;
-          case 'set_model':
-            setModel(cmd.model, getCommandContext());
+          case 'set_model': {
+            log.info('set_model received', { requested: cmd.model, current: model });
+            const result = setModel(cmd.model, getCommandContext());
+            log.info('set_model result', { ok: result.ok, message: result.message, now: model });
+            if (!result.ok) {
+              // Broadcast the real current model back so the UI corrects its optimistic update
+              broadcast({ type: 'state', model, contextWindow: getContextWindow(model) });
+            }
             break;
+          }
           case 'message_rating': {
             const { rating, messageId, notes } = cmd as { rating: number; messageId: string; notes?: string };
             if (rating >= 1 && rating <= 5) {
@@ -1811,6 +1819,17 @@ async function initAgent(): Promise<void> {
   // (in the sandbox there are no API keys — only the SocketProvider works)
   agentProvider = proxyProvider;
 
+  const modelMaxTokensConfig = (() => {
+    try {
+      const settings = readSettingsSync();
+      const raw = settings['model_max_tokens'];
+      if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+        return raw as Record<string, number>;
+      }
+    } catch { /* ignore */ }
+    return undefined;
+  })();
+
   agent = new Agent({
     model,
     thinking: currentThinking,
@@ -1818,6 +1837,7 @@ async function initAgent(): Promise<void> {
     ...(mcpManager ? { mcpManager } : {}),
     ...(proxyProvider ? { provider: proxyProvider } : {}),
     extraSystemPrompt: buildExtraSystemPrompt(),
+    ...(modelMaxTokensConfig ? { modelMaxTokens: modelMaxTokensConfig } : {}),
   });
   syncCapabilities();
 

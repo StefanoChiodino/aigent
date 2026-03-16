@@ -33,7 +33,7 @@ export const COMMANDS: CommandDef[] = [
   { name: '/reject-patch',   desc: 'Reject patch request' },
 ];
 
-export type SettingType = 'toggle' | 'slider' | 'number' | 'text' | 'select' | 'password' | 'string-list' | 'model-picker';
+export type SettingType = 'toggle' | 'slider' | 'number' | 'text' | 'select' | 'password' | 'string-list' | 'model-picker' | 'model-tokens';
 
 export interface SettingDef {
   key: string;
@@ -161,6 +161,15 @@ export const SETTINGS_SCHEMA: SettingDef[] = [
     group: 'Model',
     type: 'toggle',
     default: false,
+    scope: 'client',
+  },
+  {
+    key: 'model_max_tokens',
+    label: 'Per-model max tokens',
+    desc: 'Max tokens for each model tier. Set individually for Flash, Pro, and Ultra models. Leave blank to use default (16384).',
+    group: 'Model',
+    type: 'model-tokens',
+    default: '{}',
     scope: 'client',
   },
   {

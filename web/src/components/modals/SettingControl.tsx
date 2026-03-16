@@ -287,6 +287,115 @@ export function SettingControl({ def, value, onChange, availableModels = [] }: S
           </span>
         );
       }
+      // Special case: model_max_tokens gets individual inputs per tier
+      if (def.key === 'model_max_tokens') {
+        const currentValue = String(value);
+        const [error, setError] = useState<string | null>(null);
+        const [formData, setFormData] = useState<{ flash?: number; pro?: number; ultra?: number }>({});
+
+        useEffect(() => {
+          try {
+            if (currentValue.trim() === '') {
+              setFormData({});
+              setError(null);
+              return;
+            }
+            const parsed = JSON.parse(currentValue);
+            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+              setFormData({});
+              setError('Expected JSON object');
+              return;
+            }
+            const valid: { flash?: number; pro?: number; ultra?: number } = {};
+            for (const [key, val] of Object.entries(parsed)) {
+              if (typeof val === 'number' && val > 0) {
+                if (key.includes('flash') || key.includes('haiku')) valid.flash = val;
+                else if (key.includes('pro') || key.includes('sonnet')) valid.pro = val;
+                else if (key.includes('ultra') || key.includes('opus')) valid.ultra = val;
+              }
+            }
+            setFormData(valid);
+            setError(null);
+          } catch (e: unknown) {
+            const err = e as { message?: string };
+            setError(err.message ?? 'Invalid JSON');
+            setFormData({});
+          }
+        }, [currentValue]);
+
+        const handleTierChange = (tier: 'flash' | 'pro' | 'ultra', newValue: string) => {
+          const num = newValue.trim() === '' ? undefined : Number(newValue);
+          if (num !== undefined && num !== null && num > 0 && !Number.isNaN(num)) {
+            setFormData(prev => ({ ...prev, [tier]: num }));
+          } else {
+            setFormData(prev => {
+              const next = { ...prev };
+              delete next[tier];
+              return next;
+            });
+          }
+        };
+
+        const commit = () => {
+          if (Object.keys(formData).length === 0) {
+            onChange('{}');
+            setError(null);
+            return;
+          }
+          try {
+            const mapped: Record<string, number> = {};
+            const modelTiers = useUIStore.getState().modelTiers;
+            for (const [tier, tokens] of Object.entries(formData)) {
+              if (tokens === undefined) continue;
+              const tierKey = tier === 'flash' ? modelTiers.flash : tier === 'pro' ? modelTiers.pro : modelTiers.ultra;
+              if (tierKey) mapped[tierKey] = tokens;
+            }
+            onChange(JSON.stringify(mapped));
+            setError(null);
+          } catch (e: unknown) {
+            const err = e as { message?: string };
+            setError(err.message ?? 'Failed to save');
+          }
+        };
+
+        useEffect(() => {
+          commit();
+        }, [formData]);
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {(() => {
+              const modelTiers = useUIStore.getState().modelTiers;
+              const tiers: { key: 'flash' | 'pro' | 'ultra'; label: string; model?: string }[] = [
+                { key: 'flash', label: 'Flash tier', model: modelTiers.flash },
+                { key: 'pro', label: 'Pro tier', model: modelTiers.pro },
+                { key: 'ultra', label: 'Ultra tier', model: modelTiers.ultra },
+              ];
+              return tiers.map(({ key, label, model }) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ width: 80, fontSize: 13, color: '#888' }}>{label}</span>
+                  {model && <span style={{ fontSize: 12, color: '#666' }}>({model})</span>}
+                  <input
+                    type="number"
+                    className="settings-text settings-tokens-input"
+                    min="1"
+                    step="100"
+                    placeholder="default"
+                    value={formData[key] ?? ''}
+                    onChange={e => handleTierChange(key, e.target.value)}
+                    style={{ flex: 1, maxWidth: 150 }}
+                  />
+                  <span style={{ fontSize: 11, color: '#777' }}>tokens</span>
+                </div>
+              ));
+            })()}
+            {error && <span className="settings-error">{error}</span>}
+            <span className="settings-hint">
+              Set max tokens per tier. Leave blank to use default (16384).
+            </span>
+          </div>
+        );
+      }
       return (
         <input
           type="text"

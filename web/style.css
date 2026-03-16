@@ -5383,6 +5383,52 @@ body[data-working] .bokeh .b6 { animation-name: bokeh-drift-3; animation-duratio
   border-color: var(--accent);
 }
 
+/* JSON input for model_max_tokens */
+.settings-json-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+
+/* Tiered tokens input for model_max_tokens */
+.settings-tokens-input {
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 13px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.settings-tokens-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-error {
+  color: var(--error);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.settings-hint {
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.settings-hint code {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 10px;
+}
+
 /* Model picker control in settings */
 .settings-model-picker {
   position: relative;
