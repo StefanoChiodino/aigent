@@ -12,11 +12,13 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { existsSync, unlinkSync, appendFileSync, mkdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join, dirname } from 'node:path';
+import { createServer as createHTTPServer } from 'node:http';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { generateSessionId, autoSaveSession, autoLoadSession } from './profiles.js';
 import type { ProviderMessage, UserContent, TextContent, ImageContent, DocumentContent, ImageMediaType, ToolResult } from './provider.js';
 import type { ClientCommand, ServerEvent, DisplayMessage, DisplayAttachment, ServerState, TokenUsage, StreamingTrace } from './protocol.js';
-import { SOCKET_PATH } from './protocol.js';
+import { SOCKET_PATH, AIGENT_HOST, AIGENT_PORT } from './protocol.js';
 import { computeCost, registerModelPricing } from './pricing.js';
 import { distillToMemory } from './compact.js';
 import { loadMCP, type MCPManager } from './mcp.js';
@@ -1143,6 +1145,14 @@ function broadcast(event: ServerEvent): void {
   for (const client of clients) {
     send(client, event);
   }
+  const msg = JSON.stringify(event);
+  for (const ws of webSocketClients) {
+    try {
+      ws.send(msg);
+    } catch {
+      // Client disconnected, will be cleaned up on close
+    }
+  }
 }
 
 function addSystemMessage(content: string): void {
@@ -1611,6 +1621,260 @@ function handleClient(socket: Socket): void {
   });
 }
 
+// --- WebSocket client handler ---
+
+// Shared state for WebSocket clients
+const webSocketClients = new Set<WebSocket>();
+
+function handleWebSocketClient(ws: WebSocket): void {
+  webSocketClients.add(ws);
+  
+  const send = (event: ServerEvent): void => {
+    try {
+      ws.send(JSON.stringify(event));
+    } catch (err) {
+      log.error('Failed to send WebSocket message', { error: String(err) });
+    }
+  };
+
+  // Replay pending requests to new WebSocket client
+  configWriteBroker.replayTo((id, meta) => {
+    send({ type: 'config_write_request', id, file: meta.file, content: meta.content, reason: meta.reason });
+  });
+  editFileBroker.replayTo((id, meta) => {
+    send({ type: 'edit_file_request', id, path: meta.path, edits: meta.edits, reason: meta.reason });
+  });
+  execBroker.replayTo((id, meta) => {
+    send({ type: 'exec_request', id, command: meta.command });
+  });
+  fetchBroker.replayTo((id, meta) => {
+    send({ type: 'fetch_request', id, url: meta.url, ...(meta.method ? { method: meta.method } : {}) });
+  });
+  fileAccessBroker.replayTo((id, meta) => {
+    send({ type: 'file_access_request', id, path: meta.path, operation: meta.operation, reason: `Agent wants to ${meta.operation} this path` });
+  });
+  userQuestionBroker.replayTo((id, meta) => {
+    send({
+      type: 'user_question_request', id, question: meta.question,
+      ...(meta.options ? { options: meta.options } : {}),
+      ...(meta.multiSelect !== undefined ? { multiSelect: meta.multiSelect } : {}),
+      ...(meta.allowFreeText !== undefined ? { allowFreeText: meta.allowFreeText } : {}),
+    });
+  });
+
+  // Send initial state
+  send({ type: 'connected', state: getState() });
+
+  ws.on('message', (data: Buffer) => {
+    try {
+      const cmd = JSON.parse(data.toString()) as ClientCommand;
+        
+        // Forward to the main message queue (same as Unix socket clients)
+        switch (cmd.type) {
+          case 'message': {
+            const trimmed = cmd.content.trim();
+            const hasImages = cmd.images && cmd.images.length > 0;
+            const hasAttachments = cmd.attachments && cmd.attachments.length > 0;
+            if (!trimmed && !hasImages && !hasAttachments) break;
+            if (trimmed && !hasImages && !hasAttachments && handleCommand(trimmed)) break;
+
+            const parts: (TextContent | ImageContent | DocumentContent)[] = [];
+
+            if (hasImages) {
+              for (const img of cmd.images!) {
+                parts.push({ type: 'image', mediaType: img.mediaType as ImageMediaType, data: img.data });
+              }
+            }
+
+            if (hasAttachments) {
+              for (const att of cmd.attachments!) {
+                if (IMAGE_TYPES_SET.has(att.mediaType)) {
+                  parts.push({ type: 'image', mediaType: att.mediaType as ImageMediaType, data: att.data });
+                } else if (att.mediaType === 'application/pdf') {
+                  parts.push({ type: 'document', mediaType: 'application/pdf', data: att.data, title: att.name });
+                } else if (isTextMime(att.mediaType)) {
+                  const decoded = Buffer.from(att.data, 'base64').toString('utf-8');
+                  const truncated = decoded.length > MAX_TEXT_FILE_SIZE
+                    ? decoded.slice(0, MAX_TEXT_FILE_SIZE) + '\n\n... [truncated]'
+                    : decoded;
+                  parts.push({ type: 'text', text: `--- File: ${att.name} ---\n${truncated}\n--- End of ${att.name} ---` });
+                } else {
+                  parts.push({ type: 'text', text: `[Unsupported file: ${att.name} (${att.mediaType})]` });
+                }
+              }
+            }
+
+            parts.push({ type: 'text', text: trimmed || 'Review these attachments.' });
+
+            const displayText = trimmed || (hasImages || hasAttachments ? '[attachments]' : undefined);
+            const displayAttachments: DisplayAttachment[] | undefined =
+              (hasImages || hasAttachments)
+                ? [
+                    ...(cmd.images ?? []).map((img, i) => ({
+                      name: `image-${i + 1}`,
+                      mediaType: img.mediaType,
+                    })),
+                    ...(cmd.attachments ?? []).map(att => ({
+                      name: att.name,
+                      mediaType: att.mediaType,
+                      ...(att.thumbnail ? { thumbnail: att.thumbnail } : {}),
+                    })),
+                  ]
+                : undefined;
+
+            const queued: QueuedMessage = {
+              id: ++queueIdCounter,
+              content: parts.length > 1 ? parts : (trimmed as string),
+              ...(displayText ? { displayText } : {}),
+              ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
+              ...('reqId' in cmd && cmd.reqId ? { reqId: cmd.reqId } : {}),
+              ...(displayAttachments ? { displayAttachments } : {}),
+            };
+            
+            if (isLoading) {
+              messageQueue.push(queued);
+              broadcastQueueUpdate();
+            } else {
+              messageQueue.push(queued);
+              void processQueue();
+            }
+            break;
+          }
+          case 'cancel':
+            handleCancel();
+            break;
+          case 'cancel_queued': {
+            const idx = messageQueue.findIndex(m => m.id === cmd.id);
+            if (idx !== -1) {
+              messageQueue.splice(idx, 1);
+              broadcastQueueUpdate();
+            }
+            break;
+          }
+          case 'reorder_queue': {
+            const idOrder = cmd.ids;
+            const byId = new Map(messageQueue.map(m => [m.id, m]));
+            const reordered: QueuedMessage[] = [];
+            for (const id of idOrder) {
+              const m = byId.get(id);
+              if (m) reordered.push(m);
+            }
+            for (const m of messageQueue) {
+              if (!idOrder.includes(m.id)) reordered.push(m);
+            }
+            messageQueue.length = 0;
+            messageQueue.push(...reordered);
+            broadcastQueueUpdate();
+            break;
+          }
+          case 'command':
+            handleCommand(cmd.cmd);
+            break;
+          case 'set_thinking':
+            setThinking(cmd.enabled, getCommandContext());
+            break;
+          case 'set_effort':
+            setEffort(cmd.level, getCommandContext());
+            break;
+          case 'set_short':
+            setShort(cmd.enabled, getCommandContext());
+            break;
+          case 'set_model': {
+            log.info('set_model received', { requested: cmd.model, current: model });
+            const result = setModel(cmd.model, getCommandContext());
+            log.info('set_model result', { ok: result.ok, message: result.message, now: model });
+            if (!result.ok) {
+              send({ type: 'state', model, contextWindow: getContextWindow(model) });
+            }
+            break;
+          }
+          case 'message_rating': {
+            const { rating, messageId, notes } = cmd as { rating: number; messageId: string; notes?: string };
+            if (rating >= 1 && rating <= 5) {
+              sessionRatings.set(messageId, { score: rating, ...(notes ? { notes } : {}) });
+            } else if (rating === 0) {
+              sessionRatings.delete(messageId);
+            }
+            break;
+          }
+          case 'host_state':
+            agent?.setExtraSystemPrompt(buildExtraSystemPrompt());
+            break;
+          case 'config_write_response':
+            configWriteBroker.resolve(cmd.id, cmd);
+            break;
+          case 'edit_file_response':
+            editFileBroker.resolve(cmd.id, cmd);
+            break;
+          case 'exec_response':
+            execBroker.resolve(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
+            break;
+          case 'fetch_response':
+            fetchBroker.resolve(cmd.id, { ok: cmd.ok, alwaysAllow: cmd.alwaysAllow ?? false, message: cmd.message });
+            break;
+          case 'file_access_response':
+            fileAccessBroker.resolve(cmd.id, { ok: cmd.ok, message: cmd.message });
+            break;
+          case 'fetch_size_response':
+            fetchSizeBroker.resolve(cmd.id, { ok: cmd.ok, approvedBytes: cmd.approvedBytes, message: cmd.message });
+            break;
+          case 'mcp_tool_response':
+            mcpToolBroker.resolve(cmd.id, { ok: cmd.ok, message: cmd.message });
+            break;
+          case 'screenshot_response':
+            screenshotBroker.resolve(cmd.id, {
+              ok: cmd.ok,
+              ...(cmd.data !== undefined ? { data: cmd.data } : {}),
+              ...(cmd.mediaType !== undefined ? { mediaType: cmd.mediaType } : {}),
+              message: cmd.message,
+            });
+            break;
+          case 'screen_share_response':
+            screenShareBroker.resolve(cmd.id, { ok: cmd.ok, message: cmd.message });
+            break;
+          case 'browser_ext_result':
+            browserExtBroker.resolve(cmd.id, cmd as BrowserExtResponse);
+            break;
+          case 'user_question_response': {
+            const questionResponse: { answer: string; selectedOptions?: string[]; dismissed: boolean } = {
+              answer: cmd.answer,
+              dismissed: cmd.dismissed,
+            };
+            if (cmd.selectedOptions !== undefined) questionResponse.selectedOptions = cmd.selectedOptions;
+            userQuestionBroker.resolve(cmd.id, questionResponse);
+            break;
+          }
+          case 'context_breakdown_request':
+            try {
+              send({ type: 'context_breakdown', breakdown: agent.getContextBreakdown() });
+            } catch (err) {
+              log.error('Failed to generate context breakdown', { error: String(err) });
+              send({ type: 'context_breakdown', breakdown: {
+                systemBase: 0, workspaceContext: 0, toolDefs: 0,
+                messages: [], messagesTotal: 0, total: 0,
+              } });
+            }
+            break;
+          case 'ping':
+            send({ type: 'pong' });
+            break;
+        }
+    } catch {
+      // Malformed JSON, ignore
+    }
+  });
+
+  ws.on('close', () => {
+    webSocketClients.delete(ws);
+    log.info('WebSocket client disconnected');
+  });
+
+  ws.on('error', (error) => {
+    log.error('WebSocket error', { error: String(error) });
+    webSocketClients.delete(ws);
+  });
+}
+
 // --- Server startup ---
 
 function startServer(): Server {
@@ -1625,9 +1889,32 @@ function startServer(): Server {
     try { unlinkSync(SOCKET_PATH); } catch { /* ignore */ }
   }
 
+  // Create HTTP server for WebSocket upgrade
+  const httpServer = createHTTPServer();
+  
+  // Create Unix socket server for TUI clients
   const server = createServer(handleClient);
   server.listen(SOCKET_PATH, () => {
-    // Server ready
+    log.info('Unix socket server ready');
+  });
+
+  // Create WebSocket server for web app
+  const wsServer = new WebSocketServer({
+    server: httpServer,
+    path: '/ws'
+  });
+
+  wsServer.on('connection', (ws: WebSocket) => {
+    log.info('WebSocket client connected');
+    handleWebSocketClient(ws);
+  });
+
+  // Start HTTP server for WebSocket
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    log.error('WebSocket HTTP server error', { error: err.message, code: err.code });
+  });
+  httpServer.listen(AIGENT_PORT, AIGENT_HOST, () => {
+    log.info(`WebSocket server ready on ${AIGENT_HOST}:${AIGENT_PORT}`);
   });
 
   return server;

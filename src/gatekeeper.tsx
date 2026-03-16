@@ -355,11 +355,29 @@ function startServerProcess(): void {
     spawnArgs = [COMPILED_SERVER];
   }
 
+  // Re-read settings.json on each spawn so model/config changes made at runtime
+  // (e.g. via set_model) are picked up without restarting the gatekeeper.
+  const settingsPath = getSettingsPath();
+  const runtimeSettings: Record<string, string> = {};
+  if (existsSync(settingsPath)) {
+    try {
+      const SECRET_KEYS = new Set(['ANTHROPIC_API_KEY', 'OPENAI_API_KEY']);
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
+      for (const [key, value] of Object.entries(settings)) {
+        if (SECRET_KEYS.has(key)) continue;
+        if (value !== null && value !== undefined && value !== '') {
+          runtimeSettings[key] = String(value);
+        }
+      }
+    } catch { /* malformed settings.json — ignore */ }
+  }
+
   serverProcess = spawn(spawnCmd, spawnArgs, {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: IS_DEV_MODE ? REPO_DIR : process.cwd(),
     env: {
       ...process.env,
+      ...runtimeSettings,
       AIGENT_WORKSPACE: process.env['AIGENT_WORKSPACE'] ?? defaultWorkspace,
     },
   });

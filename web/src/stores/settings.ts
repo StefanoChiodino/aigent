@@ -79,6 +79,14 @@ export function buildSettingsPayload(key: string, value: boolean | number | stri
       },
     };
   }
+  if (key === 'model_max_tokens') {
+    try {
+      const parsed = JSON.parse(String(value));
+      return { model_max_tokens: parsed };
+    } catch {
+      return { model_max_tokens: {} };
+    }
+  }
   return { [key]: value };
 }
 

@@ -1,6 +1,19 @@
 {
   "permissions": {
     "allow": [
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(make pdf-quick:*)",
+      "Bash(make:*)",
+      "Bash(unzip:*)",
+      "Bash(xmllint:*)",
+      "Bash(epubcheck:*)",
+      "Bash(epubcheck --help:*)",
+      "Bash(git stash:*)"
+    ],
+    "additionalDirectories": [
+      "/home/draga/repos/orchids/assets/images/illustrations/candidates"
     ]
   }
 }

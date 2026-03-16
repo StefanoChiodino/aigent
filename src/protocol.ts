@@ -219,3 +219,7 @@ export type GatekeeperResponse =
 // Override with AIGENT_SOCKET_DIR to run multiple instances (e.g. dev + tests).
 export const SOCKET_DIR = process.env['AIGENT_SOCKET_DIR'] ?? '/tmp/aigent';
 export const SOCKET_PATH = `${SOCKET_DIR}/worker.sock`;
+
+// WebSocket server constants for web app (separate from the gatekeeper web port 3141)
+export const AIGENT_HOST = process.env['AIGENT_HOST'] ?? 'localhost';
+export const AIGENT_PORT = parseInt(process.env['AIGENT_PORT'] ?? '3142', 10);

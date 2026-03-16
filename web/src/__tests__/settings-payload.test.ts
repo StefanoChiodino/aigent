@@ -177,4 +177,70 @@ describe('buildSettingsPayload', () => {
     const result = buildSettingsPayload('AIGENT_MODEL', 'claude-opus-4-6', {});
     expect(result).toEqual({ AIGENT_MODEL: 'claude-opus-4-6' });
   });
+
+  // ── model_max_tokens ────────────────────────────────────────────────────
+
+  it('model_max_tokens sends parsed JSON object', () => {
+    const all = {
+      model_max_tokens: '{"claude-opus-4-6": 32000, "claude-sonnet-4-6": 16384}',
+    };
+    const result = buildSettingsPayload('model_max_tokens', all.model_max_tokens, all);
+    expect(result).toEqual({ model_max_tokens: { 'claude-opus-4-6': 32000, 'claude-sonnet-4-6': 16384 } });
+  });
+
+  it('model_max_tokens with empty object', () => {
+    const all = { model_max_tokens: '{}' };
+    const result = buildSettingsPayload('model_max_tokens', all.model_max_tokens, all);
+    expect(result).toEqual({ model_max_tokens: {} });
+  });
+
+  it('model_max_tokens with invalid JSON returns empty object', () => {
+    const all = { model_max_tokens: 'invalid json' };
+    const result = buildSettingsPayload('model_max_tokens', all.model_max_tokens, all);
+    expect(result).toEqual({ model_max_tokens: {} });
+  });
+
+  it('model_max_tokens with array returns empty object', () => {
+    const all = { model_max_tokens: '["claude-opus-4-6"]' };
+    const result = buildSettingsPayload('model_max_tokens', all.model_max_tokens, all);
+    expect(result).toEqual({ model_max_tokens: {} });
+  });
+
+  it('model_max_tokens with non-numeric values returns empty object', () => {
+    const all = { model_max_tokens: '{"claude-opus-4-6": "32000"}' };
+    const result = buildSettingsPayload('model_max_tokens', all.model_max_tokens, all);
+    expect(result).toEqual({ model_max_tokens: {} });
+  });
+
+  it('model_max_tokens with negative values returns empty object', () => {
+    const all = { model_max_tokens: '{"claude-opus-4-6": -100}' };
+    const result = buildSettingsPayload('model_max_tokens', all.model_max_tokens, all);
+    expect(result).toEqual({ model_max_tokens: {} });
+  });
+
+  it('model_max_tokens with zero values returns empty object', () => {
+    const all = { model_max_tokens: '{"claude-opus-4-6": 0}' };
+    const result = buildSettingsPayload('model_max_tokens', all.model_max_tokens, all);
+    expect(result).toEqual({ model_max_tokens: {} });
+  });
+
+  it('model_max_tokens with valid single model', () => {
+    const all = { model_max_tokens: '{"claude-opus-4-6": 32000}' };
+    const result = buildSettingsPayload('model_max_tokens', all.model_max_tokens, all);
+    expect(result).toEqual({ model_max_tokens: { 'claude-opus-4-6': 32000 } });
+  });
+
+  it('model_max_tokens with multiple models', () => {
+    const all = {
+      model_max_tokens: '{"claude-opus-4-6": 32000, "claude-sonnet-4-6": 16384, "claude-haiku-4-5": 8192}',
+    };
+    const result = buildSettingsPayload('model_max_tokens', all.model_max_tokens, all);
+    expect(result).toEqual({
+      model_max_tokens: {
+        'claude-opus-4-6': 32000,
+        'claude-sonnet-4-6': 16384,
+        'claude-haiku-4-5': 8192,
+      },
+    });
+  });
 });

@@ -153,6 +153,21 @@ describe('getToolDefinitions', () => {
     assert.ok(names.includes('Write'));
   });
 
+  it('internal names include exec, read_file, write_file, compact_context', () => {
+    const names = getToolDefinitions(false).map((t) => t.name);
+    assert.ok(names.includes('exec'));
+    assert.ok(names.includes('read_file'));
+    assert.ok(names.includes('write_file'));
+    assert.ok(names.includes('compact_context'));
+  });
+
+  it('CC names include Bash, Read, Write', () => {
+    const names = getToolDefinitions(true).map((t) => t.name);
+    assert.ok(names.includes('Bash'));
+    assert.ok(names.includes('Read'));
+    assert.ok(names.includes('Write'));
+  });
+
   it('every tool has name, description, and input_schema', () => {
     for (const tool of getToolDefinitions(false)) {
       assert.ok(tool.name, `tool should have a name`);

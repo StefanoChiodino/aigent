@@ -183,11 +183,11 @@ export function Header() {
           )}</span>
           <span ref={vscodeBadgeRef} id="vscode-badge" className={`conn-icon ${vscodeConnected ? 'ext-on' : 'ext-off'}`}
                 onClick={(e) => {
-                  if (!vscodeConnected) {
-                    setVscodeSetupOpen(!vscodeSetupOpen);
-                  }
+                  // Don't show popup by default - just indicate connection status
+                  // To see setup instructions, open Settings and look for VSCode extension info
+                  // setVscodeSetupOpen(!vscodeSetupOpen);
                 }}
-                style={{ cursor: vscodeConnected ? 'default' : 'pointer' }}>
+                style={{ cursor: 'default' }}>
             <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
               <path d="M2.5 1.5L1 3l1.5 1.5L2.5 6l1-1.5L2.5 3 4.5 1.5H2.5zM6.5 1.5l-1 1.5 1 1.5-1 1.5 1 1.5V14l3.5-7L6.5 1.5z"/>
             </svg>
@@ -203,6 +203,9 @@ export function Header() {
                   <li>This opens a new VSCode window with the extension enabled</li>
                   <li>Click the Aigent icon in the status bar to connect</li>
                 </ol>
+                <p style={{ marginTop: 12, fontSize: 11, color: 'var(--text-secondary)' }}>
+                  Tip: Click the icon again to close this popup
+                </p>
               </div>
             )}
           </span>

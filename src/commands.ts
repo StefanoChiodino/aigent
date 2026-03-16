@@ -18,6 +18,7 @@ import {
 import { formatLifetimeUsage } from './usage-tracking.js';
 import { readImageBase64 } from './image-support.js';
 import { resolveModelAlias } from './server.js';
+import { writeSettings } from './settings-file.js';
 
 // ---------------------------------------------------------------------------
 // Context interface — provided by server.ts
@@ -115,27 +116,21 @@ export function setModel(model: string, ctx: CommandContext): { ok: boolean; mes
   // before validating against availableModels
   const resolvedModel = resolveModelAlias(model);
 
-  if (resolvedModel !== model) {
-    // Model was a tier alias that got resolved
-    ctx.model = resolvedModel;
-    ctx.agent.currentModel = resolvedModel;
-    ctx.broadcast({ type: 'state', model: ctx.model, contextWindow: ctx.getContextWindow(resolvedModel) });
-    ctx.doAutoSave();
-    return { ok: true };
-  }
+  const finalModel = resolvedModel !== model ? resolvedModel : model;
 
-  if (!ctx.availableModels.includes(model)) {
-    return { ok: false, message: `Unknown model: ${model}\nAvailable: ${ctx.availableModels.join(', ')}` };
-  }
-
-  if (model === ctx.model) {
+  if (finalModel === ctx.model) {
     return { ok: true, message: `Already using: ${ctx.model}` };
   }
 
-  ctx.model = model;
-  ctx.agent.currentModel = model;
-  ctx.broadcast({ type: 'state', model: ctx.model, contextWindow: ctx.getContextWindow(model) });
+  // If we have a model list and the model isn't in it, still allow — the list may be
+  // stale or from a custom/local endpoint that reports different IDs.
+
+  ctx.model = finalModel;
+  ctx.agent.currentModel = finalModel;
+  ctx.broadcast({ type: 'state', model: finalModel, contextWindow: ctx.getContextWindow(finalModel) });
   ctx.doAutoSave();
+  // Persist so the model survives server restarts
+  void writeSettings('setModel', (s) => ({ ...s, AIGENT_MODEL: finalModel }));
   return { ok: true };
 }
 

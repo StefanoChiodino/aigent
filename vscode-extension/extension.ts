@@ -1,15 +1,16 @@
 /**
  * aigent VS Code Extension
  * 
- * Sends VS Code context to aigent agent via WebSocket at ws://localhost:3141/ext
+ * Sends VS Code context to aigent agent via Unix domain socket
  */
 
 import * as vscode from 'vscode';
 import * as net from 'net';
+import * as os from 'os';
+import * as path from 'path';
 
-const AIGENT_HOST = 'localhost';
-const AIGENT_PORT = 3141;
-const AIGENT_PATH = '/ext';
+// Use Unix domain socket for local connections
+const AIGENT_SOCKET_PATH = process.env['AIGENT_SOCKET_PATH'] || path.join(os.tmpdir(), 'aigent', 'worker.sock');
 
 let socket: net.Socket | null = null;
 let connected = false;
@@ -40,105 +41,6 @@ function updateStatusBar(): void {
   }
 }
 
-function decodeChunkedEncoding(body: string): string {
-  // Remove headers (everything up to first \r\n\r\n)
-  const parts = body.split('\r\n\r\n');
-  if (parts.length < 2) return '';
-  let chunkedData = parts.slice(1).join('\r\n\r\n').trim();
-  
-  if (!chunkedData) return '';
-  
-  // Parse chunked encoding: "31\r\n{...}\r\n0\r\n\r\n"
-  const chunks: string[] = [];
-  let remaining = chunkedData;
-  
-  while (remaining) {
-    const crlfIndex = remaining.indexOf('\r\n');
-    if (crlfIndex === -1) break;
-    
-    const chunkSizeHex = remaining.substring(0, crlfIndex).trim();
-    const chunkSize = parseInt(chunkSizeHex, 16);
-    
-    if (chunkSize === 0) break; // end of chunks
-    
-    remaining = remaining.substring(crlfIndex + 2); // skip "\r\n"
-    
-    if (remaining.length < chunkSize) {
-      log(`Chunk decoding error: expected ${chunkSize} bytes but got ${remaining.length}`);
-      break;
-    }
-    
-    chunks.push(remaining.substring(0, chunkSize));
-    remaining = remaining.substring(chunkSize);
-    
-    // Skip trailing "\r\n" if present
-    if (remaining.startsWith('\r\n')) {
-      remaining = remaining.substring(2);
-    }
-  }
-  
-  return chunks.join('');
-}
-
-async function fetchSecret(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const client = new net.Socket();
-    const request = [
-      `GET /ext/secret HTTP/1.1`,
-      `Host: ${AIGENT_HOST}:${AIGENT_PORT}`,
-      'Connection: close',
-      '',
-      ''
-    ].join('\r\n');
-
-    let buffer = '';
-
-    client.on('data', (data) => {
-      buffer += data.toString();
-      log(`Secret fetch raw response: ${buffer}`);
-      if (buffer.includes('\r\n\r\n')) {
-        const bodyMatch = buffer.match(/\r\n\r\n(.*)$/s);
-        if (bodyMatch) {
-          let bodyText = bodyMatch[1];
-          log(`Secret fetch body (raw): ${bodyText}`);
-          
-          // Decode chunked transfer encoding if present
-          if (bodyText.match(/^[0-9a-fA-F]+\r\n/)) {
-            bodyText = decodeChunkedEncoding(buffer);
-            log(`Secret fetch body (decoded): ${bodyText}`);
-          }
-          
-          try {
-            const body = JSON.parse(bodyText);
-            client.destroy();
-            log(`Secret fetched: ${body.secret ? 'yes' : 'no'}`);
-            resolve(body.secret ?? null);
-            return;
-          } catch (e) {
-            log(`Secret fetch JSON parse error: ${e}`);
-          }
-        }
-        client.destroy();
-        resolve(null);
-      }
-    });
-
-    client.on('error', () => {
-      resolve(null);
-    });
-
-    client.on('timeout', () => {
-      client.destroy();
-      resolve(null);
-    });
-
-    client.setTimeout(5000);
-    client.connect(AIGENT_PORT, AIGENT_HOST, () => {
-      client.write(request);
-    });
-  });
-}
-
 function connect(): Promise<net.Socket> {
   return new Promise(async (resolve, reject) => {
     if (socket && connected) {
@@ -146,60 +48,20 @@ function connect(): Promise<net.Socket> {
       return;
     }
 
-    // Fetch auth secret first (like Chrome extension does)
-    const secret = await fetchSecret();
-    log(`Connect: secret=${secret ? 'present' : 'missing'}`);
-    const wsPath = secret ? `${AIGENT_PATH}?secret=${encodeURIComponent(secret)}` : AIGENT_PATH;
-    log(`Connect: wsPath=${wsPath}`);
-
     socket = new net.Socket();
-    socket.connect(AIGENT_PORT, AIGENT_HOST, () => {
-      // Send HTTP Upgrade request for WebSocket
-      const request = [
-        `GET ${wsPath} HTTP/1.1`,
-        `Host: ${AIGENT_HOST}:${AIGENT_PORT}`,
-        'Upgrade: websocket',
-        'Connection: Upgrade',
-        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==',
-        'Sec-WebSocket-Version: 13',
-        '',
-        ''
-      ].join('\r\n');
-
-      socket!.write(request);
-
-      // Wait for upgrade response
-      let buffer = '';
-      const onData = (data: Buffer) => {
-        buffer += data.toString();
-        if (buffer.includes('\r\n\r\n')) {
-          socket!.off('data', onData);
-          if (buffer.includes('101 Switching Protocols')) {
-            log('WebSocket upgrade successful');
-            // Now send the VS Code hello message (WebSocket upgrade complete)
-            const hello = JSON.stringify({ type: 'vscode_hello', version: '1.0.0' });
-            const len = Buffer.byteLength(hello);
-            const frame = Buffer.alloc(2 + len);
-            frame[0] = 0x81; // text frame
-            frame[1] = len;
-            frame.write(hello, 2);
-            
-            // Wait a moment for server to process hello before resolving
-            setTimeout(() => {
-              log('Sent hello, setting connected=true');
-              connected = true;
-              updateStatusBar();
-              resolve(socket!);
-            }, 100);
-            return;
-          } else {
-            const statusMatch = buffer.match(/HTTP\/1\.1 (\d+)/);
-            const status = statusMatch ? statusMatch[1] : 'unknown';
-            reject(new Error(`WebSocket upgrade failed (HTTP ${status})`));
-          }
-        }
-      };
-      socket!.on('data', onData);
+    socket.connect(AIGENT_SOCKET_PATH, () => {
+      log('Connected to Unix socket');
+      // Send VS Code hello message (newline-delimited JSON)
+      const hello = JSON.stringify({ type: 'vscode_hello', version: '1.0.0' }) + '\n';
+      socket!.write(hello);
+      
+      // Wait a moment for server to process hello before resolving
+      setTimeout(() => {
+        log('Sent hello, setting connected=true');
+        connected = true;
+        updateStatusBar();
+        resolve(socket!);
+      }, 100);
     });
 
     socket.on('error', (err) => {
@@ -235,29 +97,9 @@ function sendMessage(data: object): void {
     return;
   }
 
-  // Simple WebSocket frame: opcode 0x81 (text), length + payload
-  const json = JSON.stringify(data);
-  const length = Buffer.byteLength(json);
-  
-  let frame: Buffer;
-  if (length <= 125) {
-    frame = Buffer.alloc(2 + length);
-    frame[0] = 0x81; // text frame
-    frame[1] = length;
-  } else if (length <= 65535) {
-    frame = Buffer.alloc(4 + length);
-    frame[0] = 0x81;
-    frame[1] = 126;
-    frame.writeUInt16BE(length, 2);
-  } else {
-    frame = Buffer.alloc(10 + length);
-    frame[0] = 0x81;
-    frame[1] = 127;
-    frame.writeBigUInt64BE(BigInt(length), 2);
-  }
-  
-  frame.write(json, frame[1] === 126 ? 4 : frame[1] === 127 ? 10 : 2);
-  socket.write(frame);
+  // Newline-delimited JSON (NDJSON) protocol
+  const json = JSON.stringify(data) + '\n';
+  socket.write(json);
 }
 
 interface VSCodeContext {
@@ -348,7 +190,8 @@ async function getOpenTabs(): Promise<VSCodeContext> {
 export function activate(context: vscode.ExtensionContext) {
   // Create output channel (shows up in Output > Aigent dropdown)
   outputChannel = vscode.window.createOutputChannel('Aigent', 'json');
-  outputChannel.show(true);
+  // Don't auto-show the output panel - user can open it manually if needed
+  // outputChannel.show(true);
   context.subscriptions.push(outputChannel);
 
   // Create status bar item
@@ -359,11 +202,17 @@ export function activate(context: vscode.ExtensionContext) {
   updateStatusBar();
   log('Status bar item created');
   
-  // Register command to show connection status
+  // Register command to show connection status (simple message, no popup)
   context.subscriptions.push(
     vscode.commands.registerCommand('aigent.status', () => {
       log(`Status clicked: connected=${connected}`);
-      vscode.window.showInformationMessage(`aigent: ${connected ? 'Connected ✓' : 'Disconnected ✗'}`);
+      if (connected) {
+        // Silent - status bar shows connection state
+        // vscode.window.showInformationMessage('aigent: Connected ✓');
+      } else {
+        // Silent - status bar shows connection state
+        // vscode.window.showInformationMessage('aigent: Not connected - check if aigent server is running');
+      }
     })
   );
 
@@ -373,7 +222,7 @@ export function activate(context: vscode.ExtensionContext) {
   log('Starting initial connection...');
   connect().then(() => {
     log('Connected to aigent agent successfully');
-    vscode.window.showInformationMessage('aigent: Connected');
+    // Silent connection - status bar shows connection state
     updateStatusBar();
   }).catch((err) => {
     log(`Initial connection failed: ${err.message}`);
@@ -389,7 +238,8 @@ export function activate(context: vscode.ExtensionContext) {
         updateStatusBar();
         const ctx = await getSelection();
         sendMessage(ctx);
-        vscode.window.showInformationMessage(`aigent: Sent selection (lines ${ctx.selection?.startLine}-${ctx.selection?.endLine})`);
+        // Silent - status bar shows connection state
+        // vscode.window.showInformationMessage(`aigent: Sent selection (lines ${ctx.selection?.startLine}-${ctx.selection?.endLine})`);
       } catch (err) {
         vscode.window.showErrorMessage(`aigent: ${err}`);
       }
@@ -404,7 +254,8 @@ export function activate(context: vscode.ExtensionContext) {
         updateStatusBar();
         const ctx = await getActiveFile();
         sendMessage(ctx);
-        vscode.window.showInformationMessage(`aigent: Sent ${ctx.filePath}`);
+        // Silent - status bar shows connection state
+        // vscode.window.showInformationMessage(`aigent: Sent ${ctx.filePath}`);
       } catch (err) {
         vscode.window.showErrorMessage(`aigent: ${err}`);
       }
@@ -416,6 +267,32 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.onDidChangeTextEditorSelection(async (e) => {
       // Optional: auto-send selection changes
       // For now, manual trigger only to avoid spam
+    })
+  );
+
+  // Help command - shows basic usage instructions (available via Command Palette)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('aigent.help', () => {
+      const help = `
+# aigent VSCode Extension - Quick Start
+
+## Commands
+- aigent: Send Selection (Ctrl+Shift+A) - Send selected code to aigent
+- aigent: Send Active File - Send entire file to aigent
+- aigent: Show Connection Status - Check if connected
+
+## Status Bar
+- ✓ aigent = Connected to aigent server
+- ✗ aigent = Not connected
+
+## Tips
+- Select code and press Ctrl+Shift+A to send to aigent
+- Click status bar item to check connection
+- Open Output > Aigent to see connection logs
+`;
+      vscode.window.showInformationMessage('aigent: Help shown in Output panel');
+      outputChannel?.appendLine(help);
+      outputChannel?.show(false);
     })
   );
 }

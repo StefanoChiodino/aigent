@@ -535,22 +535,6 @@ const provideFinalAnswerTool: ToolDef = {
   },
 };
 
-const trackProgressTool: ToolDef = {
-  name: 'trackProgress',
-  description:
-    'Call this to track your progress through a multi-step task. Helps you know when you are close to completion.',
-  input_schema: {
-    type: 'object' as const,
-    properties: {
-      step: { type: 'number', description: 'Current step number' },
-      totalSteps: { type: 'number', description: 'Estimated total steps' },
-      status: { type: 'string', description: 'What you are working on' },
-      notes: { type: 'string', description: 'Optional notes or context' },
-    },
-    required: ['step', 'status'],
-  },
-};
-
 // --- Tool registry ---
 
 export const internalTools: ToolDef[] = [

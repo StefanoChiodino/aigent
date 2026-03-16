@@ -27,6 +27,10 @@
       {
         "command": "aigent.sendFile",
         "title": "Send Active File to aigent"
+      },
+      {
+        "command": "aigent.help",
+        "title": "aigent: Show Help"
       }
     ],
     "keybindings": [

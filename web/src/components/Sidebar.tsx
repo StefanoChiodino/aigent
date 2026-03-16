@@ -318,7 +318,7 @@ export function Sidebar() {
             {favorites
               .filter(mid => !modelFilter || mid.toLowerCase().includes(modelFilter.toLowerCase()))
               .map((mid: string) => (
-                <div
+                <button
                   key={`fav-${mid}`}
                   className={`sb-model-option sb-model-fav${mid === modelName ? ' active' : ''}`}
                   title={mid}
@@ -334,11 +334,14 @@ export function Sidebar() {
                 >
                   <span className="sb-model-fav-name">{modelDisplayName(mid)}</span>
                   <span
-                    className="sb-model-star starred"
-                    title="Remove from favourites"
-                    onClick={e => toggleFavorite(mid, e)}
-                  >★</span>
-                </div>
+                    className={`sb-model-star${favorites.includes(mid) ? ' starred' : ''}`}
+                    title={favorites.includes(mid) ? 'Remove from favourites' : 'Add to favourites'}
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleFavorite(mid, e);
+                    }}
+                  >{favorites.includes(mid) ? '★' : '☆'}</span>
+                </button>
               ))}
 
             {/* All models */}

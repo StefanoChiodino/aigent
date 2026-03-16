@@ -2,8 +2,8 @@
 
 # --- Development ---
 
-# Run gatekeeper + vite dev server (HMR on :5173, backend on :3141) + Chrome plugin watch
-dev-ts:
+# Run gatekeeper + vite dev server (HMR on :5173, backend on :3141) + Chrome plugin watch. No TTS/STT.
+dev-ts: kill-ports
 	@npx concurrently \
 		--names "gate,web,plugin" \
 		--prefix-colors "cyan,blue,green" \

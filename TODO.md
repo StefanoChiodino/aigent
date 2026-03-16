@@ -2,6 +2,42 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
+---
+
+## Connection Architecture Note
+
+**Problem**: `http://localhost:5173/` shows "Chrome not connected" while `http://localhost:3141/` shows "connected"
+
+**Root Cause**: Two different connection mechanisms are in use:
+
+1. **`http://localhost:5173/`** - Vite's dev server (serves the React frontend)
+   - The frontend connects to `ws://localhost:3142/ws` in dev mode (see `useWebSocket.ts`)
+   - This is Vite's development server proxying WebSocket connections
+
+2. **`http://localhost:3141/`** - The actual aigent web server (`web-bridge.ts`)
+   - Serves both HTTP and WebSocket on port 3141
+   - This is the real backend that connects to the agent
+
+**What's Happening**:
+- `http://localhost:3141/` shows "connected" because the web server at 3141 has WebSocket clients connected to it
+- `http://localhost:5173/` shows "chrome not connected" because the frontend's WebSocket hook is trying to connect to port 3142, which may not be properly configured
+
+**The Fix**: The `useWebSocket.ts` hook in dev mode should connect to `ws://localhost:3141/ws` (the actual web server) rather than `ws://localhost:3142/ws`.
+
+**Files involved**:
+- `web/src/hooks/useWebSocket.ts` - React hook that needs to connect to port 3141 instead of 3142
+- `src/web-bridge.ts` - The actual web server that serves both HTTP and WebSocket on port 3141
+- `src/server.ts` - Main server file
+
+---
+
+Bug: still getting ghost request to access files ("File Read
+/Users/stefano/repos/aigent/web/src/components/Header.tsx
+Agent wants to read this path
+")) when the YOLO permissions allow the agent to do so. When approved I get a message saying that the request doesn't exists (Unknown command: /approve-file file_1 Type /help for available commands). This is also concernign because I dont' expect the modal to work based on raw / commands.
+
+Bug: on page refresh / server restart the current and queued messages are lost!
+
 ON HOLD: Shall we migrate from makefile to npm commands? I'm used to makefile but it seems a bit redundant
 
 ~~Sounds and browser notifications should be more customizable. Not really in the actual sound, but more like which sound plays: e.g. play on finish, notification on finish, same for asking for permissions, etc~~ done — 4 toggles in Settings → Notifications: sound on permission (on by default, now toggleable), sound on response complete, browser notification on permission, browser notification on response complete

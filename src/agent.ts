@@ -119,6 +119,8 @@ export interface AgentOptions {
   extraSystemPrompt?: string;
   /** Pre-created provider (e.g., SocketProvider for gatekeeper proxy). */
   provider?: Provider;
+  /** Per-model max tokens configuration. Maps model names to their max token limits. */
+  modelMaxTokens?: Record<string, number>;
 }
 
 // Re-export TokenUsage from protocol (single source of truth)
@@ -149,6 +151,7 @@ export class Agent {
   private messages: ProviderMessage[] = [];
   private model: string;
   private maxTokens: number;
+  private modelMaxTokens: Record<string, number>;
   private isOAuth: boolean;
   private toolDefs: ProviderToolDef[];
   /** Split system prompt: [0] = stable base (cached), [1] = dynamic workspace (uncached) */
@@ -167,6 +170,8 @@ export class Agent {
   private compactPromise: Promise<void> | null = null;
   /** Track tool results that were summarized to save context tokens. */
   private toolSummaries = new Map<string, ToolSummaryRecord>();
+  /** Track tool execution success/failure for error rate monitoring. */
+  private toolExecutionHistory: Array<{ tool: string; success: boolean; error?: string }> = [];
   readonly providerType: string;
 
   constructor(options: AgentOptions = {}) {
@@ -181,7 +186,8 @@ export class Agent {
       this.isOAuth = providerType === 'anthropic' && (this.provider as AnthropicProvider).isOAuthToken;
     }
     this.model = options.model ?? process.env['AIGENT_MODEL'] ?? '';
-    this.maxTokens = options.maxTokens ?? 16384;
+    this.modelMaxTokens = options.modelMaxTokens ?? {};
+    this.maxTokens = options.maxTokens ?? this.getEffectiveMaxTokens(this.model);
     this.thinking = options.thinking ?? (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
     this.mcpManager = options.mcpManager ?? null;
     this.extraSystemPrompt = options.extraSystemPrompt ?? '';
@@ -323,6 +329,7 @@ export class Agent {
 
           const toolStart = performance.now();
           let result: string | ToolContentBlock[];
+          let toolError: string | undefined;
           if (toolName === 'compact_context') {
             const contextWindow = this.getContextWindow();
             const currentUsage = this._totalUsage.contextTokens ?? 0;
@@ -360,6 +367,7 @@ export class Agent {
             const mcpApproval = await requestMcpToolApproval(mcpServer, mcpTool, tc.input, signal);
             if (!mcpApproval.ok) {
               result = `MCP tool call denied: ${mcpApproval.message}`;
+              toolError = `Denied: ${mcpApproval.message}`;
             } else {
               result = await this.mcpManager.callTool(toolName, tc.input as Record<string, unknown>);
             }
@@ -370,11 +378,20 @@ export class Agent {
             this.thinking = savedThinking;
             return result;
           } else {
-            result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput, signal);
+            try {
+              result = await executeTool(tc.name, tc.input as Parameters<typeof executeTool>[1], this.isOAuth, callbacks?.onToolOutput, signal);
+            } catch (execErr: unknown) {
+              toolError = (execErr as { message?: string }).message ?? 'Tool execution failed';
+              result = `Error: ${toolError}`;
+            }
           }
           const toolMs = (performance.now() - toolStart).toFixed(0);
           log.info('Tool executed', { tool: toolName, ms: toolMs });
-          callbacks?.onToolComplete?.({ tool: toolName, input: truncatedInput, ms: toolMs, ok: true });
+
+          // Track tool execution success/failure
+          const success = toolError === undefined;
+          this.toolExecutionHistory.push({ tool: toolName, success, ...(toolError ? { error: toolError } : {})});
+          callbacks?.onToolComplete?.({ tool: toolName, input: truncatedInput, ms: toolMs, ok: success });
 
           // Broadcast tool result to UI: images and text for non-streaming tools.
           if (typeof result !== 'string') {
@@ -413,6 +430,8 @@ export class Agent {
             const errMsg = e.name === 'AbortError' ? 'Aborted by user' : (e.message ?? 'Tool execution failed');
             results.push({ id: tc.id, content: errMsg });
             const failedToolName = this.isOAuth ? fromClaudeCodeName(tc.name) : tc.name;
+            // Track failed tool in history
+            this.toolExecutionHistory.push({ tool: failedToolName, success: false, error: errMsg });
             callbacks?.onToolComplete?.({ tool: failedToolName, input: '(not executed)', ms: '0', ok: false });
           }
         }
@@ -431,6 +450,13 @@ export class Agent {
 
       callbacks?.onToolEnd?.();
       this.messages.push({ role: 'tool_result', results });
+
+      // Check error rate and terminate early if needed
+      const errorCheck = this.checkErrorRate();
+      if (errorCheck.shouldTerminate) {
+        this.thinking = savedThinking;
+        return errorCheck.errorMessage!;
+      }
     }
 
     // Hit iteration limit — ask the model to summarize progress and next steps
@@ -446,7 +472,7 @@ export class Agent {
         this.systemPromptParts,
         this.messages,
         [], // no tools — just produce text
-        { model: this.model, maxTokens: this.maxTokens, thinking: 'off' },
+        { model: this.model, maxTokens: this.getEffectiveMaxTokens(this.model), thinking: 'off' },
         { onText: callbacks?.onText, onThinking: callbacks?.onThinking },
       );
       this.messages.push({ role: 'assistant', content: handoff.text });
@@ -487,7 +513,7 @@ export class Agent {
           this.systemPromptParts,
           this.messages,
           this.getActiveTools(),
-          { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking, ...(signal ? { signal } : {}) },
+          { model: this.model, maxTokens: this.getEffectiveMaxTokens(this.model), thinking: this.thinking, ...(signal ? { signal } : {}) },
           {
             onText: callbacks?.onText,
             onThinking: callbacks?.onThinking,
@@ -515,7 +541,7 @@ export class Agent {
                 this.systemPromptParts,
                 this.messages,
                 this.getActiveTools(),
-                { model: this.model, maxTokens: this.maxTokens, thinking: 'off', ...(signal ? { signal } : {}) },
+                { model: this.model, maxTokens: this.getEffectiveMaxTokens(this.model), thinking: 'off', ...(signal ? { signal } : {}) },
                 { onText: callbacks?.onText, onThinking: callbacks?.onThinking },
               );
             } finally {
@@ -541,7 +567,7 @@ export class Agent {
                 this.systemPromptParts,
                 this.messages,
                 this.getActiveTools(),
-                { model: this.model, maxTokens: this.maxTokens, thinking: this.thinking, ...(signal ? { signal } : {}) },
+                { model: this.model, maxTokens: this.getEffectiveMaxTokens(this.model), thinking: this.thinking, ...(signal ? { signal } : {}) },
                 { onText: callbacks?.onText, onThinking: callbacks?.onThinking },
               );
             } finally {
@@ -631,7 +657,7 @@ export class Agent {
           systemPrompt,
           subMessages,
           subToolDefs,
-          { model: requestedModel, maxTokens: this.maxTokens, thinking: requestedThinking },
+          { model: requestedModel, maxTokens: this.getEffectiveMaxTokens(requestedModel), thinking: requestedThinking },
         );
 
         subMessages.push({
@@ -719,6 +745,15 @@ export class Agent {
       if (!isNaN(n) && n > 0) return n;
     }
     return 200_000;
+  }
+
+  /**
+   * Returns the effective max tokens for a given model.
+   * Uses per-model configuration if set, otherwise falls back to the instance default.
+   */
+  private getEffectiveMaxTokens(model: string): number {
+    if (!model) return this.maxTokens;
+    return this.modelMaxTokens[model] ?? this.maxTokens;
   }
 
   /**
@@ -911,7 +946,7 @@ export class Agent {
   private getToolOutputMaxChars(resultLength: number): number {
     const contextWindow = this.getContextWindow();
     const currentUsage = this._totalUsage.contextTokens ?? 0;
-    const responseBuffer = this.maxTokens;
+    const responseBuffer = this.getEffectiveMaxTokens(this.model);
     const availableTokens = Math.max(0, contextWindow - currentUsage - responseBuffer);
 
     // ~4 chars per token as rough estimate
@@ -985,6 +1020,26 @@ export class Agent {
     this._totalUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 };
     this.seenImageHashes.clear();
     this.toolSummaries.clear();
+  }
+
+  /**
+   * Check if error rate exceeds threshold and should terminate early.
+   * Returns { shouldTerminate: boolean, errorMessage?: string }
+   */
+  private checkErrorRate(): { shouldTerminate: boolean; errorMessage?: string } {
+    const total = this.toolExecutionHistory.length;
+    if (total < 3) return { shouldTerminate: false }; // Need at least 3 tool calls
+
+    const failed = this.toolExecutionHistory.filter(t => !t.success).length;
+    const errorRate = failed / total;
+
+    if (errorRate > 0.30) {
+      return {
+        shouldTerminate: true,
+        errorMessage: `High error rate detected: ${failed}/${total} tool calls failed (${Math.round(errorRate * 100)}%). Stopping to prevent wasted iterations.`,
+      };
+    }
+    return { shouldTerminate: false };
   }
 
   get conversationLength(): number { return this.messages.length; }

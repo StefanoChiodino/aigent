@@ -242,21 +242,24 @@ export class AnthropicProvider implements Provider {
     // Wrap stream.finalMessage() with timeout protection
     const streamPromise = stream.finalMessage();
     const timeoutPromise = new Promise<Anthropic.Message>((resolve) => {
-      const timer = setTimeout(() => {
+      setTimeout(() => {
         log.warn(`Stream timeout after ${Math.round(STREAM_TIMEOUT_MS / 1000)}s for model ${options.model}`);
         stream.abort();
         // Resolve with a minimal message that will be treated as incomplete
         resolve({
-          content: [],
+          container: null,
+          content: [{ type: 'text', text: '', citations: null }],
           id: 'timeout',
           model: options.model,
           role: 'assistant',
-          stop_reason: 'max_tokens' as const,
+          stop_reason: 'max_tokens',
+          stop_sequence: null,
+          type: 'message',
           usage: {
-            input_tokens: 0,
-            output_tokens: 0,
+            inputTokens: 0,
+            outputTokens: 0,
           },
-        } as Anthropic.Message);
+        } as unknown as Anthropic.Message);
       }, STREAM_TIMEOUT_MS);
     });
 
