@@ -80,9 +80,17 @@ describe('buildBrowserExtSystemPrompt', () => {
 });
 
 describe('SHORT_MODE_PROMPT', () => {
-  it('exists and includes speak tag format', () => {
-    assert.ok(SHORT_MODE_PROMPT.includes('[speak]'));
+  it('exists and is MANDATORY', () => {
     assert.ok(SHORT_MODE_PROMPT.includes('MANDATORY'));
+  });
+
+  it('instructs the model to call speak_text tool first', () => {
+    assert.ok(SHORT_MODE_PROMPT.includes('speak_text'));
+    assert.ok(SHORT_MODE_PROMPT.includes('FIRST'));
+  });
+
+  it('enforces 100 word hard limit', () => {
+    assert.ok(SHORT_MODE_PROMPT.includes('100 words'));
   });
 });
 

@@ -628,7 +628,7 @@ async function processAgentTurn(
   // System prompt instructions get buried in long conversations; a user-turn
   // reminder is far more reliable at keeping the model concise.
   if (currentShort && !isTaskResult) {
-    const shortReminder = '\n\n[SHORT MODE — HARD LIMIT 100 WORDS. [speak]1-2 sentences[/speak] first, then at most 1-3 sentences. No blockquotes, no long content, no before/after comparisons. If content is needed, use a tool.]';
+    const shortReminder = '\n\n[SHORT MODE — HARD LIMIT 100 WORDS. Call speak_text(...) FIRST with one sentence before any other action or text. Then at most 1-3 sentences of text. No blockquotes, no long content. If content is needed, use a tool.]';
     if (typeof userContent === 'string') {
       userContent = userContent + shortReminder;
     } else if (Array.isArray(userContent)) {
@@ -636,23 +636,15 @@ async function processAgentTurn(
     }
   }
 
-  let speakSent = false; // one-time flag: send speak event only once per turn
   try {
     const response = await agent.chat(userContent, {
       signal: controller.signal,
       onText: (text) => {
         if (controller.signal.aborted) return;
-        // Strip speak tags from streaming text to avoid showing them
+        // Strip any legacy speak tags from streaming text (backwards compat)
         const stripped = text.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '');
-        // Only broadcast if there's content after stripping tags
         if (stripped.trim()) {
           broadcast({ type: 'text', content: stripped });
-        }
-        // Also broadcast extracted spokenText for TTS
-        const { spokenText } = _extractAndStripSpeak(text, currentShort, true);
-        if (spokenText && !speakSent) {
-          speakSent = true;
-          broadcast({ type: 'speak', content: spokenText });
         }
       },
       onThinking: (text) => {
@@ -1153,6 +1145,11 @@ function broadcast(event: ServerEvent): void {
       // Client disconnected, will be cleaned up on close
     }
   }
+}
+
+/** Called by the speak_text tool to immediately queue TTS audio for the client. */
+export function broadcastSpeakText(text: string): void {
+  broadcast({ type: 'speak', content: text });
 }
 
 function addSystemMessage(content: string): void {
@@ -1890,7 +1887,13 @@ function startServer(): Server {
   }
 
   // Create HTTP server for WebSocket upgrade
-  const httpServer = createHTTPServer();
+  const httpServer = createHTTPServer((req, res) => {
+    // Handle WebSocket upgrades - let ws handle it
+    if (!req.url || !req.url.startsWith('/ws')) {
+      res.writeHead(404);
+      res.end('Not found');
+    }
+  });
   
   // Create Unix socket server for TUI clients
   const server = createServer(handleClient);

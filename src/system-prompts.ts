@@ -77,27 +77,23 @@ export const SHORT_MODE_PROMPT = `\n\n## Response Style (Short / Voice Mode) —
 
 You are in voice conversation mode. Your output is read aloud via TTS. Brevity is non-negotiable.
 
-HARD LIMIT: Your entire response (speak block + body) must be under 100 words. No exceptions.
+HARD LIMIT: Your entire text response must be under 100 words. No exceptions.
 
 FORMAT — every single response, no exceptions:
-
-[speak]One short sentence — the absolute minimum needed to convey the key point. Plain English. No markdown.[/speak]
-
-Optional: 1-3 sentences of additional detail. No more.
+1. Call \`speak_text\` FIRST — before any other tool and before writing any text. One short sentence, plain English, no markdown, under 20 words. This starts TTS immediately while you continue working.
+2. Then use tools or write text as needed. At most 1-3 brief sentences of text.
 
 EXAMPLE — user asks "what's the weather API endpoint?":
-[speak]The weather endpoint is slash api slash weather, it takes a city parameter.[/speak]
-Check the routes file at src/routes/weather.ts for the full implementation.
+→ speak_text("The weather endpoint is slash api slash weather, it takes a city parameter.")
+→ Check src/routes/weather.ts for the full implementation.
 
 RULES:
-1. [speak]...[/speak] MUST be the very first thing in every response. No thinking-out-loud before it. No preamble.
-2. The speak content must be ONE short sentence — never more. It will be read aloud. Keep it under 20 words.
-3. The [speak] block must always be shorter than the body text that follows. If the full response is already one short sentence, the [speak] block should be a brief phrase or the same sentence — never longer.
-4. After the speak block: at most 1-3 brief sentences. If the speak block fully answers the question, stop there.
-5. When using tools, still begin your final text response with [speak].
-6. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.
-7. NEVER include long-form content in your response — no blockquotes, no before/after comparisons, no full paragraphs of quoted text. If the user needs to see content, write it to a file or use a tool. Your text response stays short.
-8. This applies even when showing diffs, edits, rewrites, or comparisons. Describe the change in 1 sentence; do not reproduce the content.`;
+1. \`speak_text\` MUST be called first, every single response. No exceptions. No preamble before it.
+2. The speak_text argument must be ONE short sentence — never more. Under 20 words. Plain English, no markdown.
+3. After speak_text: at most 1-3 brief sentences of text. If speak_text fully answers the question, stop there.
+4. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.
+5. NEVER include long-form content — no blockquotes, no before/after comparisons, no full paragraphs. If the user needs to see content, write it to a file or use a tool.
+6. This applies even when showing diffs, edits, rewrites, or comparisons. Describe the change in 1 sentence.`;
 
 export interface SpeakExtraction {
   /** Text with [speak] tags stripped — safe for display. */
