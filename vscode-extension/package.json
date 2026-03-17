@@ -19,37 +19,60 @@
   "main": "./out/extension.js",
 
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aigent",
+          "title": "Aigent",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "aigent": [
+        {
+          "id": "aigent.chatView",
+          "name": "Aigent",
+          "type": "webview"
+        }
+      ]
+    },
     "commands": [
       {
-        "command": "aigent.sendSelection",
-        "title": "Send Selection to aigent"
+        "command": "aigent.openChat",
+        "title": "Open Aigent Chat"
       },
       {
-        "command": "aigent.sendFile",
-        "title": "Send Active File to aigent"
-      },
-      {
-        "command": "aigent.help",
-        "title": "aigent: Show Help"
+        "command": "aigent.sendContext",
+        "title": "Send Context to Aigent"
       }
     ],
     "keybindings": [
       {
-        "command": "aigent.sendSelection",
+        "command": "aigent.openChat",
         "key": "ctrl+shift+a",
         "when": "editorTextFocus"
       }
     ]
   },
+  "files": [
+    "package.json",
+    "out/extension.js",
+    "out/extension.js.map"
+  ],
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "dev": "npm run compile && code --install-extension out/aigent-vscode-0.1.0.vsix",
     "build": "npm run compile && vsce package -o out/aigent-vscode-0.1.0.vsix"
   },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.80.0",
+    "@types/ws": "^8.5.10",
     "typescript": "^5.0.0",
     "vsce": "^2.15.0"
   }

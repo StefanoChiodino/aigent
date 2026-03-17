@@ -593,6 +593,7 @@ export async function startWebServer(
       sttAvailable: stt,
       extensionConnected: extensionBridge.isConnected(),
       extensionPath: EXTENSION_PATH_DISPLAY,
+      vscodeConnected: extensionBridge.isVscodeConnected(),
     });
     if (ws) {
       if (ws.readyState === WebSocket.OPEN) ws.send(msg);
