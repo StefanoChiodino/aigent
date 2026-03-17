@@ -112,7 +112,7 @@ describe('TTS singleton state', () => {
 });
 
 describe('flushStream — spokenText handling (short mode)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     useVoiceStore.setState({
       ttsAutoSpeak: true,
@@ -125,6 +125,9 @@ describe('flushStream — spokenText handling (short mode)', () => {
     useChatStore.setState(s => ({
       streaming: { ...s.streaming, text: '', spokenText: null, active: true },
     }));
+    // These tests assume short mode is on (spokenText only matters in short mode)
+    const { useUIStore } = await import('../stores/ui');
+    useUIStore.setState({ shortMode: true });
   });
 
   it('speaks the spokenText when present', async () => {
@@ -192,12 +195,15 @@ describe('flushStream — spokenText handling (short mode)', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('falls back to normal sentence chunking when no spokenText is set', async () => {
+  it('falls back to normal sentence chunking in non-short mode', async () => {
+    const { useUIStore } = await import('../stores/ui');
+    useUIStore.setState({ shortMode: false });
+
     const { useTTS } = await import('../hooks/useTTS');
     const hook = renderHook(() => useTTS());
     act(() => { hook.result.current.stopStream(); });
 
-    // Plain response — no short mode, no spokenText
+    // Plain response — not in short mode, no spokenText
     useChatStore.getState().setStreamText('Hello there. How can I help you today? ');
 
     mockFetch.mockResolvedValueOnce({ ok: true, blob: () => Promise.resolve(new Blob(['audio'])) });
@@ -207,5 +213,28 @@ describe('flushStream — spokenText handling (short mode)', () => {
     const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect(typeof opts.body).toBe('string');
     expect((opts.body as string).length).toBeGreaterThan(0);
+  });
+
+  it('non-short mode ignores spokenText and speaks full text', async () => {
+    const { useUIStore } = await import('../stores/ui');
+    useUIStore.setState({ shortMode: false });
+
+    const { useTTS } = await import('../hooks/useTTS');
+    const hook = renderHook(() => useTTS());
+    act(() => { hook.result.current.stopStream(); });
+
+    // speak_text tool fired, setting spokenText — but we're in "on" mode
+    useChatStore.getState().setStreamSpokenText('Short summary.');
+    useChatStore.getState().setStreamText('Full detailed response here. More sentences follow. ');
+
+    mockFetch.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(['audio'])) });
+    act(() => { hook.result.current.flushStream(); });
+
+    await vi.waitFor(() => { expect(mockFetch).toHaveBeenCalled(); });
+    // Should speak the full text, NOT the spokenText summary
+    const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(opts.body).toContain('Full detailed response');
+    // speakBlockSpoken should NOT be set in non-short mode
+    expect(useVoiceStore.getState().speakBlockSpoken).toBe(false);
   });
 });

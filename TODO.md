@@ -2,6 +2,13 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
+input/output audio selection seems to reset on refresh/restart.
+
+Qwen3.5 should be capable of parsing images, but it fails?
+
+If there is an image in the chat from there on ther is no way to resurrest that chaat, since any further message is just going to keep trying sending the image and fail!
+
+
 ---
 
 ## Connection Architecture Note
@@ -76,8 +83,16 @@ the model picker on the left bar shows stars but doesn't allow to favourite/unfa
 - [ ] Add unit tests
 
 ## VSCode Integration
-- [ ] Explore VSCode extension possibilities
-- [ ] Implement CLI commands for VSCode extension to call
+
+- [x] Activity bar panel with iframe showing full web UI at localhost:3141
+- [x] Status bar item with $(check)/$(x) connection indicator
+- [x] WebSocket connection to /ext so server knows VSCode is attached (vscode_connected in web app header)
+- [x] Output channel "Aigent" for debugging
+- [ ] **IDE context injection** — on each message, automatically send: active file path, selection start/end (line:col), selected text snippet, and list of all currently visible file paths. Agent sees what you're looking at without manual action.
+- [ ] **Visible tabs/editors** — include `visibleTextEditors` paths in context so agent knows which files are open across split panes
+- [ ] **Diff viewer** — register virtual document provider; when agent proposes file edits, show a proper VSCode side-by-side diff (vscode.diff command) instead of inline patch approval
+- [ ] **Diagnostics forwarding** — send current errors/warnings from `languages.getDiagnostics()` for visible files so agent knows what's broken
+- [ ] **Terminal integration** — send text to active terminal via `terminal.sendText`; reading terminal output is not possible (VSCode API limitation)
 
 ---
 

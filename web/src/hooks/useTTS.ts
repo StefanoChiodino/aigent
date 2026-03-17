@@ -160,26 +160,25 @@ export function useTTS(): TTSControls {
     if (useVoiceStore.getState().micState !== 'idle') return;
 
     const { text: streamText, spokenText } = useChatStore.getState().streaming;
+    const isShort = useUIStore.getState().shortMode;
 
-    // Short mode: server sends spokenText via a separate 'speak' event.
-    // Speak it once, then suppress all further TTS for this turn.
-    if (spokenText) {
-      if (!useVoiceStore.getState().speakBlockSpoken) {
+    // ── Short mode ──────────────────────────────────────────────────
+    // The speak_text tool fires a 'speak' event that sets spokenText.
+    // Speak it exactly once, then suppress all further TTS for this turn
+    // (body text is not read aloud in short mode).
+    if (isShort) {
+      if (spokenText && !useVoiceStore.getState().speakBlockSpoken) {
         useVoiceStore.getState().setSpeakBlockSpoken(true);
         useVoiceStore.getState().setTtsSpeakingId(TTS_STREAMING_ID);
         enqueueChunk(spokenText);
       }
+      // In short mode, never speak body text — only the speak_text summary.
       return;
     }
 
-    // If the speak block was already spoken this turn, suppress all further TTS.
-    if (useVoiceStore.getState().speakBlockSpoken) return;
-
-    // Short mode: don't speak body text before the speak summary arrives.
-    // Without this guard, the text event (which arrives before the speak event)
-    // would trigger the normal-mode path and speak body text prematurely.
-    if (useUIStore.getState().shortMode && !spokenText) return;
-
+    // ── Normal ("on") mode ──────────────────────────────────────────
+    // Ignore spokenText entirely — speak the full streamed text
+    // sentence-by-sentence as it arrives.
     const unspoken = streamText.slice(ttsStreamLastLen.current);
     if (!unspoken) return;
 

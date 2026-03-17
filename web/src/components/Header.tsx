@@ -157,8 +157,27 @@ export function Header() {
                   }
                 }}
                 style={{ cursor: 'pointer' }}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-              <path d="M9 1.5a1.5 1.5 0 0 1 3 0V3h1.5A1.5 1.5 0 0 1 15 4.5V6h-1.5a1.5 1.5 0 0 0 0 3H15v1.5a1.5 1.5 0 0 1-1.5 1.5H12v1.5a1.5 1.5 0 0 1-3 0V12H7.5A1.5 1.5 0 0 1 6 10.5V9h1.5a1.5 1.5 0 0 0 0-3H6V4.5A1.5 1.5 0 0 1 7.5 3H9V1.5z"/>
+            <svg xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" viewBox="0 0 48 48" height="48" width="14" style={{ opacity: extensionConnected ? 1 : 0.3 }}>
+              <defs>
+                <linearGradient id="a" x1="3.2173" y1="15" x2="44.7812" y2="15" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stopColor="#d93025" />
+                  <stop offset="1" stopColor="#ea4335" />
+                </linearGradient>
+                <linearGradient id="b" x1="20.7219" y1="47.6791" x2="41.5039" y2="11.6837" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stopColor="#fcc934" />
+                  <stop offset="1" stopColor="#fbbc04" />
+                </linearGradient>
+                <linearGradient id="c" x1="26.5981" y1="46.5015" x2="5.8161" y2="10.506" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stopColor="#1e8e3e" />
+                  <stop offset="1" stopColor="#34a853" />
+                </linearGradient>
+              </defs>
+              <circle cx="24" cy="23.9947" r="12" fill="#fff" />
+              <path d="M3.2154,36A24,24,0,1,0,12,3.2154,24,24,0,0,0,3.2154,36ZM34.3923,18A12,12,0,1,1,18,13.6077,12,12,0,0,1,34.3923,18Z" fill="none" />
+              <path d="M24,12H44.7812a23.9939,23.9939,0,0,0-41.5639.0029L13.6079,30l.0093-.0024A11.9852,11.9852,0,0,1,24,12Z" fill="url(#a)" />
+              <circle cx="24" cy="24" r="9.5" fill="#1a73e8" />
+              <path d="M34.3913,30.0029,24.0007,48A23.994,23.994,0,0,0,44.78,12.0031H23.9989l-.0025.0093A11.985,11.985,0,0,1,34.3913,30.0029Z" fill="url(#b)" />
+              <path d="M13.6086,30.0031,3.218,12.006A23.994,23.994,0,0,0,24.0025,48L34.3931,30.0029l-.0067-.0068a11.9852,11.9852,0,0,1-20.7778.007Z" fill="url(#c)" />
             </svg>
             <span className="conn-tooltip">
               {extensionConnected ? 'Extension connected' : 'Extension not connected — click for setup'}
@@ -181,18 +200,22 @@ export function Header() {
               </ol>
             </div>
           )}</span>
-          <span ref={vscodeBadgeRef} id="vscode-badge" className={`conn-icon ${vscodeConnected ? 'ext-on' : 'ext-off'}`}
+            <span ref={vscodeBadgeRef} id="vscode-badge" className={`conn-icon ${vscodeConnected ? 'ext-on' : 'ext-off'}`}
                 onClick={(e) => {
                   // Don't show popup by default - just indicate connection status
                   // To see setup instructions, open Settings and look for VSCode extension info
                   // setVscodeSetupOpen(!vscodeSetupOpen);
                 }}
                 style={{ cursor: 'default' }}>
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-              <path d="M2.5 1.5L1 3l1.5 1.5L2.5 6l1-1.5L2.5 3 4.5 1.5H2.5zM6.5 1.5l-1 1.5 1 1.5-1 1.5 1 1.5V14l3.5-7L6.5 1.5z"/>
+            <svg viewBox="0 0 100 100" width="14" height="14">
+              <g style={{ opacity: vscodeConnected ? 1 : 0.3 }}>
+                <path d="M96.4614 10.7962L75.8569 0.875542C73.4719 -0.272773 70.6217 0.211611 68.75 2.08333L1.29858 63.5832C-0.515693 65.2373 -0.513607 68.0937 1.30308 69.7452L6.81272 74.754C8.29793 76.1042 10.5347 76.2036 12.1338 74.9905L93.3609 13.3699C96.086 11.3026 100 13.2462 100 16.6667V16.4275C100 14.0265 98.6246 11.8378 96.4614 10.7962Z" fill={vscodeConnected ? "#0065A9" : "gray"}/>
+                <path d="M96.4614 89.2038L75.8569 99.1245C73.4719 100.273 70.6217 99.7884 68.75 97.9167L1.29858 36.4169C-0.515693 34.7627 -0.513607 31.9063 1.30308 30.2548L6.81272 25.246C8.29793 23.8958 10.5347 23.7964 12.1338 25.0095L93.3609 86.6301C96.086 88.6974 100 86.7538 100 83.3334V83.5726C100 85.9735 98.6246 88.1622 96.4614 89.2038Z" fill={vscodeConnected ? "#007ACC" : "gray"}/>
+                <path d="M75.8578 99.1263C73.4721 100.274 70.6219 99.7885 68.75 97.9166C71.0564 100.223 75 98.5895 75 95.3278V4.67213C75 1.41039 71.0564 -0.223106 68.75 2.08329C70.6219 0.211402 73.4721 -0.273666 75.8578 0.873633L96.4587 10.7807C98.6234 11.8217 100 14.0112 100 16.4132V83.5871C100 85.9891 98.6234 88.1786 96.4586 89.2196L75.8578 99.1263Z" fill={vscodeConnected ? "#1F9CF0" : "gray"}/>
+              </g>
             </svg>
             <span className="conn-tooltip">
-              {vscodeConnected ? 'VSCode connected' : 'VSCode not connected — click for setup'}
+              {vscodeConnected ? 'VSCode connected' : 'VSCode not connected'}
             </span>
             {!vscodeConnected && vscodeSetupOpen && (
               <div id="vscode-setup-popup" className="ext-setup-popup">
