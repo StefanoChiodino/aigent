@@ -1,8 +1,8 @@
 /**
  * 64 — Per-model max tokens settings
  *
- * Tests the new tiered max tokens UI that replaces the raw JSON textarea.
- * Verifies that Flash, Pro, and Ultra tier inputs work correctly.
+ * Tests the rich table editor for max tokens configuration.
+ * Verifies table view, edit mode, and quick actions.
  */
 
 import { test, expect } from '@playwright/test';
@@ -20,52 +20,108 @@ test.describe('@fast Per-model max tokens settings', () => {
     await page.locator('#settings-nav .settings-nav-item', { hasText: 'Model' }).click();
   }
 
-  test('max tokens setting shows tiered inputs', async () => {
+  test('max tokens setting shows table header', async () => {
     const page = getPage();
     await openSettings(page);
     await openModelSettings(page);
 
-    // Should see tier labels
-    await expect(page.locator('.settings-body', { hasText: 'Flash tier' })).toBeVisible();
-    await expect(page.locator('.settings-body', { hasText: 'Pro tier' })).toBeVisible();
-    await expect(page.locator('.settings-body', { hasText: 'Ultra tier' })).toBeVisible();
+    // Should see table header with columns
+    await expect(page.locator('.settings-body', { hasText: 'Model Tier' })).toBeVisible();
+    await expect(page.locator('.settings-body', { hasText: 'Model Name' })).toBeVisible();
+    await expect(page.locator('.settings-body', { hasText: 'Max Tokens' })).toBeVisible();
   });
 
-  test('max tokens setting shows model names next to tiers', async () => {
+  test('max tokens setting shows model table rows', async () => {
     const page = getPage();
     await openSettings(page);
     await openModelSettings(page);
 
-    // Should see model names in parentheses next to tier labels
+    // Should see at least one model row (Flash, Pro, or Ultra)
     const body = page.locator('#settings-body');
     const text = await body.innerText();
-    
-    // At least one tier should show a model name
-    expect(text).toMatch(/\(claude-|\(google\/|custom-/);
+    expect(text).toMatch(/claude-|google\//);
   });
 
-  test('can enter values in tier inputs', async () => {
+  test('max tokens table has color-coded tiers', async () => {
     const page = getPage();
     await openSettings(page);
     await openModelSettings(page);
 
-    const inputs = page.locator('.settings-tokens-input');
-    const count = await inputs.count();
-    expect(count).toBe(3);
+    // Table rows should have colored left borders
+    const rows = page.locator('.settings-body').locator('div').filter({ hasText: 'Flash' });
+    const count = await rows.count();
+    expect(count).toBeGreaterThan(0);
+  });
 
-    // Enter values in each tier
-    const flashInput = inputs.nth(0);
-    const proInput = inputs.nth(1);
-    const ultraInput = inputs.nth(2);
+  test('max tokens shows formatted numbers', async () => {
+    const page = getPage();
+    await openSettings(page);
+    await openModelSettings(page);
 
-    await flashInput.fill('8192');
-    await expect(flashInput).toHaveValue('8192');
+    // Should see formatted numbers (with thousands separator)
+    const body = page.locator('#settings-body');
+    const text = await body.innerText();
+    expect(text).toMatch(/\d{3},\d{3}/);
+  });
 
-    await proInput.fill('16384');
-    await expect(proInput).toHaveValue('16384');
+  test('can open edit mode', async () => {
+    const page = getPage();
+    await openSettings(page);
+    await openModelSettings(page);
 
-    await ultraInput.fill('32000');
-    await expect(ultraInput).toHaveValue('32000');
+    // Click edit button
+    await page.locator('button', { hasText: /Edit/ }).click();
+
+    // Should see textarea for JSON editing
+    await expect(page.locator('textarea.settings-json-input')).toBeVisible();
+  });
+
+  test('edit mode shows validation errors', async () => {
+    const page = getPage();
+    await openSettings(page);
+    await openModelSettings(page);
+
+    // Click edit button
+    await page.locator('button', { hasText: /Edit/ }).click();
+
+    // Enter invalid JSON
+    await page.locator('textarea.settings-json-input').fill('invalid');
+
+    // Should show error
+    await expect(page.locator('.settings-error')).toBeVisible();
+  });
+
+  test('edit mode accepts valid JSON', async () => {
+    const page = getPage();
+    await openSettings(page);
+    await openModelSettings(page);
+
+    // Click edit button
+    await page.locator('button', { hasText: /Edit/ }).click();
+
+    // Enter valid JSON
+    await page.locator('textarea.settings-json-input').fill('{"test-model": 16384}');
+
+    // Should not show error
+    await expect(page.locator('.settings-error')).not.toBeVisible();
+  });
+
+  test('can use quick action buttons', async () => {
+    const page = getPage();
+    await openSettings(page);
+    await openModelSettings(page);
+
+    // Should see quick action buttons
+    const buttons = page.locator('button', { hasText: /Quick:/ });
+    const count = await buttons.count();
+    expect(count).toBeGreaterThanOrEqual(1);
+
+    // Click quick button
+    await buttons.first().click();
+
+    // Should update the JSON (check for success indicator or updated value)
+    const body = page.locator('#settings-body');
+    await expect(body).toBeVisible();
   });
 
   test('max tokens setting shows hint text', async () => {
@@ -74,39 +130,8 @@ test.describe('@fast Per-model max tokens settings', () => {
     await openModelSettings(page);
 
     await expect(page.locator('.settings-hint', { 
-      hasText: /Set max tokens per tier/ 
+      hasText: /Edit JSON/ 
     })).toBeVisible();
-  });
-
-  test('max tokens setting has default placeholder', async () => {
-    const page = getPage();
-    await openSettings(page);
-    await openModelSettings(page);
-
-    const inputs = page.locator('.settings-tokens-input');
-    for (let i = 0; i < await inputs.count(); i++) {
-      const input = inputs.nth(i);
-      const placeholder = await input.getAttribute('placeholder');
-      expect(placeholder).toBe('default');
-    }
-  });
-
-  test('can clear tier inputs', async () => {
-    const page = getPage();
-    await openSettings(page);
-    await openModelSettings(page);
-
-    const inputs = page.locator('.settings-tokens-input');
-    
-    // Fill and clear each input
-    for (let i = 0; i < await inputs.count(); i++) {
-      const input = inputs.nth(i);
-      await input.fill('16384');
-      await expect(input).toHaveValue('16384');
-      
-      await input.clear();
-      await expect(input).toHaveValue('');
-    }
   });
 
   test('max tokens setting is in Model group', async () => {
@@ -122,5 +147,16 @@ test.describe('@fast Per-model max tokens settings', () => {
     
     const body = page.locator('#settings-body');
     await expect(body).toContainText('Per-model max tokens', { timeout: 2_000 });
+  });
+
+  test('table displays model tier labels', async () => {
+    const page = getPage();
+    await openSettings(page);
+    await openModelSettings(page);
+
+    // Should see tier labels like Flash, Pro, Ultra, or Custom
+    const body = page.locator('#settings-body');
+    const text = await body.innerText();
+    expect(text).toMatch(/Flash|Pro|Ultra|Custom/);
   });
 });

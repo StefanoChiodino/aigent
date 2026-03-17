@@ -287,111 +287,218 @@ export function SettingControl({ def, value, onChange, availableModels = [] }: S
           </span>
         );
       }
-      // Special case: model_max_tokens gets individual inputs per tier
+      // Special case: model_max_tokens gets a rich table editor
       if (def.key === 'model_max_tokens') {
         const currentValue = String(value);
         const [error, setError] = useState<string | null>(null);
-        const [formData, setFormData] = useState<{ flash?: number; pro?: number; ultra?: number }>({});
-
-        useEffect(() => {
+        const [rawJson, setRawJson] = useState(currentValue);
+        const [editMode, setEditMode] = useState(false);
+        const modelTiers = useUIStore(s => s.modelTiers);
+        
+        // Parse and categorize models
+        const parsedData = (() => {
           try {
-            if (currentValue.trim() === '') {
-              setFormData({});
+            if (currentValue.trim() === '') return {};
+            const parsed = JSON.parse(currentValue);
+            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
+            return parsed as Record<string, number>;
+          } catch {
+            return {};
+          }
+        })();
+
+        // Get all unique models from parsed data and tiers
+        const allModels = (() => {
+          const models = new Set<string>();
+          Object.keys(parsedData).forEach(m => models.add(m));
+          if (modelTiers.flash) models.add(modelTiers.flash);
+          if (modelTiers.pro) models.add(modelTiers.pro);
+          if (modelTiers.ultra) models.add(modelTiers.ultra);
+          return Array.from(models);
+        })();
+
+        // Categorize model into tier
+        const categorizeModel = (model: string): 'flash' | 'pro' | 'ultra' | 'other' => {
+          if (modelTiers.flash && model.includes(modelTiers.flash.toLowerCase().split('-')[0])) return 'flash';
+          if (modelTiers.pro && model.includes(modelTiers.pro.toLowerCase().split('-')[0])) return 'pro';
+          if (modelTiers.ultra && model.includes(modelTiers.ultra.toLowerCase().split('-')[0])) return 'ultra';
+          if (model.toLowerCase().includes('flash') || model.toLowerCase().includes('haiku')) return 'flash';
+          if (model.toLowerCase().includes('pro') || model.toLowerCase().includes('sonnet')) return 'pro';
+          if (model.toLowerCase().includes('ultra') || model.toLowerCase().includes('opus')) return 'ultra';
+          return 'other';
+        };
+
+        // Get tier label for a model
+        const getTierLabel = (model: string): string => {
+          const cat = categorizeModel(model);
+          if (cat === 'flash') return 'Flash';
+          if (cat === 'pro') return 'Pro';
+          if (cat === 'ultra') return 'Ultra';
+          return 'Custom';
+        };
+
+        // Get tier color for visual distinction
+        const getTierColor = (model: string): string => {
+          const cat = categorizeModel(model);
+          if (cat === 'flash') return '#22c55e';
+          if (cat === 'pro') return '#3b82f6';
+          if (cat === 'ultra') return '#8b5cf6';
+          return '#64748b';
+        };
+
+        const handleJsonChange = (newValue: string) => {
+          setRawJson(newValue);
+          try {
+            if (newValue.trim() === '') {
+              onChange('{}');
               setError(null);
               return;
             }
-            const parsed = JSON.parse(currentValue);
+            const parsed = JSON.parse(newValue);
             if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-              setFormData({});
               setError('Expected JSON object');
               return;
             }
-            const valid: { flash?: number; pro?: number; ultra?: number } = {};
             for (const [key, val] of Object.entries(parsed)) {
-              if (typeof val === 'number' && val > 0) {
-                if (key.includes('flash') || key.includes('haiku')) valid.flash = val;
-                else if (key.includes('pro') || key.includes('sonnet')) valid.pro = val;
-                else if (key.includes('ultra') || key.includes('opus')) valid.ultra = val;
+              if (typeof val !== 'number' || val <= 0) {
+                setError(`Value for "${key}" must be a positive number`);
+                return;
               }
             }
-            setFormData(valid);
             setError(null);
+            onChange(newValue);
           } catch (e: unknown) {
             const err = e as { message?: string };
             setError(err.message ?? 'Invalid JSON');
-            setFormData({});
-          }
-        }, [currentValue]);
-
-        const handleTierChange = (tier: 'flash' | 'pro' | 'ultra', newValue: string) => {
-          const num = newValue.trim() === '' ? undefined : Number(newValue);
-          if (num !== undefined && num !== null && num > 0 && !Number.isNaN(num)) {
-            setFormData(prev => ({ ...prev, [tier]: num }));
-          } else {
-            setFormData(prev => {
-              const next = { ...prev };
-              delete next[tier];
-              return next;
-            });
           }
         };
 
-        const commit = () => {
-          if (Object.keys(formData).length === 0) {
-            onChange('{}');
-            setError(null);
-            return;
-          }
+        const handleQuickSet = (model: string, tokens: number) => {
           try {
-            const mapped: Record<string, number> = {};
-            const modelTiers = useUIStore.getState().modelTiers;
-            for (const [tier, tokens] of Object.entries(formData)) {
-              if (tokens === undefined) continue;
-              const tierKey = tier === 'flash' ? modelTiers.flash : tier === 'pro' ? modelTiers.pro : modelTiers.ultra;
-              if (tierKey) mapped[tierKey] = tokens;
-            }
-            onChange(JSON.stringify(mapped));
-            setError(null);
-          } catch (e: unknown) {
-            const err = e as { message?: string };
-            setError(err.message ?? 'Failed to save');
+            const current = JSON.parse(rawJson) as Record<string, number>;
+            current[model] = tokens;
+            setRawJson(JSON.stringify(current, null, 2));
+            handleJsonChange(JSON.stringify(current, null, 2));
+          } catch {
+            setRawJson(JSON.stringify({ [model]: tokens }, null, 2));
+            handleJsonChange(JSON.stringify({ [model]: tokens }, null, 2));
           }
         };
-
-        useEffect(() => {
-          commit();
-        }, [formData]);
 
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {(() => {
-              const modelTiers = useUIStore.getState().modelTiers;
-              const tiers: { key: 'flash' | 'pro' | 'ultra'; label: string; model?: string }[] = [
-                { key: 'flash', label: 'Flash tier', model: modelTiers.flash },
-                { key: 'pro', label: 'Pro tier', model: modelTiers.pro },
-                { key: 'ultra', label: 'Ultra tier', model: modelTiers.ultra },
-              ];
-              return tiers.map(({ key, label, model }) => (
-                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ width: 80, fontSize: 13, color: '#888' }}>{label}</span>
-                  {model && <span style={{ fontSize: 12, color: '#666' }}>({model})</span>}
-                  <input
-                    type="number"
-                    className="settings-text settings-tokens-input"
-                    min="1"
-                    step="100"
-                    placeholder="default"
-                    value={formData[key] ?? ''}
-                    onChange={e => handleTierChange(key, e.target.value)}
-                    style={{ flex: 1, maxWidth: 150 }}
-                  />
-                  <span style={{ fontSize: 11, color: '#777' }}>tokens</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {editMode ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <textarea
+                  className="settings-text settings-json-input"
+                  value={rawJson}
+                  onChange={e => handleJsonChange(e.target.value)}
+                  rows={6}
+                  spellCheck={false}
+                  style={{ fontFamily: "'SF Mono', 'Monaco', 'Consolas', monospace", fontSize: 12 }}
+                />
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button
+                    onClick={() => {
+                      setEditMode(false);
+                      setRawJson(String(value));
+                    }}
+                    style={{ padding: '4px 12px', fontSize: 12, cursor: 'pointer' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => setEditMode(false)}
+                    style={{ padding: '4px 12px', fontSize: 12, cursor: 'pointer', backgroundColor: 'var(--accent)', color: 'white', border: 'none', borderRadius: 4 }}
+                  >
+                    Done
+                  </button>
                 </div>
-              ));
-            })()}
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px', gap: 0, alignItems: 'center', marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, color: '#666', padding: '4px 8px', borderBottom: '1px solid var(--border)', fontWeight: 500 }}>Model Tier</div>
+                  <div style={{ fontSize: 11, color: '#666', padding: '4px 8px', borderBottom: '1px solid var(--border)', fontWeight: 500 }}>Model Name</div>
+                  <div style={{ fontSize: 11, color: '#666', padding: '4px 8px', borderBottom: '1px solid var(--border)', fontWeight: 500, textAlign: 'right' }}>Max Tokens</div>
+                </div>
+                {allModels.length === 0 ? (
+                  <div style={{ padding: 12, fontSize: 12, color: '#777', textAlign: 'center' }}>
+                    No models configured. Set Flash, Pro, or Ultra model first.
+                  </div>
+                ) : (
+                  allModels.map(model => {
+                    const tokens = parsedData[model];
+                    const tier = getTierLabel(model);
+                    const color = getTierColor(model);
+                    return (
+                      <div key={model} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px', gap: 0, alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
+                        <div style={{ padding: '6px 8px', fontSize: 12, color: '#888', borderBottom: `2px solid ${color}`, position: 'relative' }}>
+                          <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: color }} />
+                          {tier}
+                        </div>
+                        <div style={{ padding: '6px 8px', fontSize: 11, color: modelTiers.flash === model || modelTiers.pro === model || modelTiers.ultra === model ? '#444' : '#666' }}>
+                          {model}
+                        </div>
+                        <div style={{ padding: '6px 8px', fontSize: 12, fontWeight: 500, textAlign: 'right', borderBottom: `2px solid ${color}` }}>
+                          {tokens ? tokens.toLocaleString() : '—'}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                  <button
+                    onClick={() => setEditMode(true)}
+                    style={{ padding: '6px 16px', fontSize: 12, cursor: 'pointer', backgroundColor: 'var(--accent)', color: 'white', border: 'none', borderRadius: 4, flex: 1 }}
+                  >
+                    {allModels.length === 0 ? 'Configure Models First' : 'Edit JSON'}
+                  </button>
+                  {allModels.length > 0 && (
+                    <>
+                      <button
+                        onClick={() => {
+                          const firstModel = allModels[0];
+                          handleQuickSet(firstModel, 8192);
+                        }}
+                        style={{ padding: '4px 10px', fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, backgroundColor: 'var(--bg)', color: 'var(--text)' }}
+                        title="Set first model to 8192"
+                      >
+                        Quick: 8K
+                      </button>
+                      <button
+                        onClick={() => {
+                          const firstModel = allModels[0];
+                          handleQuickSet(firstModel, 16384);
+                        }}
+                        style={{ padding: '4px 10px', fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, backgroundColor: 'var(--bg)', color: 'var(--text)' }}
+                        title="Set first model to 16384"
+                      >
+                        Quick: 16K
+                      </button>
+                      <button
+                        onClick={() => {
+                          const firstModel = allModels[0];
+                          handleQuickSet(firstModel, 32000);
+                        }}
+                        style={{ padding: '4px 10px', fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, backgroundColor: 'var(--bg)', color: 'var(--text)' }}
+                        title="Set first model to 32000"
+                      >
+                        Quick: 32K
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
             {error && <span className="settings-error">{error}</span>}
             <span className="settings-hint">
-              Set max tokens per tier. Leave blank to use default (16384).
+              {editMode 
+                ? 'Edit the JSON directly. Valid format: {"model-name": 32000}' 
+                : allModels.length === 0 
+                  ? 'Configure Flash, Pro, or Ultra model in the Model group first, then edit max tokens.'
+                  : `Viewing ${allModels.length} model${allModels.length > 1 ? 's' : ''}. Click "Edit JSON" to modify values.`
+              }
             </span>
           </div>
         );

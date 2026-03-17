@@ -2,62 +2,87 @@
 
 ## Overview
 
-The `model_max_tokens` setting allows you to configure maximum token limits for each model tier (Flash, Pro, Ultra) through a user-friendly interface instead of editing raw JSON.
+The `model_max_tokens` setting provides a rich, interactive editor for configuring maximum token limits across all your models. Features a visual table with color-coded tiers and quick-action buttons.
 
 ## Configuration
 
 ### Via Settings UI
 
 1. Open Settings → Model group
-2. Find "Per-model max tokens"
-3. Set token limits for each tier:
-   - **Flash tier**: Fast, low-cost tier (Haiku family)
-   - **Pro tier**: Balanced tier (Sonnet family)
-   - **Ultra tier**: Most capable tier (Opus family)
+2. **Important**: First configure your Flash, Pro, and Ultra models in the Model section
+3. Find "Per-model max tokens" - the editor will automatically display all configured models
 
-### Via Settings JSON
+### Table View
 
-```json
-{
-  "model_max_tokens": {
-    "claude-opus-4-6": 32000,
-    "claude-sonnet-4-6": 16384,
-    "claude-haiku-4-5-20251001": 8192
-  }
-}
-```
+The editor displays models in a color-coded table:
+- **Green tier** (Flash): Fast, low-cost tier (Haiku family)
+- **Blue tier** (Pro): Balanced tier (Sonnet family)  
+- **Purple tier** (Ultra): Most capable tier (Opus family)
+- **Gray tier** (Custom): Any other models you've added
 
-## How It Works
+Each row shows:
+- Model tier (color-coded with left border accent)
+- Full model name
+- Current max token limit (formatted with thousands separator)
 
-The UI automatically maps tier inputs to the actual model names configured in:
-- `AIGENT_FLASH_MODEL` → Flash tier
-- `AIGENT_PRO_MODEL` → Pro tier
-- `AIGENT_ULTRA_MODEL` → Ultra tier
+### Quick Actions
 
-When you enter a value in a tier input, the system:
-1. Reads the current model configuration
-2. Maps the tier to the correct model name
-3. Updates the underlying JSON setting
+Click quick buttons to set the first model to common values:
+- **8K**: 8192 tokens
+- **16K**: 16384 tokens (default)
+- **32K**: 32000 tokens
+
+### Edit Mode
+
+Click "Edit JSON" to open a rich JSON editor with:
+- Syntax highlighting
+- Real-time validation
+- Error messages for invalid values
+- Multi-line formatting support
+- Cancel/Done buttons
 
 ## Examples
 
+### View configured models
+
+After setting Flash, Pro, and Ultra models, the table automatically shows all three with their current token limits, color-coded by tier.
+
 ### Set different limits per tier
 
-Flash: 8192 tokens (fast, cheap)
-Pro: 16384 tokens (balanced)
-Ultra: 32000 tokens (maximum capacity)
+Click "Edit JSON" and enter:
+```json
+{
+  "claude-haiku-4-5-20251001": 8192,
+  "claude-sonnet-4-6": 16384,
+  "claude-opus-4-6": 32000
+}
+```
 
-### Use default for all tiers
+### Use default for all models
 
-Leave all inputs blank → uses default 16384 tokens for all models
+Leave the JSON empty `{}` → system uses 16384 token default for all models
 
-### Override single tier
+### Add custom model
 
-Set only Ultra tier to 65536 tokens → Flash and Pro use defaults, Ultra gets custom limit
+Add any model to the JSON:
+```json
+{
+  "claude-opus-4-6": 65536,
+  "google/gemini-2.0-flash": 2048
+}
+```
+
+Custom models appear in gray tier rows.
+
+### Quick set common values
+
+Use the quick buttons to instantly set the first model to 8K, 16K, or 32K without opening the editor.
 
 ## Technical Details
 
-- Type: `model-tokens` (new setting type)
+- Type: `model-tokens` (rich table editor)
 - Storage: JSON object mapping model names to positive integers
-- Validation: Ensures all values are positive numbers
+- Validation: Real-time JSON parsing and numeric validation
+- Auto-detection: Automatically categorizes models by tier based on name patterns
+- Visual feedback: Color-coded tiers with visual separators
 - Default: `{}` (empty object uses 16384 token default)
