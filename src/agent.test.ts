@@ -88,3 +88,36 @@ describe('iteration limits', () => {
     );
   });
 });
+
+describe('loop detection (integration)', () => {
+  it('halts a turn and returns an error message when the same tool+args is called repeatedly', async () => {
+    // Provider always returns the same tool call — simulates a stuck agent
+    let callCount = 0;
+    const repeatingProvider: Provider = {
+      sendMessage: async () => {
+        callCount++;
+        return {
+          text: '',
+          stopReason: 'tool_use' as const,
+          toolCalls: [{ id: `tc-${callCount}`, name: 'grep', input: { pattern: 'foo', path: '/src' } }],
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        };
+      },
+      listModels: async () => [],
+    };
+
+    const agent = new Agent({
+      provider: repeatingProvider,
+      loopWindow: 10,
+      loopMaxRepeats: 3, // low threshold for fast test
+    });
+
+    const result = await agent.chat('find foo in src', {});
+    assert.ok(
+      result.includes('Loop detected') && result.includes('grep'),
+      `Expected loop detection message mentioning "grep", got: ${result}`,
+    );
+    // Should halt well before MAX_AGENT_ITERATIONS
+    assert.ok(callCount < 10, `Expected early halt, got ${callCount} provider calls`);
+  });
+});

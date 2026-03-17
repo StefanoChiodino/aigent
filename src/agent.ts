@@ -6,6 +6,7 @@ import { loadWorkspaceContext } from './workspace.js';
 import { compactConversation } from './compact.js';
 import type { MCPManager } from './mcp.js';
 import { createLogger } from './logger.js';
+import { ToolLoopDetector, LoopDetectedError } from './loop-detector.js';
 
 const log = createLogger('agent');
 
@@ -125,6 +126,10 @@ export interface AgentOptions {
   provider?: Provider;
   /** Per-model max tokens configuration. Maps model names to their max token limits. */
   modelMaxTokens?: Record<string, number>;
+  /** Sliding window size for repetitive tool call detection (default: AIGENT_LOOP_WINDOW env var or 10). */
+  loopWindow?: number;
+  /** Max times same tool+args may appear in window before halting (default: AIGENT_LOOP_MAX_REPEATS env var or 5). */
+  loopMaxRepeats?: number;
 }
 
 // Re-export TokenUsage from protocol (single source of truth)
@@ -174,6 +179,8 @@ export class Agent {
   private compactPromise: Promise<void> | null = null;
   /** Track tool results that were summarized to save context tokens. */
   private toolSummaries = new Map<string, ToolSummaryRecord>();
+  private loopWindow: number | undefined;
+  private loopMaxRepeats: number | undefined;
   /** Track tool execution success/failure for error rate monitoring. */
   private toolExecutionHistory: Array<{ tool: string; success: boolean; error?: string }> = [];
   readonly providerType: string;
@@ -194,6 +201,8 @@ export class Agent {
     this.maxTokens = options.maxTokens ?? this.getEffectiveMaxTokens(this.model);
     this.thinking = options.thinking ?? (process.env['AIGENT_THINKING'] as ThinkingLevel | undefined) ?? 'high';
     this.mcpManager = options.mcpManager ?? null;
+    this.loopWindow = options.loopWindow;
+    this.loopMaxRepeats = options.loopMaxRepeats;
     this.extraSystemPrompt = options.extraSystemPrompt ?? '';
 
     // Get built-in tool definitions
@@ -238,6 +247,10 @@ export class Agent {
 
     let iterations = 0;
     const maxIterations = MAX_AGENT_ITERATIONS;
+    const loopDetector = new ToolLoopDetector({
+      ...(this.loopWindow !== undefined && { window: this.loopWindow }),
+      ...(this.loopMaxRepeats !== undefined && { maxRepeats: this.loopMaxRepeats }),
+    });
 
     while (iterations < maxIterations) {
       // Check abort before each iteration
@@ -480,6 +493,17 @@ export class Agent {
       if (errorCheck.shouldTerminate) {
         this.thinking = savedThinking;
         return errorCheck.errorMessage!;
+      }
+
+      // Check for repetitive tool call loops — same tool+args called too many times
+      try {
+        loopDetector.check(response.toolCalls);
+      } catch (err) {
+        if (err instanceof LoopDetectedError) {
+          this.thinking = savedThinking;
+          return err.message;
+        }
+        throw err;
       }
     }
 
