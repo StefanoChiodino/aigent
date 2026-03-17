@@ -182,3 +182,53 @@ Server process (spawned directly, no Docker)
 ## Blocked
 
 (nothing currently blocked)
+
+---
+
+## 2026-03-17 — Hardening & testing
+
+### Goals
+
+- Reduce regressions by tightening tests and smoke coverage.
+- Establish a minimal but real release workflow that is safe for self-modifying behavior.
+- Bake TDD expectations into project instructions so every bug fix ships with a test.
+
+### Scope
+
+- **Interfaces**
+  - Treat the web UI (and VSCode/Chrome integrations) as the primary frontends.
+
+- **Testing and smoke coverage**
+  - Keep existing unit, web, and e2e tests as the primary safety net.
+  - Add/extend smoke tests to focus on:
+    - Server + web startup (no unhandled errors on boot).
+    - Basic chat loop: send a message via web UI and receive a response.
+    - Self-mod safe guardrails: typecheck and `make check` remain green after changes.
+
+- **Release workflow**
+  - Define a lightweight semver-based release process for a self-modifying agent:
+    - Tag releases only from clean `main` with `make check` passing.
+    - Build and smoke-test the npm package tarball before publishing.
+    - Document expectations for self-editing across versions.
+
+### Milestones
+
+1. **Testing hardening (M1)**
+   - Review existing smoke/e2e tests and identify gaps around:
+     - Message persistence across refresh/restart.
+     - Permission flows (especially file access YOLO mode).
+     - Image/vision fallbacks that previously caused unrecoverable threads.
+   - For each recurring bug class, add at least one regression test (unit, web, or e2e).
+   - Keep `make check` as the single “ready to release” gate.
+
+2. **Release workflow (M2)**
+   - Document a minimal release process in `README.md` (or a dedicated `RELEASES.md`):
+     - Branch/merge expectations.
+     - Required commands (`make check`, `npm pack`, optional smoke run).
+     - How to safely let aigent modify itself between releases (and how to recover).
+
+3. **TDD + regressions policy (M3)**
+   - Update `AGENTS.md` to:
+     - Emphasize “write a failing test first” for any bug fix.
+     - Encourage small, incremental self-edits with `make check` between them.
+   - Ensure this policy is reflected in workspace templates so aigent follows it when self-editing.

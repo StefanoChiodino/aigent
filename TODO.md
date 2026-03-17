@@ -8,6 +8,11 @@ Qwen3.5 should be capable of parsing images, but it fails?
 
 If there is an image in the chat from there on ther is no way to resurrest that chaat, since any further message is just going to keep trying sending the image and fail!
 
+chrome icon shows a hand cursor, but vscode shows a pointer. It should be a hand in both cases.
+
+BUG/FEATURE: the current STT injects a lot of description of sounds into the chat, things like "(beeping)". These are probably just confusing and we maybe should try different models or ways of helping this.
+
+BUG: Aigent just ran 25 tools, then probably couldn't run any more tools and just stopped. filled up 25 seems like a lot but there are cases where it is easy to use 25 and then it is quite annoying to have to go back. If it is using 25 tools and it just didn't just get stuck in a loop we should allow for I'm guessing pretty much unlimited or at least much much higher number of tools.
 
 ---
 
@@ -142,6 +147,10 @@ the model picker on the left bar shows stars but doesn't allow to favourite/unfa
 
 ---
 
+## OpenSpec Integration
+
+- [x] **OpenSpec setup** — Installed @fission-ai/openspec, initialized project structure, created initial spec for core system, documented in README.md, added make targets (openspec, openspec-init)
+
 ## Future / Low Priority
 
 - [ ] **Multi-instance agents** — per-project agent processes once STT is decoupled from GPU.
@@ -168,10 +177,13 @@ Browser ext:       aigent-extension/
 Commands:          src/commands.ts
 Profiles:          src/profiles.ts
 Background tasks:  src/tasks.ts
+OpenSpec:          openspec/ (specs/, changes/), .claude/commands/, .github/
 
 Test commands:
   make check          — typecheck + unit tests + web tests + builds
   make test-llm       — integration test with local LLM (Ollama, on demand)
+  make openspec-init  — initialize OpenSpec in project (run once)
+  make openspec       — update OpenSpec to latest version
   node --import tsx/esm --test src/reflection.test.ts  — run specific test file
 
 Build commands:

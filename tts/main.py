@@ -87,8 +87,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # Per-request overrides via query params
-        params = parse_qs(parsed.query)
-        rate = params.get("rate", [_rate])[0]
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        rate_str = params.get("rate", [_rate])[0].strip()
+        # Ensure rate starts with + or -
+        if rate_str and rate_str[0] not in "+-":
+            rate_str = "+" + rate_str
+        rate = rate_str
         voice = params.get("voice", [None])[0]
 
         length = int(self.headers.get("Content-Length", 0))

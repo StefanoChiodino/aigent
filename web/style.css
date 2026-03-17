@@ -1381,8 +1381,7 @@ html, body {
 #ext-badge:has(.ext-setup-popup) .conn-tooltip { display: none; }
 #vscode-badge { font-size: 12px; }
 #vscode-badge.ext-on { opacity: 1; }
-#vscode-badge.ext-off:has(.ext-setup-popup) { opacity: 1; }
-#vscode-badge:has(.ext-setup-popup) .conn-tooltip { display: none; }
+#vscode-badge.ext-off { display: none; }
 #ext-badge[data-copied]::after {
   content: 'Copied chrome://extensions';
   position: absolute;

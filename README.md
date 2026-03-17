@@ -657,6 +657,63 @@ For security issues, open a private issue rather than a public PR.
 
 ---
 
+## Spec-Driven Development (OpenSpec)
+
+This project uses [OpenSpec](https://github.com/Fission-AI/OpenSpec) for spec-driven development. OpenSpec helps align on what to build before any code is written by creating structured planning artifacts.
+
+### How It Works
+
+After running `openspec init`, the project has this structure:
+
+```
+openspec/
+├── specs/              # Source of truth (system behavior)
+│   └── core/
+│       └── spec.md     # Core system specification
+└── changes/            # Proposed modifications
+    └── <change-name>/
+        ├── proposal.md   # Why we're doing this
+        ├── specs/        # Delta specs (what's changing)
+        ├── design.md     # Technical approach
+        └── tasks.md      # Implementation checklist
+```
+
+### Commands
+
+Use these slash commands in your AI coding assistant:
+
+- `/opsx:propose "change-name"` - Create a new change and generate planning artifacts
+- `/opsx:explore` - Think through ideas before committing to a change
+- `/opsx:apply` - Implement tasks from the change
+- `/opsx:archive` - Archive a completed change
+
+### Getting Started
+
+```bash
+# Install OpenSpec CLI
+npm install -D @fission-ai/openspec
+
+# Initialize in project (already done)
+npx openspec init
+
+# Start your first change
+/opsx:propose "your idea"
+```
+
+### Workflow
+
+1. **Propose**: `/opsx:propose add-feature-name` creates planning artifacts
+2. **Implement**: `/opsx:apply` works through the task checklist
+3. **Archive**: `/opsx:archive` merges specs and moves change to archive
+
+### Resources
+
+- [OpenSpec Documentation](https://github.com/Fission-AI/OpenSpec)
+- [Getting Started Guide](https://github.com/Fission-AI/OpenSpec/blob/main/docs/getting-started.md)
+- [Commands Reference](https://github.com/Fission-AI/OpenSpec/blob/main/docs/commands.md)
+
+---
+
 ## License
 
 MIT

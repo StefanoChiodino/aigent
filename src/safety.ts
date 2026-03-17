@@ -415,8 +415,9 @@ export const DEFAULT_FILE_PERMISSIONS: FilePermissions = {
  * Expand leading `~` or `~/` in a pattern to the user's home directory.
  */
 function expandTilde(pattern: string): string {
-  if (pattern === '~') return homedir();
-  if (pattern.startsWith('~/')) return homedir() + pattern.slice(1);
+  const home = homedir().toLowerCase();
+  if (pattern === '~') return home;
+  if (pattern.startsWith('~/')) return home + pattern.slice(1);
   return pattern;
 }
 

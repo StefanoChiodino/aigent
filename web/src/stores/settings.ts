@@ -81,8 +81,17 @@ export function buildSettingsPayload(key: string, value: boolean | number | stri
   }
   if (key === 'model_max_tokens') {
     try {
-      const parsed = JSON.parse(String(value));
-      return { model_max_tokens: parsed };
+      const raw = JSON.parse(String(value));
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return { model_max_tokens: {} };
+      }
+      const out: Record<string, number> = {};
+      for (const [model, val] of Object.entries(raw as Record<string, unknown>)) {
+        if (typeof val === 'number' && Number.isFinite(val) && val > 0) {
+          out[model] = val;
+        }
+      }
+      return { model_max_tokens: out };
     } catch {
       return { model_max_tokens: {} };
     }

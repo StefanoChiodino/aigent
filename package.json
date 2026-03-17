@@ -4,7 +4,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "aigent": "dist/cli.js",
+    "aigent": "dist/host/daemon.js",
     "aigent-host": "dist/host/daemon.js"
   },
   "files": [
@@ -27,7 +27,7 @@
   "scripts": {
     "build": "tsc",
     "build-release": "npm run build && npm run web:build",
-    "dev": "tsx --watch src/index.tsx",
+    "dev": "tsx src/gatekeeper.tsx --headless",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build && npm run web:build",
@@ -90,6 +90,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.11.1",
+    "@fission-ai/openspec": "^1.2.0",
     "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

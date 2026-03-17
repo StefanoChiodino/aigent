@@ -1,4 +1,4 @@
-.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots screenshots-diff clean stt stt-setup stt-legacy tts tts-setup demo-audio kill-ports plugin plugin-dev plugin-typecheck build-release recover
+.PHONY: dev dev-ts serve web web-dev typecheck test test-e2e test-e2e-fast test-e2e-spec test-e2e-live test-e2e-ui screenshots screenshots-diff clean stt stt-setup stt-legacy tts tts-setup demo-audio kill-ports plugin plugin-dev plugin-typecheck build-release recover openspec openspec-init
 
 # --- Development ---
 
@@ -184,3 +184,15 @@ demo-audio: $(TTS_PYTHON)
 $(TTS_PYTHON):
 	@echo "TTS environment not set up. Run: make tts-setup"
 	@exit 1
+
+# --- OpenSpec ---
+
+# Initialize OpenSpec in project (run once)
+openspec-init:
+	@npx openspec init
+
+# Update OpenSpec to latest version
+openspec:
+	@npm install -D @fission-ai/openspec@latest
+	@npx openspec update
+
