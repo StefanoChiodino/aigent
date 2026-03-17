@@ -426,41 +426,55 @@ export function SettingControl({ def, value, onChange, availableModels = [] }: S
               </div>
             </div>
           ) : (
-            <div>
-              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px', gap: 0, alignItems: 'center', marginBottom: 4 }}>
-                <div style={{ fontSize: 11, color: '#666', padding: '4px 8px', borderBottom: '1px solid var(--border)', fontWeight: 500 }}>Model Tier</div>
-                <div style={{ fontSize: 11, color: '#666', padding: '4px 8px', borderBottom: '1px solid var(--border)', fontWeight: 500 }}>Model Name</div>
-                <div style={{ fontSize: 11, color: '#666', padding: '4px 8px', borderBottom: '1px solid var(--border)', fontWeight: 500, textAlign: 'right' }}>Max Tokens</div>
+            <div style={{ width: '100%' }}>
+              <div style={{ width: '100%', overflowX: 'auto', marginBottom: 8 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#666', position: 'relative', paddingLeft: 24 }}>
+                        <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: 'linear-gradient(to bottom, #22c55e, #22c55e)' }} />
+                        Model Tier
+                      </th>
+                      <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#666' }}>Model Name</th>
+                      <th style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, color: '#666' }}>Max Tokens</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {allModels.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} style={{ padding: 16, textAlign: 'center', color: '#777' }}>
+                          No models configured. Set Flash, Pro, or Ultra model first.
+                        </td>
+                      </tr>
+                    ) : (
+                      allModels.map((model, idx) => {
+                        const tokens = parsedData[model];
+                        const tier = getTierLabel(model);
+                        const color = getTierColor(model);
+                        const isEven = idx % 2 === 0;
+                        return (
+                          <tr key={model} style={{ borderBottom: '1px solid var(--border)', background: isEven ? 'var(--bg)' : 'transparent' }}>
+                            <td style={{ padding: '8px 12px', color: '#888', position: 'relative', paddingLeft: 24 }}>
+                              <span style={{ position: 'absolute', left: 8, top: 8, bottom: 8, width: 3, background: color, borderRadius: 1 }} />
+                              {tier}
+                            </td>
+                            <td style={{ padding: '8px 12px', color: modelTiers.flash === model || modelTiers.pro === model || modelTiers.ultra === model ? '#444' : '#666' }}>
+                              {model}
+                            </td>
+                            <td style={{ padding: '8px 12px', fontWeight: 500, textAlign: 'right', color: '#444' }}>
+                              {tokens ? tokens.toLocaleString() : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
-              {allModels.length === 0 ? (
-                <div style={{ padding: 12, fontSize: 12, color: '#777', textAlign: 'center' }}>
-                  No models configured. Set Flash, Pro, or Ultra model first.
-                </div>
-              ) : (
-                allModels.map(model => {
-                  const tokens = parsedData[model];
-                  const tier = getTierLabel(model);
-                  const color = getTierColor(model);
-                  return (
-                    <div key={model} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 80px', gap: 0, alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
-                      <div style={{ padding: '6px 8px', fontSize: 12, color: '#888', borderBottom: `2px solid ${color}`, position: 'relative' }}>
-                        <span style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: color }} />
-                        {tier}
-                      </div>
-                      <div style={{ padding: '6px 8px', fontSize: 11, color: modelTiers.flash === model || modelTiers.pro === model || modelTiers.ultra === model ? '#444' : '#666' }}>
-                        {model}
-                      </div>
-                      <div style={{ padding: '6px 8px', fontSize: 12, fontWeight: 500, textAlign: 'right', borderBottom: `2px solid ${color}` }}>
-                        {tokens ? tokens.toLocaleString() : '—'}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
                   onClick={() => setEditMode(true)}
-                  style={{ padding: '6px 16px', fontSize: 12, cursor: 'pointer', backgroundColor: 'var(--accent)', color: 'white', border: 'none', borderRadius: 4, flex: 1 }}
+                  style={{ padding: '6px 16px', fontSize: 12, cursor: 'pointer', backgroundColor: 'var(--accent)', color: 'white', border: 'none', borderRadius: 4, flex: '1 1 auto' }}
                 >
                   {allModels.length === 0 ? 'Configure Models First' : 'Edit JSON'}
                 </button>
@@ -471,7 +485,7 @@ export function SettingControl({ def, value, onChange, availableModels = [] }: S
                         const firstModel = allModels[0];
                         handleQuickSet(firstModel, 8192);
                       }}
-                      style={{ padding: '4px 10px', fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, backgroundColor: 'var(--bg)', color: 'var(--text)' }}
+                      style={{ padding: '4px 10px', fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, backgroundColor: 'var(--bg)', color: 'var(--text)', whiteSpace: 'nowrap' }}
                       title="Set first model to 8192"
                     >
                       Quick: 8K
@@ -481,7 +495,7 @@ export function SettingControl({ def, value, onChange, availableModels = [] }: S
                         const firstModel = allModels[0];
                         handleQuickSet(firstModel, 16384);
                       }}
-                      style={{ padding: '4px 10px', fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, backgroundColor: 'var(--bg)', color: 'var(--text)' }}
+                      style={{ padding: '4px 10px', fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, backgroundColor: 'var(--bg)', color: 'var(--text)', whiteSpace: 'nowrap' }}
                       title="Set first model to 16384"
                     >
                       Quick: 16K
@@ -491,7 +505,7 @@ export function SettingControl({ def, value, onChange, availableModels = [] }: S
                         const firstModel = allModels[0];
                         handleQuickSet(firstModel, 32000);
                       }}
-                      style={{ padding: '4px 10px', fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, backgroundColor: 'var(--bg)', color: 'var(--text)' }}
+                      style={{ padding: '4px 10px', fontSize: 11, cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 4, backgroundColor: 'var(--bg)', color: 'var(--text)', whiteSpace: 'nowrap' }}
                       title="Set first model to 32000"
                     >
                       Quick: 32K
