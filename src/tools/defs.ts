@@ -548,6 +548,17 @@ const speakTextTool: ToolDef = {
   },
 };
 
+const getIdeContextTool: ToolDef = {
+  name: 'get_ide_context',
+  description:
+    'Get the current IDE (VSCode) context: active file path, cursor/selection position and selected text, and all visible files. Returns null if the VSCode extension is not connected. Call this when you need to know what the user is looking at in their editor.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {},
+    required: [],
+  },
+};
+
 // --- Tool registry ---
 
 export const internalTools: ToolDef[] = [
@@ -556,6 +567,7 @@ export const internalTools: ToolDef[] = [
   hostTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
   compactContextTool, searchMemoryTool, browserExtTool, askUserTool,
   logEpisodeTool, queryEpisodesTool, searchEpisodesTool, provideFinalAnswerTool, speakTextTool,
+  getIdeContextTool,
 ];
 
 export function getToolDefinitions(useClaudeCodeNames: boolean): ToolDef[] {

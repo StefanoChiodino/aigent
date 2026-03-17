@@ -174,6 +174,8 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       const short = question.length > 60 ? question.slice(0, 60) + '...' : question;
       return `ask: ${short}`;
     }
+    case 'get_ide_context':
+      return 'get_ide_context';
     case 'log_episode': {
       const { domain, task, outcome } = input as LogEpisodeInput;
       const short = task.length > 50 ? task.slice(0, 50) + '...' : task;
@@ -714,6 +716,28 @@ export async function executeTool(
       if (res.dismissed) return 'User dismissed the question without answering.';
       if (res.selectedOptions && res.selectedOptions.length > 0) return `User selected: ${res.selectedOptions.join(', ')}`;
       return `User responded: ${res.answer}`;
+    }
+
+    case 'get_ide_context': {
+      const { extensionBridge } = await import('../ext-bridge.js');
+      if (!extensionBridge.isVscodeConnected()) return 'VSCode extension is not connected.';
+      const ctx = extensionBridge.getVscodeContext();
+      if (!ctx) return 'VSCode extension is connected but no context is available yet.';
+      const parts: string[] = [];
+      if (ctx.activeFile) {
+        const sel = (ctx.selectionStartLine != null && ctx.selectionEndLine != null)
+          ? ` (lines ${ctx.selectionStartLine}–${ctx.selectionEndLine})`
+          : '';
+        parts.push(`Active file: ${ctx.activeFile}${sel}`);
+        if (ctx.selectedText && ctx.selectedText.trim().length > 0) {
+          parts.push(`Selected text:\n\`\`\`\n${ctx.selectedText}\n\`\`\``);
+        }
+      }
+      if (ctx.visibleFiles && ctx.visibleFiles.length > 0) {
+        const others = ctx.visibleFiles.filter(f => f !== ctx.activeFile);
+        if (others.length > 0) parts.push(`Also visible: ${others.join(', ')}`);
+      }
+      return parts.length > 0 ? parts.join('\n') : 'No file is currently open in the editor.';
     }
 
     case 'log_episode': {

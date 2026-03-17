@@ -33,6 +33,7 @@ import { saveLifetimeUsage } from './usage-tracking.js';
 import {
   buildHostSystemPrompt as _buildHostSystemPrompt,
   buildBrowserExtSystemPrompt as _buildBrowserExtSystemPrompt,
+  buildVscodeSystemPrompt as _buildVscodeSystemPrompt,
   SHORT_MODE_PROMPT,
   EPISODE_LOGGING_PROMPT,
   extractAndStripSpeak as _extractAndStripSpeak,
@@ -2025,6 +2026,7 @@ let hostClient: HostClient | null = null;
 // Tracks whether the browser extension is currently connected.
 // Updated by the extensionBridge event emitter (wired in initAgent).
 let browserExtConnected = false;
+let vscodeConnected = false;
 
 /** Sync active capabilities to the agent for dynamic tool filtering. */
 function syncCapabilities(): void {
@@ -2038,6 +2040,7 @@ function syncCapabilities(): void {
 function buildExtraSystemPrompt(): string {
   let extra = _buildHostSystemPrompt(hostClient);
   extra += _buildBrowserExtSystemPrompt(browserExtConnected);
+  extra += _buildVscodeSystemPrompt(vscodeConnected);
   extra += EPISODE_LOGGING_PROMPT;
   if (currentShort) extra += SHORT_MODE_PROMPT;
   return extra;
@@ -2077,13 +2080,21 @@ async function initAgent(): Promise<void> {
     });
     extensionBridge.on('disconnected', () => {
       browserExtConnected = false;
+      vscodeConnected = false;
       log.info('Browser extension disconnected — updating system prompt');
       agent?.setExtraSystemPrompt(buildExtraSystemPrompt());
       syncCapabilities();
       addSystemMessage('Browser extension disconnected.');
     });
+    extensionBridge.on('vscode_connected', () => {
+      vscodeConnected = true;
+      log.info('VSCode extension connected — updating system prompt');
+      agent?.setExtraSystemPrompt(buildExtraSystemPrompt());
+      addSystemMessage('VSCode extension connected. `get_ide_context` tool is now available.');
+    });
     // Sync initial state in case extension was already connected before agent init
     browserExtConnected = extensionBridge.isConnected();
+    vscodeConnected = extensionBridge.isVscodeConnected();
   }
 
   // Check for LLM proxy socket — if present, use SocketProvider
