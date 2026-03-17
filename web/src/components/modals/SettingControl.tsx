@@ -329,9 +329,9 @@ export function SettingControl({ def, value, onChange, availableModels = [] }: S
 
       // Categorize model into tier
       const categorizeModel = (model: string): 'flash' | 'pro' | 'ultra' | 'other' => {
-        if (modelTiers.flash && model.includes(modelTiers.flash.toLowerCase().split('-')[0])) return 'flash';
-        if (modelTiers.pro && model.includes(modelTiers.pro.toLowerCase().split('-')[0])) return 'pro';
-        if (modelTiers.ultra && model.includes(modelTiers.ultra.toLowerCase().split('-')[0])) return 'ultra';
+        if (modelTiers.flash && model === modelTiers.flash) return 'flash';
+        if (modelTiers.pro && model === modelTiers.pro) return 'pro';
+        if (modelTiers.ultra && model === modelTiers.ultra) return 'ultra';
         if (model.toLowerCase().includes('flash') || model.toLowerCase().includes('haiku')) return 'flash';
         if (model.toLowerCase().includes('pro') || model.toLowerCase().includes('sonnet')) return 'pro';
         if (model.toLowerCase().includes('ultra') || model.toLowerCase().includes('opus')) return 'ultra';
