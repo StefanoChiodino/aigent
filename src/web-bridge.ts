@@ -627,7 +627,7 @@ export async function startWebServer(
   };
   extensionBridge.on('connected', () => broadcastExtensionState(true));
   extensionBridge.on('disconnected', () => broadcastExtensionState(false));
-  extensionBridge.on('vscode_connected', () => broadcastExtensionState(true));
+  extensionBridge.on('vscode_connected', () => broadcastExtensionState(false));
 
   // Handle "Send to aigent" context menu events from the Chrome extension
   extensionBridge.on('context_menu', (data: { selectionText?: string; pageUrl?: string; linkUrl?: string; srcUrl?: string; tabId?: number; tabTitle?: string }) => {
@@ -925,6 +925,8 @@ export async function startWebServer(
             }
             // Prepend VSCode IDE context if connected and a file is open.
             // Skip for slash commands — they are internal directives, not agent prompts.
+            // displayContent is what the UI shows; content is what the agent receives.
+            const displayContent: string = cmd.content;
             let content: string = cmd.content;
             const isSlashCommand = typeof content === 'string' && content.trimStart().startsWith('/');
             if (!isSlashCommand) {
@@ -949,11 +951,13 @@ export async function startWebServer(
                 }
               }
             }
+            const ideContextAdded = content !== displayContent;
             if ((cmd.images && cmd.images.length > 0) || (cmd.attachments && cmd.attachments.length > 0)) {
               // Attachments present — send full command directly (slash commands never have attachments)
               client.send({
                 type: 'message',
                 content,
+                ...(ideContextAdded ? { displayText: displayContent } : {}),
                 ...(cmd.images ? { images: cmd.images } : {}),
                 ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
                 ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
@@ -964,6 +968,7 @@ export async function startWebServer(
               client.send({
                 type: 'message',
                 content,
+                ...(ideContextAdded ? { displayText: displayContent } : {}),
                 ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
                 ...(cmd.reqId ? { reqId: cmd.reqId } : {}),
               });

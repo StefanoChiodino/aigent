@@ -1,13 +1,21 @@
 /**
- * Extension Bridge — gatekeeper-side WebSocket handler for the Chrome extension.
+ * Extension Bridge — gatekeeper-side WebSocket handler for the /ext WebSocket endpoint.
  *
- * Manages the single extension WebSocket connection and provides a request/response
- * API for the agent to call browser tools through.
+ * Both the Chrome extension and the VSCode extension connect here. The connection
+ * type is determined by the first hello message:
+ *   - Chrome:  sends `ext_hello`   → emits 'connected',       isConnected() = true
+ *   - VSCode:  sends `vscode_hello` → emits 'vscode_connected', isVscodeConnected() = true
+ *
+ * IMPORTANT: Do NOT emit 'connected' or set isConnected on the raw WebSocket connection
+ * event — the type is unknown until the hello arrives. isConnected() must return false
+ * for VSCode connections. This distinction breaks every time VSCode features are added
+ * without keeping these invariants.
  *
  * Usage:
  *   extensionBridge.onConnection(ws)          — called by web-bridge when /ext connects
- *   extensionBridge.isConnected()             — check if extension is live
- *   extensionBridge.request(action, params)   — send a command, await result
+ *   extensionBridge.isConnected()             — true only for Chrome extension
+ *   extensionBridge.isVscodeConnected()       — true only for VSCode extension
+ *   extensionBridge.request(action, params)   — send a command, await result (Chrome only)
  */
 
 import { EventEmitter } from 'node:events';
@@ -111,7 +119,6 @@ class ExtensionBridge extends EventEmitter {
 
     this.ws = ws;
     log.info('Extension connected');
-    this.emit('connected');
 
     ws.on('message', (data: Buffer) => {
       let msg: ExtMessage;
@@ -126,6 +133,7 @@ class ExtensionBridge extends EventEmitter {
         log.info('Extension hello', { version: msg.version, browser: msg.browser });
         // Acknowledge the hello message so the extension knows the connection is ready
         ws.send(JSON.stringify({ type: 'ext_hello_ack', version: msg.version }));
+        this.emit('connected');
         return;
       }
 
@@ -183,7 +191,7 @@ class ExtensionBridge extends EventEmitter {
   }
 
   isConnected(): boolean {
-    return this.ws !== null;
+    return this.ws !== null && !this.isVscode;
   }
 
   isVscodeConnected(): boolean {
