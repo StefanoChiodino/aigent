@@ -116,8 +116,8 @@ export function activate(context: vscode.ExtensionContext) {
   // Status bar item
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusBar.command = 'aigent.openChat';
-  statusBar.text = '$(comment-discussion) aigent';
-  statusBar.tooltip = 'Open Aigent';
+  statusBar.text = '$(check) aigent';
+  statusBar.tooltip = 'Aigent connected';
   statusBar.show();
   context.subscriptions.push(statusBar);
 
