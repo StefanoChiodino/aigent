@@ -66,7 +66,26 @@ interface VSCodeHello {
   version: string;
 }
 
-type ExtMessage = ExtHello | ExtResponse | ExtTabChanged | ExtContextMenu | VSCodeHello;
+export interface VSCodeContext {
+  /** Absolute path of the active file, if any. */
+  activeFile?: string;
+  /** 1-based start line of the selection. */
+  selectionStartLine?: number;
+  selectionStartCol?: number;
+  selectionEndLine?: number;
+  selectionEndCol?: number;
+  /** Selected text (may be empty if cursor only). */
+  selectedText?: string;
+  /** All currently visible file paths across split panes. */
+  visibleFiles?: string[];
+}
+
+interface VSCodeContextMsg {
+  type: 'vscode_context';
+  context: VSCodeContext;
+}
+
+type ExtMessage = ExtHello | ExtResponse | ExtTabChanged | ExtContextMenu | VSCodeHello | VSCodeContextMsg;
 
 interface PendingRequest {
   resolve: (r: ExtResponse) => void;
@@ -81,6 +100,7 @@ class ExtensionBridge extends EventEmitter {
   private pending = new Map<string, PendingRequest>();
   private lastTabUrl = '';
   private isVscode = false;
+  private vscodeContext: VSCodeContext | null = null;
 
   onConnection(ws: WebSocket): void {
     if (this.ws) {
@@ -116,6 +136,11 @@ class ExtensionBridge extends EventEmitter {
         return;
       }
 
+      if (msg.type === 'vscode_context') {
+        this.vscodeContext = msg.context;
+        return;
+      }
+
       if (msg.type === 'ext_tab_changed') {
         this.lastTabUrl = msg.url;
         return;
@@ -142,6 +167,7 @@ class ExtensionBridge extends EventEmitter {
       log.info('Extension disconnected');
       this.ws = null;
       this.isVscode = false;
+      this.vscodeContext = null;
       // Reject any pending requests
       for (const [id, pending] of this.pending) {
         clearTimeout(pending.timer);
@@ -162,6 +188,11 @@ class ExtensionBridge extends EventEmitter {
 
   isVscodeConnected(): boolean {
     return this.isVscode;
+  }
+
+  /** Returns the last known VSCode editor context, or null if not connected / no file open. */
+  getVscodeContext(): VSCodeContext | null {
+    return this.vscodeContext;
   }
 
   /** Returns the last known active tab URL (from ext_tab_changed events), or empty string. */

@@ -917,17 +917,43 @@ export async function startWebServer(
       try {
         const cmd = JSON.parse(data.toString());
         switch (cmd.type) {
-          case 'message':
+          case 'message': {
             // In test mode there is no container, so handle slash commands locally
             // by broadcasting the appropriate state events back to all clients.
             if (TEST_MODE && typeof cmd.content === 'string' && !cmd.images && !cmd.attachments) {
               if (handleTestModeCommand(cmd.content as string)) break;
             }
+            // Prepend VSCode IDE context if connected and a file is open.
+            // Skip for slash commands — they are internal directives, not agent prompts.
+            let content: string = cmd.content;
+            const isSlashCommand = typeof content === 'string' && content.trimStart().startsWith('/');
+            if (!isSlashCommand) {
+              const ideCtx = extensionBridge.getVscodeContext();
+              if (ideCtx) {
+                const parts: string[] = [];
+                if (ideCtx.activeFile) {
+                  const sel = (ideCtx.selectionStartLine != null && ideCtx.selectionEndLine != null)
+                    ? ` (${ideCtx.selectionStartLine}:${ideCtx.selectionStartCol ?? 0}–${ideCtx.selectionEndLine}:${ideCtx.selectionEndCol ?? 0})`
+                    : '';
+                  parts.push(`Active file: ${ideCtx.activeFile}${sel}`);
+                  if (ideCtx.selectedText && ideCtx.selectedText.trim().length > 0) {
+                    parts.push(`Selected text:\n\`\`\`\n${ideCtx.selectedText}\n\`\`\``);
+                  }
+                }
+                if (ideCtx.visibleFiles && ideCtx.visibleFiles.length > 0) {
+                  const others = ideCtx.visibleFiles.filter(f => f !== ideCtx.activeFile);
+                  if (others.length > 0) parts.push(`Also visible: ${others.join(', ')}`);
+                }
+                if (parts.length > 0) {
+                  content = `[VSCode context]\n${parts.join('\n')}\n\n${content}`;
+                }
+              }
+            }
             if ((cmd.images && cmd.images.length > 0) || (cmd.attachments && cmd.attachments.length > 0)) {
               // Attachments present — send full command directly (slash commands never have attachments)
               client.send({
                 type: 'message',
-                content: cmd.content,
+                content,
                 ...(cmd.images ? { images: cmd.images } : {}),
                 ...(cmd.attachments ? { attachments: cmd.attachments } : {}),
                 ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
@@ -937,12 +963,13 @@ export async function startWebServer(
               // Text only — send directly so reqId is preserved (sendMessage doesn't forward it)
               client.send({
                 type: 'message',
-                content: cmd.content,
+                content,
                 ...(cmd.thinkingOverride ? { thinkingOverride: cmd.thinkingOverride } : {}),
                 ...(cmd.reqId ? { reqId: cmd.reqId } : {}),
               });
             }
             break;
+          }
           case 'cancel':
             client.cancel();
             break;

@@ -47,6 +47,8 @@ async function connectExtBridge(baseUrl: string, statusBar: vscode.StatusBarItem
     statusBar.text = '$(check) aigent';
     statusBar.backgroundColor = undefined;
     statusBar.tooltip = 'Aigent — connected';
+    // Send current context immediately on connect
+    sendVscodeContext();
   });
 
   ws.on('message', (data: Buffer) => {
@@ -64,6 +66,33 @@ async function connectExtBridge(baseUrl: string, statusBar: vscode.StatusBarItem
   ws.on('error', (err) => {
     log.appendLine(`[ext-bridge] WebSocket error: ${err.message}`);
   });
+}
+
+function sendVscodeContext() {
+  if (!extWs || extWs.readyState !== WebSocket.OPEN) return;
+
+  const active = vscode.window.activeTextEditor;
+  const visibleFiles = vscode.window.visibleTextEditors
+    .map(e => e.document.uri.fsPath)
+    .filter(p => p && !p.startsWith('extension-output'));
+
+  const context: Record<string, unknown> = { visibleFiles };
+
+  if (active) {
+    context.activeFile = active.document.uri.fsPath;
+    const sel = active.selection;
+    context.selectionStartLine = sel.start.line + 1;
+    context.selectionStartCol = sel.start.character + 1;
+    context.selectionEndLine = sel.end.line + 1;
+    context.selectionEndCol = sel.end.character + 1;
+    if (!sel.isEmpty) {
+      const text = active.document.getText(sel);
+      // Cap selected text at 2000 chars to avoid bloating every message
+      context.selectedText = text.length > 2000 ? text.slice(0, 2000) + '…' : text;
+    }
+  }
+
+  extWs.send(JSON.stringify({ type: 'vscode_context', context }));
 }
 
 function scheduleReconnect(baseUrl: string, statusBar: vscode.StatusBarItem) {
@@ -107,6 +136,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerWebviewViewProvider('aigent.chatView', chatProvider, {
       webviewOptions: { retainContextWhenHidden: true }
     })
+  );
+
+  // Track editor changes and send context to server
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(() => sendVscodeContext()),
+    vscode.window.onDidChangeTextEditorSelection(() => sendVscodeContext()),
+    vscode.window.onDidChangeVisibleTextEditors(() => sendVscodeContext()),
   );
 
   // Commands
