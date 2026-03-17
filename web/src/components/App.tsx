@@ -44,19 +44,24 @@ export function App() {
   useDemoMode();
   useWakeLock();
 
-  // Wire TTS auto-speak to streaming text changes
+  // Wire TTS auto-speak to streaming text/spokenText changes
   const { flushStream } = useTTS();
   const flushRef = useRef(flushStream);
   flushRef.current = flushStream;
   useEffect(() => {
     let prev = '';
+    let prevSpoken: string | null = null;
     let wasActive = false;
     return useChatStore.subscribe((s) => {
       const text = s.streaming.text;
+      const spokenText = s.streaming.spokenText;
       const active = s.streaming.active;
       if (text && text !== prev) { prev = text; flushRef.current(); }
+      // speak_text tool sets spokenText without touching text — flush immediately
+      if (spokenText && spokenText !== prevSpoken) { prevSpoken = spokenText; flushRef.current(); }
       if (wasActive && !active) flushRef.current(true); // final flush
       if (!text) prev = '';
+      if (!spokenText) prevSpoken = null;
       wasActive = active;
     });
   }, []);

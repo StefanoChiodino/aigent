@@ -134,8 +134,12 @@ export const handlers: HandlerMap = {
     chat().appendThinkingText(event.content);
   },
 
-  tool_start(event, { chat }) {
+  tool_start(event, { chat, voice }) {
     const { streaming } = chat();
+    if (!streaming.active) {
+      voice().setSpeakBlockSpoken(false);
+      chat().startStream(chat().usage.contextTokens ?? 0);
+    }
     if (streaming.isThinking) chat().finalizeThinkingBlock();
     chat().startToolBlock(event.name, event.summary, event.input, event.model, event.thinking);
   },
