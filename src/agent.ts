@@ -18,7 +18,7 @@ Be direct. Be helpful. Execute commands to verify things rather than guessing.
 You have many tools available. Use them strategically:
 - **Gather information efficiently**: Don't call the same tool multiple times unnecessarily
 - **Know when to stop**: After gathering what you need, call \`provideFinalAnswer\` with your answer
-- **Max iterations**: You have a limit of 12 iterations maximum. Plan accordingly
+- **Max iterations**: You have a high iteration budget — use it for multi-step tasks, but don't loop needlessly
 - **Don't loop indefinitely**: The user wants responses, not endless tool calls
 - **Use provideFinalAnswer** when you have enough information to answer the user's question
 
@@ -233,7 +233,7 @@ export class Agent {
     }
 
     let iterations = 0;
-    const maxIterations = 25;
+    const maxIterations = 200;
 
     while (iterations < maxIterations) {
       // Check abort before each iteration
@@ -638,7 +638,7 @@ export class Agent {
     const task = String(input['task'] ?? '');
     const context = input['context'] ? String(input['context']) : '';
     const requestedModel = this.resolveModelAlias(input['model'] ? String(input['model']) : this.model);
-    const maxIter = Math.min(Number(input['max_iterations'] ?? 15), 25);
+    const maxIter = Math.min(Number(input['max_iterations'] ?? 50), 200);
     // Thinking: explicit override > model-derived default (never inherit blindly from parent)
     const requestedThinking: ThinkingLevel = input['thinking']
       ? (String(input['thinking']) as ThinkingLevel)

@@ -991,7 +991,7 @@ function dispatchBackgroundTask(input: {
       const taskModel = resolveModelAlias(input.model ?? process.env['AIGENT_FLASH_MODEL'] ?? process.env['AIGENT_CHEAP_MODEL'] ?? 'flash');
       taskQueue.setModel(taskId, taskModel);
       const taskThinking: ThinkingLevel = input.thinking ?? 'off';
-      const maxIter = Math.min(input.max_iterations ?? 25, 50);
+      const maxIter = Math.min(input.max_iterations ?? 100, 200);
       const capabilities = new Set(input.capabilities ?? []);
 
       // Build capability-restricted tool set

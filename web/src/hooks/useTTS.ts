@@ -138,7 +138,7 @@ export function useTTS(): TTSControls {
     const rateStr = ratePct >= 0 ? `+${ratePct}%` : `${ratePct}%`;
     const ctrl = new AbortController();
     ttsStreamFetchCtrls.push(ctrl);
-    const p = fetch(`/tts?rate=${encodeURIComponent(rateStr)}`, {
+    const p = fetch(`/synthesize?rate=${encodeURIComponent(rateStr)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: stripped,
@@ -155,7 +155,6 @@ export function useTTS(): TTSControls {
   }, [drainQueue]);
 
   const flushStream = useCallback((final = false): void => {
-    if (!getAutoSpeak()) return;
     // Never talk over the user — suppress TTS while mic is active
     if (useVoiceStore.getState().micState !== 'idle') return;
 
@@ -175,6 +174,8 @@ export function useTTS(): TTSControls {
       // In short mode, never speak body text — only the speak_text summary.
       return;
     }
+
+    if (!getAutoSpeak()) return;
 
     // ── Normal ("on") mode ──────────────────────────────────────────
     // Ignore spokenText entirely — speak the full streamed text

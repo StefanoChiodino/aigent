@@ -206,7 +206,7 @@ export function Header() {
                   // To see setup instructions, open Settings and look for VSCode extension info
                   // setVscodeSetupOpen(!vscodeSetupOpen);
                 }}
-                style={{ cursor: 'default' }}>
+                style={{ cursor: 'pointer' }}>
             <svg viewBox="0 0 100 100" width="14" height="14">
               <g style={{ opacity: vscodeConnected ? 1 : 0.3 }}>
                 <path d="M96.4614 10.7962L75.8569 0.875542C73.4719 -0.272773 70.6217 0.211611 68.75 2.08333L1.29858 63.5832C-0.515693 65.2373 -0.513607 68.0937 1.30308 69.7452L6.81272 74.754C8.29793 76.1042 10.5347 76.2036 12.1338 74.9905L93.3609 13.3699C96.086 11.3026 100 13.2462 100 16.6667V16.4275C100 14.0265 98.6246 11.8378 96.4614 10.7962Z" fill={vscodeConnected ? "#0065A9" : "gray"}/>

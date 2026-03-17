@@ -145,7 +145,7 @@ describe('flushStream — spokenText handling (short mode)', () => {
     await vi.waitFor(() => { expect(mockFetch).toHaveBeenCalledTimes(1); });
 
     const [url, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain('/tts');
+    expect(url).toContain('/synthesize');
     expect(opts.body).toBe('This is the spoken summary.');
     expect(useVoiceStore.getState().speakBlockSpoken).toBe(true);
   });

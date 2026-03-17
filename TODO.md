@@ -12,7 +12,7 @@ chrome icon shows a hand cursor, but vscode shows a pointer. It should be a hand
 
 BUG/FEATURE: the current STT injects a lot of description of sounds into the chat, things like "(beeping)". These are probably just confusing and we maybe should try different models or ways of helping this.
 
-BUG: Aigent just ran 25 tools, then probably couldn't run any more tools and just stopped. filled up 25 seems like a lot but there are cases where it is easy to use 25 and then it is quite annoying to have to go back. If it is using 25 tools and it just didn't just get stuck in a loop we should allow for I'm guessing pretty much unlimited or at least much much higher number of tools.
+~~BUG: Aigent just ran 25 tools, then probably couldn't run any more tools and just stopped.~~ Fixed: raised main agent limit to 200, spawn_agent to 200 (default 50), dispatch_task to 200 (default 100).
 
 ---
 
