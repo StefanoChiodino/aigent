@@ -8,7 +8,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { Agent } from './agent.js';
+import { Agent, MAX_AGENT_ITERATIONS, MAX_SPAWN_AGENT_ITERATIONS, DEFAULT_SPAWN_AGENT_ITERATIONS } from './agent.js';
 import type { Provider } from './provider.js';
 
 const mockProvider: Provider = {
@@ -69,5 +69,22 @@ describe('Agent', () => {
 
       assert.deepEqual(agent['modelMaxTokens'], modelMaxTokens);
     });
+  });
+});
+
+describe('iteration limits', () => {
+  it('MAX_AGENT_ITERATIONS is at least 100', () => {
+    assert.ok(MAX_AGENT_ITERATIONS >= 100, `Expected >= 100, got ${MAX_AGENT_ITERATIONS}`);
+  });
+
+  it('MAX_SPAWN_AGENT_ITERATIONS is at least 100', () => {
+    assert.ok(MAX_SPAWN_AGENT_ITERATIONS >= 100, `Expected >= 100, got ${MAX_SPAWN_AGENT_ITERATIONS}`);
+  });
+
+  it('DEFAULT_SPAWN_AGENT_ITERATIONS is less than MAX_SPAWN_AGENT_ITERATIONS', () => {
+    assert.ok(
+      DEFAULT_SPAWN_AGENT_ITERATIONS < MAX_SPAWN_AGENT_ITERATIONS,
+      `Default ${DEFAULT_SPAWN_AGENT_ITERATIONS} should be less than max ${MAX_SPAWN_AGENT_ITERATIONS}`,
+    );
   });
 });

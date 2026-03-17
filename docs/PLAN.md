@@ -35,7 +35,7 @@ Server process (spawned directly, no Docker)
 ### Foundation
 - [x] Project scaffold, strict TypeScript, Docker, Makefile
 - [x] 11 tools: exec, read_file, write_file, edit_file, list_files, grep, glob, fetch, tree, patch, spawn_agent
-- [x] Safety: 25-iteration limit, 50KB truncation
+- [x] Safety: iteration limits (200 main / 200 spawn cap / 50 spawn default), 50KB truncation
 - [x] OAT subscription token auth (Claude Code compatible)
 - [x] dotenv for .env loading
 - [x] read_file with offset/limit for line ranges on large files

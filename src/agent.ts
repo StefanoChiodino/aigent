@@ -9,6 +9,10 @@ import { createLogger } from './logger.js';
 
 const log = createLogger('agent');
 
+export const MAX_AGENT_ITERATIONS = 200;
+export const MAX_SPAWN_AGENT_ITERATIONS = 200;
+export const DEFAULT_SPAWN_AGENT_ITERATIONS = 50;
+
 const BASE_SYSTEM_PROMPT = `You are an AI agent running directly on the host machine.
 
 Be direct. Be helpful. Execute commands to verify things rather than guessing.
@@ -233,7 +237,7 @@ export class Agent {
     }
 
     let iterations = 0;
-    const maxIterations = 200;
+    const maxIterations = MAX_AGENT_ITERATIONS;
 
     while (iterations < maxIterations) {
       // Check abort before each iteration
@@ -638,7 +642,7 @@ export class Agent {
     const task = String(input['task'] ?? '');
     const context = input['context'] ? String(input['context']) : '';
     const requestedModel = this.resolveModelAlias(input['model'] ? String(input['model']) : this.model);
-    const maxIter = Math.min(Number(input['max_iterations'] ?? 50), 200);
+    const maxIter = Math.min(Number(input['max_iterations'] ?? DEFAULT_SPAWN_AGENT_ITERATIONS), MAX_SPAWN_AGENT_ITERATIONS);
     // Thinking: explicit override > model-derived default (never inherit blindly from parent)
     const requestedThinking: ThinkingLevel = input['thinking']
       ? (String(input['thinking']) as ThinkingLevel)
