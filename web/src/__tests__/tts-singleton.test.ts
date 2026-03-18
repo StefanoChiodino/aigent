@@ -238,7 +238,7 @@ describe('flushStream — spokenText handling (short mode)', () => {
     expect(useVoiceStore.getState().speakBlockSpoken).toBe(false);
   });
 
-  it('speaks new spokenText even if speakBlockSpoken was true from previous turn', async () => {
+  it('does not speak new spokenText if speakBlockSpoken was true from previous turn', async () => {
     const { useUIStore } = await import('../stores/ui');
     useUIStore.setState({ shortMode: true });
 
@@ -249,14 +249,13 @@ describe('flushStream — spokenText handling (short mode)', () => {
     // Simulate: previous turn spoke, speakBlockSpoken is true
     useVoiceStore.setState({ speakBlockSpoken: true });
     
-    // New turn: server sends new spokenText (should be spoken despite speakBlockSpoken=true)
+    // New turn: server sends new spokenText (should NOT be spoken because speakBlockSpoken=true)
     useChatStore.getState().setStreamSpokenText('New summary for new turn.');
     
     mockFetch.mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(['audio'])) });
     act(() => { hook.result.current.flushStream(); });
 
-    await vi.waitFor(() => { expect(mockFetch).toHaveBeenCalledTimes(1); });
-    const [, opts] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(opts.body).toBe('New summary for new turn.');
+    // No fetch should happen because speakBlockSpoken was true
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

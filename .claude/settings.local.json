@@ -5,5 +5,23 @@
       "Bash(git rm:*)",
       "Bash(git commit:*)"
     ]
-  }
+  },
+  "git.enableSmartCommit": true,
+  "git.confirmSync": false,
+  "claudeCode.preferredLocation": "panel",
+  "claudeCode.environmentVariables": [
+      {
+          "name": "ANTHROPIC_BASE_URL",
+          "value": "http://localhost:8081"
+      },
+      {
+          "name": "ANTHROPIC_API_KEY",
+          "value": "xxx"
+      },
+      {
+          "name": "ANTHROPIC_AUTH_TOKEN",
+          "value": "xxx"
+      }
+  ],
+  "claudeCode.selectedModel": "mlx-community/Qwen3.5-35B-A3B-4bit"
 }
