@@ -6,6 +6,7 @@ import { useTTS } from '../hooks/useTTS';
 import { TraceBlock } from './TraceBlock';
 import { SpeakPreview } from './SpeakPreview';
 import { RatingWidget } from './RatingWidget';
+import { useUIStore } from '../stores/ui';
 
 interface Props {
   message: DisplayMessage;
@@ -104,6 +105,19 @@ function MessageAttachments({ attachments }: { attachments: NonNullable<DisplayM
   );
 }
 
+function RawButton({ message }: { message: DisplayMessage }) {
+  const setRawResponseMessage = useUIStore(s => s.setRawResponseMessage);
+  return (
+    <button
+      className="msg-action-btn rri-trigger"
+      title="View raw response"
+      onClick={() => setRawResponseMessage(message)}
+    >
+      raw
+    </button>
+  );
+}
+
 export const Message = React.memo(function Message({ message }: Props) {
   const rendered = useMemo(() => {
     if (message.role === 'system') return null;
@@ -130,6 +144,9 @@ export const Message = React.memo(function Message({ message }: Props) {
         {message.role === 'assistant' && <TTSButton text={ttsText} messageId={message.id} />}
         {message.role === 'assistant' && <CopyButton text={message.content} />}
         {message.role === 'assistant' && <RatingWidget messageId={message.id} />}
+        {message.role === 'assistant' && message.rawTurns && message.rawTurns.length > 0 && (
+          <RawButton message={message} />
+        )}
         {message.spokenText && <SpeakPreview content={message.spokenText} />}
       </div>
       {message.attachments && message.attachments.length > 0 && (

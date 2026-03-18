@@ -172,6 +172,59 @@ test.describe('@fast Audio device picker', () => {
     expect(await page.evaluate(() => (window as any).__zustand_voice.getState().micDeviceId)).toBe('');
   });
 
+  // ── Persistence across reload ────────────────────────────────────────────────
+
+  test('selected mic device is preserved after page reload', async () => {
+    const page = getPage();
+    await enableVoiceServices(page);
+
+    const micRow = page.locator('.sb-device-row').filter({ hasText: 'Mic' });
+    const micSection = micRow.locator('.sb-device-section');
+    await expect(micSection).toBeVisible({ timeout: 3_000 });
+
+    // Pick a specific mic and verify store + button label
+    await selectDeviceByLabel(micSection, 'USB Microphone');
+    await expect(micRow.locator('.sb-device-btn')).toHaveText(/USB Microphone/);
+    expect(await page.evaluate(() => (window as any).__zustand_voice.getState().micDeviceId)).toBe('mic-aaa');
+
+    // Reload the page (Zustand persist should rehydrate from storage)
+    await page.reload();
+    await enableVoiceServices(page);
+
+    const micRow2 = page.locator('.sb-device-row').filter({ hasText: 'Mic' });
+    const micSection2 = micRow2.locator('.sb-device-section');
+    await expect(micSection2).toBeVisible({ timeout: 3_000 });
+
+    // Button label and store should still reflect the previous selection
+    await expect(micRow2.locator('.sb-device-btn')).toHaveText(/USB Microphone/);
+    expect(await page.evaluate(() => (window as any).__zustand_voice.getState().micDeviceId)).toBe('mic-aaa');
+  });
+
+  test('selected speaker device is preserved after page reload', async () => {
+    const page = getPage();
+    await enableVoiceServices(page);
+
+    const spkRow = page.locator('.sb-device-row').filter({ hasText: 'Speaker' });
+    const spkSection = spkRow.locator('.sb-device-section');
+    await expect(spkSection).toBeVisible({ timeout: 3_000 });
+
+    // Pick a specific speaker and verify store + button label
+    await selectDeviceByLabel(spkSection, 'Headphones');
+    await expect(spkRow.locator('.sb-device-btn')).toHaveText(/Headphones/);
+    expect(await page.evaluate(() => (window as any).__zustand_voice.getState().speakerDeviceId)).toBe('spk-bbb');
+
+    // Reload the page
+    await page.reload();
+    await enableVoiceServices(page);
+
+    const spkRow2 = page.locator('.sb-device-row').filter({ hasText: 'Speaker' });
+    const spkSection2 = spkRow2.locator('.sb-device-section');
+    await expect(spkSection2).toBeVisible({ timeout: 3_000 });
+
+    await expect(spkRow2.locator('.sb-device-btn')).toHaveText(/Headphones/);
+    expect(await page.evaluate(() => (window as any).__zustand_voice.getState().speakerDeviceId)).toBe('spk-bbb');
+  });
+
   // ── Device hot-plug ─────────────────────────────────────────────────────────
 
   test('device list updates on devicechange event', async () => {

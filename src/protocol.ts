@@ -65,6 +65,21 @@ export interface DisplayAttachment {
   thumbnail?: string; // data:image/jpeg;base64,... (small ~200px JPEG for chat display)
 }
 
+export type RawContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> };
+
+export interface RawTurnData {
+  iteration: number;
+  model: string;
+  stopReason: string;
+  usage: { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning?: number };
+  contentBlocks: RawContentBlock[];
+  provider: string;
+  completedAt: string;
+}
+
 export interface DisplayMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -74,6 +89,8 @@ export interface DisplayMessage {
   cancelled?: boolean;
   attachments?: DisplayAttachment[];
   spokenText?: string;
+  /** Raw API turn data for this assistant message. One entry per agent iteration. */
+  rawTurns?: RawTurnData[];
 }
 
 /** Record of a tool result that was summarized to save context tokens. */
@@ -174,6 +191,7 @@ export type ServerEvent =
   | { type: 'tool_images'; images: { mediaType: string; data: string }[] }
   | { type: 'tool_end' }
   | { type: 'message'; message: DisplayMessage }
+  | { type: 'raw_turn'; messageId: string; turn: RawTurnData }
   | { type: 'system'; content: string }
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'loading'; isLoading: boolean }

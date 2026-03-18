@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { DisplayMessage, TokenUsage, BackgroundTaskInfo, TraceEntry, ClassifierMeta } from '../types';
+import type { DisplayMessage, TokenUsage, BackgroundTaskInfo, TraceEntry, ClassifierMeta, RawTurnData } from '../types';
 
 interface StreamingState {
   active: boolean;
@@ -47,6 +47,11 @@ interface ChatState {
   appendToolImages: (images: { mediaType: string; data: string }[]) => void;
   finalizeToolBlock: () => void;
   setClassifierMeta: (meta: ClassifierMeta) => void;
+
+  /** Buffer raw turns keyed by messageId until the message event arrives. */
+  rawTurnBuffer: Map<string, RawTurnData[]>;
+  bufferRawTurn: (messageId: string, turn: RawTurnData) => void;
+  drainRawTurns: (messageId: string) => RawTurnData[];
 }
 
 let traceIdCounter = 0;
@@ -207,6 +212,22 @@ export const useChatStore = create<ChatState>()(
         }
         return { streaming: { ...s.streaming, traces } };
       }),
+
+      rawTurnBuffer: new Map(),
+      bufferRawTurn: (messageId, turn) => set(s => {
+        const buf = new Map(s.rawTurnBuffer);
+        buf.set(messageId, [...(buf.get(messageId) ?? []), turn]);
+        return { rawTurnBuffer: buf };
+      }),
+      drainRawTurns: (messageId) => {
+        const turns = useChatStore.getState().rawTurnBuffer.get(messageId) ?? [];
+        useChatStore.setState(s => {
+          const buf = new Map(s.rawTurnBuffer);
+          buf.delete(messageId);
+          return { rawTurnBuffer: buf };
+        });
+        return turns;
+      },
     }),
     {
       name: 'aigent-chat',

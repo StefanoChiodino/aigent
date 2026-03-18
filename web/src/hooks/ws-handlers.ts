@@ -179,13 +179,21 @@ export const handlers: HandlerMap = {
     }
   },
 
+  raw_turn(event, { chat }) {
+    chat().bufferRawTurn(event.messageId, event.turn);
+  },
+
   message(event, { chat, conn, settings }) {
     const { streaming } = chat();
     if (event.message.role === 'assistant' && streaming.active) {
       if (streaming.isThinking) chat().finalizeThinkingBlock();
       chat().finalizeToolBlock();
       const traces = chat().streaming.traces;
-      chat().finishStream(event.message, traces);
+      const bufferedRawTurns = chat().drainRawTurns(event.message.id);
+      const msgWithRaw = bufferedRawTurns.length > 0
+        ? { ...event.message, rawTurns: bufferedRawTurns }
+        : event.message;
+      chat().finishStream(msgWithRaw, traces);
       notifyResponseComplete(settings);
       const streamingRating = useRatingStore.getState().ratings[STREAMING_MESSAGE_ID];
       if (streamingRating) {
@@ -225,7 +233,13 @@ export const handlers: HandlerMap = {
     if (!event.isLoading) {
       const { streaming } = chat();
       if (streaming.active && (streaming.text || streaming.traces.length > 0)) {
-        const traces = streaming.traces;
+        // Finalize any in-progress tool/thinking block before reading traces.
+        // If cancel fires mid-tool, the output sits in currentToolOutput and
+        // the trace has running:true — without this the tool call is invisible.
+        if (streaming.isThinking) chat().finalizeThinkingBlock();
+        const hasRunningTool = streaming.traces.some(t => t.type === 'tool' && t.running);
+        if (hasRunningTool) chat().finalizeToolBlock();
+        const traces = chat().streaming.traces;
         chat().endStream();
         chat().appendMessage({
           id: generateMsgId(),

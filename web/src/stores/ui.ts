@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { PermRequest, ContextBreakdown, PendingAttachment, TraceEntry, QueuedMessageInfo } from '../types';
+import type { PermRequest, ContextBreakdown, PendingAttachment, TraceEntry, QueuedMessageInfo, DisplayMessage } from '../types';
 
 interface UIState {
   errorMsg: string | null;
@@ -30,6 +30,7 @@ interface UIState {
   pendingAttachments: PendingAttachment[];
   taskResultTask: import('../types').BackgroundTaskInfo | null;
   traceInspectorTrace: TraceEntry | null;
+  rawResponseMessage: DisplayMessage | null;
   queuedMessages: QueuedMessageInfo[];
 
   setError: (msg: string | null) => void;
@@ -63,6 +64,7 @@ interface UIState {
   clearAttachments: () => void;
   setTaskResultTask: (task: import('../types').BackgroundTaskInfo | null) => void;
   setTraceInspectorTrace: (trace: TraceEntry | null) => void;
+  setRawResponseMessage: (msg: DisplayMessage | null) => void;
   setQueuedMessages: (queue: QueuedMessageInfo[]) => void;
 }
 
@@ -95,6 +97,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   pendingAttachments: [],
   taskResultTask: null,
   traceInspectorTrace: null,
+  rawResponseMessage: null,
   queuedMessages: [],
 
   setError: (msg) => set({ errorMsg: msg }),
@@ -182,5 +185,6 @@ export const useUIStore = create<UIState>((set, get) => ({
   clearAttachments: () => set({ pendingAttachments: [] }),
   setTaskResultTask: (task) => set({ taskResultTask: task }),
   setTraceInspectorTrace: (trace) => set({ traceInspectorTrace: trace }),
+  setRawResponseMessage: (msg) => set({ rawResponseMessage: msg }),
   setQueuedMessages: (queue) => set({ queuedMessages: queue }),
 }));

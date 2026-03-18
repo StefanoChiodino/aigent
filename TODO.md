@@ -2,6 +2,14 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
+~~BUG: when cancelling, all the tool usage is wiped and can't be investigated.~~ Fixed: loading handler now finalizes any running tool/thinking block before reading traces on cancel, so tool output is preserved in the cancelled message.
+
+~~After stopping the microphone the STT text is still injected in the chat.~~ Fixed: `stopMic()` now advances `micDisplayedSeq` to `micReqSeq` on stop, so in-flight live-chunk responses that arrive after stop are rejected by the seq guard.
+
+Feature: is there a way for me to see the raw response, so that I can learn and investigate how all of that is put together in the final product? ~~Done: Raw Response Inspector added (openspec/changes/raw-response-inspector).~~
+
+Change 5 star rating to thumbs up/down
+
 input/output audio selection seems to reset on refresh/restart.
 
 Qwen3.5 should be capable of parsing images, but it fails?
@@ -150,6 +158,7 @@ the model picker on the left bar shows stars but doesn't allow to favourite/unfa
 ## OpenSpec Integration
 
 - [x] **OpenSpec setup** — Installed @fission-ai/openspec, initialized project structure, created initial spec for core system, documented in README.md, added make targets (openspec, openspec-init)
+- [x] **Raw Response Inspector** — Implemented per-message raw API response inspector with button trigger, overlay, and JSON export (archived in openspec/changes/archive/raw-response-inspector)
 
 ## Future / Low Priority
 

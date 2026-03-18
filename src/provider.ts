@@ -69,6 +69,11 @@ export interface ToolCall {
   input: Record<string, unknown>;
 }
 
+export type RawContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> };
+
 export interface ProviderResponse {
   text: string;
   toolCalls: ToolCall[];
@@ -76,6 +81,8 @@ export interface ProviderResponse {
   usage: TokenUsage;
   /** Actual model that served the response (may differ from requested, e.g. OpenRouter routing). */
   model?: string;
+  /** Raw content blocks from this turn, in provider-agnostic form. */
+  rawBlocks?: RawContentBlock[];
 }
 
 export interface ProviderToolDef {
@@ -279,6 +286,17 @@ export class AnthropicProvider implements Provider {
           ? 'max_tokens'
           : 'end_turn';
 
+    // Reconstruct raw content blocks from the final assembled response.
+    const rawBlocks: RawContentBlock[] = response.content.map((block) => {
+      if (block.type === 'thinking') {
+        return { type: 'thinking' as const, thinking: (block as unknown as { thinking: string }).thinking ?? '' };
+      }
+      if (block.type === 'tool_use') {
+        return { type: 'tool_use' as const, id: block.id, name: (block as ToolUseBlock).name, input: (block as ToolUseBlock).input as Record<string, unknown> };
+      }
+      return { type: 'text' as const, text: (block as { text?: string }).text ?? '' };
+    });
+
     // Use accumulated streaming text (currentText) instead of textBlocks to ensure
     // the final response matches what was streamed to the UI. This prevents truncation
     // when the LLM response is interrupted or when there's a timing issue between
@@ -298,6 +316,7 @@ export class AnthropicProvider implements Provider {
         cacheWrite: rawUsage['cache_creation_input_tokens'] ?? 0,
         reasoning: 0,
       },
+      rawBlocks,
     };
   }
 
@@ -588,6 +607,16 @@ export class OpenAIProvider implements Provider {
     else if (finishReason === 'content_filter') stopReason = 'content_filter';
     else stopReason = 'end_turn';
 
+    // Reconstruct raw content blocks from accumulated streaming state.
+    const rawBlocksOAI: RawContentBlock[] = [];
+    if (currentReasoning) rawBlocksOAI.push({ type: 'thinking', thinking: currentReasoning });
+    if (currentText) rawBlocksOAI.push({ type: 'text', text: currentText });
+    for (const [, tc] of toolCallAccum) {
+      let input: Record<string, unknown> = {};
+      try { input = JSON.parse(tc.args || '{}') as Record<string, unknown>; } catch { /* ignore */ }
+      rawBlocksOAI.push({ type: 'tool_use', id: tc.id, name: tc.name, input });
+    }
+
     return {
       text: currentText,
       toolCalls,
@@ -600,6 +629,7 @@ export class OpenAIProvider implements Provider {
         cacheWrite: cacheWriteTokens,
         reasoning: reasoningTokens,
       },
+      rawBlocks: rawBlocksOAI,
     };
   }
 

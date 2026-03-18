@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createProvider, detectProvider, type Provider, type ProviderMessage, type ProviderResponse, type ProviderToolDef, type AnthropicProvider, type UserContent, type ToolContentBlock, type ToolResult } from './provider.js';
+import type { RawTurnData } from './protocol.js';
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { getToolDefinitions, executeTool, summarizeToolCall, fromClaudeCodeName } from './tools.js';
 import { loadWorkspaceContext } from './workspace.js';
@@ -152,6 +153,8 @@ export interface ChatCallbacks {
   onThinkingUnsupported?: (model: string) => void;
   /** Called when a model rejects a vision request — caller should remember this and disable images for that model. */
   onVisionUnsupported?: (model: string) => void;
+  /** Called after each provider iteration with raw turn data for the raw response inspector. */
+  onRawTurn?: (turn: RawTurnData) => void;
   signal?: AbortSignal;
 }
 
@@ -290,6 +293,25 @@ export class Agent {
         } else {
           throw err;
         }
+      }
+
+      // Fire raw turn callback for the response inspector.
+      if (callbacks?.onRawTurn && response.rawBlocks) {
+        callbacks.onRawTurn({
+          iteration: this.messages.length + 1,
+          model: response.model ?? this.model,
+          stopReason: response.stopReason,
+          usage: {
+            input: response.usage.input,
+            output: response.usage.output,
+            cacheRead: response.usage.cacheRead,
+            cacheWrite: response.usage.cacheWrite,
+            ...(response.usage.reasoning !== undefined ? { reasoning: response.usage.reasoning } : {}),
+          },
+          contentBlocks: response.rawBlocks,
+          provider: this.providerType,
+          completedAt: new Date().toISOString(),
+        });
       }
 
       // Track usage — accumulate all fields for billing/cost accuracy.

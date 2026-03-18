@@ -323,6 +323,9 @@ export function useMic(onTranscript: (text: string, windowCapped: boolean) => vo
     pendingSilenceCommit.current = false;
     isFetching.current = false;
     micLiveAbortCtrls.current = [];
+    // Advance displayed seq so any in-flight live-chunk response that arrives
+    // after stop is silently ignored by the seq > micDisplayedSeq guard.
+    micDisplayedSeq.current = micReqSeq.current;
 
     setMicState('transcribing');
 

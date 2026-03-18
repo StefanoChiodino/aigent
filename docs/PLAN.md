@@ -142,6 +142,7 @@ Server process (spawned directly, no Docker)
 - [x] Replace sidepanel iframe with `chrome.windows.create({ type: 'popup' })`
 - [x] Delete mic relay chain, isSidepanel branches, sidepanel files
 - [x] Tasks Inspector modal — persistent task history, full prompt/result/metadata, clickable sidebar label
+- [x] Raw Response Inspector — per-message overlay exposing raw API response data (content blocks, usage, stop reason), accessible via button on assistant messages
 
 ### Memory System
 - [x] MEMORY.md as curated short-term memory in system prompt

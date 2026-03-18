@@ -17,7 +17,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { Agent, type ThinkingLevel } from './agent.js';
 import { generateSessionId, autoSaveSession, autoLoadSession } from './profiles.js';
 import type { ProviderMessage, UserContent, TextContent, ImageContent, DocumentContent, ImageMediaType, ToolResult } from './provider.js';
-import type { ClientCommand, ServerEvent, DisplayMessage, DisplayAttachment, ServerState, TokenUsage, StreamingTrace } from './protocol.js';
+import type { ClientCommand, ServerEvent, DisplayMessage, DisplayAttachment, ServerState, TokenUsage, StreamingTrace, RawTurnData } from './protocol.js';
 import { SOCKET_PATH, AIGENT_HOST, AIGENT_PORT } from './protocol.js';
 import { computeCost, registerModelPricing } from './pricing.js';
 import { distillToMemory } from './compact.js';
@@ -637,9 +637,16 @@ async function processAgentTurn(
     }
   }
 
+  const pendingRawTurns: RawTurnData[] = [];
+  const assistantMsgId = generateMsgId();
+
   try {
     const response = await agent.chat(userContent, {
       signal: controller.signal,
+      onRawTurn: (turn) => {
+        pendingRawTurns.push(turn);
+        broadcast({ type: 'raw_turn', messageId: assistantMsgId, turn });
+      },
       onText: (text) => {
         if (controller.signal.aborted) return;
         // Strip any legacy speak tags from streaming text (backwards compat)
@@ -651,6 +658,13 @@ async function processAgentTurn(
       onThinking: (text) => {
         if (controller.signal.aborted) return;
         broadcast({ type: 'thinking', content: text });
+        // In short mode, extract first sentence from thinking for immediate TTS
+        if (currentShort) {
+          const firstSentence = text.match(/^[^.!?]+[.!?]+/)?.[0]?.trim();
+          if (firstSentence && firstSentence.length < 100) {
+            broadcastSpeakText(firstSentence);
+          }
+        }
       },
       onToolStart: (name, toolInput, summary, meta) => {
         if (controller.signal.aborted) return;
@@ -794,12 +808,13 @@ async function processAgentTurn(
       log.info('Agent turn complete', { elapsed, messages: messages.length });
       const { content: finalContent, spokenText: finalSpoken } = _extractAndStripSpeak(response, currentShort, false);
       const assistantMsg: DisplayMessage = {
-        id: generateMsgId(),
+        id: assistantMsgId,
         role: 'assistant',
         content: finalContent,
         timestamp: new Date().toISOString(),
         elapsed,
         ...(finalSpoken ? { spokenText: finalSpoken } : {}),
+        ...(pendingRawTurns.length > 0 ? { rawTurns: pendingRawTurns } : {}),
       };
       messages.push(assistantMsg);
       broadcast({ type: 'message', message: assistantMsg });

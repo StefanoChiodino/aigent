@@ -36,6 +36,7 @@ import { TaskResultPanel } from './modals/TaskResultPanel';
 import { ShortcutsModal } from './modals/ShortcutsModal';
 import { TraceInspector } from './modals/TraceInspector';
 import { TasksInspector } from './modals/TasksInspector';
+import { RawResponseInspector } from './modals/RawResponseInspector';
 
 const THEME_OPTIONS = ['aurora', 'spectrum', 'oscilloscope', 'circular', 'milkdrop', 'circuit', 'matrix', 'constellation', 'topology', 'ember', 'fireflies', 'rain', 'neongrid', 'lavalamp', 'pcb', 'neuron', 'chroma'];
 
@@ -147,6 +148,7 @@ export function App() {
       {createPortal(<ShortcutsModal />, document.body)}
       {createPortal(<TraceInspector />, document.body)}
       {createPortal(<TasksInspector />, document.body)}
+      {createPortal(<RawResponseInspector />, document.body)}
       {isDemo() && createPortal(
         <>
           <div id="demo-banner">

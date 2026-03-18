@@ -165,6 +165,63 @@ describe('Chat store', () => {
     expect(useChatStore.getState().streaming.text).toBe('Here is what I found:');
   });
 
+  it('cancel mid-tool: tool output is preserved when stream ends with a running tool', () => {
+    // Regression: when cancel fires mid-tool, the tool output sitting in
+    // currentToolOutput was never flushed into the trace. appendMessage received
+    // traces where the last tool had running:true and toolOutput:''.
+    useChatStore.getState().startStream(0);
+    useChatStore.getState().startToolBlock('exec', 'Running ls', '{"command":"ls"}');
+    useChatStore.getState().appendToolOutput('file1.txt\nfile2.txt\n');
+
+    // Simulate what cancel should do: finalize the running tool before ending stream
+    useChatStore.getState().finalizeToolBlock();
+    const traces = useChatStore.getState().streaming.traces;
+    useChatStore.getState().endStream();
+    useChatStore.getState().appendMessage({
+      id: 'msg1',
+      role: 'assistant',
+      content: '*(cancelled)*',
+      timestamp: new Date().toISOString(),
+      cancelled: true,
+    }, traces);
+
+    const msg = useChatStore.getState().messages[0]!;
+    expect(msg.traces).toHaveLength(1);
+    const trace = msg.traces![0]!;
+    expect(trace.type).toBe('tool');
+    if (trace.type === 'tool') {
+      expect(trace.running).toBe(false);
+      expect(trace.toolOutput).toBe('file1.txt\nfile2.txt\n');
+    }
+  });
+
+  it('cancel mid-tool: WITHOUT fix, running tool trace has no output (documents the bug)', () => {
+    // This test documents the bug: if finalizeToolBlock is NOT called before
+    // reading traces, the tool output is lost.
+    useChatStore.getState().startStream(0);
+    useChatStore.getState().startToolBlock('exec', 'Running ls', '{"command":"ls"}');
+    useChatStore.getState().appendToolOutput('file1.txt\nfile2.txt\n');
+
+    // Bug: read traces WITHOUT finalizing — this is what the old code did
+    const traces = useChatStore.getState().streaming.traces;
+    useChatStore.getState().endStream();
+    useChatStore.getState().appendMessage({
+      id: 'msg1',
+      role: 'assistant',
+      content: '*(cancelled)*',
+      timestamp: new Date().toISOString(),
+      cancelled: true,
+    }, traces);
+
+    const msg = useChatStore.getState().messages[0]!;
+    const trace = msg.traces![0]!;
+    // Demonstrates the bug: tool is still running and output is empty
+    if (trace.type === 'tool') {
+      expect(trace.running).toBe(true);   // BUG: should be false after cancel
+      expect(trace.toolOutput).toBe('');  // BUG: output was lost
+    }
+  });
+
   it('trace IDs are unique', () => {
     useChatStore.getState().startStream(0);
     useChatStore.getState().startThinkingBlock();
