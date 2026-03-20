@@ -111,7 +111,7 @@ describe('TTS singleton state', () => {
   });
 });
 
-describe('flushStream — spokenText handling (short mode)', () => {
+describe('flushStream — spokenText handling (short mode, post-hoc summarization)', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     useVoiceStore.setState({
@@ -223,7 +223,7 @@ describe('flushStream — spokenText handling (short mode)', () => {
     const hook = renderHook(() => useTTS());
     act(() => { hook.result.current.stopStream(); });
 
-    // speak_text tool fired, setting spokenText — but we're in "on" mode
+    // Server sent spokenText via post-hoc summarization — but we're in "on" mode
     useChatStore.getState().setStreamSpokenText('Short summary.');
     useChatStore.getState().setStreamText('Full detailed response here. More sentences follow. ');
 

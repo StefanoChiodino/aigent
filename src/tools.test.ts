@@ -130,21 +130,21 @@ describe('fromClaudeCodeName', () => {
 describe('getToolDefinitions', () => {
   it('returns 28 tools with internal names', () => {
     const tools = getToolDefinitions(false);
-    assert.equal(tools.length, 28);
+    assert.equal(tools.length, 27);
   });
 
   it('returns 28 tools with CC names', () => {
     const tools = getToolDefinitions(true);
-    assert.equal(tools.length, 28);
+    assert.equal(tools.length, 27);
   });
 
-  it('internal names include exec, read_file, write_file, compact_context, speak_text', () => {
+  it('internal names include exec, read_file, write_file, compact_context', () => {
     const names = getToolDefinitions(false).map((t) => t.name);
     assert.ok(names.includes('exec'));
     assert.ok(names.includes('read_file'));
     assert.ok(names.includes('write_file'));
     assert.ok(names.includes('compact_context'));
-    assert.ok(names.includes('speak_text'));
+    assert.ok(!names.includes('speak_text'), 'speak_text was removed — TTS is post-hoc');
   });
 
   it('CC names include Bash, Read, Write', () => {
@@ -380,20 +380,6 @@ describe('summarizeToolCall', () => {
     assert.equal(summarizeToolCall('compact_context', {}, false), 'compact context');
   });
 
-  it('speak_text: shows spoken text preview', () => {
-    assert.equal(
-      summarizeToolCall('speak_text', { text: 'Hello there.' }, false),
-      'speak: "Hello there."',
-    );
-  });
-
-  it('speak_text: truncates long text in summary', () => {
-    const long = 'A'.repeat(80);
-    const result = summarizeToolCall('speak_text', { text: long }, false);
-    assert.ok(result.startsWith('speak: "'));
-    assert.ok(result.includes('...'));
-    assert.ok(result.length <= 75);
-  });
 
   it('unknown tool returns raw name', () => {
     assert.equal(summarizeToolCall('nonexistent_tool', {}, false), 'nonexistent_tool');

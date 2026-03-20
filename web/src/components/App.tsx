@@ -58,7 +58,7 @@ export function App() {
       const spokenText = s.streaming.spokenText;
       const active = s.streaming.active;
       if (text && text !== prev) { prev = text; flushRef.current(); }
-      // speak_text tool sets spokenText without touching text — flush immediately
+      // Server post-hoc summarization sets spokenText after streaming — flush immediately
       if (spokenText && spokenText !== prevSpoken) { prevSpoken = spokenText; flushRef.current(); }
       if (wasActive && !active) flushRef.current(true); // final flush
       if (!text) prev = '';

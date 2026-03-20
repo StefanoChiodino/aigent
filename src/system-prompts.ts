@@ -81,66 +81,13 @@ When you complete a significant task, encounter friction, or notice the user is 
 
 export const SHORT_MODE_PROMPT = `\n\n## Response Style (Short / Voice Mode) — MANDATORY
 
-You are in voice conversation mode. Your output is read aloud via TTS. Brevity is non-negotiable.
+You are in voice conversation mode. Your text output will be summarised and read aloud via TTS.
 
 HARD LIMIT: Your entire text response must be under 100 words. No exceptions.
 
-FORMAT — every single response, no exceptions:
-1. Call \`speak_text\` FIRST — before any other tool and before writing any text. One short sentence, plain English, no markdown, under 20 words. This starts TTS immediately while you continue working.
-2. Then use tools or write text as needed. At most 1-3 brief sentences of text.
-
-EXAMPLE — user asks "what's the weather API endpoint?":
-→ speak_text("The weather endpoint is slash api slash weather, it takes a city parameter.")
-→ Check src/routes/weather.ts for the full implementation.
-
 RULES:
-1. \`speak_text\` MUST be called first, every single response. No exceptions. No preamble before it.
-2. The speak_text argument must be ONE short sentence — never more. Under 20 words. Plain English, no markdown.
-3. After speak_text: at most 1-3 brief sentences of text. If speak_text fully answers the question, stop there.
-4. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.
-5. NEVER include long-form content — no blockquotes, no before/after comparisons, no full paragraphs. If the user needs to see content, write it to a file or use a tool.
-6. This applies even when showing diffs, edits, rewrites, or comparisons. Describe the change in 1 sentence.`;
+1. At most 1-3 brief sentences of text. If the answer is simple, one sentence is enough.
+2. Never produce multi-paragraph responses. Never use bullet lists. Never repeat what the user knows.
+3. NEVER include long-form content — no blockquotes, no before/after comparisons, no full paragraphs. If the user needs to see content, write it to a file or use a tool.
+4. This applies even when showing diffs, edits, rewrites, or comparisons. Describe the change in 1 sentence.`;
 
-export interface SpeakExtraction {
-  /** Text with [speak] tags stripped — safe for display. */
-  content: string;
-  /** Extracted speak content for TTS, or null if not in short mode. */
-  spokenText: string | null;
-}
-
-/**
- * Extract [speak] content and strip tags from text.
- * Also handles legacy <speak> XML tags for backwards compatibility.
- * If short mode is on but the model omitted the tag, synthesize spokenText
- * from the first sentence. The returned content never contains speak tags.
- */
-export function extractAndStripSpeak(text: string, shortMode: boolean, isStreaming = false): SpeakExtraction {
-  if (!shortMode) return { content: text, spokenText: null };
-
-  // Extract content from [speak]...[/speak] or legacy <speak>...</speak>
-  const speakMatch = text.match(/\[speak\]([\s\S]*?)\[\/speak\]/) || text.match(/<speak>([\s\S]*?)<\/speak>/);
-  if (speakMatch) {
-    const spokenText = speakMatch[1]!.trim();
-    // Strip all speak tags from content (both bracket and XML forms)
-    let content = text.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
-    // If entire text was in speak tags: during streaming, return empty so the spinner
-    // keeps showing until body text arrives (avoids jarring flash of short → full text).
-    // For the final message, fall back to spokenText so something is displayed.
-    if (!content && !isStreaming) content = spokenText;
-    return { content, spokenText };
-  }
-
-  // Strip partial (unclosed) [speak] or <speak> tag at end of streaming text
-  const content = text.replace(/\[speak\][^\[]*$/, '').replace(/<speak>[^<]*$/, '').trimEnd() || text;
-
-  // No speak tag — synthesize spokenText from first sentence
-  const forExtract = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '').trim();
-  const sentenceEnd = /[.!?]\s+/g;
-  let end = 0;
-  let m: RegExpExecArray | null;
-  if ((m = sentenceEnd.exec(forExtract)) !== null) {
-    end = m.index + 1;
-  }
-  const summary = end > 0 ? forExtract.slice(0, end).trim() : forExtract.slice(0, 100).trim();
-  return { content, spokenText: summary || null };
-}

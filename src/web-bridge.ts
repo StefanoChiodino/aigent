@@ -260,7 +260,7 @@ export async function startWebServer(
 
     // TTS proxy — forwards plain text to local edge-tts server, returns MP3 audio.
     // Passes through ?rate= query param so the browser can set per-request speed.
-    if (req.method === 'POST' && (url === '/tts' || url.startsWith('/tts?'))) {
+    if (req.method === 'POST' && (url === '/tts' || url.startsWith('/tts?') || url === '/synthesize' || url.startsWith('/synthesize?'))) {
       const chunks: Buffer[] = [];
       req.on('data', (chunk: Buffer) => chunks.push(chunk));
       req.on('end', async () => {

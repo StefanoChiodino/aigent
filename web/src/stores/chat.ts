@@ -73,17 +73,7 @@ export const useChatStore = create<ChatState>()(
 
       setMessages: (msgs) => set({ messages: msgs }),
       appendMessage: (msg, traces?) => set(s => {
-        let finalMsg = traces && traces.length > 0 ? { ...msg, traces } : msg;
-        // Extract [speak] or legacy <speak> tags from assistant content (server may already
-        // set spokenText, but handle inline tags for test harness and backwards compatibility)
-        if (finalMsg.role === 'assistant' && !finalMsg.spokenText) {
-          const m = finalMsg.content.match(/\[speak\]([\s\S]*?)\[\/speak\]/) || finalMsg.content.match(/<speak>([\s\S]*?)<\/speak>/);
-          if (m) {
-            const spokenText = m[1]!.trim();
-            const stripped = finalMsg.content.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
-            finalMsg = { ...finalMsg, spokenText, content: stripped || finalMsg.content };
-          }
-        }
+        const finalMsg = traces && traces.length > 0 ? { ...msg, traces } : msg;
         return { messages: [...s.messages, finalMsg] };
       }),
       setUsage: (usage) => set({ usage }),
@@ -117,30 +107,13 @@ export const useChatStore = create<ChatState>()(
        *  This prevents any intermediate render where StreamingMessage is gone
        *  but the final Message hasn't appeared yet (or vice versa). */
       finishStream: (msg, traces?) => set(s => {
-        let finalMsg = traces && traces.length > 0 ? { ...msg, traces } : msg;
-        if (finalMsg.role === 'assistant' && !finalMsg.spokenText) {
-          const m = finalMsg.content.match(/\[speak\]([\s\S]*?)\[\/speak\]/) || finalMsg.content.match(/<speak>([\s\S]*?)<\/speak>/);
-          if (m) {
-            const spokenText = m[1]!.trim();
-            const stripped = finalMsg.content.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
-            finalMsg = { ...finalMsg, spokenText, content: stripped || finalMsg.content };
-          }
-        }
+        const finalMsg = traces && traces.length > 0 ? { ...msg, traces } : msg;
         return {
           messages: [...s.messages, finalMsg],
           streaming: { ...s.streaming, active: false, isThinking: false },
         };
       }),
-      setStreamText: (text) => set(s => {
-        // Extract [speak] or legacy <speak> tags from streaming text
-        const m = text.match(/\[speak\]([\s\S]*?)\[\/speak\]/) || text.match(/<speak>([\s\S]*?)<\/speak>/);
-        if (m) {
-          const spokenText = m[1]!.trim();
-          const stripped = text.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '').trim();
-          return { streaming: { ...s.streaming, text: stripped || text, spokenText: spokenText || s.streaming.spokenText } };
-        }
-        return { streaming: { ...s.streaming, text } };
-      }),
+      setStreamText: (text) => set(s => ({ streaming: { ...s.streaming, text } })),
       setStreamSpokenText: (text) => set(s => ({ streaming: { ...s.streaming, spokenText: text } })),
 
       startThinkingBlock: () => set(s => {

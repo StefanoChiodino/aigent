@@ -63,7 +63,7 @@ Agent runtime that runs as child of supervisor:
 
 - Tool definition registry
 - Tool execution engine with safety checks
-- Built-in tools: exec, read_file, write_file, edit_file, list_files, grep, glob, fetch, tree, patch, spawn_agent, screenshot, dispatch_task, host, request_config_write, host_edit_file, switch_model, browser_ext, ask_user, log_episode, query_episodes, speak_text
+- Built-in tools: exec, read_file, write_file, edit_file, list_files, grep, glob, fetch, tree, patch, spawn_agent, screenshot, dispatch_task, host, request_config_write, host_edit_file, switch_model, browser_ext, ask_user, log_episode, query_episodes
 - Bidirectional mapping to Claude Code tool names
 - Browser automation tools (extract_a11y, screenshot, run_script, navigate, list_tabs, activate_tab, open_tab, close_tab, devtools_start, devtools_snapshot, devtools_stop)
 

@@ -535,18 +535,6 @@ const provideFinalAnswerTool: ToolDef = {
   },
 };
 
-const speakTextTool: ToolDef = {
-  name: 'speak_text',
-  description:
-    'In short/voice mode: call this FIRST, before writing your response, to queue a short spoken summary for TTS. The text is played aloud immediately while you continue writing. One sentence, plain English, no markdown, under 20 words.',
-  input_schema: {
-    type: 'object' as const,
-    properties: {
-      text: { type: 'string', description: 'The sentence to speak aloud. Plain English, no markdown, under 20 words.' },
-    },
-    required: ['text'],
-  },
-};
 
 const getIdeContextTool: ToolDef = {
   name: 'get_ide_context',
@@ -566,7 +554,7 @@ export const internalTools: ToolDef[] = [
   globTool, fetchTool, treeTool, patchTool, screenshotTool, spawnAgentTool, dispatchTaskTool,
   hostTool, requestConfigWriteTool, hostEditFileTool, requestScreenshotTool, switchModelTool,
   compactContextTool, searchMemoryTool, browserExtTool, askUserTool,
-  logEpisodeTool, queryEpisodesTool, searchEpisodesTool, provideFinalAnswerTool, speakTextTool,
+  logEpisodeTool, queryEpisodesTool, searchEpisodesTool, provideFinalAnswerTool,
   getIdeContextTool,
 ];
 

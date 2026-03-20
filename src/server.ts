@@ -36,7 +36,6 @@ import {
   buildVscodeSystemPrompt as _buildVscodeSystemPrompt,
   SHORT_MODE_PROMPT,
   EPISODE_LOGGING_PROMPT,
-  extractAndStripSpeak as _extractAndStripSpeak,
 } from './system-prompts.js';
 import { handleCommand as _handleCommand, setThinking, setEffort, setShort, setModel, type CommandContext } from './commands.js';
 import { readSettingsSync } from './settings-file.js';
@@ -629,7 +628,7 @@ async function processAgentTurn(
   // System prompt instructions get buried in long conversations; a user-turn
   // reminder is far more reliable at keeping the model concise.
   if (currentShort && !isTaskResult) {
-    const shortReminder = '\n\n[SHORT MODE — HARD LIMIT 100 WORDS. Call speak_text(...) FIRST with one sentence before any other action or text. Then at most 1-3 sentences of text. No blockquotes, no long content. If content is needed, use a tool.]';
+    const shortReminder = '\n\n[SHORT MODE — HARD LIMIT 100 WORDS. At most 1-3 sentences. No blockquotes, no long content. If content is needed, use a tool.]';
     if (typeof userContent === 'string') {
       userContent = userContent + shortReminder;
     } else if (Array.isArray(userContent)) {
@@ -649,22 +648,11 @@ async function processAgentTurn(
       },
       onText: (text) => {
         if (controller.signal.aborted) return;
-        // Strip any legacy speak tags from streaming text (backwards compat)
-        const stripped = text.replace(/\[speak\][\s\S]*?\[\/speak\]/g, '').replace(/<speak>[\s\S]*?<\/speak>/g, '');
-        if (stripped.trim()) {
-          broadcast({ type: 'text', content: stripped });
-        }
+        broadcast({ type: 'text', content: text });
       },
       onThinking: (text) => {
         if (controller.signal.aborted) return;
         broadcast({ type: 'thinking', content: text });
-        // In short mode, extract first sentence from thinking for immediate TTS
-        if (currentShort) {
-          const firstSentence = text.match(/^[^.!?]+[.!?]+/)?.[0]?.trim();
-          if (firstSentence && firstSentence.length < 100) {
-            broadcastSpeakText(firstSentence);
-          }
-        }
       },
       onToolStart: (name, toolInput, summary, meta) => {
         if (controller.signal.aborted) return;
@@ -806,20 +794,26 @@ async function processAgentTurn(
     if (!controller.signal.aborted) {
       const elapsed = (Date.now() - startTime) / 1000;
       log.info('Agent turn complete', { elapsed, messages: messages.length });
-      const { content: finalContent, spokenText: finalSpoken } = _extractAndStripSpeak(response, currentShort, false);
       const assistantMsg: DisplayMessage = {
         id: assistantMsgId,
         role: 'assistant',
-        content: finalContent,
+        content: response,
         timestamp: new Date().toISOString(),
         elapsed,
-        ...(finalSpoken ? { spokenText: finalSpoken } : {}),
         ...(pendingRawTurns.length > 0 ? { rawTurns: pendingRawTurns } : {}),
       };
       messages.push(assistantMsg);
       broadcast({ type: 'message', message: assistantMsg });
       currentStreamingTraces = [];
       doAutoSave();
+
+      // Post-hoc TTS summarization: after the response is fully streamed,
+      // send the text to a flash model for a one-sentence spoken summary.
+      if (currentShort && response.trim()) {
+        summarizeForTTS(response).catch((err: unknown) => {
+          log.warn('TTS summarization failed', { error: (err as Error).message });
+        });
+      }
     }
   } catch (err: unknown) {
     if (!controller.signal.aborted) {
@@ -1163,9 +1157,24 @@ function broadcast(event: ServerEvent): void {
   }
 }
 
-/** Called by the speak_text tool to immediately queue TTS audio for the client. */
-export function broadcastSpeakText(text: string): void {
-  broadcast({ type: 'speak', content: text });
+/**
+ * Post-hoc TTS summarization: send the full response to a flash model
+ * for a one-sentence spoken summary, then broadcast the 'speak' event.
+ */
+async function summarizeForTTS(responseText: string): Promise<void> {
+  if (!agentProvider) return;
+  const flashModel = resolveModelAlias('flash');
+  const truncated = responseText.length > 2000 ? responseText.slice(0, 2000) + '…' : responseText;
+  const result = await agentProvider.sendMessage(
+    'You are a TTS summarizer. Respond with ONLY a single short sentence (under 25 words) that captures the key point of the assistant message below. Plain spoken English, no markdown, no quotes. If the message is a simple acknowledgement, just echo it shorter.',
+    [{ role: 'user', content: truncated }],
+    [],
+    { model: flashModel, maxTokens: 100, thinking: 'off' },
+  );
+  const summary = result.text.trim();
+  if (summary) {
+    broadcast({ type: 'speak', content: summary });
+  }
 }
 
 function addSystemMessage(content: string): void {

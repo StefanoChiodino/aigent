@@ -70,9 +70,7 @@ interface BrowserExtInput { action: 'extract_a11y' | 'screenshot' | 'list_tabs' 
 interface AskUserInput { question: string; options?: { label: string; description?: string }[]; multi_select?: boolean }
 interface LogEpisodeInput { domain: string; task: string; outcome: 'completed' | 'partial' | 'abandoned' | 'failed'; friction?: string; lessons?: string[]; tags?: string[] }
 interface QueryEpisodesInput { domain?: string; outcome?: 'completed' | 'partial' | 'abandoned' | 'failed'; tags?: string[]; since?: string; until?: string; limit?: number }
-interface SpeakTextInput { text: string }
-
-type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput | AskUserInput | LogEpisodeInput | QueryEpisodesInput | SpeakTextInput;
+type ToolInput = ExecInput | ReadFileInput | WriteFileInput | EditFileInput | ListFilesInput | GrepInput | GlobInput | FetchInput | TreeInput | PatchInput | ScreenshotInput | SpawnAgentInput | DispatchTaskInput | HostInput | RequestConfigWriteInput | HostEditFileInput | SwitchModelInput | BrowserExtInput | AskUserInput | LogEpisodeInput | QueryEpisodesInput;
 
 // --- Tool summarization ---
 
@@ -193,11 +191,6 @@ export function summarizeToolCall(name: string, input: ToolInput, isOAuth: boole
       const { query } = input as { query: string };
       const short = query.length > 60 ? query.slice(0, 60) + '...' : query;
       return `search episodes: "${short}"`;
-    }
-    case 'speak_text': {
-      const { text } = input as SpeakTextInput;
-      const short = text.length > 60 ? text.slice(0, 60) + '...' : text;
-      return `speak: "${short}"`;
     }
     default:
       return name;
@@ -834,13 +827,6 @@ export async function executeTool(
         return `[${date}] ${ep.domain} [${ep.outcome}] (${sim}% match) ${ep.task}${frictionStr}${lessonsStr}`;
       });
       return `${results.length} semantically similar episode(s):\n\n${lines.join('\n\n')}`;
-    }
-
-    case 'speak_text': {
-      const { text } = input as SpeakTextInput;
-      const { broadcastSpeakText } = await import('../server.js');
-      broadcastSpeakText(text.trim());
-      return 'ok';
     }
 
     default:

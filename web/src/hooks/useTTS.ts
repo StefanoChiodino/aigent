@@ -162,16 +162,16 @@ export function useTTS(): TTSControls {
     const isShort = useUIStore.getState().shortMode;
 
     // ── Short mode ──────────────────────────────────────────────────
-    // The speak_text tool fires a 'speak' event that sets spokenText.
-    // Speak it exactly once, then suppress all further TTS for this turn
-    // (body text is not read aloud in short mode).
+    // After the response completes, the server sends a post-hoc 'speak'
+    // event with a flash-model summary. Speak it exactly once; body text
+    // is not read aloud in short mode.
     if (isShort) {
       if (spokenText && !useVoiceStore.getState().speakBlockSpoken) {
         useVoiceStore.getState().setSpeakBlockSpoken(true);
         useVoiceStore.getState().setTtsSpeakingId(TTS_STREAMING_ID);
         enqueueChunk(spokenText);
       }
-      // In short mode, never speak body text — only the speak_text summary.
+      // In short mode, never speak body text — only the post-hoc summary.
       return;
     }
 
