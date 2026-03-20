@@ -366,6 +366,27 @@ The continuous learning system (episodes, semantic retrieval, reflection, feedba
 
 ## Configuration
 
+### Model Fine-Tuned Parameters
+
+See [docs/model-configuration.md](docs/model-configuration.md) for complete documentation on all model parameters.
+
+**Quick reference:**
+
+| Parameter | Range | Default | Description |
+|-----------|-------|---------|-------------|
+| `model_temperature` | 0.0-2.0 | 0.7 | Controls randomness |
+| `model_top_p` | 0.0-1.0 | 0.95 | Nucleus sampling |
+| `model_top_k` | 0-500 | 0 | Top K tokens |
+| `model_presence_penalty` | -2.0 to 2.0 | 0.0 | Topic repetition |
+| `model_frequency_penalty` | -2.0 to 2.0 | 0.0 | Token repetition |
+| `model_repetition_penalty` | 0.5-2.0 | 1.1 | Token repetition |
+| `model_max_tool_calls` | 0-100 | 0 | Max calls per turn |
+| `model_image_input_quality` | low/high | high | Image compression |
+| `model_image_input_max_images` | 0-20 | 5 | Max images per message |
+| `model_document_input_max_pages` | 0-1000 | 20 | Max PDF pages |
+
+Access all parameters through the Settings UI (gear icon) → Model section.
+
 ### Environment variables
 
 ```bash

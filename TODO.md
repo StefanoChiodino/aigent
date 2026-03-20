@@ -2,9 +2,7 @@
 
 > Completed items archived in [TODO-archive.md](TODO-archive.md).
 
-~~BUG: when cancelling, all the tool usage is wiped and can't be investigated.~~ Fixed: loading handler now finalizes any running tool/thinking block before reading traces on cancel, so tool output is preserved in the cancelled message.
-
-~~After stopping the microphone the STT text is still injected in the chat.~~ Fixed: `stopMic()` now advances `micDisplayedSeq` to `micReqSeq` on stop, so in-flight live-chunk responses that arrive after stop are rejected by the seq guard.
+BUG: the raw modal is broken. Shows some turns, but nothing much inside of them. Can't even scroll. COpying the raw json from there works tho!
 
 Feature: is there a way for me to see the raw response, so that I can learn and investigate how all of that is put together in the final product? ~~Done: Raw Response Inspector added (openspec/changes/raw-response-inspector).~~
 
